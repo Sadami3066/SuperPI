@@ -6,7 +6,7 @@
 
 ## 概览
 
-Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `DeepDeepPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 38 项 capability）。
+Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `DeepDeepPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 39 项 capability）。
 
 本仓库面向外部插件作者：从 `template/` 起步，按 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) 开发，按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 与 [`PR_REVIEW.md`](PR_REVIEW.md) 发布到 PI 市场。Super PI Agent 官方插件（飞书、企业微信、中山大学 CLI、小米云服务、微信导出）在 [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins)，可作为完整参考实现。
 
@@ -119,7 +119,7 @@ cd my-plugin
 
 - 从 `template/` 复制出独立工程即可开始；多个插件放在同一个 Gradle 工程时，参考官方插件仓的 `settings.gradle.kts` 与根 `gradle/plugin-bundle.gradle.kts`。
 - 宿主已提供的库只能 `compileOnly` 依赖：`plugin-api`、经它传递的 `design`、Compose（BOM/UI/foundation/material3）、`kotlinx-coroutines`、`kotlinx-serialization-json`。不要用 `implementation` 引宿主库，否则会把宿主类打进插件包。
-- 需要系统能力时，在 `plugin.json` 的 `capabilities` 中声明（如 `linux`、`files`、`network`、`settings`、`device`、`packages`、`background`、`notifications`、`location`、`contacts`、`sms`、`calendar`、`media`、`web` 等，共 38 项）；`capabilities` 必须显式给出，空数组也要写。运行时权限写 `permissions`，通知监听/无障碍/分享/深链/后台任务等系统组件写 `components`，并与对应 capability 成对声明。
+- 需要系统能力时，在 `plugin.json` 的 `capabilities` 中声明（如 `linux`、`files`、`network`、`settings`、`device`、`packages`、`background`、`notifications`、`location`、`contacts`、`sms`、`calendar`、`media`、`web` 等，共 39 项）；`capabilities` 必须显式给出，空数组也要写。运行时权限写 `permissions`，通知监听/无障碍/分享/深链/后台任务等系统组件写 `components`，并与对应 capability 成对声明。
 - 技能、图标与文案都放在 `assets/`；插件不能使用 `res/` 资源，也不能加载原生库。
 
 ### 用户

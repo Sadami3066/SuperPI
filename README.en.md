@@ -6,7 +6,7 @@
 
 ## Overview
 
-Super PI Agent is a personal AI agent on Android. Plugins are written in Kotlin, implement `DeepDeepPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 38 capabilities in total).
+Super PI Agent is a personal AI agent on Android. Plugins are written in Kotlin, implement `DeepDeepPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 39 capabilities in total).
 
 This repository is for external plugin authors: start from `template/`, develop against [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md), and publish through deepdeep-market following [`MARKET_POLICY.md`](MARKET_POLICY.md) and [`PR_REVIEW.md`](PR_REVIEW.md). Official plugins (Feishu, WeCom, SYSU CLI, Mi Cloud, WeChat Export) live in [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) and serve as complete reference implementations.
 
