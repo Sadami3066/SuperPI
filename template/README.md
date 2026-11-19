@@ -7,7 +7,7 @@ A standalone Gradle Android project for building external Super PI Agent plugins
 - JDK 17
 - Android SDK: compileSdk 36, minSdk 29
 - Gradle 9.8.2 (wrapper included)
-- Depends on `plugin-api:1.0.1` from <https://sadami3066.github.io/deepdeep-maven>
+- Depends on `plugin-api:1.1.0` from <https://sadami3066.github.io/deepdeep-maven>
 
 Set `sdk.dir=/path/to/Android/Sdk` in `local.properties`, or set `ANDROID_HOME`.
 
