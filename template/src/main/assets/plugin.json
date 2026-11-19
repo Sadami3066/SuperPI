@@ -1,13 +1,13 @@
 {
-  "id": "io.github.whywood.deepdeep.plugintemplate",
+  "id": "io.github.whywood.superpi.plugintemplate",
   "version": "1.0.0",
-  "apiLevel": 6,
+  "apiLevel": 7,
   "minHostVersion": "1.0.6",
   "ui": {
-    "apiLevel": 2
+    "apiLevel": 3
   },
   "capabilities": ["settings", "device"],
-  "entryClass": "io.github.whywood.deepdeep.plugintemplate.TemplatePlugin",
+  "entryClass": "io.github.whywood.superpi.plugintemplate.TemplatePlugin",
   "name": {
     "default": "Plugin Template",
     "zh": "插件模板",
@@ -23,7 +23,7 @@
     "zh": "复制本工程，改插件 id 与入口类，即可构建并签名自己的 .ddp 插件包。",
     "en": "Copy this project, rename the plugin id and entry class, then build and sign a .ddp bundle."
   },
-  "homepage": "https://github.com/Sadami3066/DeepDeep-Plugins",
+  "homepage": "https://github.com/Sadami3066/SuperPI-Plugins",
   "icon": "asset:icon.png",
   "publisher": {
     "name": "Your Name"

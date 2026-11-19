@@ -18,14 +18,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.21"
 }
 
-val pluginApiVersion = "1.1.0"
+val pluginApiVersion = "2.0.0"
 
 android {
-    namespace = "io.github.whywood.deepdeep.plugintemplate"
+    namespace = "io.github.whywood.superpi.plugintemplate"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.whywood.deepdeep.plugintemplate"
+        applicationId = "io.github.whywood.superpi.plugintemplate"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
@@ -55,7 +55,7 @@ kotlin {
 }
 
 dependencies {
-    compileOnly("io.github.sadami3066.deepdeep:plugin-api:$pluginApiVersion")
+    compileOnly("io.github.sadami3066.superpi:plugin-api:$pluginApiVersion")
     compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     compileOnly(platform("androidx.compose:compose-bom:2026.03.00"))

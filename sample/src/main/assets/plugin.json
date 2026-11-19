@@ -1,13 +1,13 @@
 {
-  "id": "io.github.whywood.deepdeep.pluginsample",
+  "id": "io.github.whywood.superpi.pluginsample",
   "version": "1.0.0",
-  "apiLevel": 6,
+  "apiLevel": 7,
   "minHostVersion": "1.0.6",
   "ui": {
-    "apiLevel": 2
+    "apiLevel": 3
   },
   "capabilities": ["settings"],
-  "entryClass": "io.github.whywood.deepdeep.pluginsample.SamplePlugin",
+  "entryClass": "io.github.whywood.superpi.pluginsample.SamplePlugin",
   "name": {
     "default": "Plugin Sample",
     "zh": "示例插件",
@@ -23,7 +23,7 @@
     "zh": "供 Super PI Agent 宿主仓库的端到端脚本在设备上验证外部插件的安装、启用、停用、升级与卸载。",
     "en": "Used by the Super PI Agent host repository end-to-end scripts to verify external plugin install, activate, disable, upgrade and uninstall on a device."
   },
-  "homepage": "https://github.com/Sadami3066/DeepDeep-Plugins",
+  "homepage": "https://github.com/Sadami3066/SuperPI-Plugins",
   "icon": "asset:icon.png",
   "publisher": {
     "name": "PI dev"

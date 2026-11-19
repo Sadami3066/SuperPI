@@ -1,14 +1,14 @@
-# DeepDeep-Plugins
+# SuperPI-Plugins
 
 **Templates, contract documentation and marketplace rules for Super PI Agent external plugins.**
 
-[简体中文](README.md) · [Plugin development guide](docs/PLUGIN_DEV.md) · [Official plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) · [Marketplace](https://github.com/Sadami3066/deepdeep-market)
+[简体中文](README.md) · [Plugin development guide](docs/PLUGIN_DEV.md) · [Official plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) · [Marketplace](https://github.com/Sadami3066/SuperPI-Market)
 
 ## Overview
 
-Super PI Agent is a personal AI agent on Android. Plugins are written in Kotlin, implement `DeepDeepPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 39 capabilities in total).
+Super PI Agent is a personal AI agent on Android. Plugins are written in Kotlin, implement `SuperPIPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 39 capabilities in total).
 
-This repository is for external plugin authors: start from `template/`, develop against [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md), and publish through deepdeep-market following [`MARKET_POLICY.md`](MARKET_POLICY.md) and [`PR_REVIEW.md`](PR_REVIEW.md). Official plugins (Feishu, WeCom, SYSU CLI, Mi Cloud, WeChat Export) live in [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) and serve as complete reference implementations.
+This repository is for external plugin authors: start from `template/`, develop against [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md), and publish through SuperPI-Market following [`MARKET_POLICY.md`](MARKET_POLICY.md) and [`PR_REVIEW.md`](PR_REVIEW.md). Official plugins (Feishu, WeCom, SYSU CLI, Mi Cloud, WeChat Export) live in [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) and serve as complete reference implementations.
 
 > Plugins run in the same process and with the same permissions as the app. There is no sandbox, and installing a plugin means trusting it. Only install plugins you trust; use MCP for third-party tool sources.
 
@@ -31,7 +31,7 @@ This repository is for external plugin authors: start from `template/`, develop 
 - JDK 17
 - Android SDK: compileSdk 36, minSdk 29; point to it with `ANDROID_HOME` / `ANDROID_SDK_ROOT` or `sdk.dir` in `local.properties`
 - Gradle 9.8.2 (wrapper included in the template)
-- Network access to the public Maven repository `https://sadami3066.github.io/deepdeep-maven` (already configured in the template; no local publishing needed)
+- Network access to the public Maven repository `https://sadami3066.github.io/SuperPI-Maven` (already configured in the template; no local publishing needed)
 - Host Super PI Agent 1.0.8+ when using the new capabilities of `plugin-api 1.2.0`; plugins that only use 1.0.x/1.1.x capabilities run on 1.0.4+
 
 The host contract `plugin-api` and the `design` UI system come from that public Maven repository; `design` is exposed transitively through `api()`:
@@ -42,8 +42,8 @@ The template already configures this repository in `settings.gradle.kts`; normal
 dependencyResolutionManagement {
     repositories {
         maven {
-            url = uri("https://sadami3066.github.io/deepdeep-maven")
-            content { includeGroup("io.github.sadami3066.deepdeep") }
+            url = uri("https://sadami3066.github.io/SuperPI-Maven")
+            content { includeGroup("io.github.sadami3066.superpi") }
         }
         google()
         mavenCentral()
@@ -53,7 +53,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    compileOnly("io.github.sadami3066.deepdeep:plugin-api:1.2.0")
+    compileOnly("io.github.sadami3066.superpi:plugin-api:1.2.0")
 }
 ```
 
@@ -83,7 +83,7 @@ This creates `keys/plugin-signing.pem` and `.pub` (private key mode 600). `keys/
 
 ### 3. Write the plugin
 
-The entry class implements `DeepDeepPlugin` and can override `availability()`, `onEnable()` / `onDisable()` / `onUpgrade()`, `skills()`, `promptSections()` and `contributions()`. The template already includes:
+The entry class implements `SuperPIPlugin` and can override `availability()`, `onEnable()` / `onDisable()` / `onUpgrade()`, `skills()`, `promptSections()` and `contributions()`. The template already includes:
 
 - a tool, `template_echo` (returned from `contributions()`)
 - a tool, `template_state`, demonstrating `host.settings()` and `host.device()` (the manifest already declares the `settings` and `device` capabilities)
@@ -110,8 +110,8 @@ Transfer the `.ddp` to the phone, open Super PI Agent's plugin page, choose the 
 
 ### 6. Publish
 
-- **Super PI Agent Marketplace (all external authors)**: prepare the entry and artifact according to [`MARKET_POLICY.md`](MARKET_POLICY.md) and open a PR against [deepdeep-market](https://github.com/Sadami3066/deepdeep-market). An entry contains the plugin id (matching `plugin.json`), version, bilingual name/summary/description/tags, `artifact.url` / `sha256` / `size`, `publisherKeyId` and a PNG icon no larger than 128 KB. Maintainers review entries against [`PR_REVIEW.md`](PR_REVIEW.md).
-- **Official plugins repository (maintainers)**: [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) builds and signs all official plugins with the shared `gradle/plugin-bundle.gradle.kts` and `scripts/check.sh`. The official signing key is not distributed with the repository, so external authors cannot publish under the official `keyId`.
+- **Super PI Agent Marketplace (all external authors)**: prepare the entry and artifact according to [`MARKET_POLICY.md`](MARKET_POLICY.md) and open a PR against [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market). An entry contains the plugin id (matching `plugin.json`), version, bilingual name/summary/description/tags, `artifact.url` / `sha256` / `size`, `publisherKeyId` and a PNG icon no larger than 128 KB. Maintainers review entries against [`PR_REVIEW.md`](PR_REVIEW.md).
+- **Official plugins repository (maintainers)**: [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) builds and signs all official plugins with the shared `gradle/plugin-bundle.gradle.kts` and `scripts/check.sh`. The official signing key is not distributed with the repository, so external authors cannot publish under the official `keyId`.
 
 ## Usage
 
@@ -148,5 +148,5 @@ Transfer the `.ddp` to the phone, open Super PI Agent's plugin page, choose the 
 ## Support
 
 - The template and documentation here are provided as-is. Third-party plugins are maintained by their publishers and are not the responsibility of the Super PI Agent maintainers.
-- Report development issues, documentation errors and suggestions via [Issues](https://github.com/Sadami3066/DeepDeep-Plugins/issues); for marketplace entry issues, use [deepdeep-market](https://github.com/Sadami3066/deepdeep-market).
+- Report development issues, documentation errors and suggestions via [Issues](https://github.com/Sadami3066/SuperPI-Plugins/issues); for marketplace entry issues, use [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market).
 - Please do not report security or credential issues publicly; contact the maintainers through GitHub.

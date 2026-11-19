@@ -1,24 +1,24 @@
-package io.github.whywood.deepdeep.pluginsample
+package io.github.whywood.superpi.pluginsample
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.github.whywood.deepdeep.plugin.api.Contributions
-import io.github.whywood.deepdeep.plugin.api.DeepDeepPlugin
-import io.github.whywood.deepdeep.plugin.api.PluginAvailability
-import io.github.whywood.deepdeep.plugin.api.PluginHost
-import io.github.whywood.deepdeep.plugin.api.PluginPage
-import io.github.whywood.deepdeep.plugin.api.PluginUiContributions
-import io.github.whywood.deepdeep.plugin.api.SlotBinding
-import io.github.whywood.deepdeep.plugin.api.assetIcon
-import io.github.whywood.deepdeep.plugin.api.available
-import io.github.whywood.deepdeep.plugin.api.contributions
-import io.github.whywood.deepdeep.plugin.api.localizedText
-import io.github.whywood.deepdeep.plugin.api.pluginPage
-import io.github.whywood.deepdeep.plugin.api.pluginTool
-import io.github.whywood.deepdeep.plugin.api.textResult
+import io.github.whywood.superpi.plugin.api.Contributions
+import io.github.whywood.superpi.plugin.api.SuperPIPlugin
+import io.github.whywood.superpi.plugin.api.PluginAvailability
+import io.github.whywood.superpi.plugin.api.PluginHost
+import io.github.whywood.superpi.plugin.api.PluginPage
+import io.github.whywood.superpi.plugin.api.PluginUiContributions
+import io.github.whywood.superpi.plugin.api.SlotBinding
+import io.github.whywood.superpi.plugin.api.assetIcon
+import io.github.whywood.superpi.plugin.api.available
+import io.github.whywood.superpi.plugin.api.contributions
+import io.github.whywood.superpi.plugin.api.localizedText
+import io.github.whywood.superpi.plugin.api.pluginPage
+import io.github.whywood.superpi.plugin.api.pluginTool
+import io.github.whywood.superpi.plugin.api.textResult
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -27,7 +27,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-class SamplePlugin : DeepDeepPlugin {
+class SamplePlugin : SuperPIPlugin {
     override suspend fun availability(host: PluginHost): PluginAvailability = available()
 
     override fun contributions(host: PluginHost): Contributions =

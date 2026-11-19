@@ -1,6 +1,6 @@
 # Marketplace policy
 
-The deepdeep-market repository is the official plugin marketplace: entries are reviewed by maintainers, the registry is signed with a maintainer key, and the app browses and installs through "Plugins → Market". This policy covers what may be listed, the review standard and the takedown process.
+The SuperPI-Market repository is the official plugin marketplace: entries are reviewed by maintainers, the registry is signed with a maintainer key, and the app browses and installs through "Plugins → Market". This policy covers what may be listed, the review standard and the takedown process.
 
 ## What may be listed
 
@@ -17,7 +17,7 @@ The deepdeep-market repository is the official plugin marketplace: entries are r
 
 ## Submission requirements
 
-Open a PR against [deepdeep-market](https://github.com/Sadami3066/deepdeep-market) and fill in the entry following the repository template. Every entry must include:
+Open a PR against [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) and fill in the entry following the repository template. Every entry must include:
 
 - `id` (matching `plugin.json` inside the package) and `version` (semantic, matching the artifact).
 - `name` / `summary` / `description` / `tags` in both Chinese and English, with no developer-facing notes, internal links or exaggerated claims.

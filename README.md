@@ -1,14 +1,14 @@
-# DeepDeep-Plugins
+# SuperPI-Plugins
 
 **Super PI Agent 外部插件的开发模板、契约文档与上架规则。**
 
-[English](README.en.md) · [插件开发文档](docs/PLUGIN_DEV.md) · [官方插件](https://github.com/Sadami3066/DeepDeep-Official-Plugins) · [插件市场](https://github.com/Sadami3066/deepdeep-market)
+[English](README.en.md) · [插件开发文档](docs/PLUGIN_DEV.md) · [官方插件](https://github.com/Sadami3066/SuperPI-Official-Plugins) · [插件市场](https://github.com/Sadami3066/SuperPI-Market)
 
 ## 概览
 
-Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `DeepDeepPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 39 项 capability）。
+Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `SuperPIPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 39 项 capability）。
 
-本仓库面向外部插件作者：从 `template/` 起步，按 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) 开发，按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 与 [`PR_REVIEW.md`](PR_REVIEW.md) 发布到 PI 市场。Super PI Agent 官方插件（飞书、企业微信、中山大学 CLI、小米云服务、微信导出）在 [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins)，可作为完整参考实现。
+本仓库面向外部插件作者：从 `template/` 起步，按 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) 开发，按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 与 [`PR_REVIEW.md`](PR_REVIEW.md) 发布到 PI 市场。Super PI Agent 官方插件（飞书、企业微信、中山大学 CLI、小米云服务、微信导出）在 [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins)，可作为完整参考实现。
 
 > 插件与 App 同进程、同权限运行，没有沙箱，安装即信任。只安装自己信任的插件；第三方工具源请使用 MCP。
 
@@ -31,7 +31,7 @@ Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编
 - JDK 17
 - Android SDK：compileSdk 36、minSdk 29；SDK 位置通过 `ANDROID_HOME` / `ANDROID_SDK_ROOT` 或 `local.properties` 的 `sdk.dir` 指定
 - Gradle 9.8.2（模板自带 wrapper）
-- 能访问公开 Maven 仓库 `https://sadami3066.github.io/deepdeep-maven`（模板已配置，无需本地发布）
+- 能访问公开 Maven 仓库 `https://sadami3066.github.io/SuperPI-Maven`（模板已配置，无需本地发布）
 - 宿主 Super PI Agent 1.0.8+（使用 `plugin-api 1.2.0` 新能力时；只用 1.0.x/1.1.x 能力的插件在 1.0.4+ 运行）
 
 宿主契约 `plugin-api` 与 UI 设计系统 `design` 由该公开 Maven 仓库提供；`design` 由 `plugin-api` 通过 `api()` 传递：
@@ -42,8 +42,8 @@ Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编
 dependencyResolutionManagement {
     repositories {
         maven {
-            url = uri("https://sadami3066.github.io/deepdeep-maven")
-            content { includeGroup("io.github.sadami3066.deepdeep") }
+            url = uri("https://sadami3066.github.io/SuperPI-Maven")
+            content { includeGroup("io.github.sadami3066.superpi") }
         }
         google()
         mavenCentral()
@@ -53,7 +53,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    compileOnly("io.github.sadami3066.deepdeep:plugin-api:1.2.0")
+    compileOnly("io.github.sadami3066.superpi:plugin-api:1.2.0")
 }
 ```
 
@@ -83,7 +83,7 @@ cd my-plugin
 
 ### 3. 编写插件
 
-入口类实现 `DeepDeepPlugin`，按需实现 `availability()`、`onEnable()` / `onDisable()` / `onUpgrade()`、`skills()`、`promptSections()` 与 `contributions()`。模板自带：
+入口类实现 `SuperPIPlugin`，按需实现 `availability()`、`onEnable()` / `onDisable()` / `onUpgrade()`、`skills()`、`promptSections()` 与 `contributions()`。模板自带：
 
 - 工具 `template_echo`（由 `contributions()` 返回）
 - 工具 `template_state`：演示 `host.settings()` 与 `host.device()`（清单已声明 `settings`、`device` capability）
@@ -110,8 +110,8 @@ cd my-plugin
 
 ### 6. 发布
 
-- **上架 Super PI Agent 市场（所有外部作者）**：按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 准备条目与制品，向 [deepdeep-market](https://github.com/Sadami3066/deepdeep-market) 提交 PR。条目需包含与 `plugin.json` 一致的 id、版本、中英双语名称/简介/描述/标签、`artifact.url` / `sha256` / `size`、`publisherKeyId` 与不超过 128 KB 的 PNG 图标；维护者按 [`PR_REVIEW.md`](PR_REVIEW.md) 审核。
-- **官方插件仓库（维护者）**：[DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) 用共享脚本 `gradle/plugin-bundle.gradle.kts` 与 `scripts/check.sh` 构建、签名全部官方插件。官方签名密钥不随仓库分发，外部作者无法以官方 `keyId` 发版。
+- **上架 Super PI Agent 市场（所有外部作者）**：按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 准备条目与制品，向 [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) 提交 PR。条目需包含与 `plugin.json` 一致的 id、版本、中英双语名称/简介/描述/标签、`artifact.url` / `sha256` / `size`、`publisherKeyId` 与不超过 128 KB 的 PNG 图标；维护者按 [`PR_REVIEW.md`](PR_REVIEW.md) 审核。
+- **官方插件仓库（维护者）**：[SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) 用共享脚本 `gradle/plugin-bundle.gradle.kts` 与 `scripts/check.sh` 构建、签名全部官方插件。官方签名密钥不随仓库分发，外部作者无法以官方 `keyId` 发版。
 
 ## 使用方式
 
@@ -148,5 +148,5 @@ cd my-plugin
 ## 声明与反馈
 
 - 本仓库的模板与文档按现状提供；第三方插件由各自发布者维护，与 Super PI Agent 维护者无关。
-- 开发问题、文档错误与改进建议请到 [Issues](https://github.com/Sadami3066/DeepDeep-Plugins/issues) 反馈；市场条目相关问题请到 [deepdeep-market](https://github.com/Sadami3066/deepdeep-market)。
+- 开发问题、文档错误与改进建议请到 [Issues](https://github.com/Sadami3066/SuperPI-Plugins/issues) 反馈；市场条目相关问题请到 [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market)。
 - 安全或凭据相关问题请勿公开提交，请通过 GitHub 联系维护者。
