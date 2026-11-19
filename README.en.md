@@ -119,7 +119,7 @@ Transfer the `.ddp` to the phone, open Super PI Agent's plugin page, choose the 
 
 - Copy `template/` into its own project and start there. When several plugins share one Gradle project, follow the official repository's `settings.gradle.kts` and root `gradle/plugin-bundle.gradle.kts`.
 - Libraries provided by the host must be `compileOnly`: `plugin-api`, the transitive `design`, Compose (BOM/UI/foundation/material3), `kotlinx-coroutines` and `kotlinx-serialization-json`. Do not use `implementation` for host libraries, or host classes will be bundled into your plugin.
-- Declare the host services you need in `plugin.json` under `capabilities` (e.g. `linux`, `files`, `network`, `settings`, `device`, `packages`, `background`, `notifications`, `location`, `contacts`, `sms`, `calendar`, `media`, `web` — 38 in total). `capabilities` is required; write an empty array if you need none. Runtime permissions go under `permissions`; system components such as notification listening, accessibility, sharing, deep links and background tasks go under `components`, always paired with their capability.
+- Declare the host services you need in `plugin.json` under `capabilities` (e.g. `linux`, `files`, `network`, `settings`, `device`, `packages`, `background`, `notifications`, `location`, `contacts`, `sms`, `calendar`, `media`, `web` — 39 in total). `capabilities` is required; write an empty array if you need none. Runtime permissions go under `permissions`; system components such as notification listening, accessibility, sharing, deep links and background tasks go under `components`, always paired with their capability.
 - Skills, icons and copy live under `assets/`. Plugins cannot use `res/` resources and cannot load native libraries.
 
 ### For users
