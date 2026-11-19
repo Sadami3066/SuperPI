@@ -1,61 +1,61 @@
-# DeepDeep 插件模板
+# Super PI Agent plugin template
 
-独立 Gradle Android 工程，用来开发外部 DeepDeep 插件并打包签名成 `.ddp`。复制本目录，改插件 id、入口类与包名，即可构建自己的插件。
+A standalone Gradle Android project for building external Super PI Agent plugins and packaging them into signed `.ddp` bundles. Copy this directory, change the plugin id, entry class and package name, and you can build your own plugin.
 
-## 环境
+## Requirements
 
 - JDK 17
-- Android SDK：compileSdk 36、minSdk 29
-- Gradle 9.8.2（已带 wrapper）
-- 依赖 `plugin-api:1.0.1`，来自 <https://sadami3066.github.io/deepdeep-maven>
+- Android SDK: compileSdk 36, minSdk 29
+- Gradle 9.8.2 (wrapper included)
+- Depends on `plugin-api:1.0.1` from <https://sadami3066.github.io/deepdeep-maven>
 
-`local.properties` 写 `sdk.dir=/path/to/Android/Sdk`，或设置 `ANDROID_HOME`。
+Set `sdk.dir=/path/to/Android/Sdk` in `local.properties`, or set `ANDROID_HOME`.
 
-## 构建
+## Build
 
 ```bash
-./gradlew generateSigningKey  # 首次：生成 keys/plugin-signing.pem 与 .pub
+./gradlew generateSigningKey  # first run: creates keys/plugin-signing.pem and .pub
 ./gradlew assemblePlugin      # build/plugin/plugin-template.unsigned.ddp
-./gradlew signPlugin          # 用 keys/ 的 Ed25519 私钥签名，产出 build/plugin/plugin-template.ddp
-./gradlew verifyPlugin        # 校验签名与清单
+./gradlew signPlugin          # signs with the Ed25519 key in keys/, producing build/plugin/plugin-template.ddp
+./gradlew verifyPlugin        # verifies the signature and manifest
 ```
 
-`keys/` 已被 gitignore，**私钥绝不提交**，请自行备份；私钥丢失就无法再发布同名插件的更新。`signPlugin` 只读取密钥，缺失时直接报错并提示生成方式。也可用 `-PpluginSigningKey=keys/plugin-signing` 指定其它密钥位置（PKCS#8 PEM 文件路径或相对项目路径，不带 `.pem`/`.pub` 扩展名）。
+`keys/` is gitignored — **never commit the private key**, and keep your own backup: if it is lost you can no longer publish updates under the same plugin name. `signPlugin` only reads the key and fails with generation instructions when it is missing. Use `-PpluginSigningKey=keys/plugin-signing` to point at another location (a PKCS#8 PEM path or project-relative path, without the `.pem`/`.pub` extension).
 
-换钥等于换发布者身份：市场会视为新发布者，已安装用户无法用新钥升级（PUBLISHER_MISMATCH）。
+Changing the key changes the publisher identity: the marketplace treats it as a new publisher, and installed users cannot upgrade with the new key (PUBLISHER_MISMATCH).
 
-把 `.ddp` 通过深探 App 的「插件 → 导入插件」安装即可。
+To install, transfer the `.ddp` and use "Plugins → Import plugin" in the PI App.
 
-## 改成一个新插件
+## Turn it into your plugin
 
-1. `settings.gradle.kts` 的 `rootProject.name`、`build.gradle.kts` 的 `namespace` / `applicationId`、`versionName`。
-2. `src/main/assets/plugin.json`：`id`（点分小写，如 `com.example.myplugin`）、`version`、`entryClass`、`publisher.name`（导入页展示的作者名）、名称与描述（`default` 必填，`zh`/`en` 可选）。
-3. `src/main/kotlin/.../TemplatePlugin.kt`：改包名与类名，按需实现 `skills()` / `promptSections()` / `contributions()`。
-4. 换发布者前删掉旧 `keys/`，重新 `generateSigningKey` 与 `signPlugin`；`signPlugin` 会把密钥文件计入任务输入，换钥后不会复用旧签名。
+1. `rootProject.name` in `settings.gradle.kts`, plus `namespace` / `applicationId` and `versionName` in `build.gradle.kts`.
+2. `src/main/assets/plugin.json`: `id` (dotted lowercase, e.g. `com.example.myplugin`), `version`, `entryClass`, `publisher.name` (the author name shown on the import page), name and description (`default` required, `zh`/`en` optional).
+3. `src/main/kotlin/.../TemplatePlugin.kt`: change the package and class names, and implement `skills()` / `promptSections()` / `contributions()` as needed.
+4. Before switching publishers, delete the old `keys/` and run `generateSigningKey` and `signPlugin` again; `signPlugin` counts the key files as task inputs, so a new key never reuses the old signature.
 
-## 能力与依赖
+## Capabilities and dependencies
 
-- 插件只能依赖 Android SDK、`plugin-api` 和宿主提供的 `compileOnly` 库（Compose BOM/UI/foundation/material3、coroutines、kotlinx-serialization-json）。**不要用 `implementation` 引宿主库**，否则会把宿主类打进包。
-- 需要系统能力时在 `plugin.json` 的 `capabilities` 声明（如 `linux`、`files`、`network`、`ui`）；清单里的 `capabilities` 必须显式给出，空数组也要写。
-- 版本对齐：Kotlin 2.4.21、Compose BOM 2026.03.00、AGP 9.4.1、JVM 17。宿主升级后同步修改本工程。
+- Plugins may depend only on the Android SDK, `plugin-api` and the host-provided `compileOnly` libraries (Compose BOM/UI/foundation/material3, coroutines, kotlinx-serialization-json). **Do not use `implementation` for host libraries**, or host classes end up in your package.
+- Declare the system capabilities you need in `plugin.json` under `capabilities` (e.g. `linux`, `files`, `network`, `ui`); `capabilities` is required, so write an empty array when you need none.
+- Version alignment: Kotlin 2.4.21, Compose BOM 2026.03.00, AGP 9.4.1, JVM 17. Update this project when the host upgrades.
 
-## 产物结构
+## Artifact layout
 
-`.ddp` 就是重打包后的 APK，只保留插件真正需要的部分：
+A `.ddp` is a repacked APK that keeps only what the plugin actually needs:
 
 - `classes*.dex`
-- `assets/**`（含 `plugin.json` 与图标、技能 Markdown）
-- `lib/**`（如有原生库）
+- `assets/**` (including `plugin.json`, icons and skill Markdown)
+- `lib/**` (if there are native libraries)
 
-宿主不读取插件 `res/`，界面请用 Compose 或声明的 UI 页面实现。
+The host never reads a plugin's `res/`, so build UI with Compose or declared UI pages.
 
-## 目录
+## Files
 
-| 路径 | 作用 |
+| Path | Purpose |
 |---|---|
-| `build.gradle.kts` | Android 配置与 `generateSigningKey` / `assemblePlugin` / `signPlugin` / `verifyPlugin` 任务（含 Ed25519 与 canonical entry digest 实现） |
-| `src/main/assets/plugin.json` | 插件清单 |
-| `src/main/assets/skills/template-skill/` | 示例技能：`SKILL.md` + `references/format.md` |
-| `src/main/kotlin/.../TemplatePlugin.kt` | 参考实现：`availability`、技能、提示词段、`template_echo` 工具 |
+| `build.gradle.kts` | Android configuration and the `generateSigningKey` / `assemblePlugin` / `signPlugin` / `verifyPlugin` tasks (including Ed25519 and the canonical entry digest) |
+| `src/main/assets/plugin.json` | Plugin manifest |
+| `src/main/assets/skills/template-skill/` | Example skill: `SKILL.md` + `references/format.md` |
+| `src/main/kotlin/.../TemplatePlugin.kt` | Reference implementation: `availability`, skill, prompt section, `template_echo` tool |
 
-更完整的契约与签名规范见仓库 `docs/PLUGIN_DEV.md`；上架与分发规则见 `MARKET_POLICY.md`。
+The full contract and signing spec are in the repository's `docs/PLUGIN_DEV.md`; listing and distribution rules are in `MARKET_POLICY.md`.

@@ -1,14 +1,14 @@
 # DeepDeep-Plugins
 
-**DeepDeep 外部插件的开发模板、契约文档与上架规则。**
+**Super PI Agent 外部插件的开发模板、契约文档与上架规则。**
 
 [English](README.en.md) · [插件开发文档](docs/PLUGIN_DEV.md) · [官方插件](https://github.com/Sadami3066/DeepDeep-Official-Plugins) · [插件市场](https://github.com/Sadami3066/deepdeep-market)
 
 ## 概览
 
-DeepDeep 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `DeepDeepPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 38 项 capability）。
+Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `DeepDeepPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 38 项 capability）。
 
-本仓库面向外部插件作者：从 `template/` 起步，按 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) 开发，按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 与 [`PR_REVIEW.md`](PR_REVIEW.md) 发布到 DeepDeep 市场。DeepDeep 官方插件（飞书、企业微信、中山大学 CLI、小米云服务、微信导出）在 [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins)，可作为完整参考实现。
+本仓库面向外部插件作者：从 `template/` 起步，按 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) 开发，按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 与 [`PR_REVIEW.md`](PR_REVIEW.md) 发布到 PI 市场。Super PI Agent 官方插件（飞书、企业微信、中山大学 CLI、小米云服务、微信导出）在 [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins)，可作为完整参考实现。
 
 > 插件与 App 同进程、同权限运行，没有沙箱，安装即信任。只安装自己信任的插件；第三方工具源请使用 MCP。
 
@@ -18,7 +18,7 @@ DeepDeep 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，
 |---|---|
 | [`template/`](template/) | 独立 Gradle Android 插件模板：示例工具、技能、提示词段，以及完整的打包、签名、校验任务 |
 | [`sample/`](sample/) | 宿主端到端回归用的测试夹具：一个回声工具与一个页面，不是可上架插件 |
-| [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) | 插件开发文档：宿主契约、`plugin.json` 清单、`.ddp` 包格式、签名与验签、安装更新、生命周期、扩展面与安全模型 |
+| [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) | 插件开发入口：指向宿主仓库中维护并更新的完整开发文档（宿主契约、`plugin.json` 清单、`.ddp` 包格式、签名与验签、安装更新、生命周期、扩展面与安全模型） |
 | [`MARKET_POLICY.md`](MARKET_POLICY.md) | 市场上架政策：可上架内容、禁止内容、提交要求、签名与下架规则 |
 | [`PR_REVIEW.md`](PR_REVIEW.md) | 上架审核清单 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 本仓库变更记录 |
@@ -32,7 +32,7 @@ DeepDeep 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，
 - Android SDK：compileSdk 36、minSdk 29；SDK 位置通过 `ANDROID_HOME` / `ANDROID_SDK_ROOT` 或 `local.properties` 的 `sdk.dir` 指定
 - Gradle 9.8.2（模板自带 wrapper）
 - 能访问公开 Maven 仓库 `https://sadami3066.github.io/deepdeep-maven`（模板已配置，无需本地发布）
-- 宿主 DeepDeep 1.0.8+（使用 `plugin-api 1.2.0` 新能力时；只用 1.0.x/1.1.x 能力的插件在 1.0.4+ 运行）
+- 宿主 Super PI Agent 1.0.8+（使用 `plugin-api 1.2.0` 新能力时；只用 1.0.x/1.1.x 能力的插件在 1.0.4+ 运行）
 
 宿主契约 `plugin-api` 与 UI 设计系统 `design` 由该公开 Maven 仓库提供；`design` 由 `plugin-api` 通过 `api()` 传递：
 
@@ -106,11 +106,11 @@ cd my-plugin
 
 ### 5. 安装到手机
 
-把 `.ddp` 传到手机，打开 DeepDeep 的插件页，选择「导入插件」并选中文件。确认页会展示名称、版本、体积、整包 sha256、发布者名称与 `keyId`、能力/权限/组件声明；首次导入确认后写入信任记录（TOFU）并启用。之后的更新必须由同一把私钥签名，否则按「发布者不匹配」拒绝。
+把 `.ddp` 传到手机，打开 Super PI Agent 的插件页，选择「导入插件」并选中文件。确认页会展示名称、版本、体积、整包 sha256、发布者名称与 `keyId`、能力/权限/组件声明；首次导入确认后写入信任记录（TOFU）并启用。之后的更新必须由同一把私钥签名，否则按「发布者不匹配」拒绝。
 
 ### 6. 发布
 
-- **上架 DeepDeep 市场（所有外部作者）**：按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 准备条目与制品，向 [deepdeep-market](https://github.com/Sadami3066/deepdeep-market) 提交 PR。条目需包含与 `plugin.json` 一致的 id、版本、中英双语名称/简介/描述/标签、`artifact.url` / `sha256` / `size`、`publisherKeyId` 与不超过 128 KB 的 PNG 图标；维护者按 [`PR_REVIEW.md`](PR_REVIEW.md) 审核。
+- **上架 Super PI Agent 市场（所有外部作者）**：按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 准备条目与制品，向 [deepdeep-market](https://github.com/Sadami3066/deepdeep-market) 提交 PR。条目需包含与 `plugin.json` 一致的 id、版本、中英双语名称/简介/描述/标签、`artifact.url` / `sha256` / `size`、`publisherKeyId` 与不超过 128 KB 的 PNG 图标；维护者按 [`PR_REVIEW.md`](PR_REVIEW.md) 审核。
 - **官方插件仓库（维护者）**：[DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) 用共享脚本 `gradle/plugin-bundle.gradle.kts` 与 `scripts/check.sh` 构建、签名全部官方插件。官方签名密钥不随仓库分发，外部作者无法以官方 `keyId` 发版。
 
 ## 使用方式
@@ -124,7 +124,7 @@ cd my-plugin
 
 ### 用户
 
-- 在 DeepDeep 插件页的「市场」中浏览并安装已上架插件；或通过「导入插件」手动选择 `.ddp`。
+- 在 Super PI Agent 插件页的「市场」中浏览并安装已上架插件；或通过「导入插件」手动选择 `.ddp`。
 - 安装确认页会展示发布者名称与 `keyId`、包体 sha256 与能力声明；更新必须来自同一发布者。
 - 插件与 App 同进程、拥有 App 的全部权限，只安装可信来源。
 
@@ -142,11 +142,11 @@ cd my-plugin
 
 - 本仓库的模板、文档与构建脚本采用 [Apache-2.0](LICENSE)。可以复制、修改与再分发，但需保留版权与许可声明；用模板开发的插件归作者所有，可自行选择许可证。
 - 上架市场的插件必须允许公开再分发，并在条目或仓库中保留 LICENSE 或来源链接，要求见 [`MARKET_POLICY.md`](MARKET_POLICY.md)。
-- 插件内使用的第三方库、图标与品牌资产遵循各自许可；Apache-2.0 不包含商标授权，请勿以 DeepDeep 名义误导用户。
+- 插件内使用的第三方库、图标与品牌资产遵循各自许可；Apache-2.0 不包含商标授权，请勿以 Super PI Agent 名义误导用户。
 - 许可证不构成对插件行为、安全性或可用性的担保。
 
 ## 声明与反馈
 
-- 本仓库的模板与文档按现状提供；第三方插件由各自发布者维护，与 DeepDeep 维护者无关。
+- 本仓库的模板与文档按现状提供；第三方插件由各自发布者维护，与 Super PI Agent 维护者无关。
 - 开发问题、文档错误与改进建议请到 [Issues](https://github.com/Sadami3066/DeepDeep-Plugins/issues) 反馈；市场条目相关问题请到 [deepdeep-market](https://github.com/Sadami3066/deepdeep-market)。
 - 安全或凭据相关问题请勿公开提交，请通过 GitHub 联系维护者。

@@ -1,44 +1,44 @@
-# DeepDeep 市场政策
+# Marketplace policy
 
-DeepDeep-Market 是官方插件市场：条目由维护者人工审核，registry 由维护者密钥签名，App 通过「插件 → 市场」浏览与安装。本政策约束上架内容、审核标准与下架流程。
+The DeepDeep-Market repository is the official plugin marketplace: entries are reviewed by maintainers, the registry is signed with a maintainer key, and the app browses and installs through "Plugins → Market". This policy covers what may be listed, the review standard and the takedown process.
 
-## 可以上架的内容
+## What may be listed
 
-- 为 DeepDeep 增加能力的插件、技能与 MCP 连接器；包格式与契约见 `docs/PLUGIN_DEV.md`。
-- 制品可公开下载、可长期访问（优先 GitHub Releases 直链），并提供与发布物一致的 `sha256`。
-- 发布者拥有再分发权；仓库内保留 LICENSE 或来源链接（MIT、Apache-2.0、CC-BY 等允许再分发的许可）。
+- Plugins, skills and MCP connectors that add capability to Super PI Agent; package format and contract are described in `docs/PLUGIN_DEV.md`.
+- Artifacts that can be downloaded publicly and stay available long term (direct GitHub Releases links preferred), with a `sha256` matching the published file.
+- The publisher holds redistribution rights; the repository keeps a LICENSE or source link (redistribution-friendly licenses such as MIT, Apache-2.0 or CC-BY).
 
-## 禁止的内容
+## What is prohibited
 
-- 恶意或破坏性行为：窃取凭据/聊天/文件，未告知的数据外传，破坏用户数据，绕过系统权限或安全机制，静默安装、隐藏行为、提权后门。
-- 凭据滥用：内置他人账号、盗用 API Key、代登录第三方账号、抓取与本插件功能无关的隐私数据。
-- 与描述严重不符：宣称的功能与实际工具/技能/页面不一致，或夹带未声明的能力。
-- 侵权与违规：盗版、破解、违反当地法律或平台条款的内容；品牌图标仅限识别来源。
+- Malicious or destructive behavior: stealing credentials, chats or files, undisclosed data exfiltration, destroying user data, bypassing system permissions or security mechanisms, silent installs, hidden behavior, privilege-escalation backdoors.
+- Credential abuse: shipping other people's accounts, using stolen API keys, signing in to third-party accounts on a user's behalf, or collecting private data unrelated to the plugin's function.
+- Serious mismatch with the description: advertised features that do not match the actual tools, skills or pages, or undeclared capabilities smuggled into the package.
+- Infringement and violations: piracy, cracking, or content that breaks local law or platform terms; brand icons may only identify their source.
 
-## 提交要求
+## Submission requirements
 
-提交 PR 到 [DeepDeep-Market](https://github.com/Sadami3066/DeepDeep-Market)，按仓库模板补充条目。每个条目必须包含：
+Open a PR against [DeepDeep-Market](https://github.com/Sadami3066/DeepDeep-Market) and fill in the entry following the repository template. Every entry must include:
 
-- `id`（与插件包内 `plugin.json` 一致）、`version`（语义化，与制品一致）。
-- `name` / `summary` / `description` / `tags` 的中英双语；不得含开发侧说明、内部链接或夸大宣传。
-- `artifact.url`、`artifact.sha256`、`artifact.size`：与 Release 文件逐字节一致。
-- `publisherKeyId`：插件包内签名 `META-INF/plugin-signature.json` 的 `keyId` 一致；换钥视为新发布者。
-- ≤128KB 的 PNG 图标（品牌图标需注明来源）。
+- `id` (matching `plugin.json` inside the package) and `version` (semantic, matching the artifact).
+- `name` / `summary` / `description` / `tags` in both Chinese and English, with no developer-facing notes, internal links or exaggerated claims.
+- `artifact.url`, `artifact.sha256` and `artifact.size` matching the Release file byte for byte.
+- `publisherKeyId` matching the `keyId` in the package's `META-INF/plugin-signature.json`; a new key means a new publisher.
+- A PNG icon of ≤128 KB (brand icons must credit their source).
 
-审核清单与逐项说明见仓库 `PR_REVIEW.md`；体积上限：插件 50 MB、技能 20 MB、远程 MCP 仅接受 HTTP 端点。
+See the repository's `PR_REVIEW.md` for the review checklist and per-item notes. Size limits: 50 MB per plugin, 20 MB per skill; remote MCP accepts HTTP endpoints only.
 
-## 签名与信任
+## Signing and trust
 
-- 插件包必须由 Ed25519 私钥签名，签名覆盖 canonical entry digest；App 首装采用 TOFU 记住发布者 `keyId`。
-- 后续更新必须使用同一发布者密钥；换钥后同 `id` 的更新会被视为不同发布者并拒绝自动升级。
-- registry 由维护者 `ec256` 密钥签名，App 校验签名后才展示条目。
+- Plugin packages must be signed with an Ed25519 private key over the canonical entry digest; on first install the app pins the publisher `keyId` with TOFU.
+- Updates must use the same publisher key; after a key change, an update under the same `id` is treated as a different publisher and automatic upgrades are refused.
+- The registry is signed with a maintainer `ec256` key, and the app verifies the signature before showing entries.
 
-## 下架与撤回
+## Takedown and retraction
 
-- 维护者可因安全、侵权、失效或违反政策移除条目；已安装插件不会被远程卸载，App 只停止向该条目推送更新。
-- 发布者请求下架需说明原因；安全事件会从 registry 移除并保留审计记录。
-- 已被信任但出现破坏性行为的发布者，维护者可将其 `keyId` 加入黑名单，后续条目一律拒绝。
+- Maintainers may remove entries for security, infringement, breakage or policy violations. Installed plugins are never uninstalled remotely; the app only stops offering updates for that entry.
+- Publishers requesting removal must state a reason; security incidents are removed from the registry with an audit record kept.
+- A publisher that was trusted but turns destructive can have its `keyId` blacklisted by maintainers, and all later entries from it are refused.
 
-## 责任
+## Responsibility
 
-发布者对其插件的行为、许可与更新负责；DeepDeep 提供分发与审核，但插件与 App 同进程、同权限运行，安装与使用风险由用户与发布者承担。安装页会展示发布者、签名与能力声明，请只安装信任来源的插件。
+Publishers are responsible for their plugin's behavior, license and updates. The marketplace provides distribution and review, but plugins run in the same process and with the same permissions as the app, so installing and using them is at the user's and publisher's risk. The install page shows the publisher, signature and declared capabilities; only install plugins from sources you trust.

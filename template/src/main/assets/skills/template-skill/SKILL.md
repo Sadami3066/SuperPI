@@ -1,22 +1,22 @@
 ---
 name: template-skill
-description: 插件模板自带的示例技能，说明 external 插件如何把 markdown 与附加文件作为技能交给 agent；当用户问插件模板技能如何工作、或需要演示技能加载时使用。
+description: Example skill bundled with the plugin template. It shows how an external plugin hands markdown and supporting files to the agent as a skill; use it when the user asks how the template skill works or when a skill-loading demo is needed.
 ---
 
-# 插件模板技能
+# Plugin template skill
 
-这是 `plugin-template` 工程自带的示例技能，用来演示外部插件如何提供技能：
+This example skill ships with the `plugin-template` project and shows how an external plugin provides skills:
 
-1. `assets/skills/template-skill/SKILL.md` 是本文件的来源，插件在 `skills(host)` 里从 `host.assetsDir` 读取它，作为 `PluginSkill.markdown` 返回。
-2. `assets/skills/template-skill/references/format.md` 作为附加文件，通过 `PluginSkillFile(assetPath = ...)` 声明，物化后与 SKILL.md 放在同一技能目录。
-3. 宿主只在插件处于可贡献相位（`ACTIVE` / `DEGRADED` / `PENDING_RESTART`）时把技能写入 agent 技能目录；插件停用或卸载后按归属清理。
+1. `assets/skills/template-skill/SKILL.md` is the source of this file; the plugin reads it from `host.assetsDir` in `skills(host)` and returns it as `PluginSkill.markdown`.
+2. `assets/skills/template-skill/references/format.md` is a supporting file, declared through `PluginSkillFile(assetPath = ...)` and materialized into the same skill directory as SKILL.md.
+3. The host writes skills into the agent's skill directory only while the plugin is in a contributing phase (`ACTIVE` / `DEGRADED` / `PENDING_RESTART`); disabling or uninstalling the plugin cleans them up by ownership.
 
-## 何时使用
+## When to use
 
-- 用户在开发 DeepDeep 插件、需要看技能目录结构时，可以加载本技能作为最小示例。
-- 需要演示「技能 + 附加引用文件」时使用；不要把本技能当成真实业务能力。
+- When the user is developing a Super PI Agent plugin and needs to see the skill directory layout, load this skill as a minimal example.
+- Use it to demonstrate "skill + supporting reference file"; do not treat it as a real business capability.
 
-## 要求
+## Requirements
 
-- 技能 markdown 必须带 YAML frontmatter（`name`、`description`），`name` 与 `PluginSkill.id` 保持一致。
-- 附加文件路径必须是相对路径，不能包含 `..`、反斜杠或绝对路径；内容与 `assetPath` 二选一。
+- Skill markdown must have YAML frontmatter (`name`, `description`), and `name` must match `PluginSkill.id`.
+- Supporting file paths must be relative and must not contain `..`, backslashes or absolute paths; provide either `content` or `assetPath`.

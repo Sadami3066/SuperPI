@@ -2,31 +2,31 @@
 
 ## 2026-11-13
 
-- docs: 插件开发文档与中英文 README 覆盖 `plugin-api 1.1.0` / `design 0.7.0`（API level 6 加法，宿主 1.0.6+）：38 项 capability、`permissions`/`components` 清单字段、18 个新宿主服务（设置/设备/剪贴板/权限/应用管理/提权执行/Intent 与动态广播/独立窗口与前台服务/后台任务/定位/联系人/短信/日历/媒体/语音/网页/宿主凭据/无障碍）、通知监听与动作、系统事件 hooks、页面参数与交互选择器、design 0.7.0 组件，以及 1.0.x→1.1.0 迁移说明 [文档] [能力]
+- docs: the plugin development guide and both READMEs now cover `plugin-api 1.1.0` / `design 0.7.0` (an addition within API level 6, host 1.0.6+): 38 capabilities, the `permissions`/`components` manifest fields, 18 new host services (settings, device, clipboard, permissions, app management, elevated execution, intents and dynamic broadcasts, standalone windows and foreground services, background tasks, location, contacts, SMS, calendar, media, speech, web, host credentials, accessibility), notification listening and actions, system event hooks, page arguments and interactive pickers, design 0.7.0 components, and the 1.0.x → 1.1.0 migration notes [docs] [capabilities]
 
 ## 2026-11-12
 
-- chore: 模板、示例与文档引脚升级到 `plugin-api:1.0.1`（补丁版本，API level 不变）[依赖] [模板]
-- feat: 模板与示例迁移到 `plugin-api:1.0.0`（API level 6、`ui.apiLevel` 2），清单改为 `apiLevel` 6 / `minHostVersion` 1.0.4，改用顶层工厂与接口；中英文 README 的 SDK 版本表同步 [依赖] [模板] [破坏性]
-- feat: 新增 `sample/` 测试夹具（`sample_echo` 工具 + `sample.main` 页面，随仓库提交仅用于开发的 Ed25519 签名密钥），供宿主仓库 `scripts/plugin-e2e.sh` 在设备上回归外部插件的安装、启用、停用、升级与卸载 [工具] [模板]
-- chore: 模板升到 `plugin-api:0.8.1`（消费端 R8 keep 规则补齐），模板清单 `minHostVersion` 改为 `1.0.1`；README 与开发文档的版本表同步 [依赖] [文档]
+- chore: bump the template, sample and documentation pins to `plugin-api:1.0.1` (patch release, same API level) [dependency] [template]
+- feat: migrate the template and sample to `plugin-api:1.0.0` (API level 6, `ui.apiLevel` 2); manifests now use `apiLevel` 6 / `minHostVersion` 1.0.4 and the top-level factories and interfaces; both READMEs updated their SDK version tables [dependency] [template] [breaking]
+- feat: add the `sample/` test fixture (`sample_echo` tool plus the `sample.main` page, with a development-only Ed25519 signing key committed with the repository) so the host repository's `scripts/plugin-e2e.sh` can regress external plugin install, enable, disable, upgrade and uninstall on a device [tooling] [template]
+- chore: bump the template to `plugin-api:0.8.1` (complete consumer R8 keep rules) and set the template manifest `minHostVersion` to `1.0.1`; READMEs and the development guide version tables updated [dependency] [docs]
 
 ## 2026-11-10
 
-- feat(api): 插件 API 升到 v2（`PLUGIN_API_LEVEL` / `BASELINE_API_LEVEL` 4→5）；删除 `host.privilege()` / `PrivilegeService` 与清单字段 `requiresPrivilege`；`host.linux()` / `host.files()` 语义不变，执行身份由用户选择的访问档位（LOCAL/ADB/ROOT）决定 [api] [破坏性]
-- docs: 同步更新 `docs/PLUGIN_DEV.md` 的清单字段、capabilities 列表、宿主服务、ABI 与安全模型；模板 `plugin.json` 的 `apiLevel` 改为 5；中英文 README 的 API level 与特权说明同步 [文档] [模板]
+- feat(api): plugin API v2 (`PLUGIN_API_LEVEL` / `BASELINE_API_LEVEL` 4→5); removed `host.privilege()` / `PrivilegeService` and the `requiresPrivilege` manifest field; `host.linux()` / `host.files()` keep their semantics, and the execution identity is set by the user's access tier (LOCAL/ADB/ROOT) [api] [breaking]
+- docs: updated the manifest fields, capabilities list, host services, ABI and security model in `docs/PLUGIN_DEV.md`; the template `plugin.json` `apiLevel` is now 5; READMEs updated for the API level and privilege changes [docs] [template]
 
 ## 2026-11-09
 
-- refactor: 官方插件拆到独立仓库 [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins)（feishu 1.0.1 / wecom 1.0.1 / sysu 1.0.0 / micloud 1.0.2）；`jwxt` 全面更名 `sysu`（目录、Kotlin 包与类、插件 id `io.github.whywood.deepdeep.plugin.sysu`）；本仓库保留模板、开发文档与上架规则 [拆分] [破坏性]
+- refactor: move the official plugins to their own repository [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) (feishu 1.0.1 / wecom 1.0.1 / sysu 1.0.0 / micloud 1.0.2); `jwxt` renamed to `sysu` everywhere (directory, Kotlin packages and classes, plugin id `io.github.whywood.deepdeep.plugin.sysu`); this repository keeps the template, the development guide and the listing rules [split] [breaking]
 
-- feat(jwxt): 插件对外更名为「中山大学 CLI」，内置 `sysu` 多站点 CLI（教务 / 在线教学 / 体育场馆 / 网费 / 统一认证），技能 id 改为 `deepdeep-sysu`；安装路径迁移到 `/root/projects/sysu` 与 `/usr/local/bin/sysu`，清理时兼容删除旧 `jwxt` 路径 [jwxt] [破坏性]
+- feat(jwxt): the plugin is now called "SYSU CLI" externally and bundles the multi-site `sysu` CLI (academic affairs / online teaching / sports venues / campus network fees / SSO), with the skill id changed to `deepdeep-sysu`; install paths move to `/root/projects/sysu` and `/usr/local/bin/sysu`, and cleanup still removes the old `jwxt` paths [jwxt] [breaking]
 
-- feat: 新增公开插件模板 `template/`：独立 Gradle 工程，`plugin-api:0.7.0` 从公开 Maven 解析，自带 `assemblePlugin` / `signPlugin` / `verifyPlugin` 与 Ed25519 签名实现，附示例工具、技能与提示词段；本地构建、签名、校验全部通过 [工具] [模板]
-- docs: 新增公开文档 `docs/PLUGIN_DEV.md`（契约、清单、`.ddp` 格式、签名算法、生命周期、工具/技能/UI/服务、ABI 与安全模型）；新增 `MARKET_POLICY.md` 与 `PR_REVIEW` 上架规则说明；README 改为公开 Maven 用法 [文档]
-- chore: 依赖坐标切换到 `io.github.sadami3066.deepdeep`（`plugin-api:0.7.0`、`design:0.6.0`），仓库改从 `https://sadami3066.github.io/deepdeep-maven` 解析；四个插件产物哈希不变，市场条目无需重发 [构建]
-- docs: 插件与接口 AGENTS 中的 mavenLocal 发布说明改为公开 Maven 发布流程 [文档]
+- feat: add the public plugin template `template/`: a standalone Gradle project resolving `plugin-api:0.7.0` from public Maven, with `assemblePlugin` / `signPlugin` / `verifyPlugin` and the Ed25519 signing implementation, plus an example tool, skill and prompt section; local build, signing and verification all pass [tooling] [template]
+- docs: add the public `docs/PLUGIN_DEV.md` (contract, manifest, `.ddp` format, signing algorithm, lifecycle, tools/skills/UI/services, ABI and security model); add `MARKET_POLICY.md` and the `PR_REVIEW` listing rules; READMEs now use the public Maven setup [docs]
+- chore: switch dependency coordinates to `io.github.sadami3066.deepdeep` (`plugin-api:0.7.0`, `design:0.6.0`) and resolve from `https://sadami3066.github.io/deepdeep-maven`; the four plugin artifacts keep their hashes, so marketplace entries need no republish [build]
+- docs: replace the mavenLocal publishing notes with the public Maven release flow in the plugin and interface AGENTS files [docs]
 
-## 历史版本
+## Earlier versions
 
-此前插件（飞书、企业微信、中山大学教务、小米云服务）的版本变更记录在各插件目录与市场 registry 中；本文件从公开仓库启用时开始记录。
+Earlier version history for the plugins (Feishu, WeCom, SYSU academic affairs, Mi Cloud) lives in each plugin directory and in the marketplace registry; this file records changes from when the public repository was enabled.

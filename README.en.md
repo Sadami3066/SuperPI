@@ -1,12 +1,12 @@
 # DeepDeep-Plugins
 
-**Templates, contract documentation and marketplace rules for DeepDeep external plugins.**
+**Templates, contract documentation and marketplace rules for Super PI Agent external plugins.**
 
 [简体中文](README.md) · [Plugin development guide](docs/PLUGIN_DEV.md) · [Official plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) · [Marketplace](https://github.com/Sadami3066/deepdeep-market)
 
 ## Overview
 
-DeepDeep is a personal AI agent on Android. Plugins are written in Kotlin, implement `DeepDeepPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 38 capabilities in total).
+Super PI Agent is a personal AI agent on Android. Plugins are written in Kotlin, implement `DeepDeepPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 38 capabilities in total).
 
 This repository is for external plugin authors: start from `template/`, develop against [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md), and publish through deepdeep-market following [`MARKET_POLICY.md`](MARKET_POLICY.md) and [`PR_REVIEW.md`](PR_REVIEW.md). Official plugins (Feishu, WeCom, SYSU CLI, Mi Cloud, WeChat Export) live in [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) and serve as complete reference implementations.
 
@@ -18,7 +18,7 @@ This repository is for external plugin authors: start from `template/`, develop 
 |---|---|
 | [`template/`](template/) | Standalone Gradle Android plugin template: example tool, skill and prompt section, plus the full build, signing and verification tasks |
 | [`sample/`](sample/) | Test fixture for the host end-to-end scripts: one echo tool and one page; not a plugin for the market |
-| [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) | Plugin development guide: host contract, `plugin.json` manifest, `.ddp` package format, signing and verification, install/update, lifecycle, extension points and security model |
+| [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) | Entry point to the canonical plugin development guide in the host repository (host contract, `plugin.json` manifest, `.ddp` package format, signing and verification, install and update, lifecycle, extension points and security model) |
 | [`MARKET_POLICY.md`](MARKET_POLICY.md) | Marketplace policy: accepted content, prohibited content, submission requirements, signing and takedown rules |
 | [`PR_REVIEW.md`](PR_REVIEW.md) | Marketplace review checklist |
 | [`CHANGELOG.md`](CHANGELOG.md) | Repository changelog |
@@ -32,7 +32,7 @@ This repository is for external plugin authors: start from `template/`, develop 
 - Android SDK: compileSdk 36, minSdk 29; point to it with `ANDROID_HOME` / `ANDROID_SDK_ROOT` or `sdk.dir` in `local.properties`
 - Gradle 9.8.2 (wrapper included in the template)
 - Network access to the public Maven repository `https://sadami3066.github.io/deepdeep-maven` (already configured in the template; no local publishing needed)
-- Host DeepDeep 1.0.8+ when using the new capabilities of `plugin-api 1.2.0`; plugins that only use 1.0.x/1.1.x capabilities run on 1.0.4+
+- Host Super PI Agent 1.0.8+ when using the new capabilities of `plugin-api 1.2.0`; plugins that only use 1.0.x/1.1.x capabilities run on 1.0.4+
 
 The host contract `plugin-api` and the `design` UI system come from that public Maven repository; `design` is exposed transitively through `api()`:
 
@@ -106,11 +106,11 @@ See [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) for the full set of extension poi
 
 ### 5. Install on a phone
 
-Transfer the `.ddp` to the phone, open DeepDeep's plugin page, choose the import action and select the file. The confirmation page shows the name, version, size, bundle sha256, publisher name and `keyId`, plus declared capabilities, permissions and components. After the first import the host records trust on first use (TOFU) and enables the plugin. Future updates must be signed with the same private key, otherwise they are rejected as a publisher mismatch.
+Transfer the `.ddp` to the phone, open Super PI Agent's plugin page, choose the import action and select the file. The confirmation page shows the name, version, size, bundle sha256, publisher name and `keyId`, plus declared capabilities, permissions and components. After the first import the host records trust on first use (TOFU) and enables the plugin. Future updates must be signed with the same private key, otherwise they are rejected as a publisher mismatch.
 
 ### 6. Publish
 
-- **DeepDeep Marketplace (all external authors)**: prepare the entry and artifact according to [`MARKET_POLICY.md`](MARKET_POLICY.md) and open a PR against [deepdeep-market](https://github.com/Sadami3066/deepdeep-market). An entry contains the plugin id (matching `plugin.json`), version, bilingual name/summary/description/tags, `artifact.url` / `sha256` / `size`, `publisherKeyId` and a PNG icon no larger than 128 KB. Maintainers review entries against [`PR_REVIEW.md`](PR_REVIEW.md).
+- **Super PI Agent Marketplace (all external authors)**: prepare the entry and artifact according to [`MARKET_POLICY.md`](MARKET_POLICY.md) and open a PR against [deepdeep-market](https://github.com/Sadami3066/deepdeep-market). An entry contains the plugin id (matching `plugin.json`), version, bilingual name/summary/description/tags, `artifact.url` / `sha256` / `size`, `publisherKeyId` and a PNG icon no larger than 128 KB. Maintainers review entries against [`PR_REVIEW.md`](PR_REVIEW.md).
 - **Official plugins repository (maintainers)**: [DeepDeep-Official-Plugins](https://github.com/Sadami3066/DeepDeep-Official-Plugins) builds and signs all official plugins with the shared `gradle/plugin-bundle.gradle.kts` and `scripts/check.sh`. The official signing key is not distributed with the repository, so external authors cannot publish under the official `keyId`.
 
 ## Usage
@@ -124,7 +124,7 @@ Transfer the `.ddp` to the phone, open DeepDeep's plugin page, choose the import
 
 ### For users
 
-- Browse and install published plugins from the Marketplace in DeepDeep's plugin page, or import a `.ddp` file manually.
+- Browse and install published plugins from the Marketplace in Super PI Agent's plugin page, or import a `.ddp` file manually.
 - The confirmation page shows the publisher name and `keyId`, bundle sha256 and declared capabilities; updates must come from the same publisher.
 - Plugins run in the app's process with the app's full permissions. Only install what you trust.
 
@@ -142,11 +142,11 @@ Transfer the `.ddp` to the phone, open DeepDeep's plugin page, choose the import
 
 - The template, documentation and build scripts in this repository are licensed under [Apache-2.0](LICENSE). You may copy, modify and redistribute them provided you keep the copyright and license notices. Plugins built from the template belong to their authors, who may choose their own license.
 - Plugins submitted to the marketplace must be redistributable publicly and must keep a LICENSE or source link in the entry or repository; see [`MARKET_POLICY.md`](MARKET_POLICY.md).
-- Third-party libraries, icons and brand assets used by a plugin remain under their respective licenses. Apache-2.0 does not grant trademark rights; do not use the DeepDeep name in a misleading way.
+- Third-party libraries, icons and brand assets used by a plugin remain under their respective licenses. Apache-2.0 does not grant trademark rights; do not use the Super PI Agent name in a misleading way.
 - The license does not warrant a plugin's behaviour, security or availability.
 
 ## Support
 
-- The template and documentation here are provided as-is. Third-party plugins are maintained by their publishers and are not the responsibility of the DeepDeep maintainers.
+- The template and documentation here are provided as-is. Third-party plugins are maintained by their publishers and are not the responsibility of the Super PI Agent maintainers.
 - Report development issues, documentation errors and suggestions via [Issues](https://github.com/Sadami3066/DeepDeep-Plugins/issues); for marketplace entry issues, use [deepdeep-market](https://github.com/Sadami3066/deepdeep-market).
 - Please do not report security or credential issues publicly; contact the maintainers through GitHub.
