@@ -14,7 +14,7 @@ SuperPI on a phone is a personal agent app. This is the same assistant on a comp
 - **Models from pi** — the header picker lists what pi has configured and switches through `set_model`; the choice belongs to the session, so pi restores it with the conversation.
 - **Stays out of the way** — closing the window keeps SuperPI running in the tray; a second launch focuses the window that is already open, and quitting shuts the pi processes down in order.
 
-Devices talk to each other through the relay service in [SuperPI-Remote](../SuperPI-Remote): the same bots appear in the drawer, and either device runs its own bot when the other asks. A bot asked to run remotely gets its own pi process, so it never disturbs the window you have open.
+Devices talk to each other through the relay service in [SuperPI-Remote](../SuperPI-Remote): the bots of other devices sit in the same list as local ones, and either device runs its own bot when the other asks. A bot asked to run remotely gets its own pi process, so it never disturbs the window you have open.
 
 ## Repository layout
 

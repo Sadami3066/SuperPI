@@ -334,7 +334,7 @@ export function App(): React.JSX.Element {
       setRetryable(false)
       try {
         const session = await window.superpi.remoteStart({ deviceId, botId: bot.id })
-        const target = { sessionId: session.sessionId, deviceId, botId: bot.id, label: `${bot.name} · ${deviceName}` }
+        const target = { sessionId: session.sessionId, deviceId, botId: bot.id, label: `${deviceName} · ${bot.name}` }
         remoteRef.current = target
         setRemote(target)
         await window.superpi.remoteResume(session.sessionId)
@@ -358,8 +358,9 @@ export function App(): React.JSX.Element {
       : thinkingLevels
   const relayView = describeRelay(relay)
   const otherDevices = relay?.devices.filter((device) => device.deviceId !== relay.deviceId) ?? []
+  const remoteBots = otherDevices.flatMap((device) => device.bots.map((bot) => ({ device, bot })))
   const title = remote ? remote.label : (activeBot?.name ?? 'No bot')
-  const subtitle = remote ? 'remote bot' : sessionSubtitle(piState, activeBot)
+  const subtitle = remote ? 'remote' : sessionSubtitle(piState, activeBot)
 
   return (
     <div className="app">
@@ -378,6 +379,22 @@ export function App(): React.JSX.Element {
               <span className="bot-meta">
                 <span className="bot-name">{bot.name}</span>
                 <span className="bot-path">{bot.cwd}</span>
+              </span>
+            </button>
+          ))}
+          {remoteBots.map(({ device, bot }) => (
+            <button
+              key={`${device.deviceId}:${bot.id}`}
+              type="button"
+              className={`bot-row remote${remote?.deviceId === device.deviceId && remote?.botId === bot.id ? ' active' : ''}`}
+              disabled={!device.online}
+              title={device.online ? undefined : `${device.name} is offline`}
+              onClick={() => void openRemote(device.deviceId, device.name, bot)}
+            >
+              <span className="bot-avatar">{bot.name.slice(0, 1).toUpperCase()}</span>
+              <span className="bot-meta">
+                <span className="bot-name">{bot.name}</span>
+                <span className="bot-path">{device.online ? device.name : `${device.name} · offline`}</span>
               </span>
             </button>
           ))}
@@ -413,37 +430,6 @@ export function App(): React.JSX.Element {
                   </button>
                 ))
               )}
-            </nav>
-          </>
-        ) : null}
-
-        {otherDevices.length > 0 ? (
-          <>
-            <div className="section-label">Devices</div>
-            <nav className="bot-list">
-              {otherDevices.map((device) => (
-                <div key={device.deviceId} className="device-group">
-                  <div className={`device-title${device.online ? '' : ' offline'}`}>
-                    <span className={`status-dot relay ${device.online ? 'online' : 'offline'}`} />
-                    {device.name}
-                  </div>
-                  {device.bots.map((bot) => (
-                    <button
-                      key={`${device.deviceId}:${bot.id}`}
-                      type="button"
-                      className={`bot-row remote${remote?.deviceId === device.deviceId && remote?.botId === bot.id ? ' active' : ''}`}
-                      disabled={!device.online}
-                      onClick={() => void openRemote(device.deviceId, device.name, bot)}
-                    >
-                      <span className="bot-avatar">{bot.name.slice(0, 1).toUpperCase()}</span>
-                      <span className="bot-meta">
-                        <span className="bot-name">{bot.name}</span>
-                        <span className="bot-path">{device.online ? 'remote' : 'offline'}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ))}
             </nav>
           </>
         ) : null}
