@@ -2,7 +2,7 @@
   "id": "io.github.whywood.superpi.plugintemplate",
   "version": "1.0.0",
   "apiLevel": 7,
-  "minHostVersion": "1.0.6",
+  "minHostVersion": "2.0.0",
   "ui": {
     "apiLevel": 3
   },
