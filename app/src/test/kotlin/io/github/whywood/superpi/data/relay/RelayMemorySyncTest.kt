@@ -108,6 +108,21 @@ class RelayMemorySyncTest {
     }
 
     @Test
+    fun conflictRefreshesLocalMirrorWithoutOverwritingConcurrentServerEdit() = runTest {
+        val env = environment()
+        env.server.put("profile.md", "# You & I\n\n- Initial\n")
+        env.login()
+        env.sync.refreshIfStale(maxAgeMillis = 0)
+
+        env.server.put("profile.md", "# You & I\n\n- Desktop edit\n")
+        val outcome = env.sync.overwrite("profile.md", "# You & I\n\n- Stale phone edit\n")
+
+        assertTrue(outcome is MemoryWriteOutcome.Rejected)
+        assertTrue(env.server.files.getValue("profile.md").contains("Desktop edit"))
+        assertTrue(File(env.root, "profile.md").readText().contains("Desktop edit"))
+    }
+
+    @Test
     fun fallsBackToLocalMemoryWhenSignedOut() = runTest {
         val env = environment()
         assertEquals(MemoryWriteOutcome.Inactive, env.sync.append("profile.md", null, "Local entry"))

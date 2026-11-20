@@ -229,7 +229,7 @@ class RelayMemorySync(
     private suspend fun flushQueued(current: RelayAccount, secret: String) {
         while (true) {
             val entry = mutex.withLock { queue.firstOrNull() } ?: return
-            when (val outcome = submit(current, secret, entry, allowRetry = true)) {
+            when (val outcome = submit(current, secret, entry)) {
                 is SubmitOutcome.Applied -> {
                     val pending = mutex.withLock {
                         queue.remove(entry)
@@ -273,7 +273,7 @@ class RelayMemorySync(
             createdAt = clock(),
         )
         return withContext(io) {
-            when (val outcome = submit(current, secret, entry, allowRetry = true)) {
+            when (val outcome = submit(current, secret, entry)) {
                 is SubmitOutcome.Applied -> {
                     runCatching { pull(current, secret) }.onFailure(::recordError)
                     _state.update { it.copy(version = outcome.version, lastSyncedAt = syncedAt) }
@@ -299,7 +299,6 @@ class RelayMemorySync(
         current: RelayAccount,
         secret: String,
         entry: QueuedWrite,
-        allowRetry: Boolean,
     ): SubmitOutcome {
         val request = RelayMemoryWrite(
             op = entry.op,
@@ -314,15 +313,9 @@ class RelayMemorySync(
         } catch (error: RelayMemoryException) {
             when (error.failure) {
                 RelayMemoryFailure.Conflict -> {
-                    if (!allowRetry || entry.baseVersion == null) {
-                        SubmitOutcome.Rejected(CONFLICT_MESSAGE)
-                    } else {
-                        val snapshot = runCatching { client.snapshot(current, secret) }.getOrNull()
-                            ?: return SubmitOutcome.Offline
-                        applySnapshot(snapshot)
-                        val fresh = mutex.withLock { versions[entry.path] ?: 0L }
-                        submit(current, secret, entry.copy(baseVersion = fresh), allowRetry = false)
-                    }
+                    val snapshot = runCatching { client.snapshot(current, secret) }.getOrNull()
+                    if (snapshot != null) applySnapshot(snapshot)
+                    SubmitOutcome.Rejected(CONFLICT_MESSAGE)
                 }
 
                 RelayMemoryFailure.Unreachable,

@@ -20,6 +20,8 @@ import kotlinx.coroutines.runBlocking
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.BasicConstraints
 import org.bouncycastle.asn1.x509.Extension
+import org.bouncycastle.asn1.x509.GeneralName
+import org.bouncycastle.asn1.x509.GeneralNames
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
@@ -105,6 +107,47 @@ class RelayClientTest {
             )
             assertEquals("dev-tls", enrollment.deviceId)
             assertEquals("ab".repeat(32), enrollment.fingerprint)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun rejectsMismatchedHostnameEvenUnderPinnedCa() = runBlocking {
+        val caKeyPair = keyPair()
+        val ca = generateCertificate(
+            X500Name("CN=Relay CA"),
+            X500Name("CN=Relay CA"),
+            caKeyPair.public,
+            caKeyPair.private,
+            isCa = true,
+        )
+        val leafKeyPair = keyPair()
+        val leaf = generateCertificate(
+            X500Name("CN=relay"),
+            X500Name("CN=Relay CA"),
+            leafKeyPair.public,
+            caKeyPair.private,
+            isCa = false,
+            sanIp = "10.0.0.1",
+        )
+        val server = secureServer(leaf, leafKeyPair.private) { exchange ->
+            respond(exchange, 200, enrollmentJson(deviceId = "dev-tls", token = "tok-tls", fingerprint = "ab".repeat(32)))
+        }
+        server.start()
+        try {
+            try {
+                client.enroll(
+                    origin = "https://127.0.0.1:${server.address.port}",
+                    caPem = toPem(ca),
+                    deviceName = "Phone",
+                    pairCode = "ABCD2345",
+                    loginSecret = null,
+                )
+                fail("expected hostname verification failure")
+            } catch (expected: RelayException) {
+                assertEquals(RelayFailure.CertificateRejected, expected.failure)
+            }
         } finally {
             server.stop(0)
         }
@@ -264,6 +307,7 @@ class RelayClientTest {
         publicKey: PublicKey,
         signingKey: PrivateKey,
         isCa: Boolean,
+        sanIp: String? = if (isCa) null else "127.0.0.1",
     ): X509Certificate {
         val now = System.currentTimeMillis()
         val builder = JcaX509v3CertificateBuilder(
@@ -275,6 +319,13 @@ class RelayClientTest {
             publicKey,
         )
         builder.addExtension(Extension.basicConstraints, true, BasicConstraints(isCa))
+        if (sanIp != null) {
+            builder.addExtension(
+                Extension.subjectAlternativeName,
+                false,
+                GeneralNames(GeneralName(GeneralName.iPAddress, sanIp)),
+            )
+        }
         val signer = JcaContentSignerBuilder("SHA256withRSA").build(signingKey)
         return JcaX509CertificateConverter().getCertificate(builder.build(signer))
     }

@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.IBinder
 import androidx.core.content.ContextCompat
 import io.github.whywood.superpi.SuperPIApplication
@@ -26,6 +28,7 @@ class AgentService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val graph by lazy { (application as SuperPIApplication).graph }
     private var floatingWindow: FloatingWindowController? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val clockReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val action = intent?.action ?: return
@@ -42,6 +45,7 @@ class AgentService : Service() {
         startForeground(NOTIFICATION_ID, graph.notificationCenter.foregroundNotification())
         graph.notificationCenter.onForegroundStarted()
         registerClockReceiver()
+        registerNetworkCallback()
         startFloatingWindow()
         scope.launch {
             ProcessExitLog.record(this@AgentService)
@@ -88,6 +92,7 @@ class AgentService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        unregisterNetworkCallback()
         runCatching { unregisterReceiver(clockReceiver) }
         floatingWindow?.stop()
         floatingWindow = null
@@ -120,6 +125,26 @@ class AgentService : Service() {
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
         }
         ContextCompat.registerReceiver(this, clockReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    private fun registerNetworkCallback() {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                graph.relayLive.reconnectNow()
+            }
+        }
+        runCatching {
+            manager.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching { manager.unregisterNetworkCallback(callback) }
     }
 
     companion object {

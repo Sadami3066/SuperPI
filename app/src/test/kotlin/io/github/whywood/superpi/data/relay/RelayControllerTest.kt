@@ -143,6 +143,21 @@ class RelayControllerTest {
         clock = clock,
     )
 
+    @Test
+    fun rejectsEnrollmentWhoseReturnedFingerprintDisagreesWithLink() = runTest {
+        val fp = "ab".repeat(32)
+        val otherFp = "cd".repeat(32)
+        val store = FakeStore()
+        val enroller = FakeEnroller(caPem = "PEM", fingerprint = fp, enrollmentFingerprint = otherFp)
+        val controller = controller(store, enroller)
+
+        controller.signIn("https://relay.example:8443/pair#fp=$fp&code=ABCD2345", null, "Pixel")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(RelayError.FingerprintMismatch, controller.state.value.error)
+        assertEquals(null, store.read())
+    }
+
     private class FakeStore(initial: RelayAccount? = null) : RelayAccountStore {
         private val values = MutableStateFlow(initial)
         var savedToken: String? = null
@@ -171,6 +186,7 @@ class RelayControllerTest {
     private class FakeEnroller(
         private val caPem: String,
         private val fingerprint: String,
+        private val enrollmentFingerprint: String? = fingerprint,
     ) : RelayEnroller {
         var failure: Exception? = null
         var fetchedOrigin: String? = null
@@ -204,7 +220,7 @@ class RelayControllerTest {
                 token = "tok",
                 accountId = "acct",
                 entries = listOf(RelayEntry(RelayEntryKind.Lan, origin)),
-                fingerprint = fingerprint,
+                fingerprint = enrollmentFingerprint,
             )
         }
 

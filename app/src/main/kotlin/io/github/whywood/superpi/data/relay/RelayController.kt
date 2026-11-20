@@ -68,8 +68,9 @@ class RelayController(
                     pairCode = parsed.pairCode,
                     loginSecret = secret,
                 )
-                val fingerprint = parsed.fingerprint ?: enrollment.fingerprint
-                if (secure && enrollment.fingerprint != null && fingerprint != parsed.fingerprint) {
+                val enrollmentFingerprint = enrollment.fingerprint?.let(RelayPairingLink::normalizeFingerprint)
+                val fingerprint = parsed.fingerprint ?: enrollmentFingerprint
+                if (secure && enrollmentFingerprint != null && enrollmentFingerprint != parsed.fingerprint) {
                     throw RelayException(RelayFailure.FingerprintMismatch)
                 }
                 val account = RelayAccount(

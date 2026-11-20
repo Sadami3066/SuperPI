@@ -5,6 +5,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -77,17 +79,25 @@ class RelayLive(
     @Volatile
     private var account: RelayAccount? = null
 
+    private var collectorJob: Job? = null
+
     fun start() {
-        if (started) return
-        started = true
-        scope.launch {
-            runCatching { _devices.value = accounts.readDevices() }
-            launchCollectors()
+        synchronized(this) {
+            if (started) return
+            started = true
+            collectorJob?.cancel()
+            val parent = SupervisorJob(scope.coroutineContext[Job])
+            collectorJob = parent
+            val collectorScope = CoroutineScope(scope.coroutineContext + parent)
+            collectorScope.launch {
+                runCatching { _devices.value = accounts.readDevices() }
+                launchCollectors(collectorScope)
+            }
         }
     }
 
-    private fun launchCollectors() {
-        scope.launch {
+    private fun launchCollectors(collectorScope: CoroutineScope) {
+        collectorScope.launch {
             accounts.account.collect { value ->
                 val previous = account
                 account = value
@@ -98,18 +108,27 @@ class RelayLive(
                 reconcile()
             }
         }
-        scope.launch { accounts.allowRemote.collect { value -> _allowRemote.value = value; reconcile() } }
-        scope.launch { socket.state.collect { value -> onSocketState(value) } }
-        scope.launch { socket.frames.collect { frame -> onFrame(frame) } }
+        collectorScope.launch { accounts.allowRemote.collect { value -> _allowRemote.value = value; reconcile() } }
+        collectorScope.launch { socket.state.collect { value -> onSocketState(value) } }
+        collectorScope.launch { socket.frames.collect { frame -> onFrame(frame) } }
     }
 
     fun stop() {
-        started = false
+        synchronized(this) {
+            started = false
+            collectorJob?.cancel()
+            collectorJob = null
+        }
         socket.stop()
         server.reset()
         calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay stopped"))
         _devices.value = emptyList()
         _state.value = RelayLiveState.Disabled
+    }
+
+    fun reconnectNow() {
+        if (!started || account == null) return
+        socket.reconnectNow()
     }
 
     fun setAllowRemote(enabled: Boolean) {
@@ -251,7 +270,9 @@ class RelayLive(
         }
         if (value != RelaySocketState.Online) {
             calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay disconnected"))
-            server.reset()
+            if (value == RelaySocketState.Unauthorized || value == RelaySocketState.Stopped) {
+                server.reset()
+            }
         }
         _state.value = mapped
     }
@@ -287,9 +308,12 @@ class RelayLive(
                 RemoteCallOutcome.Failed(RemoteCallError(frame.code, frame.message)),
             )
 
-            is RelayServerFrame.RouteEvent -> _remoteEvents.tryEmit(
-                RemoteEvent(routeId = frame.id, seq = frame.seq, event = frame.event),
-            )
+            is RelayServerFrame.RouteEvent -> {
+                val event = RemoteEvent(routeId = frame.id, seq = frame.seq, event = frame.event)
+                if (!_remoteEvents.tryEmit(event)) {
+                    scope.launch { _remoteEvents.emit(event) }
+                }
+            }
 
             else -> Unit
         }
@@ -297,6 +321,6 @@ class RelayLive(
 
     private companion object {
         private const val CALL_TIMEOUT_MILLIS = 15_000L
-        private const val REMOTE_EVENT_BUFFER = 256
+        private const val REMOTE_EVENT_BUFFER = 2_048
     }
 }

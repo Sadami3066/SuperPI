@@ -65,7 +65,6 @@ internal object RelayTls {
                 init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
             }
             builder.sslSocketFactory(sslContext.socketFactory, trustManager)
-            builder.hostnameVerifier { _, _ -> true }
         }
         return builder.build()
     }

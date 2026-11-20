@@ -5,15 +5,14 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -31,11 +30,12 @@ enum class RelaySocketState {
 class RelaySocket(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    private val backoffSchedule: LongArray = BACKOFF,
 ) {
     private val _state = MutableStateFlow(RelaySocketState.Stopped)
     val state: StateFlow<RelaySocketState> = _state.asStateFlow()
 
-    private val _frames = MutableSharedFlow<RelayServerFrame>(extraBufferCapacity = 128)
+    private val _frames = MutableSharedFlow<RelayServerFrame>(extraBufferCapacity = FRAME_BUFFER_CAPACITY)
     val frames: SharedFlow<RelayServerFrame> = _frames.asSharedFlow()
 
     private var job: Job? = null
@@ -52,6 +52,9 @@ class RelaySocket(
     @Volatile
     private var running = false
 
+    @Volatile
+    private var retryWake: CompletableDeferred<Unit>? = null
+
     fun start(
         account: RelayAccount,
         token: String,
@@ -64,6 +67,8 @@ class RelaySocket(
 
     fun stop() {
         running = false
+        retryWake?.complete(Unit)
+        retryWake = null
         socket?.close(1000, "closed")
         socket = null
         client?.let(::shutdownClient)
@@ -71,6 +76,11 @@ class RelaySocket(
         job?.cancel()
         job = null
         _state.value = RelaySocketState.Stopped
+    }
+
+    fun reconnectNow() {
+        if (!running) return
+        retryWake?.complete(Unit)
     }
 
     fun send(frame: String): Boolean = socket?.send(frame) ?: false
@@ -83,7 +93,7 @@ class RelaySocket(
         var attempt = 0
         while (running) {
             _state.value = RelaySocketState.Connecting
-            val closed = CompletableDeferred<Throwable?>()
+            val closed = CompletableDeferred<Boolean>()
             val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
             val http = RelayTls.client(pin = pin, remote = true).newBuilder()
                 .pingInterval(20, TimeUnit.SECONDS)
@@ -97,6 +107,7 @@ class RelaySocket(
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     socket = webSocket
+                    attempt = 0
                     lastFrameAt = System.currentTimeMillis()
                     _state.value = RelaySocketState.Online
                     scope.launch {
@@ -107,32 +118,52 @@ class RelaySocket(
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     lastFrameAt = System.currentTimeMillis()
-                    RelayFrames.parse(text)?.let { frame -> _frames.tryEmit(frame) }
+                    RelayFrames.parse(text)?.let { frame ->
+                        if (!_frames.tryEmit(frame)) {
+                            scope.launch { _frames.emit(frame) }
+                        }
+                    }
                 }
 
-                override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    if (code == CLOSE_CODE_UNAUTHORIZED) {
+                        _state.value = RelaySocketState.Unauthorized
+                        running = false
+                    }
+                    runCatching { webSocket.close(code, reason) }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     val code = response?.code
                     if (code == 401 || code == 403) {
                         _state.value = RelaySocketState.Unauthorized
                         running = false
                     }
-                    closed.complete(error)
+                    closed.complete(false)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    closed.complete(null)
+                    if (code == CLOSE_CODE_UNAUTHORIZED) {
+                        _state.value = RelaySocketState.Unauthorized
+                        running = false
+                    }
+                    closed.complete(true)
                 }
             }
             val active = http.newWebSocket(request, listener)
             socket = active
-            val error = closed.await()
+            closed.await()
             socket = null
             shutdownClient(http)
             client = null
             if (!running) break
             _state.value = RelaySocketState.Offline
-            attempt = (attempt + 1).coerceAtMost(BACKOFF.size - 1)
-            if (error != null) delay(BACKOFF[attempt])
+            val delayMillis = backoffSchedule[attempt.coerceAtMost(backoffSchedule.size - 1)]
+            attempt = (attempt + 1).coerceAtMost(backoffSchedule.size - 1)
+            val wake = CompletableDeferred<Unit>()
+            retryWake = wake
+            withTimeoutOrNull(delayMillis) { wake.await() }
+            if (retryWake === wake) retryWake = null
         }
         if (_state.value != RelaySocketState.Unauthorized) _state.value = RelaySocketState.Stopped
     }
@@ -149,6 +180,8 @@ class RelaySocket(
     }
 
     private companion object {
+        private const val CLOSE_CODE_UNAUTHORIZED = 4001
+        private const val FRAME_BUFFER_CAPACITY = 2_048
         private val BACKOFF = longArrayOf(1_000, 2_000, 5_000, 10_000, 30_000)
     }
 }
