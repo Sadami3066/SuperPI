@@ -14,6 +14,7 @@ import { RelayClient, type RelayConnectionState } from './relay-client.ts'
 import { fetchCaPem, fingerprintOfPem, relayRequest } from './http.ts'
 import { parsePairingLink } from './pairing.ts'
 import { MemoryClient, type MemorySummary } from './memory-client.ts'
+import { materializeRelayCa, removeRelayCa } from './ca-cache.ts'
 import { RemoteAgentServer, type RemoteBotHost } from './remote-server.ts'
 
 export type RelayState = 'disconnected' | 'connecting' | 'online' | 'offline' | 'error'
@@ -112,6 +113,13 @@ export class RelayService {
     if (credentials) {
       env.SUPERPI_RELAY_ENDPOINT = credentials.origin
       env.SUPERPI_RELAY_TOKEN = credentials.token
+      if (credentials.caPem !== null) {
+        try {
+          env.NODE_EXTRA_CA_CERTS = materializeRelayCa(this.options.homeDir, credentials.caPem)
+        } catch (failure) {
+          console.error(`relay CA is not available for pi: ${failure instanceof Error ? failure.message : String(failure)}`)
+        }
+      }
     }
     return env
   }
@@ -237,6 +245,7 @@ export class RelayService {
 
   logout(): RelayStatus {
     this.options.remoteSessions?.clearAll()
+    removeRelayCa(this.options.homeDir)
     void this.remoteServer?.closeAll()
     this.client?.disconnect()
     this.client = null
