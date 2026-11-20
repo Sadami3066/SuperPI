@@ -58,6 +58,10 @@ export class RelayStore {
     this.db.close()
   }
 
+  get database(): DatabaseSync {
+    return this.db
+  }
+
   account(): AccountRecord | null {
     const row = this.db.prepare('SELECT id, secret_hash, created_at FROM accounts LIMIT 1').get() as
       | { id: string; secret_hash: string; created_at: number }

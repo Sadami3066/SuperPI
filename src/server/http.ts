@@ -12,6 +12,10 @@ import type {
   EnrollResponse,
   ErrorCode,
   HealthResponse,
+  MemoryFileResponse,
+  MemorySnapshotResponse,
+  MemoryWriteRequest,
+  MemoryWriteResponse,
   PairCodeResponse,
   PairEntry,
   RevokeResponse,
@@ -19,6 +23,7 @@ import type {
 import type { RelayConfig } from './config.ts'
 import { newDeviceId, newPairCode, randomToken, sha256, verifySecret } from './auth.ts'
 import type { DeviceRecord, RelayStore } from './store.ts'
+import { MemoryConflictError, MemoryRequestError, type MemoryStore } from './memory.ts'
 
 export interface RelayServerOptions {
   config: RelayConfig
@@ -26,6 +31,8 @@ export interface RelayServerOptions {
   fingerprint: string | null
   entries: PairEntry[]
   caPem?: string | null
+  memory?: MemoryStore | null
+  onMemoryChanged?: (version: number) => void
   now?: () => number
   online?: (deviceId: string) => boolean
   botsOf?: (deviceId: string) => BotInfo[]
@@ -116,6 +123,38 @@ async function handle(
       return
     }
 
+    if (method === 'GET' && url.pathname === '/v1/memory/snapshot') {
+      const device = authenticate(options, now(), request, response)
+      if (!device || response.writableEnded) return
+      const memory = requireMemory(options)
+      const body: MemorySnapshotResponse = memory.snapshot()
+      sendJson(response, 200, body)
+      return
+    }
+
+    if (method === 'GET' && url.pathname === '/v1/memory/file') {
+      const device = authenticate(options, now(), request, response)
+      if (!device || response.writableEnded) return
+      const memory = requireMemory(options)
+      const requested = url.searchParams.get('path') ?? ''
+      const body: MemoryFileResponse = memory.file(requested)
+      sendJson(response, 200, body)
+      return
+    }
+
+    if (method === 'POST' && url.pathname === '/v1/memory/write') {
+      const device = authenticate(options, now(), request, response)
+      if (!device || response.writableEnded) return
+      const memory = requireMemory(options)
+      const body = await readJson(request)
+      if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
+      const result = memory.write({ deviceId: device.id, deviceName: device.name }, body as MemoryWriteRequest, now())
+      if (result.applied) options.onMemoryChanged?.(result.version)
+      const responseBody: MemoryWriteResponse = { version: result.version }
+      sendJson(response, 200, responseBody)
+      return
+    }
+
     if (method === 'POST' && url.pathname === '/v1/pair/enroll') {
       const body = await enroll(options, now(), request)
       sendJson(response, 200, body)
@@ -165,6 +204,18 @@ async function handle(
   } catch (error) {
     if (error instanceof HttpError) {
       sendError(response, error.status, error.code, error.message)
+      return
+    }
+    if (error instanceof MemoryConflictError) {
+      sendJson(response, 409, {
+        code: 'memory_conflict',
+        message: error.message,
+        details: { currentVersion: error.currentVersion },
+      })
+      return
+    }
+    if (error instanceof MemoryRequestError) {
+      sendError(response, 400, 'bad_request', error.message)
       return
     }
     console.error('relay request failed', error)
@@ -243,6 +294,11 @@ function authenticate(
   }
   options.store.touchDevice(device.id, now)
   return device
+}
+
+function requireMemory(options: RelayServerOptions): MemoryStore {
+  if (!options.memory) throw new HttpError(404, 'not_found', 'memory is not configured')
+  return options.memory
 }
 
 function toDeviceInfo(device: DeviceRecord, options: RelayServerOptions): DeviceInfo {

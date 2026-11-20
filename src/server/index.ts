@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { createRelayServer } from './http.ts'
 import { createRealtimeHub } from './realtime.ts'
+import { MemoryStore } from './memory.ts'
 import { loadConfig } from './config.ts'
 import { RelayStore } from './store.ts'
 import { hashSecret, newAccountId, randomToken, readFingerprint } from './auth.ts'
@@ -19,12 +21,15 @@ if (!account) {
 const fingerprint = readFingerprint(config.certPath)
 const caPem = config.caPath ? readFileSync(config.caPath, 'utf8') : null
 const hub = createRealtimeHub(store)
+const memory = new MemoryStore(path.join(config.dataDir, 'memory'), store.database)
 const relay = createRelayServer({
   config,
   store,
   fingerprint,
   entries: config.entries,
   caPem,
+  memory,
+  onMemoryChanged: (version) => hub.broadcastMemoryChanged(version),
   online: (deviceId) => hub.isOnline(deviceId),
   botsOf: (deviceId) => hub.botsOf(deviceId),
 })

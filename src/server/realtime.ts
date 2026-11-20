@@ -23,6 +23,7 @@ export interface RealtimeHub {
   close(): Promise<void>
   isOnline(deviceId: string): boolean
   botsOf(deviceId: string): BotInfo[]
+  broadcastMemoryChanged(version: number): void
 }
 
 interface Connection {
@@ -255,6 +256,11 @@ export function createRealtimeHub(
     },
     botsOf(deviceId: string) {
       return connections.get(deviceId)?.bots ?? []
+    },
+    broadcastMemoryChanged(version: number) {
+      for (const connection of connections.values()) {
+        send(connection, { type: 'memory_changed', version })
+      }
     },
   }
 }
