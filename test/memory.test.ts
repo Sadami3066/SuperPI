@@ -133,7 +133,11 @@ describe('shared memory', () => {
     expect(snap.version).toBe(1)
     expect(snap.files['profile.md']).toContain('Likes dark mode')
     expect(snap.files['profile.md']).toContain('<!-- src: My phone ')
+    expect(snap.versions['profile.md']).toBe(1)
     expect(harness.changed).toEqual([1])
+
+    const file = await fetch(`${harness.baseUrl}/v1/memory/file?path=profile.md`, { headers: auth(harness) })
+    expect(((await file.json()) as MemoryFileResponse).fileVersion).toBe(1)
   })
 
   it('treats a repeated idempotency key as the same write', async () => {

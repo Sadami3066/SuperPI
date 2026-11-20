@@ -18,10 +18,12 @@ export interface MemoryWriteResponse {
 export interface MemorySnapshotResponse {
   version: number
   files: Record<string, string>
+  versions: Record<string, number>
 }
 
 export interface MemoryFileResponse {
   version: number
+  fileVersion: number
   path: string
   content: string
 }

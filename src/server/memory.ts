@@ -7,10 +7,12 @@ import { isMemoryPath } from '@superpi/protocol'
 export interface MemorySnapshot {
   version: number
   files: Record<string, string>
+  versions: Record<string, number>
 }
 
 export interface MemoryFileContent {
   version: number
+  fileVersion: number
   path: string
   content: string
 }
@@ -63,12 +65,20 @@ export class MemoryStore {
   }
 
   snapshot(): MemorySnapshot {
-    return { version: this.version(), files: this.listFiles() }
+    const files = this.listFiles()
+    const versions: Record<string, number> = {}
+    for (const relative of Object.keys(files)) versions[relative] = this.fileVersion(relative)
+    return { version: this.version(), files, versions }
   }
 
   file(requested: string): MemoryFileContent {
     const relative = this.normalizePath(requested)
-    return { version: this.version(), path: relative, content: this.read(relative) }
+    return {
+      version: this.version(),
+      fileVersion: this.fileVersion(relative),
+      path: relative,
+      content: this.read(relative),
+    }
   }
 
   write(source: MemorySource, request: MemoryWriteRequest, now = Date.now()): { version: number; applied: boolean } {
