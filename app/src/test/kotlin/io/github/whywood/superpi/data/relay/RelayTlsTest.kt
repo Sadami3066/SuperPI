@@ -1,4 +1,4 @@
-package io.github.whywood.superpi.data.remote
+package io.github.whywood.superpi.data.relay
 
 import java.math.BigInteger
 import java.security.KeyPair
@@ -19,7 +19,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class RemoteTlsTest {
+class RelayTlsTest {
     private val ca: X509Certificate
     private val caKey: KeyPair
     private val leaf: X509Certificate
@@ -46,7 +46,7 @@ class RemoteTlsTest {
 
     @Test
     fun sha256FingerprintIsUppercaseColonHex() {
-        val fingerprint = RemoteTls.sha256Hex(leaf)
+        val fingerprint = RelayTls.sha256Hex(leaf)
         assertTrue(fingerprint.matches(Regex("^([0-9A-F]{2}:){31}[0-9A-F]{2}$")))
         val expected = MessageDigest.getInstance("SHA-256").digest(leaf.encoded)
             .joinToString(":") { "%02X".format(it) }
@@ -55,27 +55,27 @@ class RemoteTlsTest {
 
     @Test
     fun encodesAndDecodesCertificate() {
-        val encoded = RemoteTls.encode(ca)
-        val decoded = RemoteTls.decode(encoded)
+        val encoded = RelayTls.encode(ca)
+        val decoded = RelayTls.decode(encoded)
         assertNotNull(decoded)
         assertTrue(ca.encoded.contentEquals(decoded!!.encoded))
-        assertEquals(RemoteTls.sha256Hex(ca), RemoteTls.sha256Hex(decoded))
+        assertEquals(RelayTls.sha256Hex(ca), RelayTls.sha256Hex(decoded))
     }
 
     @Test
     fun decodesRawCertificateBytes() {
-        val decoded = RemoteTls.decodeBytes(ca.encoded)
+        val decoded = RelayTls.decodeBytes(ca.encoded)
         assertNotNull(decoded)
         assertTrue(ca.encoded.contentEquals(decoded!!.encoded))
-        assertNull(RemoteTls.decode("not base64"))
-        assertNull(RemoteTls.decodeBytes(byteArrayOf(1, 2, 3)))
+        assertNull(RelayTls.decode("not base64"))
+        assertNull(RelayTls.decodeBytes(byteArrayOf(1, 2, 3)))
     }
 
     @Test
     fun verifiesLeafAgainstItsCa() {
-        assertTrue(RemoteTls.verifies(ca, arrayOf(leaf)))
-        assertFalse(RemoteTls.verifies(ca, null))
-        assertFalse(RemoteTls.verifies(ca, emptyArray()))
+        assertTrue(RelayTls.verifies(ca, arrayOf(leaf)))
+        assertFalse(RelayTls.verifies(ca, null))
+        assertFalse(RelayTls.verifies(ca, emptyArray()))
     }
 
     @Test
@@ -89,12 +89,12 @@ class RemoteTlsTest {
             signingKey = otherCaKey.private,
             isCa = true,
         )
-        assertFalse(RemoteTls.verifies(otherCa, arrayOf(leaf)))
+        assertFalse(RelayTls.verifies(otherCa, arrayOf(leaf)))
     }
 
     @Test
     fun pinnedTrustManagerAcceptsLeaf() {
-        val manager = RemoteTls.pinnedTrustManager(listOf(ca))
+        val manager = RelayTls.pinnedTrustManager(listOf(ca))
         manager.checkServerTrusted(arrayOf(leaf), "ECDHE_ECDSA")
     }
 

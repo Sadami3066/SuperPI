@@ -17,7 +17,6 @@ import io.github.whywood.superpi.data.ShareStaging
 import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.VoicePreferences
 import io.github.whywood.superpi.data.WebSearchSettingsStore
-import io.github.whywood.superpi.data.remote.RemoteConnection
 import io.github.whywood.superpi.data.relay.RelayController
 import io.github.whywood.superpi.data.relay.RelayLive
 import io.github.whywood.superpi.data.update.UpdateManager
@@ -134,8 +133,6 @@ interface FeatureDependencies {
     val memory: MemoryStore
 
     val memoryRecap: MemoryRecap
-
-    val remoteConnection: RemoteConnection
 
     val relayController: RelayController
 

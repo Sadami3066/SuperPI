@@ -28,7 +28,6 @@ import io.github.whywood.superpi.data.ShareStaging
 import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.ThemePreferences
 import io.github.whywood.superpi.data.VoicePreferences
-import io.github.whywood.superpi.data.remote.RemoteConnection
 import io.github.whywood.superpi.data.update.AndroidUpdateInstaller
 import io.github.whywood.superpi.data.update.DataStoreUpdateStore
 import io.github.whywood.superpi.data.update.UpdateManager
@@ -161,7 +160,6 @@ class AppGraph(context: Context) : AppDependencies {
     override val skillCatalog: SkillCatalog get() = dataGraph.skillCatalog
     override val questionCenter: QuestionCenter get() = dataGraph.questionCenter
     override val goalService: GoalService get() = dataGraph.goalService
-    override val remoteConnection: RemoteConnection get() = dataGraph.remoteConnection
     override val relayController: io.github.whywood.superpi.data.relay.RelayController get() = dataGraph.relayController
 
     private val remoteBots = MutableStateFlow<List<io.github.whywood.superpi.data.relay.RemoteBot>>(emptyList())

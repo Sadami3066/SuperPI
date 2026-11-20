@@ -1,6 +1,5 @@
 package io.github.whywood.superpi.data.relay
 
-import io.github.whywood.superpi.data.remote.RemoteTls
 import java.io.IOException
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.Dispatchers
@@ -74,8 +73,8 @@ class RelayMemoryClient : RelayMemoryApi {
     }
 
     private fun <T> execute(account: RelayAccount, request: Request, parse: (String) -> T): T {
-        val pin = account.caPem?.let { RemoteTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
-        val client = RemoteTls.client(pin = pin, remote = true)
+        val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
+        val client = RelayTls.client(pin = pin, remote = true)
         try {
             client.newCall(request).execute().use { response ->
                 val text = response.body.string()

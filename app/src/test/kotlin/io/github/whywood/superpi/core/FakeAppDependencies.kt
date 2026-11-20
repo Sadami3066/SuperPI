@@ -17,7 +17,6 @@ import io.github.whywood.superpi.data.StorageMountStore
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.data.VoicePreferences
 import io.github.whywood.superpi.data.WebSearchSettingsStore
-import io.github.whywood.superpi.data.remote.RemoteConnection
 import io.github.whywood.superpi.data.update.UpdateManager
 import io.github.whywood.superpi.market.MarketRepository
 import io.github.whywood.superpi.plugin.manager.PluginManagerFacade
@@ -62,8 +61,6 @@ internal class FakeAppDependencies(
     override val storageMounts: StorageMountStore get() = unavailable("storageMounts")
 
     override val workspaceToolPolicies: WorkspaceToolPolicyStore get() = unavailable("workspaceToolPolicies")
-
-    override val remoteConnection: RemoteConnection get() = unavailable("remoteConnection")
 
     override val relayController: io.github.whywood.superpi.data.relay.RelayController get() = unavailable("relayController")
 

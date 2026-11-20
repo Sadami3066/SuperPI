@@ -267,7 +267,6 @@ private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions
                 onOpenPlugins = { actions.onNavigate(AppDestination.Plugins) },
                 onOpenTimers = { actions.onNavigate(AppDestination.Timers) },
                 onOpenMemory = { actions.onNavigate(AppDestination.Memory) },
-                onOpenRemote = { actions.onNavigate(AppDestination.Remote) },
                 onOpenRelay = { actions.onNavigate(AppDestination.Relay) },
                 onCreateWorkspace = actions.onCreateWorkspace,
                 onToggleWorkspaceExpanded = actions.onToggleWorkspaceExpanded,

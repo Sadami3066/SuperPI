@@ -173,7 +173,6 @@ fun SuperPIDrawer(
     onOpenPlugins: () -> Unit,
     onOpenTimers: () -> Unit,
     onOpenMemory: () -> Unit,
-    onOpenRemote: () -> Unit,
     onOpenRelay: () -> Unit,
     onCreateWorkspace: () -> Unit,
     onToggleWorkspaceExpanded: (String) -> Unit,
@@ -319,13 +318,6 @@ fun SuperPIDrawer(
                     label = stringResource(R.string.drawer_nav_memory),
                     onClick = onOpenMemory,
                     testTag = "drawer_memory",
-                    modifier = Modifier.padding(start = 14.dp),
-                )
-                DrawerNavItem(
-                    icon = DdIcons.Desktop,
-                    label = stringResource(R.string.drawer_nav_remote),
-                    onClick = onOpenRemote,
-                    testTag = "drawer_remote",
                     modifier = Modifier.padding(start = 14.dp),
                 )
                 DrawerNavItem(

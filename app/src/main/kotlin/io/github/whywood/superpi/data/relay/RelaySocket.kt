@@ -1,6 +1,5 @@
 package io.github.whywood.superpi.data.relay
 
-import io.github.whywood.superpi.data.remote.RemoteTls
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -85,8 +84,8 @@ class RelaySocket(
         while (running) {
             _state.value = RelaySocketState.Connecting
             val closed = CompletableDeferred<Throwable?>()
-            val pin = account.caPem?.let { RemoteTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
-            val http = RemoteTls.client(pin = pin, remote = true).newBuilder()
+            val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
+            val http = RelayTls.client(pin = pin, remote = true).newBuilder()
                 .pingInterval(20, TimeUnit.SECONDS)
                 .build()
             client = http

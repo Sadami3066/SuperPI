@@ -1,7 +1,5 @@
 package io.github.whywood.superpi.data.relay
 
-import io.github.whywood.superpi.data.remote.CaptureTrustManager
-import io.github.whywood.superpi.data.remote.RemoteTls
 import java.io.IOException
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.Dispatchers
@@ -18,9 +16,9 @@ class RelayClient(
         val secure = origin.startsWith("https://")
         val capture = if (secure) CaptureTrustManager() else null
         val client = if (capture != null) {
-            RemoteTls.capturingClient(capture, remote = true)
+            RelayTls.capturingClient(capture, remote = true)
         } else {
-            RemoteTls.client(pin = null, remote = true, bootstrap = true)
+            RelayTls.client(pin = null, remote = true, bootstrap = true)
         }
         val request = Request.Builder().url("$origin/v1/ca").get().build()
         try {
@@ -28,9 +26,9 @@ class RelayClient(
                 if (!response.isSuccessful) throw RelayException(RelayFailure.BadResponse)
                 val pem = response.body.string().takeIf { it.isNotBlank() }
                 if (capture != null && pem != null) {
-                    val ca = RemoteTls.decodeBytes(pem.toByteArray(Charsets.UTF_8))
+                    val ca = RelayTls.decodeBytes(pem.toByteArray(Charsets.UTF_8))
                         ?: throw RelayException(RelayFailure.BadResponse)
-                    if (!RemoteTls.verifies(ca, capture.chain)) {
+                    if (!RelayTls.verifies(ca, capture.chain)) {
                         throw RelayException(RelayFailure.FingerprintMismatch)
                     }
                 }
@@ -52,8 +50,8 @@ class RelayClient(
         pairCode: String?,
         loginSecret: String?,
     ): RelayEnrollment = withContext(Dispatchers.IO) {
-        val pin = caPem?.let { RemoteTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
-        val client = RemoteTls.client(pin = pin, remote = true)
+        val pin = caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
+        val client = RelayTls.client(pin = pin, remote = true)
         val body = RelayProtocol
             .enrollRequest(deviceName, platform, appVersion, pairCode, loginSecret)
             .toRequestBody(JSON)
@@ -78,8 +76,8 @@ class RelayClient(
     }
 
     override fun fingerprintOf(caPem: String): String? {
-        val certificate = RemoteTls.decodeBytes(caPem.toByteArray(Charsets.UTF_8)) ?: return null
-        return RelayPairingLink.normalizeFingerprint(RemoteTls.sha256Hex(certificate))
+        val certificate = RelayTls.decodeBytes(caPem.toByteArray(Charsets.UTF_8)) ?: return null
+        return RelayPairingLink.normalizeFingerprint(RelayTls.sha256Hex(certificate))
     }
 
     companion object {

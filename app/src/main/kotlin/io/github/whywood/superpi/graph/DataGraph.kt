@@ -23,11 +23,6 @@ import io.github.whywood.superpi.data.ShareStaging
 import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.ThemePreferences
 import io.github.whywood.superpi.data.VoicePreferences
-import io.github.whywood.superpi.data.remote.RemoteBrowserClient
-import io.github.whywood.superpi.data.remote.RemoteComputerStore
-import io.github.whywood.superpi.data.remote.RemoteConnection
-import io.github.whywood.superpi.data.remote.RemoteGatewayClient
-import io.github.whywood.superpi.data.remote.RemoteSecrets
 import io.github.whywood.superpi.data.relay.RelayClient
 import io.github.whywood.superpi.data.relay.RelayController
 import io.github.whywood.superpi.data.relay.RelayMemoryClient
@@ -80,14 +75,6 @@ internal class DataGraph(private val deps: DataGraphDeps) {
     val linuxSettings = LinuxSettingsStore(deps.appContext)
     val storageMountStore = StorageMountStore(File(deps.appContext.filesDir, "storage-mounts.json"))
     val workspaceToolPolicies = WorkspaceToolPolicyStore(File(deps.appContext.filesDir, "workspace-tool-policies.json"))
-    val remoteComputerStore = RemoteComputerStore(File(deps.appContext.filesDir, "remote-computers.json"))
-    val remoteConnection = RemoteConnection(
-        store = remoteComputerStore,
-        secrets = RemoteSecrets(secretStore),
-        browser = RemoteBrowserClient(deps.appContext),
-        client = RemoteGatewayClient(),
-        scope = deps.scope,
-    )
     val relayStore = RelayStore(deps.appContext)
     val relayController = RelayController(
         store = relayStore,

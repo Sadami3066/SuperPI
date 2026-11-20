@@ -1,4 +1,4 @@
-package io.github.whywood.superpi.data.remote
+package io.github.whywood.superpi.data.relay
 
 import java.io.ByteArrayInputStream
 import java.security.GeneralSecurityException
@@ -17,7 +17,7 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import okhttp3.OkHttpClient
 
-internal object RemoteTls {
+internal object RelayTls {
     fun sha256Hex(certificate: X509Certificate): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
         return digest.joinToString(":") { byte -> "%02X".format(byte) }

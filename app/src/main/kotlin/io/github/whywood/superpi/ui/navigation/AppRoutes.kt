@@ -19,9 +19,7 @@ import io.github.whywood.superpi.ui.navigation.routes.PluginsRoute
 import io.github.whywood.superpi.ui.navigation.routes.CustomProviderEditorRoute
 import io.github.whywood.superpi.ui.navigation.routes.ProviderDetailRoute
 import io.github.whywood.superpi.ui.navigation.routes.ProvidersRoute
-import io.github.whywood.superpi.ui.navigation.routes.RemoteConnectRoute
 import io.github.whywood.superpi.ui.navigation.routes.RelayRoute
-import io.github.whywood.superpi.ui.navigation.routes.RemoteRoute
 import io.github.whywood.superpi.ui.navigation.routes.ScanJsonRoute
 import io.github.whywood.superpi.ui.navigation.routes.ScanSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.SearchRoute
@@ -47,12 +45,10 @@ data class RouteSpec(
 private const val PLUGIN_DETAIL_PREFIX = "plugins/"
 private const val PLUGIN_PAGE_MARKER = "/page/"
 private const val MINIAPP_DETAIL_PREFIX = "miniapp/"
-private const val REMOTE_CONNECT_PREFIX = "remote/"
 
 fun parentRouteKey(routeKey: String): String? = when {
     routeKey.startsWith(PLUGIN_DETAIL_PREFIX) -> "plugins"
     routeKey.startsWith(MINIAPP_DETAIL_PREFIX) -> "miniapp"
-    routeKey.startsWith(REMOTE_CONNECT_PREFIX) -> "remote"
     else -> null
 }
 
@@ -203,21 +199,8 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
             onBack = onBack,
         )
 
-        AppDestination.Remote -> RemoteRoute(
-            dependencies = dependencies,
-            navigator = host.navigator,
-            onBack = onBack,
-        )
-
         AppDestination.Relay -> RelayRoute(
             dependencies = dependencies,
-            onBack = onBack,
-        )
-
-        is AppDestination.RemoteConnect -> RemoteConnectRoute(
-            computerId = destination.computerId,
-            dependencies = dependencies,
-            navigator = host.navigator,
             onBack = onBack,
         )
 

@@ -145,19 +145,9 @@ sealed interface AppDestination {
         override val depth: Int = 1
     }
 
-    data object Remote : AppDestination {
-        override val routeKey: String = "remote"
-        override val depth: Int = 1
-    }
-
     data object Relay : AppDestination {
         override val routeKey: String = "relay"
         override val depth: Int = 1
-    }
-
-    data class RemoteConnect(val computerId: String) : AppDestination {
-        override val routeKey: String = REMOTE_CONNECT_PREFIX + computerId
-        override val depth: Int = 2
     }
 
     data object Miniapp : AppDestination {
@@ -201,7 +191,6 @@ sealed interface AppDestination {
         private const val CUSTOM_PROVIDER_NEW_ROUTE = "providers/custom"
         private const val PLUGIN_DETAIL_PREFIX = "plugins/"
         private const val MINIAPP_DETAIL_PREFIX = "miniapp/"
-        private const val REMOTE_CONNECT_PREFIX = "remote/"
         private const val WORKSPACE_SETTINGS_PREFIX = "workspaces/"
         private const val WORKSPACE_SETTINGS_SUFFIX = "/settings"
         private const val PLUGIN_PAGE_MARKER = "/page/"
@@ -249,11 +238,7 @@ sealed interface AppDestination {
             routeKey == Timers.routeKey -> Timers
             routeKey == Memory.routeKey -> Memory
             routeKey == Plugins.routeKey -> Plugins
-            routeKey == Remote.routeKey -> Remote
             routeKey == Relay.routeKey -> Relay
-            routeKey.startsWith(REMOTE_CONNECT_PREFIX) ->
-                RemoteConnect(routeKey.removePrefix(REMOTE_CONNECT_PREFIX))
-                    .takeIf { it.computerId.isNotBlank() }
 
             routeKey == Miniapp.routeKey -> Miniapp
             routeKey.startsWith(MINIAPP_DETAIL_PREFIX) -> {
