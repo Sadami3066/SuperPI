@@ -1,7 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
+import { readFileSync } from 'node:fs'
 import { PROTOCOL_VERSION } from '@superpi/protocol'
 import type {
   ApiErrorBody,
+  BotInfo,
   DeviceInfo,
   DeviceListResponse,
   DevicePlatform,
@@ -23,6 +26,8 @@ export interface RelayServerOptions {
   fingerprint: string | null
   entries: PairEntry[]
   now?: () => number
+  online?: (deviceId: string) => boolean
+  botsOf?: (deviceId: string) => BotInfo[]
 }
 
 export interface RelayServer {
@@ -36,9 +41,10 @@ const BODY_LIMIT = 64 * 1024
 
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const now = options.now ?? (() => Date.now())
-  const server = createServer((request, response) => {
+  const listener = (request: IncomingMessage, response: ServerResponse): void => {
     void handle(options, now, request, response)
-  })
+  }
+  const server = createListener(options.config, listener)
 
   return {
     server,
@@ -62,6 +68,17 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       })
     },
   }
+}
+
+function createListener(config: RelayConfig, listener: (request: IncomingMessage, response: ServerResponse) => void): Server {
+  if (config.certPath && config.keyPath) {
+    const secure = createHttpsServer(
+      { cert: readFileSync(config.certPath), key: readFileSync(config.keyPath) },
+      listener,
+    )
+    return secure as unknown as Server
+  }
+  return createServer(listener)
 }
 
 async function handle(
@@ -109,7 +126,12 @@ async function handle(
     if (method === 'GET' && url.pathname === '/v1/devices') {
       authenticate(options, now(), request, response)
       if (response.writableEnded) return
-      const body: DeviceListResponse = { devices: options.store.listDevices().filter((device) => !device.revoked).map(toDeviceInfo) }
+      const body: DeviceListResponse = {
+        devices: options.store
+          .listDevices()
+          .filter((device) => !device.revoked)
+          .map((device) => toDeviceInfo(device, options)),
+      }
       sendJson(response, 200, body)
       return
     }
@@ -209,14 +231,14 @@ function authenticate(
   return device
 }
 
-function toDeviceInfo(device: DeviceRecord): DeviceInfo {
+function toDeviceInfo(device: DeviceRecord, options: RelayServerOptions): DeviceInfo {
   return {
     deviceId: device.id,
     name: device.name,
     platform: device.platform as DevicePlatform,
-    online: false,
+    online: options.online?.(device.id) ?? false,
     lastSeen: device.lastSeen,
-    bots: [],
+    bots: options.botsOf?.(device.id) ?? [],
   }
 }
 

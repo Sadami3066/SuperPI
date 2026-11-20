@@ -1,4 +1,5 @@
 import { createRelayServer } from './http.ts'
+import { createRealtimeHub } from './realtime.ts'
 import { loadConfig } from './config.ts'
 import { RelayStore } from './store.ts'
 import { hashSecret, newAccountId, randomToken, readFingerprint } from './auth.ts'
@@ -15,7 +16,16 @@ if (!account) {
 }
 
 const fingerprint = readFingerprint(config.certPath)
-const relay = createRelayServer({ config, store, fingerprint, entries: config.entries })
+const hub = createRealtimeHub(store)
+const relay = createRelayServer({
+  config,
+  store,
+  fingerprint,
+  entries: config.entries,
+  online: (deviceId) => hub.isOnline(deviceId),
+  botsOf: (deviceId) => hub.botsOf(deviceId),
+})
+hub.attach(relay.server)
 const address = await relay.listen()
 console.log(`superpi-relay ${config.version} listening on ${address.host}:${address.port}`)
 if (!config.certPath) console.log('no certificate configured; clients must pair over plain HTTP for now')
@@ -25,6 +35,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
   console.log(`shutting down on ${signal}`)
+  await hub.close()
   await relay.close()
   store.close()
   process.exit(0)

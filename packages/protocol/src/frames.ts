@@ -115,6 +115,7 @@ export interface PresenceFrame {
   deviceId: string
   online: boolean
   lastSeen: number
+  bots?: BotInfo[]
 }
 
 export interface InboundRouteFrame extends RouteFrame {
@@ -213,13 +214,17 @@ export function parseServerFrame(value: unknown): ServerFrame {
         devices: requireDevices(value.devices),
         memoryVersion: requireNumber(value, 'memoryVersion'),
       }
-    case 'presence':
-      return {
+    case 'presence': {
+      const bots = value.bots === undefined ? undefined : requireBots(value.bots)
+      const frame: PresenceFrame = {
         type: 'presence',
         deviceId: requireString(value, 'deviceId'),
         online: requireBoolean(value, 'online'),
         lastSeen: requireNumber(value, 'lastSeen'),
       }
+      if (bots) frame.bots = bots
+      return frame
+    }
     case 'route':
       return parseRoute(value, true) as InboundRouteFrame
     case 'route_ok':
