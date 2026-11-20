@@ -1,21 +1,29 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, Tray } from 'electron'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { BotStore, type BotRecord } from './bot-store'
+import { loadDesktopState, saveDesktopState, type DesktopState } from './desktop-state'
 import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
 import { RelayService } from './relay/service'
+import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, closeAction, restoreWindowBounds, type CloseAction } from './shell'
 
+const homeDir = path.join(os.homedir(), '.superpi')
 const botStore = new BotStore()
 const windows = new Set<BrowserWindow>()
+const clients = new Map<string, PiRpcClient>()
+let state: DesktopState = loadDesktopState(homeDir)
+let tray: Tray | null = null
+let quitting = false
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
 const relay = new RelayService({
-  homeDir: path.join(os.homedir(), '.superpi'),
+  homeDir,
   bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
   broadcast: (status) => broadcast('relay:state', status),
   broadcastMemory: (summary) => broadcast('memory:state', summary),
   onRemoteEvent: (payload) => broadcast('remote:event', payload),
 })
-const clients = new Map<string, PiRpcClient>()
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of windows) {
@@ -62,19 +70,72 @@ async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
   return client
 }
 
-async function stopClient(botId: string): Promise<void> {
-  const client = clients.get(botId)
-  if (!client) return
-  clients.delete(botId)
-  await client.stop()
+function primaryWindow(): BrowserWindow | null {
+  for (const window of windows) {
+    if (!window.isDestroyed()) return window
+  }
+  return null
+}
+
+function rememberWindowBounds(): void {
+  const window = primaryWindow()
+  if (!window) return
+  state = {
+    ...state,
+    window: { bounds: window.getNormalBounds(), maximized: window.isMaximized() },
+  }
+  scheduleSaveState()
+}
+
+function scheduleSaveState(): void {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    saveDesktopState(state, homeDir)
+  }, 400)
+}
+
+function flushState(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  saveDesktopState(state, homeDir)
+}
+
+function showWindow(): void {
+  const window = primaryWindow()
+  if (!window) {
+    createWindow()
+    return
+  }
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+}
+
+function toggleWindow(): void {
+  const window = primaryWindow()
+  if (!window) {
+    createWindow()
+    return
+  }
+  if (window.isVisible() && !window.isMinimized()) {
+    window.hide()
+    return
+  }
+  showWindow()
 }
 
 function createWindow(): BrowserWindow {
+  const bounds = restoreWindowBounds(
+    state.window?.bounds ?? null,
+    screen.getAllDisplays().map((display) => display.workArea),
+  )
   const window = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 880,
-    minHeight: 560,
+    ...bounds,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     backgroundColor: '#121316',
     show: false,
     webPreferences: {
@@ -85,10 +146,71 @@ function createWindow(): BrowserWindow {
     },
   })
   windows.add(window)
-  window.once('ready-to-show', () => window.show())
+  if (state.window?.maximized) window.maximize()
+  window.once('ready-to-show', () => {
+    if (!quitting) window.show()
+  })
+  window.on('resize', rememberWindowBounds)
+  window.on('move', rememberWindowBounds)
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !(input.control || input.meta)) return
+    if (input.key.toLowerCase() !== 'w') return
+    event.preventDefault()
+    window.close()
+  })
+  window.on('close', (event) => {
+    const action: CloseAction = closeAction(quitting, tray !== null)
+    if (action === 'close') {
+      rememberWindowBounds()
+      return
+    }
+    event.preventDefault()
+    rememberWindowBounds()
+    flushState()
+    if (action === 'hide') window.hide()
+    else window.minimize()
+  })
   window.on('closed', () => windows.delete(window))
   void window.loadFile(path.join(__dirname, '../renderer/index.html'))
   return window
+}
+
+function createTray(): void {
+  if (tray) return
+  const icon = nativeImage.createFromPath(path.join(__dirname, '../../assets/tray.png'))
+  try {
+    const created = new Tray(icon)
+    created.setToolTip('SuperPI')
+    created.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Show SuperPI', click: () => showWindow() },
+        { type: 'separator' },
+        { label: 'Quit SuperPI', click: () => requestQuit() },
+      ]),
+    )
+    created.on('click', () => toggleWindow())
+    tray = created
+  } catch (failure) {
+    console.error(`tray unavailable: ${failure instanceof Error ? failure.message : String(failure)}`)
+  }
+}
+
+async function shutdown(): Promise<void> {
+  rememberWindowBounds()
+  flushState()
+  if (tray) {
+    tray.destroy()
+    tray = null
+  }
+  relay.dispose()
+  await Promise.all([...clients.values()].map((client) => client.stop()))
+  clients.clear()
+}
+
+function requestQuit(): void {
+  if (quitting) return
+  quitting = true
+  void shutdown().finally(() => app.quit())
 }
 
 function registerIpc(): void {
@@ -136,19 +258,32 @@ function registerIpc(): void {
   ipcMain.handle('bots:remove', (_event, id: string) => botStore.remove(id))
 }
 
-app.whenReady().then(() => {
+function start(): void {
   registerIpc()
+  createTray()
   createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  app.on('activate', () => showWindow())
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
   })
-})
+  app.on('before-quit', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    requestQuit()
+  })
+  app.on('will-quit', () => {
+    if (tray) {
+      tray.destroy()
+      tray = null
+    }
+  })
+  process.on('SIGINT', requestQuit)
+  process.on('SIGTERM', requestQuit)
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
-
-app.on('before-quit', () => {
-  relay.dispose()
-  for (const botId of clients.keys()) void stopClient(botId)
-})
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => showWindow())
+  void app.whenReady().then(start)
+}

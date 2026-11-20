@@ -19,7 +19,8 @@ pnpm start          # 启动 Electron
 - `agent_settled` 才是真空闲；`agent_end` 之后仍可能有重试、压缩、steer。
 - 关闭 pi 先关 stdin 等有序退出，超时才 SIGTERM，最后 SIGKILL。
 - 主进程是 pi 连接的唯一持有者；渲染进程只经 preload 的通道通信。
-- SuperPI 自己的状态在 `~/.superpi`（bot 清单 `bots.json`、默认工作目录 `workspace/`）；pi 的凭据与会话在它自己的配置目录。
+- SuperPI 自己的状态在 `~/.superpi`（bot 清单 `bots.json`、窗口位置与每 bot 上次会话 `desktop.json`、默认工作目录 `workspace/`）；pi 的凭据与会话在它自己的配置目录。
+- 常驻：关窗只是隐藏，进程留在托盘（左键切换窗口，菜单显示/退出），窗口位置无效时回主屏居中；单实例锁保证第二次启动只唤起已有窗口；退出时按上面顺序关掉所有 pi，托盘销毁。
 - 本机 Electron 有两个环境坑：`pnpm install` 的 postinstall 由 `scripts/ensure-electron.mjs` 兜底解包（避免 extract-zip 在 Node 24 上静默失败）；启动若报 SUID sandbox，跑一次 `scripts/fix-sandbox.sh`。
 - 无头验收：`xvfb-run ... pnpm start` 配合 `scripts/dev-screenshot.mjs` 截图。
 - 中继接入在 `src/main/relay/`：配对链接解析、凭据（`~/.superpi/relay.json`，0600）、CA 指纹比对、HTTP/WSS 客户端、自动重连；IPC 表面是 `relay:status` / `relay:pair` / `relay:logout`，状态经 `relay:state` 推给界面。
