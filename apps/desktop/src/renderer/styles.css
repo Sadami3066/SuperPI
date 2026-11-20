@@ -63,6 +63,102 @@ body {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+  flex: 0 1 auto;
+  max-height: 32%;
+  min-height: 0;
+}
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px;
+}
+
+.section-row .section-label {
+  padding: 0;
+}
+
+.link-button {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--text);
+  background: #17191d;
+}
+
+.link-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 72px;
+}
+
+.session-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-row:hover {
+  background: #17191d;
+}
+
+.session-row.active {
+  background: #1d2025;
+}
+
+.session-row:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.session-row:disabled:hover {
+  background: transparent;
+}
+
+.session-title {
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.session-time {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.session-empty {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .bot-row {
@@ -147,11 +243,17 @@ body {
 
 .chat-header {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-header-main {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--line);
 }
 
 .chat-title {
@@ -166,6 +268,10 @@ body {
 }
 
 .chat-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   font-size: 12px;
   color: var(--danger);
 }

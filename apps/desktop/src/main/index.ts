@@ -3,16 +3,18 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { BotStore, type BotRecord } from './bot-store'
-import { loadDesktopState, saveDesktopState, type DesktopState } from './desktop-state'
+import { loadDesktopState, rememberSession, saveDesktopState, type DesktopState } from './desktop-state'
 import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
+import { listSessions, resumableSession } from './pi/sessions'
 import { RelayService } from './relay/service'
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, closeAction, restoreWindowBounds, type CloseAction } from './shell'
+import type { BotSessionPayload, BotSessionResult, PiStatePayload } from '../shared/ipc'
 
 const homeDir = path.join(os.homedir(), '.superpi')
 const botStore = new BotStore()
 const windows = new Set<BrowserWindow>()
 const clients = new Map<string, PiRpcClient>()
-let state: DesktopState = loadDesktopState(homeDir)
+let shellState: DesktopState = loadDesktopState(homeDir)
 let tray: Tray | null = null
 let quitting = false
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -31,8 +33,17 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
-function botById(id: string): BotRecord | null {
-  return botStore.list().find((bot) => bot.id === id) ?? null
+function resolveBot(botId: string | null): BotRecord {
+  const bots = botStore.list()
+  if (botId !== null) {
+    const bot = bots.find((entry) => entry.id === botId)
+    if (!bot) throw new Error(`unknown bot: ${botId}`)
+    return bot
+  }
+  const remembered = shellState.lastBotId === null ? undefined : bots.find((bot) => bot.id === shellState.lastBotId)
+  const bot = remembered ?? bots[0]
+  if (!bot) throw new Error('no bots are configured')
+  return bot
 }
 
 async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
@@ -40,6 +51,8 @@ async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
   if (existing?.running) return existing
   const extension = path.join(__dirname, '../../extensions/superpi-memory.mjs')
   const args = ['--mode', 'rpc']
+  const resume = resumableSession(shellState.lastSession[bot.id])
+  if (resume) args.push('--session', resume)
   if (existsSync(extension)) args.push('-e', extension)
   const client = new PiRpcClient({
     command: process.env.SUPERPI_PI_BIN ?? 'pi',
@@ -47,7 +60,10 @@ async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
     cwd: bot.cwd,
     env: { ...process.env, ...relay.memoryEnvironment() },
   })
-  client.onEvent((event: PiRpcEvent) => broadcast('pi:event', { botId: bot.id, event }))
+  client.onEvent((event: PiRpcEvent) => {
+    broadcast('pi:event', { botId: bot.id, event })
+    if (event.type === 'agent_settled') void rememberClientSession(bot.id, client)
+  })
   client.onExit((error) => {
     clients.delete(bot.id)
     if (error) {
@@ -70,6 +86,79 @@ async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
   return client
 }
 
+async function rememberClientSession(botId: string, client: PiRpcClient): Promise<void> {
+  try {
+    const raw = await client.getState()
+    shellState = rememberSession(shellState, botId, resumableSession(piStatePayload(raw).sessionFile))
+    scheduleSaveState()
+  } catch {
+    return
+  }
+}
+
+function piStatePayload(raw: unknown): PiStatePayload {
+  const state = isRecord(raw) ? raw : {}
+  const model = isRecord(state.model) ? state.model : null
+  return {
+    model:
+      model !== null && typeof model.provider === 'string' && typeof model.id === 'string'
+        ? {
+            provider: model.provider,
+            id: model.id,
+            name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id,
+          }
+        : null,
+    thinkingLevel: typeof state.thinkingLevel === 'string' ? state.thinkingLevel : 'off',
+    sessionFile: typeof state.sessionFile === 'string' ? state.sessionFile : null,
+    sessionName: typeof state.sessionName === 'string' && state.sessionName !== '' ? state.sessionName : null,
+  }
+}
+
+async function sessionSnapshot(bot: BotRecord, client: PiRpcClient): Promise<BotSessionPayload> {
+  const raw = await client.getState()
+  const messages = await client.getMessages<{ messages?: unknown[] }>()
+  const payload = piStatePayload(raw)
+  shellState = rememberSession(shellState, bot.id, resumableSession(payload.sessionFile))
+  shellState = { ...shellState, lastBotId: bot.id }
+  scheduleSaveState()
+  return {
+    botId: bot.id,
+    state: payload,
+    messages: messages.messages ?? [],
+    sessions: listSessions(bot.cwd),
+  }
+}
+
+async function openBot(requestedBotId: string | null): Promise<BotSessionPayload> {
+  const bot = resolveBot(requestedBotId)
+  const client = await ensureClient(bot)
+  return sessionSnapshot(bot, client)
+}
+
+async function newBotSession(botId: string): Promise<BotSessionResult> {
+  const bot = resolveBot(botId)
+  const client = await ensureClient(bot)
+  const result = await client.newSession<{ cancelled?: boolean }>()
+  const snapshot = await sessionSnapshot(bot, client)
+  if (result.cancelled === true) {
+    return { ...snapshot, cancelled: true }
+  }
+  shellState = rememberSession(shellState, bot.id, null)
+  scheduleSaveState()
+  return { ...snapshot, cancelled: false }
+}
+
+async function switchBotSession(botId: string, sessionPath: string): Promise<BotSessionResult> {
+  const bot = resolveBot(botId)
+  if (!path.isAbsolute(sessionPath) || !sessionPath.endsWith('.jsonl') || !existsSync(sessionPath)) {
+    throw new Error('That session is no longer available')
+  }
+  const client = await ensureClient(bot)
+  const result = await client.switchSession<{ cancelled?: boolean }>(sessionPath)
+  const snapshot = await sessionSnapshot(bot, client)
+  return { ...snapshot, cancelled: result.cancelled === true }
+}
+
 function primaryWindow(): BrowserWindow | null {
   for (const window of windows) {
     if (!window.isDestroyed()) return window
@@ -80,8 +169,8 @@ function primaryWindow(): BrowserWindow | null {
 function rememberWindowBounds(): void {
   const window = primaryWindow()
   if (!window) return
-  state = {
-    ...state,
+  shellState = {
+    ...shellState,
     window: { bounds: window.getNormalBounds(), maximized: window.isMaximized() },
   }
   scheduleSaveState()
@@ -91,7 +180,7 @@ function scheduleSaveState(): void {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = null
-    saveDesktopState(state, homeDir)
+    saveDesktopState(shellState, homeDir)
   }, 400)
 }
 
@@ -100,7 +189,7 @@ function flushState(): void {
     clearTimeout(saveTimer)
     saveTimer = null
   }
-  saveDesktopState(state, homeDir)
+  saveDesktopState(shellState, homeDir)
 }
 
 function showWindow(): void {
@@ -129,7 +218,7 @@ function toggleWindow(): void {
 
 function createWindow(): BrowserWindow {
   const bounds = restoreWindowBounds(
-    state.window?.bounds ?? null,
+    shellState.window?.bounds ?? null,
     screen.getAllDisplays().map((display) => display.workArea),
   )
   const window = new BrowserWindow({
@@ -146,7 +235,7 @@ function createWindow(): BrowserWindow {
     },
   })
   windows.add(window)
-  if (state.window?.maximized) window.maximize()
+  if (shellState.window?.maximized) window.maximize()
   window.once('ready-to-show', () => {
     if (!quitting) window.show()
   })
@@ -215,17 +304,20 @@ function requestQuit(): void {
 
 function registerIpc(): void {
   ipcMain.handle('bots:list', () => botStore.list())
-
+  ipcMain.handle('bot:open', (_event, botId: string | null) => openBot(botId))
+  ipcMain.handle('bot:sessions', (_event, botId: string) => listSessions(resolveBot(botId).cwd))
   ipcMain.handle('bot:state', async (_event, botId: string) => {
-    const bot = botById(botId)
-    if (!bot) throw new Error(`unknown bot: ${botId}`)
+    const bot = resolveBot(botId)
     const client = await ensureClient(bot)
-    return client.getState()
+    return piStatePayload(await client.getState())
   })
+  ipcMain.handle('bot:new-session', (_event, botId: string) => newBotSession(botId))
+  ipcMain.handle('bot:switch-session', (_event, payload: { botId: string; sessionPath: string }) =>
+    switchBotSession(payload.botId, payload.sessionPath),
+  )
 
   ipcMain.handle('bot:prompt', async (_event, payload: { botId: string; text: string }) => {
-    const bot = botById(payload.botId)
-    if (!bot) throw new Error(`unknown bot: ${payload.botId}`)
+    const bot = resolveBot(payload.botId)
     const client = await ensureClient(bot)
     return client.prompt(payload.text)
   })
@@ -279,6 +371,10 @@ function start(): void {
   })
   process.on('SIGINT', requestQuit)
   process.on('SIGTERM', requestQuit)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 if (!app.requestSingleInstanceLock()) {

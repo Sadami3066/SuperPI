@@ -1,68 +1,44 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  BotInfo,
+  BotSessionPayload,
+  BotSessionResult,
+  MemorySummaryPayload,
+  PiEventPayload,
+  PiExitPayload,
+  PiStatePayload,
+  RelayStatusPayload,
+  RemoteEventPayload,
+  RemoteSessionPayload,
+  SessionSummary,
+} from '../shared/ipc'
 
-export interface BotInfo {
-  id: string
-  name: string
-  cwd: string
-  isHome: boolean
-  avatar: string | null
-  intro: string
-}
-
-export interface PiEventPayload {
-  botId: string
-  event: { type: string; [key: string]: unknown }
-}
-
-export interface PiExitPayload {
-  botId: string
-  message: string | null
-}
-
-export interface RelayDeviceInfo {
-  deviceId: string
-  name: string
-  platform: string
-  online: boolean
-  lastSeen: number
-  bots: Array<{ id: string; name: string }>
-}
-
-export interface RemoteSessionPayload {
-  sessionId: string
-  deviceId: string
-  botId: string
-  peerSessionId: string | null
-}
-
-export interface RemoteEventPayload {
-  sessionId: string
-  deviceId: string
-  botId: string
-  event: { type: string; [key: string]: unknown }
-}
-
-export interface MemorySummaryPayload {
-  version: number
-  syncedAt: number
-  files: string[]
-}
-
-export interface RelayStatusPayload {
-  state: 'disconnected' | 'connecting' | 'online' | 'offline' | 'error'
-  deviceId?: string
-  origin?: string
-  deviceName?: string
-  accountId?: string
-  devices: RelayDeviceInfo[]
-  error?: string
-}
+export type {
+  BotInfo,
+  BotSessionPayload,
+  BotSessionResult,
+  MemorySummaryPayload,
+  PiEventPayload,
+  PiExitPayload,
+  PiModelInfo,
+  PiStatePayload,
+  RelayDeviceInfo,
+  RelayStatusPayload,
+  RemoteEventPayload,
+  RemoteSessionPayload,
+  SessionSummary,
+} from '../shared/ipc'
 
 const api = {
   listBots: (): Promise<BotInfo[]> => ipcRenderer.invoke('bots:list'),
   createBot: (bot: BotInfo): Promise<BotInfo[]> => ipcRenderer.invoke('bots:add', bot),
   removeBot: (id: string): Promise<BotInfo[]> => ipcRenderer.invoke('bots:remove', id),
-  getState: (botId: string): Promise<unknown> => ipcRenderer.invoke('bot:state', botId),
+  openBot: (botId: string | null): Promise<BotSessionPayload> => ipcRenderer.invoke('bot:open', botId),
+  getState: (botId: string): Promise<PiStatePayload> => ipcRenderer.invoke('bot:state', botId),
+  listSessions: (botId: string): Promise<SessionSummary[]> => ipcRenderer.invoke('bot:sessions', botId),
+  newSession: (botId: string): Promise<BotSessionResult> => ipcRenderer.invoke('bot:new-session', botId),
+  switchSession: (botId: string, sessionPath: string): Promise<BotSessionResult> =>
+    ipcRenderer.invoke('bot:switch-session', { botId, sessionPath }),
   prompt: (botId: string, text: string): Promise<unknown> => ipcRenderer.invoke('bot:prompt', { botId, text }),
   abort: (botId: string): Promise<unknown> => ipcRenderer.invoke('bot:abort', botId),
   relayStatus: (): Promise<RelayStatusPayload> => ipcRenderer.invoke('relay:status'),

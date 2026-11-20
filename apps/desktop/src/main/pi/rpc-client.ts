@@ -131,6 +131,18 @@ export class PiRpcClient {
     return this.send<T>({ type: 'get_messages' })
   }
 
+  newSession<T = unknown>(): Promise<T> {
+    return this.send<T>({ type: 'new_session' })
+  }
+
+  switchSession<T = unknown>(sessionPath: string): Promise<T> {
+    return this.send<T>({ type: 'switch_session', sessionPath })
+  }
+
+  setSessionName(name: string): Promise<unknown> {
+    return this.send({ type: 'set_session_name', name })
+  }
+
   setModel(provider: string, modelId: string): Promise<unknown> {
     return this.send({ type: 'set_model', provider, modelId })
   }

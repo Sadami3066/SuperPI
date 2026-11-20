@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { BotInfo, MemorySummaryPayload, PiEventPayload, RelayStatusPayload, RemoteEventPayload } from '../preload'
+import type {
+  BotInfo,
+  BotSessionPayload,
+  MemorySummaryPayload,
+  PiEventPayload,
+  PiStatePayload,
+  RelayStatusPayload,
+  RemoteEventPayload,
+  SessionSummary,
+} from '../shared/ipc'
+import { appendAssistantDelta, entriesFromMessages, entryId, type Entry } from './entries'
 import './styles.css'
-
-type Entry =
-  | { kind: 'user'; id: string; text: string }
-  | { kind: 'assistant'; id: string; text: string }
-  | { kind: 'tool'; id: string; name: string; status: 'running' | 'done' | 'error'; detail: string }
-  | { kind: 'notice'; id: string; text: string; tone: 'error' | 'info' }
 
 interface RemoteTarget {
   sessionId: string
@@ -15,34 +19,80 @@ interface RemoteTarget {
   label: string
 }
 
-let nextEntryId = 0
-function entryId(): string {
-  nextEntryId += 1
-  return `e${nextEntryId}`
-}
-
 export function App(): React.JSX.Element {
   const [bots, setBots] = useState<BotInfo[]>([])
   const [activeBotId, setActiveBotId] = useState<string | null>(null)
   const [remote, setRemote] = useState<RemoteTarget | null>(null)
+  const [piState, setPiState] = useState<PiStatePayload | null>(null)
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [sessionsBusy, setSessionsBusy] = useState(false)
   const [entries, setEntries] = useState<Entry[]>([])
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [retryable, setRetryable] = useState(false)
   const [relay, setRelay] = useState<RelayStatusPayload | null>(null)
   const [memory, setMemory] = useState<MemorySummaryPayload | null>(null)
   const [showRelay, setShowRelay] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeBotIdRef = useRef<string | null>(null)
   const remoteRef = useRef<RemoteTarget | null>(null)
+  const openSequence = useRef(0)
 
   activeBotIdRef.current = activeBotId
   remoteRef.current = remote
 
+  const applySnapshot = useCallback((snapshot: BotSessionPayload) => {
+    setActiveBotId(snapshot.botId)
+    setPiState(snapshot.state)
+    setSessions(snapshot.sessions)
+    setEntries(entriesFromMessages(snapshot.messages))
+    setRunning(false)
+    setNotice(null)
+    setRetryable(false)
+  }, [])
+
+  const activate = useCallback(
+    async (botId: string | null) => {
+      const sequence = ++openSequence.current
+      setSessionsBusy(true)
+      setNotice(null)
+      setRetryable(false)
+      try {
+        const opened = await window.superpi.openBot(botId)
+        if (sequence !== openSequence.current) return
+        applySnapshot(opened)
+      } catch (error) {
+        if (sequence !== openSequence.current) return
+        setNotice(errorMessage(error))
+        setRetryable(true)
+      } finally {
+        if (sequence === openSequence.current) setSessionsBusy(false)
+      }
+    },
+    [applySnapshot],
+  )
+
+  const refreshSessions = useCallback(async () => {
+    const botId = activeBotIdRef.current
+    if (botId === null || remoteRef.current !== null) return
+    try {
+      const [nextSessions, nextState] = await Promise.all([
+        window.superpi.listSessions(botId),
+        window.superpi.getState(botId),
+      ])
+      if (botId !== activeBotIdRef.current) return
+      setSessions(nextSessions)
+      setPiState(nextState)
+    } catch {
+      return
+    }
+  }, [])
+
   useEffect(() => {
     void window.superpi.listBots().then((list) => {
       setBots(list)
-      setActiveBotId((current) => current ?? list[0]?.id ?? null)
+      void activate(null)
     })
     void window.superpi.relayStatus().then(setRelay)
     void window.superpi.memoryStatus().then(setMemory)
@@ -52,15 +102,16 @@ export function App(): React.JSX.Element {
       stopRelay()
       stopMemory()
     }
-  }, [])
+  }, [activate])
 
   useEffect(() => {
     return window.superpi.onEvent((payload: PiEventPayload) => {
       if (remoteRef.current !== null) return
       if (payload.botId !== activeBotIdRef.current) return
       applyEvent(payload.event, setEntries, setRunning, setNotice)
+      if (payload.event.type === 'agent_settled') void refreshSessions()
     })
-  }, [])
+  }, [refreshSessions])
 
   useEffect(() => {
     return window.superpi.onRemoteEvent((payload: RemoteEventPayload) => {
@@ -74,6 +125,7 @@ export function App(): React.JSX.Element {
     return window.superpi.onExit((payload) => {
       if (payload.botId !== activeBotIdRef.current) return
       setRunning(false)
+      setRetryable(true)
       setNotice(payload.message ? `pi exited: ${payload.message}` : 'pi session ended')
     })
   }, [])
@@ -101,7 +153,7 @@ export function App(): React.JSX.Element {
       setRunning(false)
       setEntries((current) => [
         ...current,
-        { kind: 'notice', id: entryId(), text: error instanceof Error ? error.message : String(error), tone: 'error' },
+        { kind: 'notice', id: entryId(), text: errorMessage(error), tone: 'error' },
       ])
     }
   }, [activeBotId, input, running])
@@ -115,7 +167,7 @@ export function App(): React.JSX.Element {
         await window.superpi.abort(activeBotId)
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error))
+      setNotice(errorMessage(error))
     }
   }, [activeBotId])
 
@@ -124,26 +176,76 @@ export function App(): React.JSX.Element {
       if (botId === activeBotId && remote === null) return
       void closeRemote(remote)
       setRemote(null)
-      setActiveBotId(botId)
+      setPiState(null)
+      setSessions([])
       setEntries([])
       setRunning(false)
       setNotice(null)
+      void activate(botId)
     },
-    [activeBotId, remote],
+    [activeBotId, remote, activate],
   )
+
+  const newChat = useCallback(async () => {
+    if (activeBotId === null || running || remote !== null) return
+    setSessionsBusy(true)
+    setNotice(null)
+    try {
+      const result = await window.superpi.newSession(activeBotId)
+      if (result.cancelled) {
+        setNotice('pi kept the current session')
+        return
+      }
+      applySnapshot(result)
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setSessionsBusy(false)
+    }
+  }, [activeBotId, running, remote, applySnapshot])
+
+  const openSession = useCallback(
+    async (sessionPath: string) => {
+      if (activeBotId === null || running || remote !== null) return
+      if (sessionPath === piState?.sessionFile) return
+      setSessionsBusy(true)
+      setNotice(null)
+      try {
+        const result = await window.superpi.switchSession(activeBotId, sessionPath)
+        if (result.cancelled) {
+          setNotice('pi kept the current session')
+          return
+        }
+        applySnapshot(result)
+      } catch (error) {
+        setNotice(errorMessage(error))
+      } finally {
+        setSessionsBusy(false)
+      }
+    },
+    [activeBotId, running, remote, piState?.sessionFile, applySnapshot],
+  )
+
+  const retry = useCallback(() => {
+    const botId = activeBotIdRef.current
+    if (botId !== null) void activate(botId)
+  }, [activate])
 
   const openRemote = useCallback(
     async (deviceId: string, deviceName: string, bot: { id: string; name: string }) => {
       void closeRemote(remote)
       setRemote(null)
+      setPiState(null)
+      setSessions([])
       setEntries([])
       setRunning(false)
       setNotice(null)
+      setRetryable(false)
       try {
         const session = await window.superpi.remoteStart({ deviceId, botId: bot.id })
         setRemote({ sessionId: session.sessionId, deviceId, botId: bot.id, label: `${bot.name} · ${deviceName}` })
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : String(error))
+        setNotice(errorMessage(error))
       }
     },
     [remote],
@@ -153,7 +255,7 @@ export function App(): React.JSX.Element {
   const relayView = describeRelay(relay)
   const otherDevices = relay?.devices.filter((device) => device.deviceId !== relay.deviceId) ?? []
   const title = remote ? remote.label : (activeBot?.name ?? 'No bot')
-  const subtitle = remote ? 'remote bot' : (activeBot?.cwd ?? '')
+  const subtitle = remote ? 'remote bot' : sessionSubtitle(piState, activeBot)
 
   return (
     <div className="app">
@@ -176,6 +278,40 @@ export function App(): React.JSX.Element {
             </button>
           ))}
         </nav>
+
+        {remote === null ? (
+          <>
+            <div className="section-row">
+              <span className="section-label">Chats</span>
+              <button
+                type="button"
+                className="link-button"
+                disabled={activeBotId === null || running || sessionsBusy}
+                onClick={() => void newChat()}
+              >
+                New
+              </button>
+            </div>
+            <nav className="session-list">
+              {sessions.length === 0 ? (
+                <div className="session-empty">{sessionsBusy ? 'Loading…' : 'No chats yet'}</div>
+              ) : (
+                sessions.map((session) => (
+                  <button
+                    key={session.path}
+                    type="button"
+                    className={`session-row${session.path === piState?.sessionFile ? ' active' : ''}`}
+                    disabled={running || sessionsBusy}
+                    onClick={() => void openSession(session.path)}
+                  >
+                    <span className="session-title">{session.title}</span>
+                    <span className="session-time">{formatSessionTime(session.modified)}</span>
+                  </button>
+                ))
+              )}
+            </nav>
+          </>
+        ) : null}
 
         {otherDevices.length > 0 ? (
           <>
@@ -223,17 +359,28 @@ export function App(): React.JSX.Element {
 
       <main className="chat">
         <header className="chat-header">
-          <div>
-            <div className="chat-title">{title}</div>
-            <div className="chat-subtitle">{subtitle}</div>
+          <div className="chat-header-main">
+            <div>
+              <div className="chat-title">{title}</div>
+              <div className="chat-subtitle">{subtitle}</div>
+            </div>
           </div>
-          {notice ? <div className="chat-notice">{notice}</div> : null}
+          {notice ? (
+            <div className="chat-notice">
+              <span>{notice}</span>
+              {retryable ? (
+                <button type="button" className="link-button" onClick={retry}>
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </header>
 
         <div className="messages" ref={scrollRef}>
           {entries.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-title">{remote ? 'Remote bot ready' : 'Ask PI anything'}</div>
+              <div className="empty-title">{emptyTitle(remote, sessionsBusy)}</div>
               <div className="empty-hint">
                 {remote ? 'Messages run on the other device.' : "Sessions run in this bot's working directory."}
               </div>
@@ -303,12 +450,7 @@ export function App(): React.JSX.Element {
       </main>
 
       {showRelay ? (
-        <RelayDialog
-          relay={relay}
-          memory={memory}
-          onClose={() => setShowRelay(false)}
-          onChanged={setRelay}
-        />
+        <RelayDialog relay={relay} memory={memory} onClose={() => setShowRelay(false)} onChanged={setRelay} />
       ) : null}
     </div>
   )
@@ -321,6 +463,30 @@ async function closeRemote(target: RemoteTarget | null): Promise<void> {
   } catch {
     return
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function sessionSubtitle(state: PiStatePayload | null, bot: BotInfo | null): string {
+  const parts = [state?.sessionName ?? null, bot?.cwd ?? null].filter((part): part is string => part !== null)
+  return parts.join(' · ')
+}
+
+function emptyTitle(remote: RemoteTarget | null, busy: boolean): string {
+  if (remote) return 'Remote bot ready'
+  return busy ? 'Starting pi…' : 'Ask PI anything'
+}
+
+function formatSessionTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 function applyEvent(
@@ -404,7 +570,7 @@ function RelayDialog(props: {
       })
       props.onChanged(status)
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure))
+      setError(errorMessage(failure))
     } finally {
       setBusy(false)
     }
@@ -416,7 +582,7 @@ function RelayDialog(props: {
     try {
       props.onChanged(await window.superpi.relayLogout())
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure))
+      setError(errorMessage(failure))
     } finally {
       setBusy(false)
     }
@@ -528,13 +694,4 @@ function describeRelay(relay: RelayStatusPayload | null): { title: string; subti
     default:
       return { title: 'Connect devices', subtitle: '', tone: 'offline' }
   }
-}
-
-function appendAssistantDelta(entries: Entry[], delta: string): Entry[] {
-  const last = entries[entries.length - 1]
-  if (last && last.kind === 'assistant') {
-    const updated: Entry = { ...last, text: last.text + delta }
-    return [...entries.slice(0, -1), updated]
-  }
-  return [...entries, { kind: 'assistant', id: entryId(), text: delta }]
 }

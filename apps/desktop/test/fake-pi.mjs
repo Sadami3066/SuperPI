@@ -45,6 +45,18 @@ function handle(command) {
     case 'get_state':
       emit({ id: command.id, type: 'response', command: 'get_state', success: true, data: { model: 'fake/model', messageCount: 0 } })
       break
+    case 'get_messages':
+      emit({ id: command.id, type: 'response', command: 'get_messages', success: true, data: { messages: [] } })
+      break
+    case 'new_session':
+    case 'switch_session':
+      emit({ id: command.id, type: 'response', command: command.type, success: true, data: { cancelled: false } })
+      break
+    case 'set_session_name':
+    case 'set_model':
+    case 'set_thinking_level':
+      emit({ id: command.id, type: 'response', command: command.type, success: true })
+      break
     case 'abort':
       emit({ id: command.id, type: 'response', command: 'abort', success: true, data: { stopped: true } })
       break

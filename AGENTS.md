@@ -20,6 +20,7 @@ pnpm start          # 启动 Electron
 - 关闭 pi 先关 stdin 等有序退出，超时才 SIGTERM，最后 SIGKILL。
 - 主进程是 pi 连接的唯一持有者；渲染进程只经 preload 的通道通信。
 - SuperPI 自己的状态在 `~/.superpi`（bot 清单 `bots.json`、窗口位置与每 bot 上次会话 `desktop.json`、默认工作目录 `workspace/`）；pi 的凭据与会话在它自己的配置目录。
+- 会话：pi 的会话文件位于 `~/.pi/agent/sessions/--<cwd 编码>--/`（`PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` / `sessionDir` 设置会改位置，`src/main/pi/sessions.ts` 按同一优先级解析）；侧栏按 bot cwd 列出会话，切换走 RPC `switch_session`，新会话走 `new_session`，历史消息用 `get_messages` 还原；每个 bot 上次会话记在 `desktop.json`，启动时用 `--session` 恢复。
 - 常驻：关窗只是隐藏，进程留在托盘（左键切换窗口，菜单显示/退出），窗口位置无效时回主屏居中；单实例锁保证第二次启动只唤起已有窗口；退出时按上面顺序关掉所有 pi，托盘销毁。
 - 本机 Electron 有两个环境坑：`pnpm install` 的 postinstall 由 `scripts/ensure-electron.mjs` 兜底解包（避免 extract-zip 在 Node 24 上静默失败）；启动若报 SUID sandbox，跑一次 `scripts/fix-sandbox.sh`。
 - 无头验收：`xvfb-run ... pnpm start` 配合 `scripts/dev-screenshot.mjs` 截图。
