@@ -22,7 +22,7 @@ describe.skipIf(!hasRemoteRepo)('desktop relay client against a live relay', () 
       expect(status.origin).toBe(`http://127.0.0.1:${relay.port}`)
       expect(status.devices.some((device) => device.deviceId === status.deviceId)).toBe(true)
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 20_000)
 
@@ -43,7 +43,7 @@ describe.skipIf(!hasRemoteRepo)('desktop relay client against a live relay', () 
       await waitFor(() => service.status().state === 'online', 8_000)
       expect(service.status().origin).toBe(`https://127.0.0.1:${relay.port}`)
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 30_000)
 
@@ -64,7 +64,7 @@ describe.skipIf(!hasRemoteRepo)('desktop relay client against a live relay', () 
         }),
       ).rejects.toThrow(/does not match the pairing link/)
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 30_000)
 
@@ -77,7 +77,7 @@ describe.skipIf(!hasRemoteRepo)('desktop relay client against a live relay', () 
       ).rejects.toThrow(/Pairing failed \(401\)/)
       expect(service.status().state).toBe('disconnected')
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 20_000)
 })

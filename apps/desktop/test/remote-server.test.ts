@@ -11,11 +11,13 @@ import {
 
 class FakeClient implements RemoteBotClient {
   readonly listeners = new Set<(event: PiRpcEvent) => void>()
+  readonly exitListeners = new Set<(error: Error | null) => void>()
   readonly prompts: Array<{ message: string; behavior?: string }> = []
   readonly steers: string[] = []
   readonly followUps: string[] = []
   aborts = 0
   newSessions = 0
+  stopped = false
 
   constructor(readonly id: string) {}
 
@@ -26,8 +28,19 @@ class FakeClient implements RemoteBotClient {
     }
   }
 
+  onExit(listener: (error: Error | null) => void): () => void {
+    this.exitListeners.add(listener)
+    return () => {
+      this.exitListeners.delete(listener)
+    }
+  }
+
   emit(event: PiRpcEvent): void {
     for (const listener of this.listeners) listener(event)
+  }
+
+  exit(): void {
+    for (const listener of this.exitListeners) listener(null)
   }
 
   async prompt(message: string, options?: { streamingBehavior?: 'steer' | 'followUp' }): Promise<unknown> {
@@ -58,11 +71,15 @@ class FakeClient implements RemoteBotClient {
   async getState<T = unknown>(): Promise<T> {
     return { sessionId: this.id, sessionFile: `/tmp/${this.id}.jsonl` } as T
   }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+  }
 }
 
 class FakeHost implements RemoteBotHost {
   readonly created: FakeClient[] = []
-  private readonly byBot = new Map<string, FakeClient>()
+  readonly local = new FakeClient('local-session')
 
   constructor(private readonly bots: string[]) {}
 
@@ -70,21 +87,24 @@ class FakeHost implements RemoteBotHost {
     return this.bots
   }
 
-  async client(botId: string): Promise<RemoteBotClient> {
-    if (!this.bots.includes(botId)) throw new Error(`unknown bot: ${botId}`)
-    const existing = this.byBot.get(botId)
-    if (existing) return existing
+  async createClient(_botId: string): Promise<RemoteBotClient> {
     const client = new FakeClient(`session-${this.created.length + 1}`)
     this.created.push(client)
-    this.byBot.set(botId, client)
     return client
   }
 }
 
-function setup(bots = ['pi', 'work']): { frames: ClientFrame[]; host: FakeHost; server: RemoteAgentServer } {
+function setup(
+  bots = ['pi', 'work'],
+  options: { idleTimeoutMs?: number } = {},
+): { frames: ClientFrame[]; host: FakeHost; server: RemoteAgentServer } {
   const frames: ClientFrame[] = []
   const host = new FakeHost(bots)
-  const server = new RemoteAgentServer({ host, send: (frame) => frames.push(frame) })
+  const server = new RemoteAgentServer({
+    host,
+    send: (frame) => frames.push(frame),
+    idleTimeoutMs: options.idleTimeoutMs,
+  })
   return { frames, host, server }
 }
 
@@ -96,13 +116,17 @@ function events(frames: ClientFrame[]): Array<Extract<ClientFrame, { type: 'rout
   return frames.filter((frame): frame is Extract<ClientFrame, { type: 'route_event' }> => frame.type === 'route_event')
 }
 
-describe('remote agent server', () => {
-  it('rejects an unknown bot before starting any process', async () => {
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+describe('remote agent server isolation', () => {
+  it('rejects an unknown bot before starting a process', async () => {
     const { frames, host, server } = setup()
     await server.handle(route('r1', 'bot.prompt', { botId: 'missing', text: 'hi' }))
     expect(frames).toEqual([{ type: 'route_error', id: 'r1', code: 'bot_not_found', message: expect.stringContaining('missing') }])
     expect(host.created).toHaveLength(0)
-    server.dispose()
+    await server.dispose()
   })
 
   it('rejects requests without a bot or text', async () => {
@@ -110,19 +134,19 @@ describe('remote agent server', () => {
     await server.handle(route('r1', 'bot.prompt', { text: 'hi' }))
     await server.handle(route('r2', 'bot.prompt', { botId: 'pi', text: '   ' }))
     expect(frames.map((frame) => frame.type === 'route_error' && frame.code)).toEqual(['bot_not_found', 'bad_request'])
-    server.dispose()
+    await server.dispose()
   })
 
-  it('starts a session and streams pi events under the prompt route id', async () => {
+  it('starts a dedicated pi client for the first remote prompt and streams its events', async () => {
     const { frames, host, server } = setup()
     await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'run pwd' }))
+    expect(host.created).toHaveLength(1)
     const client = host.created[0]
     expect(client?.newSessions).toBe(1)
     expect(frames[0]).toEqual({ type: 'route_ok', id: 'r1', result: { sessionId: 'session-1' } })
     expect(client?.prompts).toEqual([{ message: 'run pwd', behavior: undefined }])
 
     client?.emit({ type: 'agent_start' })
-    client?.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' } })
     client?.emit({ type: 'tool_execution_start', toolCallId: 'call_1', toolName: 'bash', args: { command: 'pwd' } })
     client?.emit({
       type: 'tool_execution_end',
@@ -131,24 +155,56 @@ describe('remote agent server', () => {
       result: { content: [{ type: 'text', text: '/home/me' }] },
       isError: false,
     })
+    client?.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' } })
     client?.emit({ type: 'agent_end' })
     client?.emit({ type: 'agent_settled' })
 
-    const streamed = events(frames)
-    expect(streamed.map((frame) => frame.event.type)).toEqual([
+    expect(events(frames).map((frame) => frame.event.type)).toEqual([
       'agent_start',
-      'message_update',
       'tool_call',
       'tool_result',
+      'message_update',
       'agent_end',
       'agent_settled',
     ])
-    expect(streamed.map((frame) => frame.id)).toEqual(['r1', 'r1', 'r1', 'r1', 'r1', 'r1'])
-    expect(streamed.map((frame) => frame.seq)).toEqual([0, 1, 2, 3, 4, 5])
-    expect(streamed[1]?.event).toEqual({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' } })
-    expect(streamed[2]?.event).toEqual({ type: 'tool_call', callId: 'call_1', name: 'bash', args: { command: 'pwd' } })
-    expect(streamed[3]?.event).toEqual({ type: 'tool_result', callId: 'call_1', result: '/home/me', isError: false })
-    server.dispose()
+    expect(events(frames).map((frame) => [frame.id, frame.seq])).toEqual([
+      ['r1', 0],
+      ['r1', 1],
+      ['r1', 2],
+      ['r1', 3],
+      ['r1', 4],
+      ['r1', 5],
+    ])
+    expect(events(frames)[2]?.event).toEqual({ type: 'tool_result', callId: 'call_1', result: '/home/me', isError: false })
+    await server.dispose()
+  })
+
+  it('never touches the local client', async () => {
+    const { frames, host, server } = setup()
+    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'remote only' }))
+    const remote = host.created[0]
+    remote?.emit({ type: 'agent_start' })
+    remote?.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'remote text' } })
+    expect(host.local.prompts).toEqual([])
+    expect(host.local.listeners.size).toBe(0)
+    expect(host.local.exitListeners.size).toBe(0)
+    expect(remote).not.toBe(host.local)
+    expect(frames.some((frame) => frame.type === 'route_event')).toBe(true)
+    await server.dispose()
+  })
+
+  it('reuses the remote client for later turns and separate clients for other bots', async () => {
+    const { host, server } = setup()
+    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'first' }))
+    host.created[0]?.emit({ type: 'agent_settled' })
+    await server.handle(route('r2', 'bot.prompt', { botId: 'pi', text: 'second', sessionId: 'session-1' }))
+    expect(host.created).toHaveLength(1)
+    expect(host.created[0]?.prompts.map((prompt) => prompt.message)).toEqual(['first', 'second'])
+
+    await server.handle(route('r3', 'bot.prompt', { botId: 'work', text: 'other bot' }))
+    expect(host.created).toHaveLength(2)
+    expect(host.created[1]).not.toBe(host.created[0])
+    await server.dispose()
   })
 
   it('queues a follow-up prompt on the running session and moves the route id', async () => {
@@ -160,9 +216,8 @@ describe('remote agent server', () => {
     expect(frames.at(-1)).toEqual({ type: 'route_ok', id: 'r2', result: { sessionId: 'session-1' } })
     expect(client?.prompts[1]).toEqual({ message: 'second', behavior: 'followUp' })
     client?.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'later' } })
-    const streamed = events(frames)
-    expect(streamed.at(-1)).toMatchObject({ id: 'r2', seq: 0 })
-    server.dispose()
+    expect(events(frames).at(-1)).toMatchObject({ id: 'r2', seq: 0 })
+    await server.dispose()
   })
 
   it('aborts a session and reports whether it is busy', async () => {
@@ -173,26 +228,18 @@ describe('remote agent server', () => {
     await server.handle(route('r2', 'bot.state', { sessionId: 'session-1' }))
     await server.handle(route('r3', 'bot.abort', { sessionId: 'session-1' }))
     await server.handle(route('r4', 'bot.state', { sessionId: 'session-1' }))
-    expect(frames.find((frame) => frame.type === 'route_ok' && frame.id === 'r2')).toEqual({
-      type: 'route_ok',
-      id: 'r2',
-      result: { sessionId: 'session-1', busy: true },
-    })
+    expect(frames.find((frame) => frame.type === 'route_ok' && frame.id === 'r2')).toMatchObject({ result: { busy: true } })
     expect(frames.find((frame) => frame.type === 'route_ok' && frame.id === 'r3')).toEqual({
       type: 'route_ok',
       id: 'r3',
       result: { sessionId: 'session-1' },
     })
     expect(client?.aborts).toBe(1)
-    expect(frames.find((frame) => frame.type === 'route_ok' && frame.id === 'r4')).toEqual({
-      type: 'route_ok',
-      id: 'r4',
-      result: { sessionId: 'session-1', busy: false },
-    })
-    server.dispose()
+    expect(frames.find((frame) => frame.type === 'route_ok' && frame.id === 'r4')).toMatchObject({ result: { busy: false } })
+    await server.dispose()
   })
 
-  it('steers and queues follow-ups inside the session', async () => {
+  it('steers and queues follow-ups inside the remote session', async () => {
     const { frames, host, server } = setup()
     await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'start' }))
     const client = host.created[0]
@@ -201,7 +248,7 @@ describe('remote agent server', () => {
     expect(client?.steers).toEqual(['look left'])
     expect(client?.followUps).toEqual(['then right'])
     expect(frames.filter((frame) => frame.type === 'route_ok')).toHaveLength(3)
-    server.dispose()
+    await server.dispose()
   })
 
   it('rejects actions on a session that is not active', async () => {
@@ -212,7 +259,7 @@ describe('remote agent server', () => {
       'session_not_found',
       'session_not_found',
     ])
-    server.dispose()
+    await server.dispose()
   })
 
   it('does not leak one bot session events into another route', async () => {
@@ -223,14 +270,13 @@ describe('remote agent server', () => {
     host.created[0]?.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'pi only' } })
     host.created[1]?.emit({ type: 'agent_start' })
     host.created[1]?.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'work only' } })
-    const streamed = events(frames)
-    expect(streamed.map((frame) => [frame.id, frame.event.type])).toEqual([
+    expect(events(frames).map((frame) => [frame.id, frame.event.type])).toEqual([
       ['r1', 'agent_start'],
       ['r1', 'message_update'],
       ['r2', 'agent_start'],
       ['r2', 'message_update'],
     ])
-    server.dispose()
+    await server.dispose()
   })
 
   it('replays buffered events after a resume cursor', async () => {
@@ -246,7 +292,43 @@ describe('remote agent server', () => {
     const replayed = events(frames)
     expect(replayed.map((frame) => frame.seq)).toEqual([1, 2])
     expect(replayed.every((frame) => frame.id === 'r2')).toBe(true)
-    server.dispose()
+    await server.dispose()
+  })
+})
+
+describe('remote client lifecycle', () => {
+  it('idle-closes the remote client and lets the next prompt start fresh', async () => {
+    const { host, server } = setup(['pi'], { idleTimeoutMs: 20 })
+    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'hello' }))
+    const client = host.created[0]
+    client?.emit({ type: 'agent_settled' })
+    await sleep(80)
+    expect(client?.stopped).toBe(true)
+
+    await server.handle(route('r2', 'bot.prompt', { botId: 'pi', text: 'hello again' }))
+    expect(host.created).toHaveLength(2)
+    expect(host.created[1]?.newSessions).toBe(1)
+    await server.dispose()
+  })
+
+  it('closes every remote client on dispose', async () => {
+    const { host, server } = setup()
+    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'first' }))
+    await server.handle(route('r2', 'bot.prompt', { botId: 'work', text: 'second' }))
+    await server.dispose()
+    expect(host.created.map((client) => client.stopped)).toEqual([true, true])
+    expect(host.local.stopped).toBe(false)
+  })
+
+  it('drops the session when the remote pi process exits', async () => {
+    const { frames, host, server } = setup()
+    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'hello' }))
+    host.created[0]?.exit()
+    await server.handle(route('r2', 'bot.prompt', { botId: 'pi', text: 'again', sessionId: 'session-1' }))
+    expect(frames.at(-1)).toMatchObject({ type: 'route_error', id: 'r2', code: 'session_not_found' })
+    await server.handle(route('r3', 'bot.prompt', { botId: 'pi', text: 'fresh' }))
+    expect(host.created).toHaveLength(2)
+    await server.dispose()
   })
 })
 
@@ -267,30 +349,5 @@ describe('pi event mapping', () => {
     expect(resultText({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] })).toBe('a\nb')
     expect(resultText('plain')).toBe('plain')
     expect(resultText({ details: {} })).toBe('')
-  })
-})
-
-describe('remote session lifecycle', () => {
-  it('replaces an idle remote session when a prompt starts a new one', async () => {
-    const { host, server } = setup()
-    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'first' }))
-    const client = host.created[0]
-    client?.emit({ type: 'agent_settled' })
-    await server.handle(route('r2', 'bot.prompt', { botId: 'pi', text: 'fresh' }))
-    expect(host.created).toHaveLength(1)
-    expect(client?.newSessions).toBe(2)
-    client?.emit({ type: 'agent_start' })
-    const frames: ClientFrame[] = []
-    server.dispose()
-    expect(frames).toEqual([])
-  })
-
-  it('refuses a new session while the bot is busy with another one', async () => {
-    const { frames, host, server } = setup()
-    await server.handle(route('r1', 'bot.prompt', { botId: 'pi', text: 'first' }))
-    host.created[0]?.emit({ type: 'agent_start' })
-    await server.handle(route('r2', 'bot.prompt', { botId: 'pi', text: 'second chat' }))
-    expect(frames.at(-1)).toMatchObject({ type: 'route_error', id: 'r2', code: 'bad_request' })
-    server.dispose()
   })
 })

@@ -79,12 +79,14 @@ export function createService(
     onMemory?: (summary: MemorySummary | null) => void
     homeDir?: string
     host?: RemoteBotHost
+    remoteIdleTimeoutMs?: number
   } = {},
 ): RelayService {
   return new RelayService({
     homeDir: options.homeDir ?? tempDir('superpi-relay-home-'),
     bots: () => [{ id: 'pi', name: 'PI' }],
     host: options.host,
+    remoteIdleTimeoutMs: options.remoteIdleTimeoutMs,
     broadcast: () => undefined,
     broadcastMemory: options.onMemory,
     onRemoteEvent: options.onRemoteEvent,

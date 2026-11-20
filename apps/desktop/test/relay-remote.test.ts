@@ -128,7 +128,7 @@ describe.skipIf(!hasRemoteRepo)('remote bot sessions', () => {
       expect(routed).toMatchObject({ to: peerEnrollment.deviceId, method: 'bot.prompt' })
       if (routed?.type === 'route') expect(routed.params).toEqual({ botId: 'pi', text: 'hello phone' })
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 25_000)
 
@@ -140,7 +140,7 @@ describe.skipIf(!hasRemoteRepo)('remote bot sessions', () => {
       await waitFor(() => service.status().state === 'online', 8_000)
       expect(() => service.startRemote({ deviceId: 'dev-missing', botId: 'pi' })).toThrow(/offline/)
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 20_000)
 })

@@ -87,12 +87,9 @@ class Phone {
 }
 
 function fakePiHost(sessionId: string): RemoteBotHost {
-  const byBot = new Map<string, PiRpcClient>()
   return {
     botIds: () => ['pi'],
-    client: async (botId: string) => {
-      const existing = byBot.get(botId)
-      if (existing) return existing
+    createClient: async () => {
       const client = new PiRpcClient({
         command: process.execPath,
         args: [fakePi],
@@ -101,7 +98,6 @@ function fakePiHost(sessionId: string): RemoteBotHost {
         requestTimeoutMs: 5_000,
       })
       clients.push(client)
-      byBot.set(botId, client)
       await client.start()
       return client
     },
@@ -178,7 +174,7 @@ describe.skipIf(!hasRemoteRepo)('remote agent server over the relay', () => {
         result: { sessionId: 'remote-session-1' },
       })
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 30_000)
 })

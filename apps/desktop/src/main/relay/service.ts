@@ -38,6 +38,7 @@ export interface RelayServiceOptions {
   homeDir: string
   bots: () => BotInfo[]
   host?: RemoteBotHost
+  remoteIdleTimeoutMs?: number
   broadcast: (status: RelayStatus) => void
   broadcastMemory?: (summary: MemorySummary | null) => void
   onRemoteEvent?: (payload: RemoteEventPayload) => void
@@ -83,6 +84,7 @@ export class RelayService {
           send: (frame: ClientFrame) => {
             if (this.client?.connected) this.client.send(frame)
           },
+          idleTimeoutMs: options.remoteIdleTimeoutMs,
         })
       : null
     if (this.credentials) this.startClient()
@@ -208,6 +210,7 @@ export class RelayService {
   }
 
   logout(): RelayStatus {
+    void this.remoteServer?.closeAll()
     this.client?.disconnect()
     this.client = null
     this.credentials = null
@@ -219,10 +222,10 @@ export class RelayService {
     return this.status()
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.client?.disconnect()
     this.client = null
-    this.remoteServer?.dispose()
+    await this.remoteServer?.dispose()
   }
 
   private startClient(): void {

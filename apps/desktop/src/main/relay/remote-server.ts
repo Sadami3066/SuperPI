@@ -9,16 +9,19 @@ export interface RemoteBotClient {
   newSession(): Promise<unknown>
   getState<T = unknown>(): Promise<T>
   onEvent(listener: (event: PiRpcEvent) => void): () => void
+  onExit(listener: (error: Error | null) => void): () => void
+  stop(): Promise<void>
 }
 
 export interface RemoteBotHost {
   botIds(): string[]
-  client(botId: string): Promise<RemoteBotClient>
+  createClient(botId: string): Promise<RemoteBotClient>
 }
 
 export interface RemoteAgentServerOptions {
   host: RemoteBotHost
   send: (frame: ClientFrame) => void
+  idleTimeoutMs?: number
 }
 
 interface RemoteSession {
@@ -32,12 +35,23 @@ interface RemoteSession {
   unsubscribe: () => void
 }
 
+interface RemoteClientEntry {
+  client: RemoteBotClient
+  sessions: Set<RemoteSession>
+  idleTimer: ReturnType<typeof setTimeout> | null
+}
+
 const MAX_BUFFERED_EVENTS = 200
+export const DEFAULT_REMOTE_IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
 export class RemoteAgentServer {
   private readonly sessions = new Map<string, RemoteSession>()
+  private readonly clients = new Map<string, RemoteClientEntry>()
+  private readonly idleTimeoutMs: number
 
-  constructor(private readonly options: RemoteAgentServerOptions) {}
+  constructor(private readonly options: RemoteAgentServerOptions) {
+    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_REMOTE_IDLE_TIMEOUT_MS
+  }
 
   async handle(frame: InboundRouteFrame): Promise<void> {
     try {
@@ -68,9 +82,28 @@ export class RemoteAgentServer {
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
+    await this.closeAll()
+  }
+
+  async closeAll(): Promise<void> {
+    const entries = [...this.clients.values()]
+    this.clients.clear()
+    for (const entry of entries) {
+      if (entry.idleTimer) clearTimeout(entry.idleTimer)
+      entry.idleTimer = null
+    }
     for (const session of this.sessions.values()) session.unsubscribe()
     this.sessions.clear()
+    await Promise.all(
+      entries.map(async (entry) => {
+        try {
+          await entry.client.stop()
+        } catch {
+          return
+        }
+      }),
+    )
   }
 
   private async prompt(frame: InboundRouteFrame): Promise<void> {
@@ -100,18 +133,14 @@ export class RemoteAgentServer {
         this.error(frame.id, 'bad_request', `session ${requested} belongs to another bot`)
         return
       }
+      this.cancelIdle(botId)
     } else {
-      const client = await this.options.host.client(botId)
-      const running = [...this.sessions.values()].find((entry) => entry.botId === botId && entry.busy)
-      if (running) {
+      if (this.findRunningSession(botId)) {
         this.error(frame.id, 'bad_request', `bot ${botId} is already running a remote session`)
         return
       }
-      for (const [id, existing] of this.sessions) {
-        if (existing.botId !== botId) continue
-        existing.unsubscribe()
-        this.sessions.delete(id)
-      }
+      this.removeSessionsForBot(botId)
+      const client = await this.ensureClient(botId)
       await client.newSession()
       const state = await client.getState<Record<string, unknown>>()
       const sessionId = typeof state.sessionId === 'string' && state.sessionId !== '' ? state.sessionId : `remote-${Date.now()}`
@@ -127,6 +156,7 @@ export class RemoteAgentServer {
       session.busy = false
       this.emit(session, { type: 'error', message: messageOf(failure) })
       this.emit(session, { type: 'agent_settled' })
+      this.scheduleIdle(botId)
     }
   }
 
@@ -172,6 +202,7 @@ export class RemoteAgentServer {
       this.emit(session, { type: 'error', message: messageOf(failure) })
     }
     session.busy = false
+    this.scheduleIdle(session.botId)
   }
 
   private state(frame: InboundRouteFrame): void {
@@ -215,6 +246,36 @@ export class RemoteAgentServer {
     return session
   }
 
+  private findRunningSession(botId: string): RemoteSession | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.botId === botId && session.busy) return session
+    }
+    return undefined
+  }
+
+  private removeSessionsForBot(botId: string): void {
+    const entry = this.clients.get(botId)
+    for (const [id, session] of this.sessions) {
+      if (session.botId !== botId) continue
+      session.unsubscribe()
+      this.sessions.delete(id)
+      entry?.sessions.delete(session)
+    }
+  }
+
+  private async ensureClient(botId: string): Promise<RemoteBotClient> {
+    const existing = this.clients.get(botId)
+    if (existing) {
+      this.cancelIdle(botId)
+      return existing.client
+    }
+    const client = await this.options.host.createClient(botId)
+    const entry: RemoteClientEntry = { client, sessions: new Set(), idleTimer: null }
+    this.clients.set(botId, entry)
+    client.onExit(() => this.dropClient(botId, client))
+    return client
+  }
+
   private createSession(id: string, botId: string, client: RemoteBotClient): RemoteSession {
     const session: RemoteSession = {
       id,
@@ -228,7 +289,54 @@ export class RemoteAgentServer {
     }
     session.unsubscribe = client.onEvent((event) => this.onClientEvent(session, event))
     this.sessions.set(id, session)
+    this.clients.get(botId)?.sessions.add(session)
     return session
+  }
+
+  private dropClient(botId: string, client: RemoteBotClient): void {
+    const entry = this.clients.get(botId)
+    if (!entry || entry.client !== client) return
+    if (entry.idleTimer) clearTimeout(entry.idleTimer)
+    this.clients.delete(botId)
+    for (const [id, session] of this.sessions) {
+      if (session.client !== client) continue
+      session.unsubscribe()
+      this.sessions.delete(id)
+    }
+  }
+
+  private cancelIdle(botId: string): void {
+    const entry = this.clients.get(botId)
+    if (!entry?.idleTimer) return
+    clearTimeout(entry.idleTimer)
+    entry.idleTimer = null
+  }
+
+  private scheduleIdle(botId: string): void {
+    const entry = this.clients.get(botId)
+    if (!entry) return
+    if (entry.idleTimer) clearTimeout(entry.idleTimer)
+    if ([...entry.sessions].some((session) => session.busy)) return
+    entry.idleTimer = setTimeout(() => {
+      entry.idleTimer = null
+      void this.closeClient(botId, entry)
+    }, this.idleTimeoutMs)
+    entry.idleTimer.unref?.()
+  }
+
+  private async closeClient(botId: string, entry: RemoteClientEntry): Promise<void> {
+    if (this.clients.get(botId) !== entry) return
+    this.clients.delete(botId)
+    for (const session of entry.sessions) {
+      session.unsubscribe()
+      this.sessions.delete(session.id)
+    }
+    entry.sessions.clear()
+    try {
+      await entry.client.stop()
+    } catch {
+      return
+    }
   }
 
   private attachRoute(session: RemoteSession, routeId: string): void {
@@ -239,7 +347,9 @@ export class RemoteAgentServer {
 
   private onClientEvent(session: RemoteSession, event: PiRpcEvent): void {
     for (const mapped of mapPiEvent(event)) this.emit(session, mapped)
-    if (event.type === 'agent_settled') session.busy = false
+    if (event.type !== 'agent_settled') return
+    session.busy = false
+    this.scheduleIdle(session.botId)
   }
 
   private emit(session: RemoteSession, event: BotEvent): void {

@@ -69,7 +69,7 @@ describe.skipIf(!hasRemoteRepo)('shared memory sync', () => {
       await waitFor(() => service.memoryStatus()?.version === 2, 8_000)
       expect(summaries.some((summary) => summary?.version === 2)).toBe(true)
     } finally {
-      service.dispose()
+      await service.dispose()
     }
   }, 25_000)
 })

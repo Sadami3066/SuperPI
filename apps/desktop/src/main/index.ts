@@ -25,7 +25,15 @@ const relay = new RelayService({
   bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
   host: {
     botIds: () => botStore.list().map((bot) => bot.id),
-    client: (botId: string) => ensureClient(resolveBot(botId)),
+    createClient: async (botId: string) => {
+      const bot = resolveBot(botId)
+      const client = spawnPiClient(bot, null)
+      client.onExit((error) => {
+        if (error) console.error(`remote pi exited for bot ${bot.id}: ${error.message}`)
+      })
+      await client.start()
+      return client
+    },
   },
   broadcast: (status) => broadcast('relay:state', status),
   broadcastMemory: (summary) => broadcast('memory:state', summary),
@@ -51,20 +59,23 @@ function resolveBot(botId: string | null): BotRecord {
   return bot
 }
 
-async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
-  const existing = clients.get(bot.id)
-  if (existing?.running) return existing
+function spawnPiClient(bot: BotRecord, resumeSession: string | null): PiRpcClient {
   const extension = path.join(__dirname, '../../extensions/superpi-memory.mjs')
   const args = ['--mode', 'rpc']
-  const resume = resumableSession(shellState.lastSession[bot.id])
-  if (resume) args.push('--session', resume)
+  if (resumeSession) args.push('--session', resumeSession)
   if (existsSync(extension)) args.push('-e', extension)
-  const client = new PiRpcClient({
+  return new PiRpcClient({
     command: process.env.SUPERPI_PI_BIN ?? 'pi',
     args,
     cwd: bot.cwd,
     env: { ...process.env, ...relay.memoryEnvironment() },
   })
+}
+
+async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
+  const existing = clients.get(bot.id)
+  if (existing?.running) return existing
+  const client = spawnPiClient(bot, resumableSession(shellState.lastSession[bot.id]))
   client.onEvent((event: PiRpcEvent) => {
     broadcast('pi:event', { botId: bot.id, event })
     if (event.type === 'agent_settled') void rememberClientSession(bot.id, client)
@@ -278,7 +289,7 @@ async function shutdown(): Promise<void> {
     tray.destroy()
     tray = null
   }
-  relay.dispose()
+  await relay.dispose()
   await Promise.all([...clients.values()].map((client) => client.stop()))
   clients.clear()
 }
