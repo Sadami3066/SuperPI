@@ -6,5 +6,12 @@
   "main": "dist/main/index.cjs",
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@superpi/protocol": "link:../../../SuperPI-Remote/packages/protocol",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
   }
 }

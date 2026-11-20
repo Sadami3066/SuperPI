@@ -321,3 +321,221 @@ body {
   background: #3a2727;
   color: #ffb4b4;
 }
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 8px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-row:hover {
+  background: #17191d;
+}
+
+.status-dot.relay {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4a5160;
+}
+
+.status-dot.relay.online {
+  background: #5ac28a;
+}
+
+.status-dot.relay.pending {
+  background: #d5b45a;
+}
+
+.status-dot.relay.error {
+  background: var(--danger);
+}
+
+.account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-title {
+  font-size: 12px;
+}
+
+.account-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 6, 8, 0.62);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.dialog {
+  width: min(520px, 100%);
+  max-height: 82vh;
+  overflow-y: auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dialog-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.dialog-label {
+  display: inline-block;
+  min-width: 64px;
+  color: var(--text-dim);
+}
+
+.dialog-section {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.dialog-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #14161a;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.field input:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: #3a4a66;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.device-name {
+  flex: 1;
+}
+
+.device-bots {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.dialog-error {
+  font-size: 12px;
+  color: var(--danger);
+  border: 1px solid #5a2a2a;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.dialog-actions button {
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #1d2025;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dialog-actions button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #0d1117;
+  font-weight: 600;
+}
+
+.dialog-actions button.danger {
+  background: #3a2727;
+  border-color: #5a2a2a;
+  color: #ffb4b4;
+}
+
+.dialog-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dialog-actions button.ghost {
+  background: transparent;
+}

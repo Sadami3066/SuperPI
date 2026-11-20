@@ -22,6 +22,8 @@ pnpm start          # 启动 Electron
 - SuperPI 自己的状态在 `~/.superpi`（bot 清单 `bots.json`、默认工作目录 `workspace/`）；pi 的凭据与会话在它自己的配置目录。
 - 本机 Electron 有两个环境坑：`pnpm install` 的 postinstall 由 `scripts/ensure-electron.mjs` 兜底解包（避免 extract-zip 在 Node 24 上静默失败）；启动若报 SUID sandbox，跑一次 `scripts/fix-sandbox.sh`。
 - 无头验收：`xvfb-run ... pnpm start` 配合 `scripts/dev-screenshot.mjs` 截图。
+- 中继接入在 `src/main/relay/`：配对链接解析、凭据（`~/.superpi/relay.json`，0600）、CA 指纹比对、HTTP/WSS 客户端、自动重连；IPC 表面是 `relay:status` / `relay:pair` / `relay:logout`，状态经 `relay:state` 推给界面。
+- 中继客户端集成测试会真起 `../SuperPI-Remote` 的服务（含 TLS 证书生成），跨仓路径不存在时自动跳过。
 
 ## 边界
 

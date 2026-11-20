@@ -1,9 +1,16 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import os from 'node:os'
 import path from 'node:path'
 import { BotStore, type BotRecord } from './bot-store'
 import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
+import { RelayService } from './relay/service'
 
 const botStore = new BotStore()
+const relay = new RelayService({
+  homeDir: path.join(os.homedir(), '.superpi'),
+  bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
+  broadcast: (status) => broadcast('relay:state', status),
+})
 const clients = new Map<string, PiRpcClient>()
 const windows = new Set<BrowserWindow>()
 
@@ -87,6 +94,12 @@ function registerIpc(): void {
     return client.abort()
   })
 
+  ipcMain.handle('relay:status', () => relay.status())
+  ipcMain.handle('relay:pair', (_event, input: { link: string; loginSecret?: string; deviceName?: string }) =>
+    relay.pair(input),
+  )
+  ipcMain.handle('relay:logout', () => relay.logout())
+
   ipcMain.handle('bots:save', (_event, bots: BotRecord[]) => botStore.save(bots))
   ipcMain.handle('bots:add', (_event, bot: BotRecord) => botStore.add(bot))
   ipcMain.handle('bots:remove', (_event, id: string) => botStore.remove(id))
@@ -105,5 +118,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  relay.dispose()
   for (const botId of clients.keys()) void stopClient(botId)
 })
