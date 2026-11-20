@@ -2,20 +2,18 @@
 
 [English](README.md) | 简体中文
 
-Super PI Agent 官方维护的外部插件源码仓库：把飞书、企业微信、中山大学校园服务、微信记录导出、小米云服务、标准邮箱和校园集市接入 PI，统一打包成带 Ed25519 签名的 `.ddp` 插件包。
+Super PI Agent 官方维护的外部插件源码仓库：把飞书、企业微信、小米云服务、标准邮箱、滴滴打车、RollingGo 酒店、高德地图、12306 铁路与主题包接入 PI，统一打包成带 Ed25519 签名的 `.ddp` 插件包。
 
 ## 概览
 
 Super PI Agent 是一个运行在 Android 上的个人智能体（[应用仓库](https://github.com/Sadami3066/SuperPI-App)）。插件用 Kotlin 实现宿主契约 `plugin-api`，在 App 进程内加载，通过工具、技能、提示词和自绘页面扩展助手能力；插件只从 `.ddp` 安装，每个插件是一个独立的 Android application 模块。
 
-本仓库包含十二个官方插件，发布者为 `milous`：
+本仓库包含九个官方插件，发布者为 `milous`：
 
 | 模块 | 插件 | 版本 | 作用 | 适合 |
 |---|---|---|---|---|
 | `feishu` | 飞书 | 2.7.1 | 通过官方 `lark-cli` 读写消息、日历、云文档、云空间、邮箱与任务 | 日常使用飞书的办公用户 |
 | `wecom` | 企业微信 | 2.6.2 | 通过官方 `wecom-cli` 操作消息、邮件、文档、日程与待办 | 使用企业微信的团队用户 |
-| `sysu` | 中山大学 CLI | 2.7.3 | 在 Linux 环境运行 Node.js 版 `sysu` CLI：课表、成绩、作业、课件、场馆预约、网费与统一认证换票；默认人类可读输出，`--json` 给脚本 | 中山大学在校师生 |
-| `wechat` | 微信导出 | 0.5.2 | 同步并解密微信本地数据库，按日期范围导出完整聊天记录，交给 Agent 总结 | 需要完整导出微信记录的用户 |
 | `micloud` | 小米云服务 | 2.7.4 | 登录小米账号后读取笔记、待办、短信、联系人、相册与录音，笔记/待办可写；按真实返回解析 | 使用小米云服务的用户 |
 | `mail` | 邮箱 | 1.6.2 | 用授权码接入 IMAP/SMTP 邮箱：收件箱、会话、写信（含附件）、账户管理，聊天内邮件卡片，并让 Agent 搜信、读信、归档、起草与发送 | 使用 QQ、163、Gmail、iCloud 等标准 IMAP/SMTP 邮箱的用户 |
 | `ride` | 滴滴打车 | 1.3.1 | 滴滴车型预估、创建订单、订单与司机位置；支付在滴滴内完成 | 需要打车、比价或查司机状态的通勤/出行用户 |
@@ -23,11 +21,10 @@ Super PI Agent 是一个运行在 Android 上的个人智能体（[应用仓库]
 | `amap` | 高德地图 | 1.5.3 | 高德 MCP：地点搜索、周边、坐标转地址、驾车/公交/步行/骑行路线与天气，卡片展示；需要高德 Key | 通勤、出行规划与查地点的用户 |
 | `rail` | 12306铁路 | 1.4.0 | 查询 12306 车次、时刻与余票，选好车次后去 12306 完成预订 | 坐高铁/火车出行，先看车次和余票的用户 |
 | `themes` | 主题包 | 1.0.1 | 给宿主提供 8 套浅色/深色主题配色，在设置的外观里一键切换 | 想换个界面气质的用户 |
-| `zanao` | 校园集市 | 1.0.18 | 内置离线 Token 捕捉器与离线签名 CLI，支持浏览、带图发帖、作者资料与历史检索 | 赞噢校园集市用户 |
 
-`cli-common/` 是仓库内部共享模块（CLI 更新/安装核心与文本、JSON 工具），不是插件、不进插件清单、不随市场发布。
+`cli-common/` 是仓库内部共享模块（CLI 更新/安装核心与文本、JSON 工具），不是插件、不进插件清单、不随市场发布。个人与校园向插件（`sysu`、`wechat`、`zanao`）已拆分至独立的 `SuperPI-Personal-Plugins` 仓库维护。
 
-版本以各模块 `src/main/assets/plugin.json` 的 `version` 为准。十二个插件的清单均为 `apiLevel` 6，使用 `plugin-api` 1.2.0–1.4.0 与 `design` 0.11.0 构建，多数插件要求 PI 1.4.3+，具体最低宿主版本以各模块清单为准。运行时依赖：飞书使用 `lark-cli` 1.0.100，企业微信使用 `wecom-cli` 1.3.4，中山大学使用 Node.js 版 `sysu` CLI 3.6.0；微信导出插件自带 `wechat` CLI，需要 Root 和微信本地数据；高德地图插件通过高德 MCP 提供地点与路线，需要高德 Key；火车票插件直接查询 12306；酒店插件通过官方 `rgh` CLI 与 OAuth 登录（需要 Node.js/npm）；打车插件直接访问滴滴 MCP HTTP API（需要滴滴 Key，插件页配置）；小米云服务没有 CLI，通过插件页内 WebView 登录；邮箱插件不依赖 CLI，用 JVM 网络栈直连 IMAP/SMTP（QQ、163、126、腾讯企业邮、阿里云邮箱、Gmail、iCloud、Fastmail、Yahoo、Zoho 与自定义服务器）；校园集市插件内置离线 Token 捕捉器和 Python CLI，不需要外部 CLI。
+版本以各模块 `src/main/assets/plugin.json` 的 `version` 为准。九个插件的清单均为 `apiLevel` 7、`minHostVersion` `2.0.0`，使用 `plugin-api` 2.0.1 与 `design` 1.0.0 构建。运行时依赖：飞书使用 `lark-cli` 1.0.100，企业微信使用 `wecom-cli` 1.3.4；高德地图插件通过高德 MCP 提供地点与路线，需要高德 Key；火车票插件直接查询 12306；酒店插件通过官方 `rgh` CLI 与 OAuth 登录（需要 Node.js/npm）；打车插件直接访问滴滴 MCP HTTP API（需要滴滴 Key，插件页配置）；小米云服务没有 CLI，通过插件页内 WebView 登录；邮箱插件不依赖 CLI，用 JVM 网络栈直连 IMAP/SMTP（QQ、163、126、腾讯企业邮、阿里云邮箱、Gmail、iCloud、Fastmail、Yahoo、Zoho 与自定义服务器）。
 
 开发示例：[`mcpui-demo/`](mcpui-demo/README.md) 演示把 MCP 工具结果渲染成插件卡片，不上市场，需要 `plugin-api 1.3.0` / 宿主 1.1.0+。
 
@@ -35,12 +32,12 @@ Super PI Agent 是一个运行在 Android 上的个人智能体（[应用仓库]
 
 | 路径 | 说明 |
 |---|---|
-| `feishu/`、`wecom/`、`sysu/`、`wechat/`、`micloud/`、`mail/`、`themes/`、`amap/`、`rail/`、`hotel/`、`ride/`、`zanao/` | 十二个插件模块：Kotlin 源码、`src/main/assets/plugin.json` 清单、图标与页面 |
+| `feishu/`、`wecom/`、`micloud/`、`mail/`、`themes/`、`amap/`、`rail/`、`hotel/`、`ride/` | 九个插件模块：Kotlin 源码、`src/main/assets/plugin.json` 清单、图标与页面 |
 | `gradle/plugin-bundle.gradle.kts` | 共享打包脚本，提供 `assemblePlugin`、`signPlugin`、`verifyPlugin` 三个任务 |
 | `settings.gradle.kts` | 模块列表与仓库配置；依赖来自 `https://sadami3066.github.io/SuperPI-Maven` 的 `io.github.sadami3066.superpi:plugin-api`（版本以该仓库最新发布为准，`api()` 传递配套的 `design`）、Google 与 Maven Central |
 | `gradle/wrapper/`、`gradlew` | Gradle 9.8.2 wrapper，无需本机预装 Gradle |
 | `scripts/gradlew-locked` | 串行 Gradle 包装：flock 构建锁、默认单 worker、限制 JVM 内存，避免小内存机器并发构建 OOM |
-| `scripts/check.sh` | 跑共享层与十二个插件的单测，并构建、签名、验签全部插件 |
+| `scripts/check.sh` | 跑共享层与九个插件的单测，并构建、签名、验签全部插件 |
 | `keys/` | 本机签名密钥目录，密钥文件不入库（`.gitignore` 忽略 `keys/*.pem` 与 `keys/*.pub`） |
 
 各模块编译配置一致：`compileSdk`/`targetSdk` 36、`minSdk` 29、Java 17。仓库只保存源码与打包脚本，不包含私钥，也不托管已签名制品；`.ddp` 产物在构建时生成。
@@ -84,7 +81,7 @@ chmod 600 keys/plugin-signing.pem
 ```bash
 ./scripts/check.sh                              # 全部插件：单测 + 构建 + 签名 + 验签
 ./scripts/gradlew-locked :feishu:verifyPlugin   # 单个插件，包含构建与签名
-./scripts/gradlew-locked :sysu:assemblePlugin   # 仅重打未签名 .ddp
+./scripts/gradlew-locked :mail:assemblePlugin   # 仅重打未签名 .ddp
 ```
 
 任务关系为 `assemblePlugin → signPlugin → verifyPlugin`：
@@ -132,10 +129,10 @@ chmod 600 keys/plugin-signing.pem
 ## 风险
 
 - **与 App 同进程、同权限**：插件在 PI 进程内加载，拥有与 App 相同的 Android 权限和数据访问范围。只安装你信任的发布者签名的插件。
-- **能力范围**：插件在 `plugin.json` 的 `capabilities` 中声明所需能力（本仓库涉及 `files`、`linux`、`network`、`secrets`、`ui`），首次安装的确认页会列出。飞书、企业微信、中山大学插件会在 App 的 Linux 环境里安装并运行 CLI，需要网络与账号凭据；小米云服务插件只申请 `secrets`。
-- **账号凭据**：飞书登录态在 Linux 环境的 `/root/.lark-cli` 与 `/root/.local/share/lark-cli`，企业微信凭据在 `/root/.config/wecom`，中山大学的凭据与登录态（credentials、教务/LMS/场馆/网费会话）在 `/root/.config/sysu`；小米云 cookie 存放在 App 的加密 secrets。卸载插件时宿主会调用插件的清理逻辑（如中山大学插件会删除 `/root/.config/sysu` 和安装目录，飞书、企业微信插件会删除 CLI 与登录目录），但建议在不再使用时退出登录并修改相关密码。
+- **能力范围**：插件在 `plugin.json` 的 `capabilities` 中声明所需能力（本仓库涉及 `files`、`linux`、`logs`、`network`、`secrets`、`settings`、`ui`），首次安装的确认页会列出。飞书与企业微信插件会在 App 的 Linux 环境里安装并运行 CLI，需要网络与账号凭据；小米云服务插件申请 `secrets` 与 `ui`。
+- **账号凭据**：飞书登录态在 Linux 环境的 `/root/.lark-cli` 与 `/root/.local/share/lark-cli`，企业微信凭据在 `/root/.config/wecom`；小米云 cookie 与邮箱授权码存放在 App 的加密 secrets。卸载插件时宿主会调用插件的清理逻辑（如飞书、企业微信插件会删除 CLI 与登录目录），但建议在不再使用时退出登录并修改相关密码。
 - **签名密钥**：私钥丢失后无法再以官方发布者身份更新；私钥泄露则可能被用来伪造更新。官方公钥对应固定的 `keyId`，换钥等于换发布者。
-- **第三方服务**：这些插件是个人维护的第三方集成，与飞书、腾讯、小米、中山大学无隶属关系。自动化访问第三方服务可能受其服务条款限制，存在账号受限或封禁的风险；第三方接口变更也可能让功能失效。
+- **第三方服务**：这些插件是个人维护的第三方集成，与飞书、腾讯、小米、滴滴、RollingGo、高德、铁路 12306 无隶属关系。自动化访问第三方服务可能受其服务条款限制，存在账号受限或封禁的风险；第三方接口变更也可能让功能失效。
 - **来源可信**：只从本仓库或官方市场获取 `.ddp`，不要安装来源不明的插件包。
 - **发布前阶段**：Super PI Agent 与插件契约仍在迭代，接口或行为可能变化。
 
@@ -145,7 +142,7 @@ chmod 600 keys/plugin-signing.pem
 
 ## 声明与反馈
 
-- 本项目为个人维护的第三方集成，与飞书、腾讯、小米、中山大学及其关联公司无隶属或背书关系。
+- 本项目为个人维护的第三方集成，与飞书、腾讯、小米、滴滴、RollingGo、高德、铁路 12306 及其关联公司无隶属或背书关系。
 - 问题、建议与使用反馈请提交到 [GitHub Issues](https://github.com/Sadami3066/SuperPI-Official-Plugins/issues)。涉及签名私钥、凭据或安全漏洞的内容请不要公开，先通过 GitHub 私下联系维护者。
 - 项目按现状提供，尽力维护，不承诺服务可用性、响应时间或第三方接口的持续可用。
 - 相关仓库：[Super PI Agent 应用](https://github.com/Sadami3066/SuperPI-App) · [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) · [SuperPI-Plugins](https://github.com/Sadami3066/SuperPI-Plugins)

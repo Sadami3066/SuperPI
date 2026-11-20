@@ -16,10 +16,6 @@ fi
   :feishu:verifyPlugin \
   :wecom:testDebugUnitTest \
   :wecom:verifyPlugin \
-  :sysu:testDebugUnitTest \
-  :sysu:verifyPlugin \
-  :wechat:testDebugUnitTest \
-  :wechat:verifyPlugin \
   :micloud:testDebugUnitTest \
   :micloud:verifyPlugin \
   :mail:testDebugUnitTest \
@@ -33,6 +29,4 @@ fi
   :ride:testDebugUnitTest \
   :ride:verifyPlugin \
   :amap:testDebugUnitTest \
-  :amap:verifyPlugin \
-  :zanao:testDebugUnitTest \
-  :zanao:verifyPlugin
+  :amap:verifyPlugin

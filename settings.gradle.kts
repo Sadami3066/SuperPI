@@ -27,7 +27,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "superpi-official-plugins"
 include(
-    ":feishu", ":mail", ":mcpui-demo", ":micloud", ":sysu", ":themes", ":wechat", ":wecom",
-    ":rail", ":hotel", ":ride", ":amap", ":zanao",
+    ":feishu", ":mail", ":mcpui-demo", ":micloud", ":themes", ":wecom",
+    ":rail", ":hotel", ":ride", ":amap",
 )
 include(":cli-common")

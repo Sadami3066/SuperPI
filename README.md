@@ -2,20 +2,18 @@
 
 English | [简体中文](README.cn.md)
 
-The official external-plugin source repository maintained by the Super PI Agent project. It brings Feishu, WeCom, SYSU campus services, WeChat export, Xiaomi Cloud, standard IMAP/SMTP mailboxes and Campus Market into PI, packaged as Ed25519-signed `.ddp` plugin bundles.
+The official external-plugin source repository maintained by the Super PI Agent project. It brings Feishu, WeCom, Xiaomi Cloud, standard IMAP/SMTP mailboxes, DiDi Ride, RollingGo Hotels, Amap Maps, 12306 Railway and Themes into PI, packaged as Ed25519-signed `.ddp` plugin bundles.
 
 ## Overview
 
 Super PI Agent is a personal AI agent on Android ([app repository](https://github.com/Sadami3066/SuperPI-App)). Plugins implement the host contract `plugin-api` in Kotlin, load inside the App process, and extend the agent with tools, skills, prompt sections and self-drawn pages. Plugins are installed only from `.ddp` files, and every plugin is a separate Android application module.
 
-This repository contains twelve official plugins, published by `milous`:
+This repository contains nine official plugins, published by `milous`:
 
 | Module | Plugin | Version | What it does | For |
 |---|---|---|---|---|
 | `feishu` | Feishu | 2.7.1 | Read and write messages, calendar, docs, drive, mail and tasks through the official `lark-cli` | Office users who work in Feishu every day |
 | `wecom` | WeCom | 2.6.2 | Operate messages, mail, docs, schedules and to-dos through the official `wecom-cli` | Teams that use WeCom |
-| `sysu` | SYSU CLI | 2.7.3 | Run the Node.js `sysu` CLI inside the Linux environment: timetable, grades, assignments, course files, venue booking, campus network fees and SSO tickets; human-readable output by default, `--json` for scripts | Students and staff at Sun Yat-sen University |
-| `wechat` | WeChat Export | 0.5.2 | Sync and decrypt the local WeChat database, export complete chat records for a date range and let the agent summarize | Users who need a complete WeChat export |
 | `micloud` | Xiaomi Cloud | 2.7.4 | Sign in to a Xiaomi account and read notes, to-dos, SMS, contacts, photos and recordings | Users of Xiaomi Cloud services |
 | `mail` | Mail | 1.6.2 | Connect an IMAP/SMTP mailbox with an authorization code: inbox, conversations, composing with attachments, account management and in-chat mail cards, with agent search, reading, archiving, drafting and sending | Users of standard IMAP/SMTP mailboxes such as QQ, 163, Gmail or iCloud |
 | `ride` | DiDi Ride | 1.3.1 | Didi estimates, order creation, ride status and driver location; payment happens in Didi | Commuters and travellers who need a ride, price comparison or driver status |
@@ -23,22 +21,21 @@ This repository contains twelve official plugins, published by `milous`:
 | `amap` | Amap Maps | 1.5.3 | Amap MCP for place search, nearby POIs, driving/transit/walking/cycling routes and weather, rendered as cards; requires an Amap key | Commuters and travellers planning routes or looking up places |
 | `rail` | 12306 Railway | 1.4.0 | Search 12306 trains, times and seat availability, then book on 12306 | Anyone travelling by rail who wants train and seat options first |
 | `themes` | Themes | 1.0.1 | Provides eight light and dark colour themes that can be switched from the host appearance settings | Users who want a different visual mood |
-| `zanao` | Campus Market | 1.0.18 | Bundled offline token catcher and offline-signing CLI: browsing, posting with images, author profiles and history search | Zanao campus marketplace users |
 
-`cli-common/` is an internal shared module (CLI update/install core plus text and JSON helpers). It is not a plugin, is not listed in manifests, and is not published to the market.
+`cli-common/` is an internal shared module (CLI update/install core plus text and JSON helpers). It is not a plugin, is not listed in manifests, and is not published to the market. Personal and campus-specific plugins (`sysu`, `wechat`, `zanao`) are maintained separately in `SuperPI-Personal-Plugins`.
 
-Versions follow `version` in each module's `src/main/assets/plugin.json`. All twelve manifests declare `apiLevel` 6 and are built against `plugin-api` 1.2.0–1.4.0 and `design` 0.11.0; most plugins require Super PI Agent 1.4.3+; the exact minimum host version is in each manifest. Runtime dependencies: Feishu uses `lark-cli` 1.0.100, WeCom uses `wecom-cli` 1.3.4, SYSU uses the Node.js `sysu` CLI 3.6.0; WeChat Export bundles its own `wechat` CLI and needs Root plus local WeChat data; Amap Maps uses the Amap MCP for places and routes with an Amap key; Trains queries 12306 directly; Hotels uses the official `rgh` CLI with OAuth (Node.js/npm required); Ride calls the Didi MCP HTTP API directly with a key configured on its plugin page; Xiaomi Cloud has no CLI and signs in through a WebView on its plugin page; the Mail plugin needs no CLI and connects to IMAP/SMTP directly over the JVM network stack (QQ, 163, 126, Tencent Exmail, Alibaba Mail, Gmail, iCloud, Fastmail, Yahoo, Zoho and custom servers); Campus Market bundles its own offline token catcher and Python CLI.
+Versions follow `version` in each module's `src/main/assets/plugin.json`. All nine manifests declare `apiLevel` 7 and `minHostVersion` `2.0.0`, built against `plugin-api` 2.0.1 and `design` 1.0.0. Runtime dependencies: Feishu uses `lark-cli` 1.0.100, WeCom uses `wecom-cli` 1.3.4; Amap Maps uses the Amap MCP for places and routes with an Amap key; Trains queries 12306 directly; Hotels uses the official `rgh` CLI with OAuth (Node.js/npm required); Ride calls the Didi MCP HTTP API directly with a key configured on its plugin page; Xiaomi Cloud has no CLI and signs in through a WebView on its plugin page; the Mail plugin needs no CLI and connects to IMAP/SMTP directly over the JVM network stack (QQ, 163, 126, Tencent Exmail, Alibaba Mail, Gmail, iCloud, Fastmail, Yahoo, Zoho and custom servers).
 
 ## What's in the repository
 
 | Path | Description |
 |---|---|
-| `feishu/`, `wecom/`, `sysu/`, `wechat/`, `micloud/`, `mail/`, `themes/`, `amap/`, `rail/`, `hotel/`, `ride/`, `zanao/` | The twelve plugin modules: Kotlin sources, `src/main/assets/plugin.json` manifests, icons and pages |
+| `feishu/`, `wecom/`, `micloud/`, `mail/`, `themes/`, `amap/`, `rail/`, `hotel/`, `ride/` | The nine plugin modules: Kotlin sources, `src/main/assets/plugin.json` manifests, icons and pages |
 | `gradle/plugin-bundle.gradle.kts` | Shared packaging script providing the `assemblePlugin`, `signPlugin` and `verifyPlugin` tasks |
 | `settings.gradle.kts` | Module list and repositories; dependencies come from `io.github.sadami3066.superpi:plugin-api` on `https://sadami3066.github.io/SuperPI-Maven` (use the latest release there; `api()` brings in the matching `design`), Google and Maven Central |
 | `gradle/wrapper/`, `gradlew` | Gradle 9.8.2 wrapper; no local Gradle installation needed |
 | `scripts/gradlew-locked` | Serialized Gradle wrapper: flock build lock, single worker by default, capped JVM memory to avoid OOM on small machines |
-| `scripts/check.sh` | Builds, signs and verifies all twelve plugins |
+| `scripts/check.sh` | Builds, signs and verifies all nine plugins |
 | `keys/` | Local signing-key directory; key files are not committed (`.gitignore` ignores `keys/*.pem` and `keys/*.pub`) |
 
 All modules share the same compile settings: `compileSdk`/`targetSdk` 36, `minSdk` 29, Java 17. The repository stores only sources and packaging scripts — no private keys and no signed artifacts; `.ddp` bundles are produced at build time.
@@ -82,7 +79,7 @@ chmod 600 keys/plugin-signing.pem
 ```bash
 ./scripts/check.sh                              # all plugins: build + sign + verify
 ./scripts/gradlew-locked :feishu:verifyPlugin   # one plugin, includes build and signing
-./scripts/gradlew-locked :sysu:assemblePlugin   # only repack the unsigned .ddp
+./scripts/gradlew-locked :mail:assemblePlugin   # only repack the unsigned .ddp
 ```
 
 The task chain is `assemblePlugin → signPlugin → verifyPlugin`:
@@ -130,10 +127,10 @@ Both `plugin.publisherKeyId` in the market entry and `keyId` in the bundle's `ME
 ## Risks
 
 - **Same process, same permissions**: plugins load inside the PI process and have the same Android permissions and data access as the App. Only install plugins signed by a publisher you trust.
-- **Capabilities**: plugins declare what they need in `plugin.json` under `capabilities` (this repository uses `files`, `linux`, `network`, `secrets` and `ui`), and the first-install confirmation lists them. The Feishu, WeCom and SYSU plugins install and run CLIs inside the App's Linux environment and need network access and account credentials; Xiaomi Cloud requests only `secrets`.
-- **Account credentials**: Feishu sign-in state lives in `/root/.lark-cli` and `/root/.local/share/lark-cli`, WeCom credentials in `/root/.config/wecom`, and SYSU credentials and sessions (credentials, jwxt/LMS/venue/network sessions) in `/root/.config/sysu`; Xiaomi Cloud stores its cookie in the App's encrypted secrets. Uninstalling a plugin invokes its cleanup logic (for example, the SYSU plugin removes `/root/.config/sysu` and its install directory, while Feishu and WeCom remove their CLIs and sign-in directories), but it is still a good idea to sign out and change passwords once you stop using them.
+- **Capabilities**: plugins declare what they need in `plugin.json` under `capabilities` (this repository uses `files`, `linux`, `logs`, `network`, `secrets`, `settings` and `ui`), and the first-install confirmation lists them. The Feishu and WeCom plugins install and run CLIs inside the App's Linux environment and need network access and account credentials; Xiaomi Cloud requests `secrets` and `ui`.
+- **Account credentials**: Feishu sign-in state lives in `/root/.lark-cli` and `/root/.local/share/lark-cli`, and WeCom credentials in `/root/.config/wecom`; Xiaomi Cloud and Mail store credentials in the App's encrypted secrets. Uninstalling a plugin invokes its cleanup logic (for example, Feishu and WeCom remove their CLIs and sign-in directories), but it is still a good idea to sign out and change passwords once you stop using them.
 - **Signing key**: losing the private key means no more updates as the official publisher; leaking it allows forged updates. The official public key maps to a fixed `keyId`, and a new key means a new publisher.
-- **Third-party services**: these plugins are third-party integrations maintained by an individual and are not affiliated with Feishu, Tencent, Xiaomi or Sun Yat-sen University. Automated access to third-party services may be restricted by their terms of service and risks account limits or bans; API changes can also break features.
+- **Third-party services**: these plugins are third-party integrations maintained by an individual and are not affiliated with Feishu, Tencent, Xiaomi, DiDi, RollingGo, Amap or China Railway. Automated access to third-party services may be restricted by their terms of service and risks account limits or bans; API changes can also break features.
 - **Trusted sources**: get `.ddp` files only from this repository or the official market, and never install bundles from unknown sources.
 - **Pre-release stage**: Super PI Agent and the plugin contract are still evolving, so interfaces and behavior may change.
 
@@ -143,7 +140,7 @@ The source code and documentation in this repository are licensed under [Apache-
 
 ## Disclaimer and feedback
 
-- This is a third-party integration maintained by an individual, with no affiliation or endorsement from Feishu, Tencent, Xiaomi, Sun Yat-sen University or their affiliates.
+- This is a third-party integration maintained by an individual, with no affiliation or endorsement from Feishu, Tencent, Xiaomi, DiDi, RollingGo, Amap, China Railway or their affiliates.
 - Please report problems, suggestions and feedback via [GitHub Issues](https://github.com/Sadami3066/SuperPI-Official-Plugins/issues). Do not post signing private keys, credentials or security vulnerabilities publicly; contact the maintainer privately on GitHub first.
 - The project is provided as-is and maintained on a best-effort basis, with no guarantee of service availability, response time or continued availability of third-party APIs.
 - Related repositories: [Super PI Agent app](https://github.com/Sadami3066/SuperPI-App) · [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) · [SuperPI-Plugins](https://github.com/Sadami3066/SuperPI-Plugins)
