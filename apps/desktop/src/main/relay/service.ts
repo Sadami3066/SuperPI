@@ -1,4 +1,5 @@
 import os from 'node:os'
+import path from 'node:path'
 import type { BotEvent, BotInfo, DeviceInfo, EnrollResponse, RouteMethod, ServerFrame } from '@superpi/protocol'
 import { RelayCredentialStore, type RelayCredentials } from './credentials.ts'
 import { RelayClient, type RelayConnectionState } from './relay-client.ts'
@@ -70,6 +71,18 @@ export class RelayService {
 
   memoryStatus(): MemorySummary | null {
     return this.memorySummary
+  }
+
+  memoryEnvironment(): Record<string, string> {
+    const env: Record<string, string> = {
+      SUPERPI_MEMORY_FILE: path.join(this.options.homeDir, 'cache', 'memory', 'snapshot.json'),
+    }
+    const credentials = this.credentials
+    if (credentials) {
+      env.SUPERPI_RELAY_ENDPOINT = credentials.origin
+      env.SUPERPI_RELAY_TOKEN = credentials.token
+    }
+    return env
   }
 
   status(): RelayStatus {

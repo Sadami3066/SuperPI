@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { BotStore, type BotRecord } from './bot-store'
@@ -29,18 +30,35 @@ function botById(id: string): BotRecord | null {
 async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
   const existing = clients.get(bot.id)
   if (existing?.running) return existing
+  const extension = path.join(__dirname, '../../extensions/superpi-memory.mjs')
+  const args = ['--mode', 'rpc']
+  if (existsSync(extension)) args.push('-e', extension)
   const client = new PiRpcClient({
     command: process.env.SUPERPI_PI_BIN ?? 'pi',
-    args: ['--mode', 'rpc'],
+    args,
     cwd: bot.cwd,
+    env: { ...process.env, ...relay.memoryEnvironment() },
   })
   client.onEvent((event: PiRpcEvent) => broadcast('pi:event', { botId: bot.id, event }))
   client.onExit((error) => {
     clients.delete(bot.id)
+    if (error) {
+      console.error(`pi exited for bot ${bot.id}: ${error.message}`)
+      const stderr = client.getStderr().trim()
+      if (stderr !== '') console.error(stderr.slice(-2000))
+    } else {
+      console.error(`pi exited cleanly for bot ${bot.id}: ${JSON.stringify(client.getLastExit())}`)
+    }
     broadcast('pi:exit', { botId: bot.id, message: error?.message ?? null })
   })
   clients.set(bot.id, client)
-  await client.start()
+  try {
+    await client.start()
+  } catch (failure) {
+    clients.delete(bot.id)
+    console.error(`pi failed to start for bot ${bot.id}: ${failure instanceof Error ? failure.message : String(failure)}`)
+    throw failure
+  }
   return client
 }
 

@@ -32,6 +32,7 @@ export class PiRpcClient {
   private readonly exitListeners = new Set<(error: Error | null) => void>()
   private stderrText = ''
   private stopped = false
+  private exitDetail: { code: number | null; signal: string | null } | null = null
 
   constructor(private readonly options: PiRpcOptions) {}
 
@@ -80,6 +81,10 @@ export class PiRpcClient {
 
   getStderr(): string {
     return this.stderrText
+  }
+
+  getLastExit(): { code: number | null; signal: string | null } | null {
+    return this.exitDetail
   }
 
   send<T = unknown>(command: Record<string, unknown>, timeoutMs = this.options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS): Promise<T> {
@@ -193,6 +198,7 @@ export class PiRpcClient {
   }
 
   private handleExit(code: number | null, signal: string | null): void {
+    this.exitDetail = { code, signal }
     const wasRunning = this.child !== null
     this.child = null
     const detail = `pi rpc process exited (code ${String(code)}, signal ${String(signal)})`
