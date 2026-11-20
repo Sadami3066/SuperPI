@@ -71,6 +71,45 @@ export function appendAssistantDelta(entries: Entry[], delta: string): Entry[] {
   return [...entries, { kind: 'assistant', id: entryId(), text: delta }]
 }
 
+export function startTool(entries: Entry[], id: string, name: string, args: unknown): Entry[] {
+  if (entries.some((entry) => entry.kind === 'tool' && entry.id === id)) return entries
+  return [...entries, { kind: 'tool', id, name, status: 'running', detail: toolArgsDetail(args) }]
+}
+
+export function updateTool(entries: Entry[], id: string, patch: { status?: 'done' | 'error'; detail?: string }): Entry[] {
+  return entries.map((entry) => {
+    if (entry.kind !== 'tool' || entry.id !== id) return entry
+    const status = patch.status ?? entry.status
+    const detail = patch.detail !== undefined ? patch.detail : entry.detail
+    return { ...entry, status, detail }
+  })
+}
+
+export function finishTool(
+  entries: Entry[],
+  id: string,
+  name: string,
+  status: 'done' | 'error',
+  result: unknown,
+): Entry[] {
+  const detail = toolResultDetail(result)
+  const exists = entries.some((entry) => entry.kind === 'tool' && entry.id === id)
+  if (!exists) return [...entries, { kind: 'tool', id, name, status, detail }]
+  return updateTool(entries, id, { status, detail })
+}
+
+export function toolResultDetail(result: unknown): string {
+  if (typeof result === 'string') return result
+  if (!isRecord(result)) return ''
+  return textOf(result.content)
+}
+
+export function toolArgsDetail(args: unknown): string {
+  if (!isRecord(args)) return ''
+  const text = JSON.stringify(args)
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text
+}
+
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content
   const parts: string[] = []

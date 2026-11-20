@@ -9,7 +9,16 @@ import type {
   RemoteEventPayload,
   SessionSummary,
 } from '../shared/ipc'
-import { appendAssistantDelta, entriesFromMessages, entryId, type Entry } from './entries'
+import {
+  appendAssistantDelta,
+  entriesFromMessages,
+  entryId,
+  finishTool,
+  startTool,
+  toolResultDetail,
+  updateTool,
+  type Entry,
+} from './entries'
 import './styles.css'
 
 interface RemoteTarget {
@@ -507,21 +516,25 @@ function applyEvent(
       setEntries((current) => appendAssistantDelta(current, delta))
       break
     }
-    case 'tool_call': {
-      const id = typeof event.callId === 'string' ? event.callId : entryId()
-      const name = typeof event.name === 'string' ? event.name : 'tool'
-      setEntries((current) => [...current, { kind: 'tool', id, name, status: 'running', detail: '' }])
+    case 'tool_execution_start': {
+      const id = typeof event.toolCallId === 'string' ? event.toolCallId : entryId()
+      const name = typeof event.toolName === 'string' ? event.toolName : 'tool'
+      setEntries((current) => startTool(current, id, name, event.args))
       break
     }
-    case 'tool_result': {
-      const callId = typeof event.callId === 'string' ? event.callId : ''
-      const isError = event.isError === true
-      const detail = typeof event.result === 'string' ? event.result : ''
-      setEntries((current) =>
-        current.map((entry) =>
-          entry.kind === 'tool' && entry.id === callId ? { ...entry, status: isError ? 'error' : 'done', detail } : entry,
-        ),
-      )
+    case 'tool_execution_update': {
+      const id = typeof event.toolCallId === 'string' ? event.toolCallId : ''
+      const detail = toolResultDetail(event.partialResult)
+      if (id === '' || detail === '') break
+      setEntries((current) => updateTool(current, id, { detail }))
+      break
+    }
+    case 'tool_execution_end': {
+      const id = typeof event.toolCallId === 'string' ? event.toolCallId : ''
+      if (id === '') break
+      const name = typeof event.toolName === 'string' ? event.toolName : 'tool'
+      const status = event.isError === true ? 'error' : 'done'
+      setEntries((current) => finishTool(current, id, name, status, event.result))
       break
     }
     case 'agent_end':
