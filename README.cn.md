@@ -48,4 +48,4 @@ pnpm dev
 
 ## 许可证
 
-私有，不发布。
+Apache-2.0，见 [LICENSE](LICENSE)。

@@ -53,7 +53,7 @@ The wire format lives in `packages/protocol`: frame types, error codes, memory w
 
 ## License
 
-Private. Not published.
+Apache-2.0. See [LICENSE](LICENSE).
 
 ## Local pairing
 
