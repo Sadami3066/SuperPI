@@ -260,7 +260,7 @@ describe('realtime hub', () => {
     const ok = await nextOf(desktopClient, 'route_ok')
     expect(ok).toMatchObject({ type: 'route_ok', id: 'req-stream', result: { sessionId: 's1' } })
 
-    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 1, event: { type: 'text_delta', delta: 'hi' } })
+    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 1, event: { type: 'agent_start' } })
     const first = await nextOf(desktopClient, 'route_event')
     expect(first).toMatchObject({ type: 'route_event', id: 'req-stream', seq: 1 })
 
@@ -268,7 +268,7 @@ describe('realtime hub', () => {
     const last = await nextOf(desktopClient, 'route_event')
     expect(last).toMatchObject({ type: 'route_event', id: 'req-stream', seq: 2 })
 
-    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 3, event: { type: 'text_delta', delta: 'late' } })
+    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 3, event: { type: 'agent_start' } })
     const rejected = await nextOf(phoneClient, 'route_error')
     expect(rejected).toMatchObject({ type: 'route_error', id: 'req-stream', code: 'internal' })
   })
