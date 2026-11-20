@@ -28,6 +28,20 @@ export interface RelayDeviceInfo {
   bots: Array<{ id: string; name: string }>
 }
 
+export interface RemoteSessionPayload {
+  sessionId: string
+  deviceId: string
+  botId: string
+  peerSessionId: string | null
+}
+
+export interface RemoteEventPayload {
+  sessionId: string
+  deviceId: string
+  botId: string
+  event: { type: string; [key: string]: unknown }
+}
+
 export interface RelayStatusPayload {
   state: 'disconnected' | 'connecting' | 'online' | 'offline' | 'error'
   deviceId?: string
@@ -49,6 +63,16 @@ const api = {
   relayPair: (input: { link: string; loginSecret?: string; deviceName?: string }): Promise<RelayStatusPayload> =>
     ipcRenderer.invoke('relay:pair', input),
   relayLogout: (): Promise<RelayStatusPayload> => ipcRenderer.invoke('relay:logout'),
+  remoteStart: (input: { deviceId: string; botId: string }): Promise<RemoteSessionPayload> =>
+    ipcRenderer.invoke('remote:start', input),
+  remotePrompt: (input: { sessionId: string; text: string }): Promise<void> => ipcRenderer.invoke('remote:prompt', input),
+  remoteAbort: (sessionId: string): Promise<void> => ipcRenderer.invoke('remote:abort', sessionId),
+  remoteClose: (sessionId: string): Promise<void> => ipcRenderer.invoke('remote:close', sessionId),
+  onRemoteEvent: (listener: (payload: RemoteEventPayload) => void): (() => void) => {
+    const handler = (_event: unknown, payload: RemoteEventPayload): void => listener(payload)
+    ipcRenderer.on('remote:event', handler)
+    return () => ipcRenderer.removeListener('remote:event', handler)
+  },
   onEvent: (listener: (payload: PiEventPayload) => void): (() => void) => {
     const handler = (_event: unknown, payload: PiEventPayload): void => listener(payload)
     ipcRenderer.on('pi:event', handler)

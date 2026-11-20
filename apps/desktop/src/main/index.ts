@@ -6,13 +6,14 @@ import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
 import { RelayService } from './relay/service'
 
 const botStore = new BotStore()
+const windows = new Set<BrowserWindow>()
 const relay = new RelayService({
   homeDir: path.join(os.homedir(), '.superpi'),
   bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
   broadcast: (status) => broadcast('relay:state', status),
+  onRemoteEvent: (payload) => broadcast('remote:event', payload),
 })
 const clients = new Map<string, PiRpcClient>()
-const windows = new Set<BrowserWindow>()
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of windows) {
@@ -99,6 +100,16 @@ function registerIpc(): void {
     relay.pair(input),
   )
   ipcMain.handle('relay:logout', () => relay.logout())
+  ipcMain.handle('remote:start', (_event, input: { deviceId: string; botId: string }) => relay.startRemote(input))
+  ipcMain.handle('remote:prompt', (_event, input: { sessionId: string; text: string }) => {
+    relay.promptRemote(input.sessionId, input.text)
+  })
+  ipcMain.handle('remote:abort', (_event, sessionId: string) => {
+    relay.abortRemote(sessionId)
+  })
+  ipcMain.handle('remote:close', (_event, sessionId: string) => {
+    relay.closeRemote(sessionId)
+  })
 
   ipcMain.handle('bots:save', (_event, bots: BotRecord[]) => botStore.save(bots))
   ipcMain.handle('bots:add', (_event, bot: BotRecord) => botStore.add(bot))

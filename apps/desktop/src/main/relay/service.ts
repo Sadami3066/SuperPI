@@ -1,5 +1,5 @@
 import os from 'node:os'
-import type { BotInfo, DeviceInfo, EnrollResponse, ServerFrame } from '@superpi/protocol'
+import type { BotEvent, BotInfo, DeviceInfo, EnrollResponse, RouteMethod, ServerFrame } from '@superpi/protocol'
 import { RelayCredentialStore, type RelayCredentials } from './credentials.ts'
 import { RelayClient, type RelayConnectionState } from './relay-client.ts'
 import { fetchCaPem, fingerprintOfPem, relayRequest } from './http.ts'
@@ -27,6 +27,21 @@ export interface RelayServiceOptions {
   homeDir: string
   bots: () => BotInfo[]
   broadcast: (status: RelayStatus) => void
+  onRemoteEvent?: (payload: RemoteEventPayload) => void
+}
+
+export interface RemoteEventPayload {
+  sessionId: string
+  deviceId: string
+  botId: string
+  event: BotEvent
+}
+
+export interface RemoteSessionInfo {
+  sessionId: string
+  deviceId: string
+  botId: string
+  peerSessionId: string | null
 }
 
 export class RelayService {
@@ -36,6 +51,9 @@ export class RelayService {
   private devices: DeviceInfo[] = []
   private state: RelayState = 'disconnected'
   private error: string | undefined
+  private readonly remoteSessions = new Map<string, RemoteSessionInfo>()
+  private readonly remoteRoutes = new Map<string, string>()
+  private remoteCounter = 0
 
   constructor(private readonly options: RelayServiceOptions) {
     this.store = new RelayCredentialStore(options.homeDir)
@@ -113,6 +131,39 @@ export class RelayService {
     return this.status()
   }
 
+  startRemote(input: { deviceId: string; botId: string }): RemoteSessionInfo {
+    const device = this.devices.find((entry) => entry.deviceId === input.deviceId)
+    if (!device || !device.online) throw new Error('That device is offline')
+    if (!device.bots.some((bot) => bot.id === input.botId)) throw new Error('That bot is not available')
+    this.remoteCounter += 1
+    const session: RemoteSessionInfo = {
+      sessionId: `rs-${this.remoteCounter}`,
+      deviceId: input.deviceId,
+      botId: input.botId,
+      peerSessionId: null,
+    }
+    this.remoteSessions.set(session.sessionId, session)
+    return session
+  }
+
+  promptRemote(sessionId: string, text: string): void {
+    const session = this.remoteSessions.get(sessionId)
+    if (!session) throw new Error(`unknown remote session: ${sessionId}`)
+    const params: Record<string, unknown> = { botId: session.botId, text }
+    if (session.peerSessionId) params.sessionId = session.peerSessionId
+    this.sendRemote(session, 'bot.prompt', params)
+  }
+
+  abortRemote(sessionId: string): void {
+    const session = this.remoteSessions.get(sessionId)
+    if (!session || !session.peerSessionId) return
+    this.sendRemote(session, 'bot.abort', { sessionId: session.peerSessionId })
+  }
+
+  closeRemote(sessionId: string): void {
+    this.remoteSessions.delete(sessionId)
+  }
+
   logout(): RelayStatus {
     this.client?.disconnect()
     this.client = null
@@ -157,16 +208,55 @@ export class RelayService {
     this.publish()
   }
 
+  private sendRemote(session: RemoteSessionInfo, method: RouteMethod, params: Record<string, unknown>): void {
+    if (!this.client?.connected) throw new Error('The relay connection is not ready')
+    const id = `rr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    this.remoteRoutes.set(id, session.sessionId)
+    this.client.send({ type: 'route', id, to: session.deviceId, method, params })
+  }
+
   private handleFrame(frame: ServerFrame): void {
     if (frame.type === 'presence') {
       this.devices = mergePresence(this.devices, frame.deviceId, frame.online, frame.lastSeen, frame.bots)
       this.publish()
+      return
+    }
+    if (frame.type === 'route_event') {
+      const sessionId = this.remoteRoutes.get(frame.id)
+      if (!sessionId) return
+      const session = this.remoteSessions.get(sessionId)
+      if (!session) return
+      this.options.onRemoteEvent?.({ sessionId, deviceId: session.deviceId, botId: session.botId, event: frame.event })
+      return
+    }
+    if (frame.type === 'route_ok') {
+      const sessionId = this.remoteRoutes.get(frame.id)
+      if (!sessionId) return
+      const session = this.remoteSessions.get(sessionId)
+      if (session && hasSessionId(frame.result)) session.peerSessionId = frame.result.sessionId
+      return
+    }
+    if (frame.type === 'route_error') {
+      const sessionId = this.remoteRoutes.get(frame.id)
+      if (!sessionId) return
+      const session = this.remoteSessions.get(sessionId)
+      if (!session) return
+      this.options.onRemoteEvent?.({
+        sessionId,
+        deviceId: session.deviceId,
+        botId: session.botId,
+        event: { type: 'error', message: frame.message },
+      })
     }
   }
 
   private publish(): void {
     this.options.broadcast(this.status())
   }
+}
+
+function hasSessionId(value: unknown): value is { sessionId: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { sessionId?: unknown }).sessionId === 'string'
 }
 
 function mergePresence(

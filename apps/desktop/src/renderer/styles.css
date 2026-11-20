@@ -539,3 +539,35 @@ body {
 .dialog-actions button.ghost {
   background: transparent;
 }
+
+.device-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.device-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.device-title.offline {
+  opacity: 0.6;
+}
+
+.bot-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bot-row:disabled:hover {
+  background: transparent;
+}
+
+.bot-row.remote .bot-path {
+  font-size: 11px;
+}
