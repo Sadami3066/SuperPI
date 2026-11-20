@@ -4,6 +4,7 @@ import { RelayCredentialStore, type RelayCredentials } from './credentials.ts'
 import { RelayClient, type RelayConnectionState } from './relay-client.ts'
 import { fetchCaPem, fingerprintOfPem, relayRequest } from './http.ts'
 import { parsePairingLink } from './pairing.ts'
+import { MemoryClient, type MemorySummary } from './memory-client.ts'
 
 export type RelayState = 'disconnected' | 'connecting' | 'online' | 'offline' | 'error'
 
@@ -27,6 +28,7 @@ export interface RelayServiceOptions {
   homeDir: string
   bots: () => BotInfo[]
   broadcast: (status: RelayStatus) => void
+  broadcastMemory?: (summary: MemorySummary | null) => void
   onRemoteEvent?: (payload: RemoteEventPayload) => void
 }
 
@@ -54,11 +56,20 @@ export class RelayService {
   private readonly remoteSessions = new Map<string, RemoteSessionInfo>()
   private readonly remoteRoutes = new Map<string, string>()
   private remoteCounter = 0
+  private readonly memoryClient: MemoryClient
+  private memorySummary: MemorySummary | null = null
+  private memorySync: Promise<void> | null = null
 
   constructor(private readonly options: RelayServiceOptions) {
     this.store = new RelayCredentialStore(options.homeDir)
     this.credentials = this.store.read()
+    this.memoryClient = new MemoryClient(options.homeDir)
+    this.memorySummary = this.memoryClient.cached()
     if (this.credentials) this.startClient()
+  }
+
+  memoryStatus(): MemorySummary | null {
+    return this.memorySummary
   }
 
   status(): RelayStatus {
@@ -206,6 +217,24 @@ export class RelayService {
     this.state = state
     this.error = error
     this.publish()
+    if (state === 'online') void this.syncMemory()
+  }
+
+  private syncMemory(): Promise<void> {
+    const credentials = this.credentials
+    if (!credentials) return Promise.resolve()
+    if (this.memorySync) return this.memorySync
+    this.memorySync = this.memoryClient
+      .sync(credentials)
+      .then((summary) => {
+        this.memorySummary = summary
+        this.options.broadcastMemory?.(summary)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.memorySync = null
+      })
+    return this.memorySync
   }
 
   private sendRemote(session: RemoteSessionInfo, method: RouteMethod, params: Record<string, unknown>): void {
@@ -216,6 +245,10 @@ export class RelayService {
   }
 
   private handleFrame(frame: ServerFrame): void {
+    if (frame.type === 'memory_changed') {
+      void this.syncMemory()
+      return
+    }
     if (frame.type === 'presence') {
       this.devices = mergePresence(this.devices, frame.deviceId, frame.online, frame.lastSeen, frame.bots)
       this.publish()

@@ -25,6 +25,7 @@ pnpm start          # 启动 Electron
 - 中继接入在 `src/main/relay/`：配对链接解析、凭据（`~/.superpi/relay.json`，0600）、CA 指纹比对、HTTP/WSS 客户端、自动重连；IPC 表面是 `relay:status` / `relay:pair` / `relay:logout`，状态经 `relay:state` 推给界面。
 - 中继客户端集成测试会真起 `../SuperPI-Remote` 的服务（含 TLS 证书生成），跨仓路径不存在时自动跳过。
 - 远程会话：`RelayService.startRemote/promptRemote/abortRemote` 经 `route` 帧驱动另一台设备上的 bot；事件以 `remote:event` 推到界面，界面用同一套 Entry 渲染。远端离线时入口置灰、启动会话直接报错。
+- 记忆缓存：`src/main/relay/memory-client.ts` 把中继快照镜像到 `~/.superpi/cache/memory/`（`snapshot.json` 存版本与内容），服务在连上中继和收到 `memory_changed` 时刷新；状态经 `memory:state` 推给界面。
 
 ## 边界
 

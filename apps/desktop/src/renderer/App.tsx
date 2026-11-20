@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { BotInfo, PiEventPayload, RelayStatusPayload, RemoteEventPayload } from '../preload'
+import type { BotInfo, MemorySummaryPayload, PiEventPayload, RelayStatusPayload, RemoteEventPayload } from '../preload'
 import './styles.css'
 
 type Entry =
@@ -30,6 +30,7 @@ export function App(): React.JSX.Element {
   const [running, setRunning] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [relay, setRelay] = useState<RelayStatusPayload | null>(null)
+  const [memory, setMemory] = useState<MemorySummaryPayload | null>(null)
   const [showRelay, setShowRelay] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeBotIdRef = useRef<string | null>(null)
@@ -44,7 +45,13 @@ export function App(): React.JSX.Element {
       setActiveBotId((current) => current ?? list[0]?.id ?? null)
     })
     void window.superpi.relayStatus().then(setRelay)
-    return window.superpi.onRelayState(setRelay)
+    void window.superpi.memoryStatus().then(setMemory)
+    const stopRelay = window.superpi.onRelayState(setRelay)
+    const stopMemory = window.superpi.onMemoryState(setMemory)
+    return () => {
+      stopRelay()
+      stopMemory()
+    }
   }, [])
 
   useEffect(() => {
@@ -296,7 +303,12 @@ export function App(): React.JSX.Element {
       </main>
 
       {showRelay ? (
-        <RelayDialog relay={relay} onClose={() => setShowRelay(false)} onChanged={setRelay} />
+        <RelayDialog
+          relay={relay}
+          memory={memory}
+          onClose={() => setShowRelay(false)}
+          onChanged={setRelay}
+        />
       ) : null}
     </div>
   )
@@ -370,6 +382,7 @@ function applyEvent(
 
 function RelayDialog(props: {
   relay: RelayStatusPayload | null
+  memory: MemorySummaryPayload | null
   onClose: () => void
   onChanged: (relay: RelayStatusPayload) => void
 }): React.JSX.Element {
@@ -429,6 +442,12 @@ function RelayDialog(props: {
               <div>
                 <span className="dialog-label">Status</span> {relay.state}
                 {relay.error ? ` · ${relay.error}` : ''}
+              </div>
+              <div>
+                <span className="dialog-label">Memory</span>{' '}
+                {props.memory
+                  ? `v${props.memory.version} · ${props.memory.files.length} files · synced ${new Date(props.memory.syncedAt).toLocaleTimeString()}`
+                  : 'not synced yet'}
               </div>
             </div>
             <div className="dialog-section">Devices</div>

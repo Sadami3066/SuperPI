@@ -11,6 +11,7 @@ const relay = new RelayService({
   homeDir: path.join(os.homedir(), '.superpi'),
   bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
   broadcast: (status) => broadcast('relay:state', status),
+  broadcastMemory: (summary) => broadcast('memory:state', summary),
   onRemoteEvent: (payload) => broadcast('remote:event', payload),
 })
 const clients = new Map<string, PiRpcClient>()
@@ -110,6 +111,7 @@ function registerIpc(): void {
   ipcMain.handle('remote:close', (_event, sessionId: string) => {
     relay.closeRemote(sessionId)
   })
+  ipcMain.handle('memory:status', () => relay.memoryStatus())
 
   ipcMain.handle('bots:save', (_event, bots: BotRecord[]) => botStore.save(bots))
   ipcMain.handle('bots:add', (_event, bot: BotRecord) => botStore.add(bot))

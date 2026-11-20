@@ -42,6 +42,12 @@ export interface RemoteEventPayload {
   event: { type: string; [key: string]: unknown }
 }
 
+export interface MemorySummaryPayload {
+  version: number
+  syncedAt: number
+  files: string[]
+}
+
 export interface RelayStatusPayload {
   state: 'disconnected' | 'connecting' | 'online' | 'offline' | 'error'
   deviceId?: string
@@ -63,6 +69,12 @@ const api = {
   relayPair: (input: { link: string; loginSecret?: string; deviceName?: string }): Promise<RelayStatusPayload> =>
     ipcRenderer.invoke('relay:pair', input),
   relayLogout: (): Promise<RelayStatusPayload> => ipcRenderer.invoke('relay:logout'),
+  memoryStatus: (): Promise<MemorySummaryPayload | null> => ipcRenderer.invoke('memory:status'),
+  onMemoryState: (listener: (summary: MemorySummaryPayload | null) => void): (() => void) => {
+    const handler = (_event: unknown, summary: MemorySummaryPayload | null): void => listener(summary)
+    ipcRenderer.on('memory:state', handler)
+    return () => ipcRenderer.removeListener('memory:state', handler)
+  },
   remoteStart: (input: { deviceId: string; botId: string }): Promise<RemoteSessionPayload> =>
     ipcRenderer.invoke('remote:start', input),
   remotePrompt: (input: { sessionId: string; text: string }): Promise<void> => ipcRenderer.invoke('remote:prompt', input),

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { EnrollResponse } from '@superpi/protocol'
 import { RelayService, type RemoteEventPayload } from '../../src/main/relay/service'
+import type { MemorySummary } from '../../src/main/relay/memory-client'
 
 export const remoteRepo = fileURLToPath(new URL('../../../../../SuperPI-Remote/', import.meta.url))
 export const remoteServer = path.join(remoteRepo, 'src/server/index.ts')
@@ -71,13 +72,34 @@ export async function startRelay(extraEnv: Record<string, string> = {}): Promise
   }
 }
 
-export function createService(options: { onRemoteEvent?: (payload: RemoteEventPayload) => void } = {}): RelayService {
+export function createService(
+  options: {
+    onRemoteEvent?: (payload: RemoteEventPayload) => void
+    onMemory?: (summary: MemorySummary | null) => void
+    homeDir?: string
+  } = {},
+): RelayService {
   return new RelayService({
-    homeDir: tempDir('superpi-relay-home-'),
+    homeDir: options.homeDir ?? tempDir('superpi-relay-home-'),
     bots: () => [{ id: 'pi', name: 'PI' }],
     broadcast: () => undefined,
+    broadcastMemory: options.onMemory,
     onRemoteEvent: options.onRemoteEvent,
   })
+}
+
+export async function writeMemory(
+  port: number,
+  token: string,
+  body: Record<string, unknown>,
+): Promise<{ version: number }> {
+  const response = await fetch(`http://127.0.0.1:${port}/v1/memory/write`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (response.status !== 200) throw new Error(`memory write failed: ${response.status}`)
+  return (await response.json()) as { version: number }
 }
 
 export async function enrollDevice(
