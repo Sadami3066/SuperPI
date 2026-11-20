@@ -3,6 +3,7 @@ import type {
   BotInfo,
   BotSessionPayload,
   MemorySummaryPayload,
+  ModelOption,
   PiEventPayload,
   PiStatePayload,
   RelayStatusPayload,
@@ -40,6 +41,10 @@ export function App(): React.JSX.Element {
   const [running, setRunning] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [retryable, setRetryable] = useState(false)
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [thinkingLevels, setThinkingLevels] = useState<string[]>([])
+  const [modelBusy, setModelBusy] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
   const [relay, setRelay] = useState<RelayStatusPayload | null>(null)
   const [memory, setMemory] = useState<MemorySummaryPayload | null>(null)
   const [showRelay, setShowRelay] = useState(false)
@@ -59,6 +64,7 @@ export function App(): React.JSX.Element {
     setRunning(false)
     setNotice(null)
     setRetryable(false)
+    setModelError(null)
   }, [])
 
   const activate = useCallback(
@@ -138,6 +144,44 @@ export function App(): React.JSX.Element {
       setNotice(payload.message ? `pi exited: ${payload.message}` : 'pi session ended')
     })
   }, [])
+
+  useEffect(() => {
+    if (remote !== null || activeBotId === null) {
+      setModels([])
+      return
+    }
+    const botId = activeBotId
+    let cancelled = false
+    void window.superpi
+      .listModels(botId)
+      .then((list) => {
+        if (!cancelled) setModels(list)
+      })
+      .catch((error) => {
+        if (!cancelled) setModelError(errorMessage(error))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeBotId, remote])
+
+  useEffect(() => {
+    if (remote !== null || activeBotId === null) {
+      setThinkingLevels([])
+      return
+    }
+    const botId = activeBotId
+    let cancelled = false
+    void window.superpi
+      .listThinkingLevels(botId)
+      .then((levels) => {
+        if (!cancelled) setThinkingLevels(levels)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [activeBotId, remote, piState?.model?.provider, piState?.model?.id])
 
   useEffect(() => {
     const element = scrollRef.current
@@ -235,6 +279,44 @@ export function App(): React.JSX.Element {
     [activeBotId, running, remote, piState?.sessionFile, applySnapshot],
   )
 
+  const chooseModel = useCallback(
+    async (model: ModelOption) => {
+      const botId = activeBotIdRef.current
+      if (botId === null || modelBusy) return
+      setModelBusy(true)
+      setModelError(null)
+      try {
+        const state = await window.superpi.setModel(botId, { provider: model.provider, id: model.id })
+        if (botId !== activeBotIdRef.current) return
+        setPiState(state)
+      } catch (error) {
+        setModelError(errorMessage(error))
+      } finally {
+        setModelBusy(false)
+      }
+    },
+    [modelBusy],
+  )
+
+  const chooseThinkingLevel = useCallback(
+    async (level: string) => {
+      const botId = activeBotIdRef.current
+      if (botId === null || modelBusy) return
+      setModelBusy(true)
+      setModelError(null)
+      try {
+        const state = await window.superpi.setThinkingLevel(botId, level)
+        if (botId !== activeBotIdRef.current) return
+        setPiState(state)
+      } catch (error) {
+        setModelError(errorMessage(error))
+      } finally {
+        setModelBusy(false)
+      }
+    },
+    [modelBusy],
+  )
+
   const retry = useCallback(() => {
     const botId = activeBotIdRef.current
     if (botId !== null) void activate(botId)
@@ -261,6 +343,16 @@ export function App(): React.JSX.Element {
   )
 
   const activeBot = bots.find((bot) => bot.id === activeBotId) ?? null
+  const selectedModel = piState?.model ?? null
+  const selectedModelIndex =
+    selectedModel === null
+      ? -1
+      : models.findIndex((model) => model.provider === selectedModel.provider && model.id === selectedModel.id)
+  const modelGroups = groupModels(models)
+  const levelChoices =
+    piState !== null && piState.thinkingLevel !== '' && !thinkingLevels.includes(piState.thinkingLevel)
+      ? [piState.thinkingLevel, ...thinkingLevels]
+      : thinkingLevels
   const relayView = describeRelay(relay)
   const otherDevices = relay?.devices.filter((device) => device.deviceId !== relay.deviceId) ?? []
   const title = remote ? remote.label : (activeBot?.name ?? 'No bot')
@@ -373,6 +465,53 @@ export function App(): React.JSX.Element {
               <div className="chat-title">{title}</div>
               <div className="chat-subtitle">{subtitle}</div>
             </div>
+            {remote === null ? (
+              <div className="chat-controls">
+                {models.length > 0 || selectedModel !== null ? (
+                  <select
+                    className="header-select"
+                    aria-label="Model"
+                    title="Model"
+                    disabled={modelBusy || models.length === 0}
+                    value={selectedModelIndex >= 0 ? String(selectedModelIndex) : ''}
+                    onChange={(event) => {
+                      const model = models[Number(event.target.value)]
+                      if (model) void chooseModel(model)
+                    }}
+                  >
+                    {selectedModelIndex < 0 && selectedModel !== null ? (
+                      <option value="">{selectedModel.name}</option>
+                    ) : null}
+                    {modelGroups.map((group) => (
+                      <optgroup key={group.provider} label={group.provider}>
+                        {group.models.map((model) => (
+                          <option key={`${model.provider}/${model.id}`} value={String(models.indexOf(model))}>
+                            {model.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                ) : null}
+                {levelChoices.length > 1 ? (
+                  <select
+                    className="header-select"
+                    aria-label="Thinking level"
+                    title="Thinking level"
+                    disabled={modelBusy}
+                    value={piState?.thinkingLevel ?? ''}
+                    onChange={(event) => void chooseThinkingLevel(event.target.value)}
+                  >
+                    {levelChoices.map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {modelError ? <span className="header-error">{modelError}</span> : null}
+              </div>
+            ) : null}
           </div>
           {notice ? (
             <div className="chat-notice">
@@ -476,6 +615,16 @@ async function closeRemote(target: RemoteTarget | null): Promise<void> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function groupModels(models: ModelOption[]): Array<{ provider: string; models: ModelOption[] }> {
+  const groups: Array<{ provider: string; models: ModelOption[] }> = []
+  for (const model of models) {
+    const group = groups.find((entry) => entry.provider === model.provider)
+    if (group) group.models.push(model)
+    else groups.push({ provider: model.provider, models: [model] })
+  }
+  return groups
 }
 
 function sessionSubtitle(state: PiStatePayload | null, bot: BotInfo | null): string {

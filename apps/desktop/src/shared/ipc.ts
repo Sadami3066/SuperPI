@@ -23,6 +23,13 @@ export interface PiModelInfo {
   name: string
 }
 
+export interface ModelOption {
+  provider: string
+  id: string
+  name: string
+  reasoning: boolean
+}
+
 export interface PiStatePayload {
   model: PiModelInfo | null
   thinkingLevel: string

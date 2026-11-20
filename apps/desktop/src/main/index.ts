@@ -6,6 +6,7 @@ import { BotStore, type BotRecord } from './bot-store'
 import { loadDesktopState, rememberSession, saveDesktopState, type DesktopState } from './desktop-state'
 import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
 import { listSessions, resumableSession } from './pi/sessions'
+import { modelOptions, piStatePayload, thinkingLevelOptions } from './pi/state'
 import { RelayService } from './relay/service'
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, closeAction, restoreWindowBounds, type CloseAction } from './shell'
 import type { BotSessionPayload, BotSessionResult, PiStatePayload } from '../shared/ipc'
@@ -93,24 +94,6 @@ async function rememberClientSession(botId: string, client: PiRpcClient): Promis
     scheduleSaveState()
   } catch {
     return
-  }
-}
-
-function piStatePayload(raw: unknown): PiStatePayload {
-  const state = isRecord(raw) ? raw : {}
-  const model = isRecord(state.model) ? state.model : null
-  return {
-    model:
-      model !== null && typeof model.provider === 'string' && typeof model.id === 'string'
-        ? {
-            provider: model.provider,
-            id: model.id,
-            name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id,
-          }
-        : null,
-    thinkingLevel: typeof state.thinkingLevel === 'string' ? state.thinkingLevel : 'off',
-    sessionFile: typeof state.sessionFile === 'string' ? state.sessionFile : null,
-    sessionName: typeof state.sessionName === 'string' && state.sessionName !== '' ? state.sessionName : null,
   }
 }
 
@@ -311,6 +294,28 @@ function registerIpc(): void {
     const client = await ensureClient(bot)
     return piStatePayload(await client.getState())
   })
+  ipcMain.handle('bot:models', async (_event, botId: string) => {
+    const bot = resolveBot(botId)
+    const client = await ensureClient(bot)
+    return modelOptions(await client.getAvailableModels())
+  })
+  ipcMain.handle('bot:thinking-levels', async (_event, botId: string) => {
+    const bot = resolveBot(botId)
+    const client = await ensureClient(bot)
+    return thinkingLevelOptions(await client.getAvailableThinkingLevels())
+  })
+  ipcMain.handle('bot:set-model', async (_event, payload: { botId: string; provider: string; id: string }) => {
+    const bot = resolveBot(payload.botId)
+    const client = await ensureClient(bot)
+    await client.setModel(payload.provider, payload.id)
+    return piStatePayload(await client.getState())
+  })
+  ipcMain.handle('bot:set-thinking-level', async (_event, payload: { botId: string; level: string }) => {
+    const bot = resolveBot(payload.botId)
+    const client = await ensureClient(bot)
+    await client.setThinkingLevel(payload.level)
+    return piStatePayload(await client.getState())
+  })
   ipcMain.handle('bot:new-session', (_event, botId: string) => newBotSession(botId))
   ipcMain.handle('bot:switch-session', (_event, payload: { botId: string; sessionPath: string }) =>
     switchBotSession(payload.botId, payload.sessionPath),
@@ -371,10 +376,6 @@ function start(): void {
   })
   process.on('SIGINT', requestQuit)
   process.on('SIGTERM', requestQuit)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 if (!app.requestSingleInstanceLock()) {

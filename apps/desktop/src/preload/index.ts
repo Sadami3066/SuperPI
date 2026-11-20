@@ -4,6 +4,7 @@ import type {
   BotSessionPayload,
   BotSessionResult,
   MemorySummaryPayload,
+  ModelOption,
   PiEventPayload,
   PiExitPayload,
   PiStatePayload,
@@ -18,6 +19,7 @@ export type {
   BotSessionPayload,
   BotSessionResult,
   MemorySummaryPayload,
+  ModelOption,
   PiEventPayload,
   PiExitPayload,
   PiModelInfo,
@@ -39,6 +41,12 @@ const api = {
   newSession: (botId: string): Promise<BotSessionResult> => ipcRenderer.invoke('bot:new-session', botId),
   switchSession: (botId: string, sessionPath: string): Promise<BotSessionResult> =>
     ipcRenderer.invoke('bot:switch-session', { botId, sessionPath }),
+  listModels: (botId: string): Promise<ModelOption[]> => ipcRenderer.invoke('bot:models', botId),
+  setModel: (botId: string, model: { provider: string; id: string }): Promise<PiStatePayload> =>
+    ipcRenderer.invoke('bot:set-model', { botId, ...model }),
+  listThinkingLevels: (botId: string): Promise<string[]> => ipcRenderer.invoke('bot:thinking-levels', botId),
+  setThinkingLevel: (botId: string, level: string): Promise<PiStatePayload> =>
+    ipcRenderer.invoke('bot:set-thinking-level', { botId, level }),
   prompt: (botId: string, text: string): Promise<unknown> => ipcRenderer.invoke('bot:prompt', { botId, text }),
   abort: (botId: string): Promise<unknown> => ipcRenderer.invoke('bot:abort', botId),
   relayStatus: (): Promise<RelayStatusPayload> => ipcRenderer.invoke('relay:status'),

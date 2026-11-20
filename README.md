@@ -11,6 +11,7 @@ SuperPI on a phone is a personal agent app. This is the same assistant on a comp
 - **Local first** — sessions, credentials and model configuration come from pi itself; SuperPI keeps only its own state under `~/.superpi`.
 - **Desktop-native surface** — a window, a bot drawer, tool cards folded into the conversation, keyboard-first composer.
 - **Sessions live in pi** — existing sessions of the bot's directory are listed and reopen through pi's own RPC, so a relaunch returns to the conversation you left.
+- **Models from pi** — the header picker lists what pi has configured and switches through `set_model`; the choice belongs to the session, so pi restores it with the conversation.
 - **Stays out of the way** — closing the window keeps SuperPI running in the tray; a second launch focuses the window that is already open, and quitting shuts the pi processes down in order.
 
 Devices can later talk to each other through the relay service in [SuperPI-Remote](../SuperPI-Remote): the same bots appear in the drawer, and either device can be asked to run its own bot.

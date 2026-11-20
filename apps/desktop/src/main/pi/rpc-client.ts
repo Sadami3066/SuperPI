@@ -147,6 +147,18 @@ export class PiRpcClient {
     return this.send({ type: 'set_model', provider, modelId })
   }
 
+  getAvailableModels<T = unknown>(): Promise<T> {
+    return this.send<T>({ type: 'get_available_models' })
+  }
+
+  setThinkingLevel(level: string): Promise<unknown> {
+    return this.send({ type: 'set_thinking_level', level })
+  }
+
+  getAvailableThinkingLevels<T = unknown>(): Promise<T> {
+    return this.send<T>({ type: 'get_available_thinking_levels' })
+  }
+
   async stop(): Promise<void> {
     const child = this.child
     if (!child) return
