@@ -144,6 +144,28 @@ class RemoteEventMappingTest {
         assertTrue(state.consume(RemoteBotEvent.Settled).isEmpty())
     }
 
+    @Test
+    fun turnMessagesPreservesInterleavedMultiStepToolHistory() {
+        val state = RemoteTurnState("PI")
+        state.consume(RemoteBotEvent.TextDelta("Checking files."))
+        state.consume(RemoteBotEvent.ToolCall("call-1", "shell", buildJsonObject { put("command", "ls") }))
+        state.consume(RemoteBotEvent.ToolResult("call-1", "a.txt", false, null))
+        state.consume(RemoteBotEvent.TextDelta("Found a.txt."))
+
+        val messages = state.turnMessages(StopReason.Stop, null)
+
+        assertEquals(3, messages.size)
+        val firstAssistant = messages[0] as AssistantMessage
+        assertEquals("Checking files.", firstAssistant.text())
+        assertEquals(StopReason.ToolUse, firstAssistant.stopReason)
+        assertTrue(firstAssistant.content.any { it is ToolCall && it.id == "call-1" })
+        val toolResult = messages[1] as io.github.whywood.superpi.sdk.ai.ToolResultMessage
+        assertEquals("call-1", toolResult.toolCallId)
+        val finalAssistant = messages[2] as AssistantMessage
+        assertEquals("Found a.txt.", finalAssistant.text())
+        assertEquals(StopReason.Stop, finalAssistant.stopReason)
+    }
+
     private fun decode(json: String): RemoteBotEvent? =
         RemoteEventMapping.decode(Json.parseToJsonElement(json).jsonObject)
 

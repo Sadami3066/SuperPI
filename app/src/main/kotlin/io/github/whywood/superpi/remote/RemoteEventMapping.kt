@@ -5,6 +5,7 @@ import io.github.whywood.superpi.sdk.agent.asAgentMessage
 import io.github.whywood.superpi.sdk.agent.AgentToolResult
 import io.github.whywood.superpi.sdk.ai.AssistantMessage
 import io.github.whywood.superpi.sdk.ai.Content
+import io.github.whywood.superpi.sdk.ai.Message
 import io.github.whywood.superpi.sdk.ai.StopReason
 import io.github.whywood.superpi.sdk.ai.TextContent
 import io.github.whywood.superpi.sdk.ai.TextDeltaEvent
@@ -120,6 +121,7 @@ internal class RemoteTurnState(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val lock = Any()
+    private val completedSteps = mutableListOf<StepSnapshot>()
     private val textBuilder = StringBuilder()
     private val reasoningBuilder = StringBuilder()
     private val calls = LinkedHashMap<String, RemoteToolCallRecord>()
@@ -133,15 +135,31 @@ internal class RemoteTurnState(
 
     val endStatus: String? get() = synchronized(lock) { endStatusValue }
 
-    val text: String get() = synchronized(lock) { textBuilder.toString() }
+    val text: String get() = synchronized(lock) {
+        buildString {
+            completedSteps.forEach { step -> append(step.text) }
+            append(textBuilder)
+        }
+    }
 
-    val reasoning: String get() = synchronized(lock) { reasoningBuilder.toString() }
+    val reasoning: String get() = synchronized(lock) {
+        buildString {
+            completedSteps.forEach { step -> append(step.reasoning) }
+            append(reasoningBuilder)
+        }
+    }
 
-    val toolResults: List<RemoteToolResultRecord> get() = synchronized(lock) { results.toList() }
+    val toolResults: List<RemoteToolResultRecord> get() = synchronized(lock) {
+        completedSteps.flatMap { it.results } + results
+    }
 
     val hasContent: Boolean
         get() = synchronized(lock) {
-            textBuilder.isNotEmpty() || reasoningBuilder.isNotEmpty() || calls.isNotEmpty() || results.isNotEmpty()
+            completedSteps.isNotEmpty() ||
+                textBuilder.isNotEmpty() ||
+                reasoningBuilder.isNotEmpty() ||
+                calls.isNotEmpty() ||
+                results.isNotEmpty()
         }
 
     fun runningToolNames(): List<String> = synchronized(lock) {
@@ -165,21 +183,38 @@ internal class RemoteTurnState(
     }
 
     fun toolResultMessages(): List<ToolResultMessage> = synchronized(lock) {
-        results.map { result ->
-            ToolResultMessage(
-                toolCallId = result.callId,
-                toolName = result.toolName,
-                content = listOf(TextContent(result.result)),
-                details = result.details,
-                isError = result.isError,
-                timestamp = result.timestamp,
-            )
+        results.map(::toToolResultMessage)
+    }
+
+    fun turnMessages(stopReason: StopReason, errorMessage: String?): List<Message> = synchronized(lock) {
+        val out = mutableListOf<Message>()
+        completedSteps.forEach { step ->
+            out += step.assistant
+            out += step.results.map(::toToolResultMessage)
         }
+        val currentContent = contentLocked()
+        val currentResults = results.map(::toToolResultMessage)
+        val hasCurrent = currentContent.isNotEmpty() || currentResults.isNotEmpty()
+        if (hasCurrent || (out.isEmpty() && stopReason == StopReason.Aborted) || errorMessage != null) {
+            out += AssistantMessage(
+                content = currentContent,
+                api = "",
+                provider = REMOTE_PROVIDER,
+                model = modelName,
+                usage = Usage.empty(),
+                stopReason = stopReason,
+                errorMessage = errorMessage,
+                timestamp = clock(),
+            )
+            out += currentResults
+        }
+        out
     }
 
     private fun consumeLocked(event: RemoteBotEvent): List<AgentEvent> = when (event) {
         RemoteBotEvent.AgentStart -> listOf(AgentEvent.AgentStart)
         is RemoteBotEvent.TextDelta -> {
+            rollStepIfNeededLocked()
             textBuilder.append(event.delta)
             val partial = partialMessage()
             listOf(
@@ -195,6 +230,7 @@ internal class RemoteTurnState(
         }
 
         is RemoteBotEvent.ReasoningDelta -> {
+            rollStepIfNeededLocked()
             reasoningBuilder.append(event.delta)
             val partial = partialMessage()
             listOf(
@@ -224,6 +260,46 @@ internal class RemoteTurnState(
         RemoteBotEvent.Settled -> emptyList()
         is RemoteBotEvent.QueueUpdate -> emptyList()
     }
+
+    private fun rollStepIfNeededLocked() {
+        if (results.isEmpty()) return
+        val finished = results.mapTo(mutableSetOf()) { it.callId }
+        if (calls.keys.any { it !in finished }) return
+        completedSteps += StepSnapshot(
+            text = textBuilder.toString(),
+            reasoning = reasoningBuilder.toString(),
+            assistant = AssistantMessage(
+                content = contentLocked(),
+                api = "",
+                provider = REMOTE_PROVIDER,
+                model = modelName,
+                usage = Usage.empty(),
+                stopReason = StopReason.ToolUse,
+                timestamp = clock(),
+            ),
+            results = results.toList(),
+        )
+        textBuilder.clear()
+        reasoningBuilder.clear()
+        calls.clear()
+        results.clear()
+    }
+
+    private fun toToolResultMessage(result: RemoteToolResultRecord): ToolResultMessage = ToolResultMessage(
+        toolCallId = result.callId,
+        toolName = result.toolName,
+        content = listOf(TextContent(result.result)),
+        details = result.details,
+        isError = result.isError,
+        timestamp = result.timestamp,
+    )
+
+    private data class StepSnapshot(
+        val text: String,
+        val reasoning: String,
+        val assistant: AssistantMessage,
+        val results: List<RemoteToolResultRecord>,
+    )
 
     private fun onToolCallLocked(event: RemoteBotEvent.ToolCall): List<AgentEvent> {
         val existing = calls[event.callId]

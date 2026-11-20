@@ -9,9 +9,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class RemoteAgentServer(
@@ -19,6 +21,7 @@ class RemoteAgentServer(
     private val bots: suspend () -> List<RelayBot>,
     private val send: (JsonObject) -> Boolean,
     scope: CoroutineScope,
+    private val maxBufferedEvents: Int = MAX_BUFFERED_EVENTS,
 ) {
     private val feeds = ConcurrentHashMap<String, Feed>()
 
@@ -69,7 +72,9 @@ class RemoteAgentServer(
             }
             host.newSession(botId).sessionId
         }
-        feeds[sessionId] = Feed(frame.id, AtomicLong(0))
+        val feed = Feed(routeId = frame.id, seq = AtomicLong(0), updatedAt = System.currentTimeMillis())
+        feeds[sessionId] = feed
+        pruneFinishedFeeds()
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
         host.send(sessionId, text)
     }
@@ -81,7 +86,7 @@ class RemoteAgentServer(
             reject(frame, "bad_request", "sessionId and text are required")
             return
         }
-        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0)))
+        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0), System.currentTimeMillis()))
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
         host.steer(sessionId, text)
     }
@@ -93,7 +98,7 @@ class RemoteAgentServer(
             reject(frame, "bad_request", "sessionId and text are required")
             return
         }
-        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0)))
+        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0), System.currentTimeMillis()))
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
         host.followUp(sessionId, text)
     }
@@ -135,21 +140,80 @@ class RemoteAgentServer(
             reject(frame, "bad_request", "sessionId is required")
             return
         }
-        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0)))
-        respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
+        val feed = feeds[sessionId]
+        if (feed == null) {
+            if (!host.busySessionIds.value.contains(sessionId)) {
+                reject(frame, "session_not_found", "session $sessionId is not active")
+                return
+            }
+            val created = Feed(frame.id, AtomicLong(0), System.currentTimeMillis())
+            feeds[sessionId] = created
+            respondOk(
+                frame.id,
+                buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("busy", true)
+                    put("gap", false)
+                },
+            )
+            return
+        }
+        val afterSeq = frame.params.long("afterSeq") ?: -1L
+        val snapshot: List<BufferedEvent>
+        val gap: Boolean
+        val busy: Boolean
+        synchronized(feed) {
+            feed.routeId = frame.id
+            feed.updatedAt = System.currentTimeMillis()
+            gap = afterSeq >= 0L && feed.evictedThroughSeq > afterSeq
+            snapshot = feed.buffer.filter { entry -> entry.seq > afterSeq }
+            busy = feed.active || host.busySessionIds.value.contains(sessionId)
+        }
+        respondOk(
+            frame.id,
+            buildJsonObject {
+                put("sessionId", sessionId)
+                put("busy", busy)
+                put("gap", gap)
+            },
+        )
+        for (entry in snapshot) {
+            if (!send(RelayFrames.routeEvent(frame.id, entry.seq, entry.event))) break
+        }
     }
 
     private fun onRuntimeEvent(session: SessionRuntimeEvent) {
         val feed = feeds[session.sessionId] ?: return
         val events = RelayEventMapper.map(session.event)
         if (events.isEmpty()) return
-        for (event in events) {
-            val sent = send(RelayFrames.routeEvent(feed.routeId, feed.seq.getAndIncrement(), event))
-            if (!sent) break
+        val terminal = session.event is RuntimeEvent.RunFinished || session.event is RuntimeEvent.RunFailed
+        val toSend = mutableListOf<Pair<String, BufferedEvent>>()
+        synchronized(feed) {
+            feed.updatedAt = System.currentTimeMillis()
+            for (event in events) {
+                val entry = BufferedEvent(feed.seq.getAndIncrement(), event)
+                feed.buffer.addLast(entry)
+                while (feed.buffer.size > maxBufferedEvents) {
+                    val removed = feed.buffer.removeFirst()
+                    feed.evictedThroughSeq = removed.seq
+                }
+                toSend += feed.routeId to entry
+            }
+            if (terminal) feed.active = false
         }
-        if (session.event is RuntimeEvent.RunFinished || session.event is RuntimeEvent.RunFailed) {
-            feeds.remove(session.sessionId, feed)
+        for ((routeId, entry) in toSend) {
+            if (!send(RelayFrames.routeEvent(routeId, entry.seq, entry.event))) break
         }
+        if (terminal) pruneFinishedFeeds()
+    }
+
+    private fun pruneFinishedFeeds() {
+        val finished = feeds.entries
+            .filter { (_, feed) -> !feed.active }
+            .sortedBy { (_, feed) -> feed.updatedAt }
+        val excess = finished.size - MAX_RETAINED_FINISHED_FEEDS
+        if (excess <= 0) return
+        finished.take(excess).forEach { (id, feed) -> feeds.remove(id, feed) }
     }
 
     private fun respondOk(id: String, result: JsonObject) {
@@ -167,8 +231,25 @@ class RemoteAgentServer(
     private fun JsonObject.string(key: String): String =
         this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
 
-    private data class Feed(
-        val routeId: String,
-        val seq: AtomicLong,
+    private fun JsonObject.long(key: String): Long? =
+        (this[key] as? JsonPrimitive)?.longOrNull
+
+    private data class BufferedEvent(
+        val seq: Long,
+        val event: JsonObject,
     )
+
+    private class Feed(
+        @Volatile var routeId: String,
+        val seq: AtomicLong,
+        @Volatile var updatedAt: Long,
+        @Volatile var active: Boolean = true,
+        var evictedThroughSeq: Long = -1L,
+        val buffer: ArrayDeque<BufferedEvent> = ArrayDeque(),
+    )
+
+    private companion object {
+        private const val MAX_BUFFERED_EVENTS = 4_000
+        private const val MAX_RETAINED_FINISHED_FEEDS = 16
+    }
 }

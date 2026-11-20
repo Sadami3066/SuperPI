@@ -22,6 +22,7 @@ import io.github.whywood.superpi.sdk.ai.PlainTextContent
 import io.github.whywood.superpi.sdk.ai.Provider
 import io.github.whywood.superpi.sdk.ai.StopReason
 import io.github.whywood.superpi.sdk.ai.TextContent
+import io.github.whywood.superpi.sdk.ai.ToolResultMessage
 import io.github.whywood.superpi.sdk.ai.UserMessage
 import io.github.whywood.superpi.sdk.coding.session.QueueBehavior
 import io.github.whywood.superpi.sdk.coding.session.SessionEvent
@@ -36,10 +37,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
@@ -49,6 +52,7 @@ class RemoteSessionHandle internal constructor(
     private val transport: RemoteAgentTransport,
     private val mirror: RemoteMirrorSession,
     injectedScope: CoroutineScope? = null,
+    private val reconnectGraceMillis: Long = RECONNECT_GRACE_MILLIS,
 ) : SessionHandle {
     private val listeners = CopyOnWriteArrayList<suspend (SessionEvent) -> Unit>()
     private val ownsScope = injectedScope == null
@@ -189,7 +193,7 @@ class RemoteSessionHandle internal constructor(
                     transport.remoteEvents.collect { event -> onRemoteEvent(turn, event) }
                 }
                 val connectionWatch: Job = launch(start = CoroutineStart.UNDISPATCHED) {
-                    transport.onlineDevices.collect { devices -> onDevicesChanged(turn, devices) }
+                    transport.onlineDevices.collect { devices -> onDevicesChanged(this, turn, devices) }
                 }
                 try {
                     deliverPrompt(turn, text)
@@ -201,6 +205,7 @@ class RemoteSessionHandle internal constructor(
                     }
                     finishTurn(turn)
                 } finally {
+                    turn.cancelDisconnectGrace()
                     eventCollector.cancel()
                     connectionWatch.cancel()
                 }
@@ -237,10 +242,53 @@ class RemoteSessionHandle internal constructor(
         onRouteId = { route -> turn.setRoute(route) },
     )
 
-    private fun onDevicesChanged(turn: RemoteTurn, devices: Set<String>) {
-        if (target.deviceId in devices || turn.settled.isCompleted) return
-        turn.connectionLost = true
-        turn.settled.complete(Unit)
+    private fun onDevicesChanged(watchScope: CoroutineScope, turn: RemoteTurn, devices: Set<String>) {
+        if (turn.settled.isCompleted || turn.aborted) return
+        if (target.deviceId !in devices) {
+            if (!turn.markDisconnected()) return
+            val graceJob = watchScope.launch {
+                delay(reconnectGraceMillis)
+                if (turn.isDisconnected() && !turn.settled.isCompleted) {
+                    turn.connectionLost = true
+                    turn.settled.complete(Unit)
+                }
+            }
+            turn.setDisconnectGrace(graceJob)
+            return
+        }
+        if (!turn.markReconnected()) return
+        val sessionId = peerSessionId ?: run {
+            turn.connectionLost = true
+            turn.settled.complete(Unit)
+            return
+        }
+        watchScope.launch { resumeTurn(turn, sessionId) }
+    }
+
+    private suspend fun resumeTurn(turn: RemoteTurn, sessionId: String) {
+        if (turn.settled.isCompleted || turn.aborted) return
+        val result = transport.call(
+            to = target.deviceId,
+            method = BOT_RESUME,
+            params = buildJsonObject {
+                put("botId", target.botId)
+                put("sessionId", sessionId)
+                put("afterSeq", turn.lastAcceptedSeq())
+            },
+            onRouteId = { route -> turn.switchRoute(route) },
+        )
+        if (turn.settled.isCompleted || turn.aborted) return
+        if (result == null) {
+            if (isSessionNotFound()) clearPeerSession()
+            turn.connectionLost = true
+            turn.settled.complete(Unit)
+            return
+        }
+        val busy = (result["busy"] as? JsonPrimitive)?.booleanOrNull
+        if (busy == false && !turn.settled.isCompleted) {
+            withTimeoutOrNull(RESUME_IDLE_DRAIN_MILLIS) { turn.settled.await() }
+            if (!turn.settled.isCompleted) turn.settled.complete(Unit)
+        }
     }
 
     private suspend fun queueInput(method: String, text: String) {
@@ -351,16 +399,25 @@ class RemoteSessionHandle internal constructor(
     ): List<AgentMessage> {
         val state = turn.state
         for (queued in turn.queuedTexts) mirror.appendUserMessage(queued)
-        val results = state.toolResultMessages()
-        val assistant = state.assistantMessage(stopReason, errorMessage)
-        val written = assistant.content.isNotEmpty() || results.isNotEmpty() || stopReason == StopReason.Aborted
-        if (!written) return emptyList()
-        mirror.appendAssistantMessage(assistant)
-        results.forEach { result -> mirror.appendToolResult(result) }
-        return buildList {
-            add(assistant.asAgentMessage())
-            results.forEach { result -> add(result.asAgentMessage()) }
+        val messages = state.turnMessages(stopReason, errorMessage)
+        if (messages.isEmpty()) return emptyList()
+        val persisted = mutableListOf<AgentMessage>()
+        for (message in messages) {
+            when (message) {
+                is PiAssistantMessage -> {
+                    mirror.appendAssistantMessage(message)
+                    persisted += message.asAgentMessage()
+                }
+
+                is ToolResultMessage -> {
+                    mirror.appendToolResult(message)
+                    persisted += message.asAgentMessage()
+                }
+
+                else -> Unit
+            }
         }
+        return persisted
     }
 
     private suspend fun rememberPeerSession(result: JsonObject) {
@@ -435,6 +492,8 @@ class RemoteSessionHandle internal constructor(
         var connectionLost: Boolean = false
 
         private var acceptedSeq: Long = -1L
+        private var disconnected: Boolean = false
+        private var disconnectGraceJob: Job? = null
 
         @Synchronized
         fun setRoute(route: String) {
@@ -444,10 +503,49 @@ class RemoteSessionHandle internal constructor(
         }
 
         @Synchronized
+        fun switchRoute(route: String) {
+            routeId = route
+        }
+
+        @Synchronized
+        fun lastAcceptedSeq(): Long = acceptedSeq
+
+        @Synchronized
         fun accept(seq: Long): Boolean {
             if (seq <= acceptedSeq) return false
             acceptedSeq = seq
             return true
+        }
+
+        @Synchronized
+        fun markDisconnected(): Boolean {
+            if (disconnected) return false
+            disconnected = true
+            return true
+        }
+
+        @Synchronized
+        fun isDisconnected(): Boolean = disconnected
+
+        @Synchronized
+        fun markReconnected(): Boolean {
+            if (!disconnected) return false
+            disconnected = false
+            disconnectGraceJob?.cancel()
+            disconnectGraceJob = null
+            return true
+        }
+
+        @Synchronized
+        fun setDisconnectGrace(job: Job) {
+            disconnectGraceJob?.cancel()
+            disconnectGraceJob = job
+        }
+
+        @Synchronized
+        fun cancelDisconnectGrace() {
+            disconnectGraceJob?.cancel()
+            disconnectGraceJob = null
         }
     }
 
@@ -456,12 +554,15 @@ class RemoteSessionHandle internal constructor(
         private const val BOT_STEER = "bot.steer"
         private const val BOT_FOLLOW_UP = "bot.follow_up"
         private const val BOT_ABORT = "bot.abort"
+        private const val BOT_RESUME = "bot.resume"
         private const val STATUS_STOPPED = "stopped"
         private const val STATUS_FAILED = "failed"
         private const val SESSION_NOT_FOUND = "session_not_found"
         private const val ROLE_ASSISTANT = "assistant"
         private const val THINKING_LEVEL = "off"
         private const val SETTLE_TIMEOUT_MILLIS = 10 * 60 * 1000L
+        private const val RECONNECT_GRACE_MILLIS = 25_000L
+        private const val RESUME_IDLE_DRAIN_MILLIS = 500L
         private const val NO_ANSWER_MESSAGE = "The remote device did not answer."
         private const val NO_SESSION_MESSAGE = "The remote bot did not start a session."
         private const val SETTLE_TIMEOUT_MESSAGE = "The remote bot did not finish the turn."

@@ -343,6 +343,7 @@ class RemoteSessionHandleTest {
         assertTrue(handle.isBusy)
 
         transport.setOnline(false)
+        testScheduler.advanceTimeBy(25_000L)
         runCurrent()
 
         assertTrue(job.isCompleted)
@@ -353,6 +354,68 @@ class RemoteSessionHandleTest {
         val assistant = handle.messages.mapNotNull { it.asLlmMessage() }.filterIsInstance<AssistantMessage>().last()
         assertEquals(StopReason.Error, assistant.stopReason)
         assertEquals("partial", assistant.content.filterIsInstance<TextContent>().joinToString("") { it.text })
+    }
+
+    @Test
+    fun briefConnectionDropResumesStreamingViaBotResume() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+        val received = mutableListOf<SessionEvent>()
+        handle.subscribe { event -> received += event }
+
+        val job = launch { handle.prompt("hello") }
+        runCurrent()
+        val promptCall = transport.calls.single()
+        transport.emit(promptCall.routeId, 0, FakeEvents.textDelta("part-1 "))
+        runCurrent()
+        assertTrue(handle.isBusy)
+
+        transport.setOnline(false)
+        testScheduler.advanceTimeBy(5_000L)
+        runCurrent()
+        assertFalse(job.isCompleted)
+
+        transport.result = { buildJsonObject { put("sessionId", FakeRemoteTransport.PEER_SESSION_ID); put("busy", true) } }
+        transport.setOnline(true)
+        runCurrent()
+
+        val resumeCall = transport.calls.last()
+        assertEquals("bot.resume", resumeCall.method)
+        assertEquals(FakeRemoteTransport.PEER_SESSION_ID, resumeCall.params.getValue("sessionId").jsonPrimitive.content)
+        assertEquals("0", resumeCall.params.getValue("afterSeq").jsonPrimitive.content)
+
+        transport.emit(resumeCall.routeId, 1, FakeEvents.textDelta("part-2"))
+        transport.emit(resumeCall.routeId, 2, FakeEvents.settled())
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertFalse(handle.isBusy)
+        assertTrue(received.filterIsInstance<SessionEvent.SessionError>().isEmpty())
+        val assistant = handle.messages.mapNotNull { it.asLlmMessage() }.filterIsInstance<AssistantMessage>().last()
+        assertEquals(StopReason.Stop, assistant.stopReason)
+        assertEquals("part-1 part-2", assistant.content.filterIsInstance<TextContent>().joinToString("") { it.text })
+    }
+
+    @Test
+    fun multiStepToolTurnPersistsInterleavedMessagesInMirror() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+
+        val job = launch { handle.prompt("check files") }
+        runCurrent()
+        val call = transport.calls.single()
+        transport.emit(call.routeId, 0, FakeEvents.textDelta("Checking."))
+        transport.emit(call.routeId, 1, FakeEvents.toolCall("call-1", "ls", buildJsonObject { put("path", ".") }))
+        transport.emit(call.routeId, 2, FakeEvents.toolResult("call-1", "README.md"))
+        transport.emit(call.routeId, 3, FakeEvents.textDelta("Done."))
+        transport.emit(call.routeId, 4, FakeEvents.settled())
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        val roles = handle.messages.map { it.role }
+        assertEquals(listOf("user", "assistant", "toolResult", "assistant"), roles)
     }
 
     @Test
