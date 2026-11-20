@@ -1,42 +1,42 @@
 # SuperPI-Plugins
 
-**Super PI Agent 外部插件的开发模板、契约文档与上架规则。**
+**Templates, contract documentation and marketplace rules for Super PI Agent external plugins.**
 
-[English](README.en.md) · [插件开发文档](docs/PLUGIN_DEV.md) · [官方插件](https://github.com/Sadami3066/SuperPI-Official-Plugins) · [插件市场](https://github.com/Sadami3066/SuperPI-Market)
+[简体中文](README.cn.md) · [Plugin development guide](docs/PLUGIN_DEV.md) · [Official plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) · [Marketplace](https://github.com/Sadami3066/SuperPI-Market)
 
-## 概览
+## Overview
 
-Super PI Agent 是运行在 Android 上的个人智能体。插件用 Kotlin 编写，实现 `plugin-api` 的 `SuperPIPlugin`，打包成签名后的 `.ddp`，由 App 在自身进程内加载；一个插件可以提供工具、技能、提示词段与 Compose UI 页面，也可以按清单声明使用宿主服务能力（设备、权限、应用管理、后台任务、通知监听、无障碍、分享与深链等，共 39 项 capability）。
+Super PI Agent is a personal AI agent on Android. Plugins are written in Kotlin, implement `SuperPIPlugin` from `plugin-api`, and ship as signed `.ddp` bundles that the app loads in its own process. A plugin can contribute tools, skills, prompt sections and Compose UI pages, and can declare host service capabilities (device, permissions, app management, background tasks, notification listening, accessibility, sharing and deep links — 39 capabilities in total).
 
-本仓库面向外部插件作者：从 `template/` 起步，按 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) 开发，按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 与 [`PR_REVIEW.md`](PR_REVIEW.md) 发布到 PI 市场。Super PI Agent 官方插件（飞书、企业微信、中山大学 CLI、小米云服务、微信导出）在 [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins)，可作为完整参考实现。
+This repository is for external plugin authors: start from `template/`, develop against [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md), and publish through SuperPI-Market following [`MARKET_POLICY.md`](MARKET_POLICY.md) and [`PR_REVIEW.md`](PR_REVIEW.md). Official plugins (Feishu, WeCom, SYSU CLI, Mi Cloud, WeChat Export) live in [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) and serve as complete reference implementations.
 
-> 插件与 App 同进程、同权限运行，没有沙箱，安装即信任。只安装自己信任的插件；第三方工具源请使用 MCP。
+> Plugins run in the same process and with the same permissions as the app. There is no sandbox, and installing a plugin means trusting it. Only install plugins you trust; use MCP for third-party tool sources.
 
-## 仓库里有什么
+## What is in this repository
 
-| 路径 | 说明 |
+| Path | Description |
 |---|---|
-| [`template/`](template/) | 独立 Gradle Android 插件模板：示例工具、技能、提示词段，以及完整的打包、签名、校验任务 |
-| [`sample/`](sample/) | 宿主端到端回归用的测试夹具：一个回声工具与一个页面，不是可上架插件 |
-| [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) | 插件开发入口：指向宿主仓库中维护并更新的完整开发文档（宿主契约、`plugin.json` 清单、`.ddp` 包格式、签名与验签、安装更新、生命周期、扩展面与安全模型） |
-| [`MARKET_POLICY.md`](MARKET_POLICY.md) | 市场上架政策：可上架内容、禁止内容、提交要求、签名与下架规则 |
-| [`PR_REVIEW.md`](PR_REVIEW.md) | 上架审核清单 |
-| [`CHANGELOG.md`](CHANGELOG.md) | 本仓库变更记录 |
+| [`template/`](template/) | Standalone Gradle Android plugin template: example tool, skill and prompt section, plus the full build, signing and verification tasks |
+| [`sample/`](sample/) | Test fixture for the host end-to-end scripts: one echo tool and one page; not a plugin for the market |
+| [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) | Entry point to the canonical plugin development guide in the host repository (host contract, `plugin.json` manifest, `.ddp` package format, signing and verification, install and update, lifecycle, extension points and security model) |
+| [`MARKET_POLICY.md`](MARKET_POLICY.md) | Marketplace policy: accepted content, prohibited content, submission requirements, signing and takedown rules |
+| [`PR_REVIEW.md`](PR_REVIEW.md) | Marketplace review checklist |
+| [`CHANGELOG.md`](CHANGELOG.md) | Repository changelog |
 | [`LICENSE`](LICENSE) | Apache-2.0 |
 
-## 快速开始
+## Quick start
 
-### 环境要求
+### Requirements
 
 - JDK 17
-- Android SDK：compileSdk 36、minSdk 29；SDK 位置通过 `ANDROID_HOME` / `ANDROID_SDK_ROOT` 或 `local.properties` 的 `sdk.dir` 指定
-- Gradle 9.8.2（模板自带 wrapper）
-- 能访问公开 Maven 仓库 `https://sadami3066.github.io/SuperPI-Maven`（模板已配置，无需本地发布）
-- 宿主 Super PI Agent 1.0.8+（使用 `plugin-api 1.2.0` 新能力时；只用 1.0.x/1.1.x 能力的插件在 1.0.4+ 运行）
+- Android SDK: compileSdk 36, minSdk 29; point to it with `ANDROID_HOME` / `ANDROID_SDK_ROOT` or `sdk.dir` in `local.properties`
+- Gradle 9.8.2 (wrapper included in the template)
+- Network access to the public Maven repository `https://sadami3066.github.io/SuperPI-Maven` (already configured in the template; no local publishing needed)
+- Host Super PI Agent 1.0.8+ when using the new capabilities of `plugin-api 1.2.0`; plugins that only use 1.0.x/1.1.x capabilities run on 1.0.4+
 
-宿主契约 `plugin-api` 与 UI 设计系统 `design` 由该公开 Maven 仓库提供；`design` 由 `plugin-api` 通过 `api()` 传递：
+The host contract `plugin-api` and the `design` UI system come from that public Maven repository; `design` is exposed transitively through `api()`:
 
-模板已在 `settings.gradle.kts` 中配置好该仓库，通常无需改动：
+The template already configures this repository in `settings.gradle.kts`; normally you do not need to change it:
 
 ```kotlin
 dependencyResolutionManagement {
@@ -57,96 +57,96 @@ dependencies {
 }
 ```
 
-当前最新为 `plugin-api 1.2.0` / `design 0.9.0`：1.2.0 是 level 6 内的纯加法，已发布插件不需要重新编译；使用新能力的插件在清单里写 `minHostVersion: "1.0.8"`。
+The current release is `plugin-api 1.2.0` / `design 0.9.0`: 1.2.0 is a pure addition within API level 6, so published plugins do not need recompiling. Plugins that use the new capabilities set `minHostVersion: "1.0.8"` in the manifest.
 
-### 1. 复制模板并改名
+### 1. Copy the template and rename it
 
 ```bash
 cp -R template my-plugin
 cd my-plugin
 ```
 
-然后修改：
+Then update:
 
-- `settings.gradle.kts` 的 `rootProject.name`（决定产物文件名）
-- `build.gradle.kts` 的 `namespace` / `applicationId` / `versionName`
-- `src/main/assets/plugin.json` 的 `id`（点分小写，如 `com.example.myplugin`）、`version`、`entryClass`、`publisher.name` 与名称/描述
-- `src/main/kotlin` 下的包名与入口类名
+- `rootProject.name` in `settings.gradle.kts` (this determines artifact names)
+- `namespace` / `applicationId` / `versionName` in `build.gradle.kts`
+- `id` (dotted lowercase, e.g. `com.example.myplugin`), `version`, `entryClass`, `publisher.name`, name and description in `src/main/assets/plugin.json`
+- the package name and entry class under `src/main/kotlin`
 
-### 2. 生成签名密钥
+### 2. Generate signing keys
 
 ```bash
 ./gradlew generateSigningKey
 ```
 
-在 `keys/` 下生成 `plugin-signing.pem` 与 `.pub`（私钥权限 600）。`keys/` 已被 gitignore，**私钥绝不提交**，请离线备份；丢失后无法再发布该插件的更新。也可以在 `signPlugin` 时用 `-PpluginSigningKey=/path/to/my-key` 指定其它密钥前缀（PKCS#8 PEM，不带 `.pem`/`.pub` 扩展名）。
+This creates `keys/plugin-signing.pem` and `.pub` (private key mode 600). `keys/` is gitignored — **never commit the private key**. Back it up offline: if you lose it, you can no longer publish updates for this plugin. To keep keys elsewhere, pass `-PpluginSigningKey=/path/to/my-key` to `signPlugin` (PKCS#8 PEM path prefix, without the `.pem`/`.pub` extension).
 
-### 3. 编写插件
+### 3. Write the plugin
 
-入口类实现 `SuperPIPlugin`，按需实现 `availability()`、`onEnable()` / `onDisable()` / `onUpgrade()`、`skills()`、`promptSections()` 与 `contributions()`。模板自带：
+The entry class implements `SuperPIPlugin` and can override `availability()`, `onEnable()` / `onDisable()` / `onUpgrade()`, `skills()`, `promptSections()` and `contributions()`. The template already includes:
 
-- 工具 `template_echo`（由 `contributions()` 返回）
-- 工具 `template_state`：演示 `host.settings()` 与 `host.device()`（清单已声明 `settings`、`device` capability）
-- 技能 `template-skill`（从 `assets/skills/template-skill/` 读取 `SKILL.md`，含 `references/format.md`）
-- 一段提示词（`promptSections()`）
+- a tool, `template_echo` (returned from `contributions()`)
+- a tool, `template_state`, demonstrating `host.settings()` and `host.device()` (the manifest already declares the `settings` and `device` capabilities)
+- a skill, `template-skill` (read from `assets/skills/template-skill/`, with `references/format.md`)
+- a prompt section (from `promptSections()`)
 
-可扩展的能力、UI 槽位与宿主服务见 [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md)。
+See [`docs/PLUGIN_DEV.md`](docs/PLUGIN_DEV.md) for the full set of extension points, UI slots and host services.
 
-### 4. 构建、签名、验证
+### 4. Build, sign and verify
 
 ```bash
-./gradlew assemblePlugin   # build/plugin/<插件名>.unsigned.ddp
-./gradlew signPlugin       # build/plugin/<插件名>.ddp，用 keys/ 的 Ed25519 私钥签名
-./gradlew verifyPlugin     # 按宿主规则验签，输出 Signature OK
+./gradlew assemblePlugin   # build/plugin/<name>.unsigned.ddp
+./gradlew signPlugin       # build/plugin/<name>.ddp, signed with the Ed25519 key in keys/
+./gradlew verifyPlugin     # verify against host rules; prints Signature OK
 ```
 
-- `assemblePlugin` 把 debug APK 重打成 `.ddp`，只保留 `classes*.dex`、`assets/**`、`lib/**`；APK 的 manifest 与资源不参与。
-- `signPlugin` 生成 `META-INF/plugin-signature.json`，并打印 `publisher keyId`、整包 sha256 与 entry digest。
-- 模板未改名时产物为 `plugin-template.*`；修改 `rootProject.name` 后变为自己的名字。
+- `assemblePlugin` repacks the debug APK into a `.ddp`, keeping only `classes*.dex`, `assets/**` and `lib/**`; the APK manifest and resources are not used.
+- `signPlugin` writes `META-INF/plugin-signature.json` and prints the publisher `keyId`, bundle sha256 and entry digest.
+- With the template's default name the artifacts are `plugin-template.*`; change `rootProject.name` to use your own.
 
-### 5. 安装到手机
+### 5. Install on a phone
 
-把 `.ddp` 传到手机，打开 Super PI Agent 的插件页，选择「导入插件」并选中文件。确认页会展示名称、版本、体积、整包 sha256、发布者名称与 `keyId`、能力/权限/组件声明；首次导入确认后写入信任记录（TOFU）并启用。之后的更新必须由同一把私钥签名，否则按「发布者不匹配」拒绝。
+Transfer the `.ddp` to the phone, open Super PI Agent's plugin page, choose the import action and select the file. The confirmation page shows the name, version, size, bundle sha256, publisher name and `keyId`, plus declared capabilities, permissions and components. After the first import the host records trust on first use (TOFU) and enables the plugin. Future updates must be signed with the same private key, otherwise they are rejected as a publisher mismatch.
 
-### 6. 发布
+### 6. Publish
 
-- **上架 Super PI Agent 市场（所有外部作者）**：按 [`MARKET_POLICY.md`](MARKET_POLICY.md) 准备条目与制品，向 [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) 提交 PR。条目需包含与 `plugin.json` 一致的 id、版本、中英双语名称/简介/描述/标签、`artifact.url` / `sha256` / `size`、`publisherKeyId` 与不超过 128 KB 的 PNG 图标；维护者按 [`PR_REVIEW.md`](PR_REVIEW.md) 审核。
-- **官方插件仓库（维护者）**：[SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) 用共享脚本 `gradle/plugin-bundle.gradle.kts` 与 `scripts/check.sh` 构建、签名全部官方插件。官方签名密钥不随仓库分发，外部作者无法以官方 `keyId` 发版。
+- **Super PI Agent Marketplace (all external authors)**: prepare the entry and artifact according to [`MARKET_POLICY.md`](MARKET_POLICY.md) and open a PR against [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market). An entry contains the plugin id (matching `plugin.json`), version, bilingual name/summary/description/tags, `artifact.url` / `sha256` / `size`, `publisherKeyId` and a PNG icon no larger than 128 KB. Maintainers review entries against [`PR_REVIEW.md`](PR_REVIEW.md).
+- **Official plugins repository (maintainers)**: [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins) builds and signs all official plugins with the shared `gradle/plugin-bundle.gradle.kts` and `scripts/check.sh`. The official signing key is not distributed with the repository, so external authors cannot publish under the official `keyId`.
 
-## 使用方式
+## Usage
 
-### 开发者
+### For developers
 
-- 从 `template/` 复制出独立工程即可开始；多个插件放在同一个 Gradle 工程时，参考官方插件仓的 `settings.gradle.kts` 与根 `gradle/plugin-bundle.gradle.kts`。
-- 宿主已提供的库只能 `compileOnly` 依赖：`plugin-api`、经它传递的 `design`、Compose（BOM/UI/foundation/material3）、`kotlinx-coroutines`、`kotlinx-serialization-json`。不要用 `implementation` 引宿主库，否则会把宿主类打进插件包。
-- 需要系统能力时，在 `plugin.json` 的 `capabilities` 中声明（如 `linux`、`files`、`network`、`settings`、`device`、`packages`、`background`、`notifications`、`location`、`contacts`、`sms`、`calendar`、`media`、`web` 等，共 39 项）；`capabilities` 必须显式给出，空数组也要写。运行时权限写 `permissions`，通知监听/无障碍/分享/深链/后台任务等系统组件写 `components`，并与对应 capability 成对声明。
-- 技能、图标与文案都放在 `assets/`；插件不能使用 `res/` 资源，也不能加载原生库。
+- Copy `template/` into its own project and start there. When several plugins share one Gradle project, follow the official repository's `settings.gradle.kts` and root `gradle/plugin-bundle.gradle.kts`.
+- Libraries provided by the host must be `compileOnly`: `plugin-api`, the transitive `design`, Compose (BOM/UI/foundation/material3), `kotlinx-coroutines` and `kotlinx-serialization-json`. Do not use `implementation` for host libraries, or host classes will be bundled into your plugin.
+- Declare the host services you need in `plugin.json` under `capabilities` (e.g. `linux`, `files`, `network`, `settings`, `device`, `packages`, `background`, `notifications`, `location`, `contacts`, `sms`, `calendar`, `media`, `web` — 39 in total). `capabilities` is required; write an empty array if you need none. Runtime permissions go under `permissions`; system components such as notification listening, accessibility, sharing, deep links and background tasks go under `components`, always paired with their capability.
+- Skills, icons and copy live under `assets/`. Plugins cannot use `res/` resources and cannot load native libraries.
 
-### 用户
+### For users
 
-- 在 Super PI Agent 插件页的「市场」中浏览并安装已上架插件；或通过「导入插件」手动选择 `.ddp`。
-- 安装确认页会展示发布者名称与 `keyId`、包体 sha256 与能力声明；更新必须来自同一发布者。
-- 插件与 App 同进程、拥有 App 的全部权限，只安装可信来源。
+- Browse and install published plugins from the Marketplace in Super PI Agent's plugin page, or import a `.ddp` file manually.
+- The confirmation page shows the publisher name and `keyId`, bundle sha256 and declared capabilities; updates must come from the same publisher.
+- Plugins run in the app's process with the app's full permissions. Only install what you trust.
 
-## 风险
+## Risks
 
-- **签名私钥丢失 = 无法更新**：私钥没有找回机制，丢失后只能换钥以新发布者身份重新上架，已安装用户不会自动升级到新钥签名的版本。请离线备份私钥。
-- **发布者身份只看 `keyId`**：`plugin.json` 里的 `publisher.name` 只是展示名，可任意填写；真正身份是签名文件里的 `keyId`。首次安装确认页与市场条目都以 `publisherKeyId` 为准，只安装你认识的 `keyId`。
-- **同进程、同权限**：插件与 App 同进程、同 UID、无沙箱，能读写 App 私有数据、反射宿主内部类、起线程、结束进程。`capabilities`、`permissions`、`components` 都只用于声明与门禁，不是权限边界。执行身份由用户选择的访问档位（LOCAL/ADB/ROOT）决定，不要假设永远以 root 运行。
-- **第三方依赖与服务**：插件可自带第三方库打进 dex，也可访问网络与第三方服务；这些代码与服务的许可证、安全与合规由插件作者和用户承担。
-- **崩溃影响范围**：插件的工具/回调异常会被宿主隔离，但插件在主线程、Compose 槽位或工具执行中导致进程崩溃时，仍会带崩 App。
-- **兼容承诺**：自 `plugin-api 1.0.0 / API level 6` 起，同一 apiLevel 内只做二进制兼容的加法，已发布插件不会因宿主升级而失效；1.2.0 是 level 6 内的加法，需要宿主 1.0.8+ 才能使用新能力。破坏性改动必须升 apiLevel，详见宿主仓库 `plugin-api/COMPATIBILITY.md`。
-- **审核不是安全担保**：市场人工审核只核对上架规则与描述一致性，不保证插件无漏洞、无恶意行为。
+- **Losing the signing key means no more updates**: there is no key recovery. You would have to switch keys and republish as a new publisher, and existing users will not automatically upgrade to builds signed with the new key. Back up the private key offline.
+- **Publisher identity is the `keyId` alone**: `publisher.name` in `plugin.json` is a display name that anyone can set. The real identity is the `keyId` in the signature file. Both the first-install confirmation page and marketplace entries rely on `publisherKeyId`; only install `keyId`s you recognise.
+- **Same process, same permissions**: plugins share the app's process and UID with no sandbox. They can read the app's private data, reflect into host internals, start threads and kill the process. `capabilities`, `permissions` and `components` are declarations and gates, not a permission boundary. The execution identity is determined by the user's access tier (LOCAL/ADB/ROOT); do not assume the plugin always runs as root.
+- **Third-party dependencies and services**: plugins may bundle third-party libraries into the dex and may call networks or third-party services. Their licenses, security and compliance are the responsibility of the plugin author and the user.
+- **Blast radius of crashes**: tool/callback exceptions are isolated by the host, but a crash caused by a plugin on the main thread, in a Compose slot or during tool execution still takes down the app.
+- **Compatibility promise**: since `plugin-api 1.0.0 / API level 6`, changes within the same apiLevel are binary-compatible additions only, so published plugins keep working across host upgrades. 1.2.0 is an addition within level 6 and requires host 1.0.8+ for its new capabilities; breaking changes must raise the apiLevel. See `plugin-api/COMPATIBILITY.md` in the host repository.
+- **Review is not a security guarantee**: marketplace review checks submission rules and description consistency; it does not guarantee that a plugin is free of vulnerabilities or malicious behaviour.
 
-## 权益与许可
+## Licensing
 
-- 本仓库的模板、文档与构建脚本采用 [Apache-2.0](LICENSE)。可以复制、修改与再分发，但需保留版权与许可声明；用模板开发的插件归作者所有，可自行选择许可证。
-- 上架市场的插件必须允许公开再分发，并在条目或仓库中保留 LICENSE 或来源链接，要求见 [`MARKET_POLICY.md`](MARKET_POLICY.md)。
-- 插件内使用的第三方库、图标与品牌资产遵循各自许可；Apache-2.0 不包含商标授权，请勿以 Super PI Agent 名义误导用户。
-- 许可证不构成对插件行为、安全性或可用性的担保。
+- The template, documentation and build scripts in this repository are licensed under [Apache-2.0](LICENSE). You may copy, modify and redistribute them provided you keep the copyright and license notices. Plugins built from the template belong to their authors, who may choose their own license.
+- Plugins submitted to the marketplace must be redistributable publicly and must keep a LICENSE or source link in the entry or repository; see [`MARKET_POLICY.md`](MARKET_POLICY.md).
+- Third-party libraries, icons and brand assets used by a plugin remain under their respective licenses. Apache-2.0 does not grant trademark rights; do not use the Super PI Agent name in a misleading way.
+- The license does not warrant a plugin's behaviour, security or availability.
 
-## 声明与反馈
+## Support
 
-- 本仓库的模板与文档按现状提供；第三方插件由各自发布者维护，与 Super PI Agent 维护者无关。
-- 开发问题、文档错误与改进建议请到 [Issues](https://github.com/Sadami3066/SuperPI-Plugins/issues) 反馈；市场条目相关问题请到 [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market)。
-- 安全或凭据相关问题请勿公开提交，请通过 GitHub 联系维护者。
+- The template and documentation here are provided as-is. Third-party plugins are maintained by their publishers and are not the responsibility of the Super PI Agent maintainers.
+- Report development issues, documentation errors and suggestions via [Issues](https://github.com/Sadami3066/SuperPI-Plugins/issues); for marketplace entry issues, use [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market).
+- Please do not report security or credential issues publicly; contact the maintainers through GitHub.
