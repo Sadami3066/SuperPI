@@ -143,6 +143,13 @@ class Client {
   }
 }
 
+async function nextOf<T extends ServerFrame['type']>(client: Client, type: T): Promise<Extract<ServerFrame, { type: T }>> {
+  while (true) {
+    const frame = await client.next()
+    if (frame.type === type) return frame as Extract<ServerFrame, { type: T }>
+  }
+}
+
 function hello(deviceId: string, bots: Array<{ id: string; name: string }> = []): ClientFrame {
   return {
     type: 'hello',
@@ -223,6 +230,47 @@ describe('realtime hub', () => {
     phoneClient.send({ type: 'route_ok', id: 'req-1', result: { sessionId: 's1' } })
     const ok = await desktopClient.next()
     expect(ok).toMatchObject({ type: 'route_ok', id: 'req-1', result: { sessionId: 's1' } })
+  })
+
+  it('keeps forwarding events after the route is accepted', async () => {
+    const harness = await startRelay()
+    const desktop = await enrollDevice(harness, 'Desktop', 'desktop')
+    const phone = await enrollDevice(harness, 'Phone', 'android')
+
+    const desktopClient = await Client.open(harness.wsBase, desktop.token)
+    desktopClient.send(hello(desktop.deviceId))
+    await desktopClient.next()
+
+    const phoneClient = await Client.open(harness.wsBase, phone.token)
+    phoneClient.send(hello(phone.deviceId))
+    await phoneClient.next()
+    await desktopClient.next()
+
+    desktopClient.send({
+      type: 'route',
+      id: 'req-stream',
+      to: phone.deviceId,
+      method: 'bot.prompt',
+      params: { botId: 'pi', text: 'hello' },
+    })
+    const inbound = await phoneClient.next()
+    expect(inbound).toMatchObject({ type: 'route', id: 'req-stream' })
+
+    phoneClient.send({ type: 'route_ok', id: 'req-stream', result: { sessionId: 's1' } })
+    const ok = await nextOf(desktopClient, 'route_ok')
+    expect(ok).toMatchObject({ type: 'route_ok', id: 'req-stream', result: { sessionId: 's1' } })
+
+    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 1, event: { type: 'text_delta', delta: 'hi' } })
+    const first = await nextOf(desktopClient, 'route_event')
+    expect(first).toMatchObject({ type: 'route_event', id: 'req-stream', seq: 1 })
+
+    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 2, event: { type: 'agent_settled' } })
+    const last = await nextOf(desktopClient, 'route_event')
+    expect(last).toMatchObject({ type: 'route_event', id: 'req-stream', seq: 2 })
+
+    phoneClient.send({ type: 'route_event', id: 'req-stream', seq: 3, event: { type: 'text_delta', delta: 'late' } })
+    const rejected = await nextOf(phoneClient, 'route_error')
+    expect(rejected).toMatchObject({ type: 'route_error', id: 'req-stream', code: 'internal' })
   })
 
   it('answers a route to an offline device with device_offline', async () => {

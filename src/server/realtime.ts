@@ -49,6 +49,18 @@ export function createRealtimeHub(
   const wss = new WebSocketServer({ noServer: true })
   const connections = new Map<string, Connection>()
   const pendingRoutes = new Map<string, PendingRoute>()
+  const sweeper = setInterval(() => {
+    const cutoff = now() - ROUTE_TTL_MS
+    for (const [id, pending] of pendingRoutes) {
+      if (pending.at > cutoff) continue
+      pendingRoutes.delete(id)
+      const requester = connections.get(pending.from)
+      if (requester) {
+        send(requester, { type: 'route_error', id, code: 'internal', message: 'request timed out' })
+      }
+    }
+  }, 60_000)
+  sweeper.unref?.()
 
   function deviceList(): DeviceInfo[] {
     return store.listDevices().map((device) => {
@@ -151,14 +163,16 @@ export function createRealtimeHub(
     const requester = connections.get(pending.from)
     if (frame.type === 'route_event') {
       if (requester) send(requester, frame as unknown as ServerFrame)
+      const event = (frame as { event?: { type?: string } }).event
+      if (event?.type === 'agent_settled' || event?.type === 'error') pendingRoutes.delete(frame.id)
+      return
+    }
+    if (frame.type === 'route_ok') {
+      if (requester) send(requester, { type: 'route_ok', id: frame.id, result: frame.result })
       return
     }
     pendingRoutes.delete(frame.id)
     if (!requester) return
-    if (frame.type === 'route_ok') {
-      send(requester, { type: 'route_ok', id: frame.id, result: frame.result })
-      return
-    }
     send(requester, {
       type: 'route_error',
       id: frame.id,
@@ -247,6 +261,7 @@ export function createRealtimeHub(
       })
     },
     close() {
+      clearInterval(sweeper)
       for (const connection of connections.values()) connection.socket.close(1001, 'server shutting down')
       connections.clear()
       return new Promise((resolve) => wss.close(() => resolve()))
