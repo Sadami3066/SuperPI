@@ -1,0 +1,33 @@
+{
+  "name": "superpi-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Desktop shell for SuperPI, built on the pi agent harness",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:main": "esbuild apps/desktop/src/main/index.ts apps/desktop/src/preload/index.ts --bundle --platform=node --format=cjs --external:electron --outdir=apps/desktop/dist --out-extension:.js=.cjs",
+    "build:renderer": "vite build apps/desktop",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "start": "electron apps/desktop",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p apps/desktop/tsconfig.json",
+    "postinstall": "node scripts/ensure-electron.mjs",
+    "start:nosandbox": "electron apps/desktop --no-sandbox"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^38.2.2",
+    "esbuild": "^0.25.11",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
+}
