@@ -14,14 +14,20 @@ export interface PersistedWindow {
   maximized: boolean
 }
 
+export interface RemoteSessionRef {
+  sessionId: string
+  afterSeq: number
+}
+
 export interface DesktopState {
   window: PersistedWindow | null
   lastBotId: string | null
   lastSession: Record<string, string>
+  remoteSessions: Record<string, RemoteSessionRef>
 }
 
 export function defaultDesktopState(): DesktopState {
-  return { window: null, lastBotId: null, lastSession: {} }
+  return { window: null, lastBotId: null, lastSession: {}, remoteSessions: {} }
 }
 
 function defaultHomeDir(): string {
@@ -63,7 +69,55 @@ export function normalizeDesktopState(value: unknown): DesktopState {
       }
     }
   }
+  if (isRecord(value.remoteSessions)) {
+    for (const [key, ref] of Object.entries(value.remoteSessions)) {
+      if (key === '' || !isRecord(ref)) continue
+      const sessionId = typeof ref.sessionId === 'string' ? ref.sessionId : ''
+      if (sessionId === '') continue
+      const afterSeq = typeof ref.afterSeq === 'number' && Number.isFinite(ref.afterSeq) && ref.afterSeq >= 0 ? Math.floor(ref.afterSeq) : 0
+      state.remoteSessions[key] = { sessionId, afterSeq }
+    }
+  }
   return state
+}
+
+export function remoteSessionKey(deviceId: string, botId: string): string {
+  return JSON.stringify([deviceId, botId])
+}
+
+export function findRemoteSession(state: DesktopState, deviceId: string, botId: string): RemoteSessionRef | null {
+  return state.remoteSessions[remoteSessionKey(deviceId, botId)] ?? null
+}
+
+export function rememberRemoteSession(
+  state: DesktopState,
+  deviceId: string,
+  botId: string,
+  sessionId: string,
+  afterSeq: number,
+): DesktopState {
+  return {
+    ...state,
+    remoteSessions: {
+      ...state.remoteSessions,
+      [remoteSessionKey(deviceId, botId)]: { sessionId, afterSeq: Math.max(0, Math.floor(afterSeq)) },
+    },
+  }
+}
+
+export function forgetRemoteSession(state: DesktopState, deviceId: string, botId: string): DesktopState {
+  const key = remoteSessionKey(deviceId, botId)
+  if (!(key in state.remoteSessions)) return state
+  const remoteSessions: Record<string, RemoteSessionRef> = {}
+  for (const [entryKey, value] of Object.entries(state.remoteSessions)) {
+    if (entryKey !== key) remoteSessions[entryKey] = value
+  }
+  return { ...state, remoteSessions }
+}
+
+export function clearRemoteSessions(state: DesktopState): DesktopState {
+  if (Object.keys(state.remoteSessions).length === 0) return state
+  return { ...state, remoteSessions: {} }
 }
 
 export function rememberSession(state: DesktopState, botId: string, sessionFile: string | null): DesktopState {

@@ -334,7 +334,10 @@ export function App(): React.JSX.Element {
       setRetryable(false)
       try {
         const session = await window.superpi.remoteStart({ deviceId, botId: bot.id })
-        setRemote({ sessionId: session.sessionId, deviceId, botId: bot.id, label: `${bot.name} · ${deviceName}` })
+        const target = { sessionId: session.sessionId, deviceId, botId: bot.id, label: `${bot.name} · ${deviceName}` }
+        remoteRef.current = target
+        setRemote(target)
+        await window.superpi.remoteResume(session.sessionId)
       } catch (error) {
         setNotice(errorMessage(error))
       }

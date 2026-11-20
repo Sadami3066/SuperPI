@@ -63,6 +63,7 @@ const api = {
     ipcRenderer.invoke('remote:start', input),
   remotePrompt: (input: { sessionId: string; text: string }): Promise<void> => ipcRenderer.invoke('remote:prompt', input),
   remoteAbort: (sessionId: string): Promise<void> => ipcRenderer.invoke('remote:abort', sessionId),
+  remoteResume: (sessionId: string): Promise<{ resumed: boolean }> => ipcRenderer.invoke('remote:resume', sessionId),
   remoteClose: (sessionId: string): Promise<void> => ipcRenderer.invoke('remote:close', sessionId),
   onRemoteEvent: (listener: (payload: RemoteEventPayload) => void): (() => void) => {
     const handler = (_event: unknown, payload: RemoteEventPayload): void => listener(payload)

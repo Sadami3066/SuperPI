@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { EnrollResponse } from '@superpi/protocol'
-import { RelayService, type RemoteEventPayload } from '../../src/main/relay/service'
+import { RelayService, type RemoteEventPayload, type RemoteSessionStore } from '../../src/main/relay/service'
 import type { RemoteBotHost } from '../../src/main/relay/remote-server'
 import type { MemorySummary } from '../../src/main/relay/memory-client'
 
@@ -80,6 +80,7 @@ export function createService(
     homeDir?: string
     host?: RemoteBotHost
     remoteIdleTimeoutMs?: number
+    remoteSessions?: RemoteSessionStore
   } = {},
 ): RelayService {
   return new RelayService({
@@ -87,6 +88,7 @@ export function createService(
     bots: () => [{ id: 'pi', name: 'PI' }],
     host: options.host,
     remoteIdleTimeoutMs: options.remoteIdleTimeoutMs,
+    remoteSessions: options.remoteSessions,
     broadcast: () => undefined,
     broadcastMemory: options.onMemory,
     onRemoteEvent: options.onRemoteEvent,

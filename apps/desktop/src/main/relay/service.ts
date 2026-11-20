@@ -34,11 +34,19 @@ export interface PairInput {
   deviceName?: string
 }
 
+export interface RemoteSessionStore {
+  find(deviceId: string, botId: string): { sessionId: string; afterSeq: number } | null
+  save(deviceId: string, botId: string, sessionId: string, afterSeq: number): void
+  clear(deviceId: string, botId: string): void
+  clearAll(): void
+}
+
 export interface RelayServiceOptions {
   homeDir: string
   bots: () => BotInfo[]
   host?: RemoteBotHost
   remoteIdleTimeoutMs?: number
+  remoteSessions?: RemoteSessionStore
   broadcast: (status: RelayStatus) => void
   broadcastMemory?: (summary: MemorySummary | null) => void
   onRemoteEvent?: (payload: RemoteEventPayload) => void
@@ -56,6 +64,7 @@ export interface RemoteSessionInfo {
   deviceId: string
   botId: string
   peerSessionId: string | null
+  lastSeq: number
 }
 
 export class RelayService {
@@ -67,6 +76,7 @@ export class RelayService {
   private error: string | undefined
   private readonly remoteSessions = new Map<string, RemoteSessionInfo>()
   private readonly remoteRoutes = new Map<string, string>()
+  private readonly remoteRequests = new Map<string, { method: RouteMethod; params: Record<string, unknown> }>()
   private remoteCounter = 0
   private readonly memoryClient: MemoryClient
   private readonly remoteServer: RemoteAgentServer | null
@@ -180,15 +190,30 @@ export class RelayService {
     const device = this.devices.find((entry) => entry.deviceId === input.deviceId)
     if (!device || !device.online) throw new Error('That device is offline')
     if (!device.bots.some((bot) => bot.id === input.botId)) throw new Error('That bot is not available')
+    const stored = this.options.remoteSessions?.find(input.deviceId, input.botId) ?? null
     this.remoteCounter += 1
     const session: RemoteSessionInfo = {
       sessionId: `rs-${this.remoteCounter}`,
       deviceId: input.deviceId,
       botId: input.botId,
-      peerSessionId: null,
+      peerSessionId: stored?.sessionId ?? null,
+      lastSeq: stored?.afterSeq ?? 0,
     }
     this.remoteSessions.set(session.sessionId, session)
     return session
+  }
+
+  resumeRemote(sessionId: string): { resumed: boolean } {
+    const session = this.remoteSessions.get(sessionId)
+    if (!session) throw new Error(`unknown remote session: ${sessionId}`)
+    const peerSessionId = session.peerSessionId
+    if (peerSessionId === null) return { resumed: false }
+    try {
+      this.sendRemote(session, 'bot.resume', { sessionId: peerSessionId, afterSeq: session.lastSeq })
+    } catch {
+      return { resumed: false }
+    }
+    return { resumed: true }
   }
 
   promptRemote(sessionId: string, text: string): void {
@@ -196,6 +221,7 @@ export class RelayService {
     if (!session) throw new Error(`unknown remote session: ${sessionId}`)
     const params: Record<string, unknown> = { botId: session.botId, text }
     if (session.peerSessionId) params.sessionId = session.peerSessionId
+    session.lastSeq = 0
     this.sendRemote(session, 'bot.prompt', params)
   }
 
@@ -210,6 +236,7 @@ export class RelayService {
   }
 
   logout(): RelayStatus {
+    this.options.remoteSessions?.clearAll()
     void this.remoteServer?.closeAll()
     this.client?.disconnect()
     this.client = null
@@ -277,6 +304,7 @@ export class RelayService {
     if (!this.client?.connected) throw new Error('The relay connection is not ready')
     const id = `rr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     this.remoteRoutes.set(id, session.sessionId)
+    this.remoteRequests.set(id, { method, params })
     this.client.send({ type: 'route', id, to: session.deviceId, method, params })
   }
 
@@ -299,21 +327,52 @@ export class RelayService {
       if (!sessionId) return
       const session = this.remoteSessions.get(sessionId)
       if (!session) return
+      session.lastSeq = Math.max(session.lastSeq, frame.seq)
+      if (session.peerSessionId !== null) this.persistRemoteSession(session)
       this.options.onRemoteEvent?.({ sessionId, deviceId: session.deviceId, botId: session.botId, event: frame.event })
+      if (frame.event.type === 'agent_settled' || frame.event.type === 'error') {
+        this.remoteRoutes.delete(frame.id)
+        this.remoteRequests.delete(frame.id)
+      }
       return
     }
     if (frame.type === 'route_ok') {
       const sessionId = this.remoteRoutes.get(frame.id)
       if (!sessionId) return
       const session = this.remoteSessions.get(sessionId)
-      if (session && hasSessionId(frame.result)) session.peerSessionId = frame.result.sessionId
+      if (!session) return
+      if (hasSessionId(frame.result)) {
+        session.peerSessionId = frame.result.sessionId
+        this.persistRemoteSession(session)
+      }
       return
     }
     if (frame.type === 'route_error') {
       const sessionId = this.remoteRoutes.get(frame.id)
       if (!sessionId) return
       const session = this.remoteSessions.get(sessionId)
+      const request = this.remoteRequests.get(frame.id)
+      this.remoteRoutes.delete(frame.id)
+      this.remoteRequests.delete(frame.id)
       if (!session) return
+      if (frame.code === 'session_not_found') {
+        this.options.remoteSessions?.clear(session.deviceId, session.botId)
+        session.peerSessionId = null
+        session.lastSeq = 0
+        if (request?.method === 'bot.prompt') {
+          const retryParams: Record<string, unknown> = {}
+          for (const [key, value] of Object.entries(request.params)) {
+            if (key !== 'sessionId') retryParams[key] = value
+          }
+          try {
+            this.sendRemote(session, 'bot.prompt', retryParams)
+            return
+          } catch {
+            return
+          }
+        }
+        if (request?.method === 'bot.resume') return
+      }
       this.options.onRemoteEvent?.({
         sessionId,
         deviceId: session.deviceId,
@@ -321,6 +380,11 @@ export class RelayService {
         event: { type: 'error', message: frame.message },
       })
     }
+  }
+
+  private persistRemoteSession(session: RemoteSessionInfo): void {
+    if (session.peerSessionId === null) return
+    this.options.remoteSessions?.save(session.deviceId, session.botId, session.peerSessionId, session.lastSeq)
   }
 
   private publish(): void {

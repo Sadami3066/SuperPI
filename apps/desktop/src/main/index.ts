@@ -3,7 +3,16 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { BotStore, type BotRecord } from './bot-store'
-import { loadDesktopState, rememberSession, saveDesktopState, type DesktopState } from './desktop-state'
+import {
+  clearRemoteSessions,
+  findRemoteSession,
+  forgetRemoteSession,
+  loadDesktopState,
+  rememberRemoteSession,
+  rememberSession,
+  saveDesktopState,
+  type DesktopState,
+} from './desktop-state'
 import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
 import { listSessions, resumableSession } from './pi/sessions'
 import { modelOptions, piStatePayload, thinkingLevelOptions } from './pi/state'
@@ -33,6 +42,21 @@ const relay = new RelayService({
       })
       await client.start()
       return client
+    },
+  },
+  remoteSessions: {
+    find: (deviceId, botId) => findRemoteSession(shellState, deviceId, botId),
+    save: (deviceId, botId, sessionId, afterSeq) => {
+      shellState = rememberRemoteSession(shellState, deviceId, botId, sessionId, afterSeq)
+      scheduleSaveState()
+    },
+    clear: (deviceId, botId) => {
+      shellState = forgetRemoteSession(shellState, deviceId, botId)
+      scheduleSaveState()
+    },
+    clearAll: () => {
+      shellState = clearRemoteSessions(shellState)
+      scheduleSaveState()
     },
   },
   broadcast: (status) => broadcast('relay:state', status),
@@ -360,6 +384,7 @@ function registerIpc(): void {
   ipcMain.handle('remote:abort', (_event, sessionId: string) => {
     relay.abortRemote(sessionId)
   })
+  ipcMain.handle('remote:resume', (_event, sessionId: string) => relay.resumeRemote(sessionId))
   ipcMain.handle('remote:close', (_event, sessionId: string) => {
     relay.closeRemote(sessionId)
   })

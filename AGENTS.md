@@ -27,7 +27,7 @@ pnpm start          # 启动 Electron
 - 无头验收：`xvfb-run ... pnpm start` 配合 `scripts/dev-screenshot.mjs` 截图。
 - 中继接入在 `src/main/relay/`：配对链接解析、凭据（`~/.superpi/relay.json`，0600）、CA 指纹比对、HTTP/WSS 客户端、自动重连；IPC 表面是 `relay:status` / `relay:pair` / `relay:logout`，状态经 `relay:state` 推给界面。
 - 中继客户端集成测试会真起 `../SuperPI-Remote` 的服务（含 TLS 证书生成），跨仓路径不存在时自动跳过。
-- 远程调用：`RelayService.startRemote/promptRemote/abortRemote` 经 `route` 帧驱动另一台设备上的 bot；事件以 `remote:event` 推到界面，界面用同一套 Entry 渲染。远端离线时入口置灰、启动会话直接报错。
+- 远程调用：`RelayService.startRemote/promptRemote/abortRemote` 经 `route` 帧驱动另一台设备上的 bot；事件以 `remote:event` 推到界面，界面用同一套 Entry 渲染。每个远程 bot 的 peer session id 与事件游标按 `deviceId + botId` 记在 `desktop.json`（只存 id 和序号，不存内容），重新打开时先发 `bot.resume {sessionId, afterSeq}` 重放；远端回 `session_not_found` 时清掉记录并静默重新开一个会话（prompt 自动去掉旧 sessionId 重试一次）。远端离线时入口置灰、启动会话直接报错。
 - 被远程调用：`relay/remote-server.ts` 处理入站 `route`（`bot.prompt`/`steer`/`follow_up`/`abort`/`state`/`resume`）。每个 bot 在第一次远程 prompt 时懒起一个**专用的** pi 子进程（同一 cwd / 扩展 / 模型配置，但与会话窗口的本地 pi 完全隔离），之后复用；空闲 10 分钟（`RemoteAgentServer` 的 `idleTimeoutMs`）停掉，退出/登出时全部关掉。每个 prompt 先回 `route_ok {sessionId}`，随后用同一请求 id 流式回 pi 事件（agent_start / message_update / tool_call / tool_result / agent_end / agent_settled / error），`agent_settled` 是这条 route 的终点；中继只接受协议里的 BotEvent 形状。
 - 记忆缓存：`src/main/relay/memory-client.ts` 把中继快照镜像到 `~/.superpi/cache/memory/`（`snapshot.json` 存版本与内容），服务在连上中继和收到 `memory_changed` 时刷新；状态经 `memory:state` 推给界面。
 - 记忆注入：`extensions/superpi-memory.mjs` 由 pi 以 `-e` 加载，在 `before_agent_start` 写 `systemPromptOptions.sections.memory`，并注册 `memory_read`/`memory_search`/`memory_write`；中继地址与 token 由主进程经环境变量传入，扩展不读凭据文件。
