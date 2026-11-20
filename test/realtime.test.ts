@@ -55,6 +55,7 @@ async function startRelay(): Promise<Harness> {
     dataDir: storeDir,
     certPath: null,
     keyPath: null,
+    caPath: null,
     version: '0.1.0',
     entries: [],
   }

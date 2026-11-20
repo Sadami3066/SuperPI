@@ -8,6 +8,7 @@ export interface RelayConfig {
   dataDir: string
   certPath: string | null
   keyPath: string | null
+  caPath: string | null
   version: string
   entries: PairEntry[]
 }
@@ -26,6 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     dataDir: env.SUPERPI_DATA_DIR ?? fileURLToPath(new URL('../../data/', import.meta.url)),
     certPath: env.SUPERPI_CERT ?? null,
     keyPath: env.SUPERPI_KEY ?? null,
+    caPath: env.SUPERPI_CA ?? null,
     version,
     entries: readEntries(env),
   }

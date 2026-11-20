@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createRelayServer } from './http.ts'
 import { createRealtimeHub } from './realtime.ts'
 import { loadConfig } from './config.ts'
@@ -16,12 +17,14 @@ if (!account) {
 }
 
 const fingerprint = readFingerprint(config.certPath)
+const caPem = config.caPath ? readFileSync(config.caPath, 'utf8') : null
 const hub = createRealtimeHub(store)
 const relay = createRelayServer({
   config,
   store,
   fingerprint,
   entries: config.entries,
+  caPem,
   online: (deviceId) => hub.isOnline(deviceId),
   botsOf: (deviceId) => hub.botsOf(deviceId),
 })

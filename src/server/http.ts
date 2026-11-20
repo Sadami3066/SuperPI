@@ -25,6 +25,7 @@ export interface RelayServerOptions {
   store: RelayStore
   fingerprint: string | null
   entries: PairEntry[]
+  caPem?: string | null
   now?: () => number
   online?: (deviceId: string) => boolean
   botsOf?: (deviceId: string) => BotInfo[]
@@ -99,6 +100,19 @@ async function handle(
         fingerprint: options.fingerprint,
       }
       sendJson(response, 200, body)
+      return
+    }
+
+    if (method === 'GET' && url.pathname === '/v1/ca') {
+      if (!options.caPem) {
+        sendError(response, 404, 'not_found', 'no certificate authority configured')
+        return
+      }
+      response.writeHead(200, {
+        'content-type': 'application/x-pem-file; charset=utf-8',
+        'content-length': Buffer.byteLength(options.caPem),
+      })
+      response.end(options.caPem)
       return
     }
 

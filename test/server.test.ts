@@ -39,6 +39,7 @@ async function startRelay(): Promise<Harness> {
     dataDir: storeDir,
     certPath: null,
     keyPath: null,
+    caPath: null,
     version: '0.1.0',
     entries: [{ kind: 'public', origin: 'https://relay.test:8443' }],
   }
