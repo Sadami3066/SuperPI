@@ -2,9 +2,6 @@ export interface BotInfo {
   id: string
   name: string
   cwd: string
-  isHome: boolean
-  avatar: string | null
-  intro: string
 }
 
 export interface PiEventPayload {

@@ -1,20 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
 import os from 'node:os'
+import path from 'node:path'
+import type { BotInfo } from '../shared/ipc'
 
-export interface BotRecord {
-  id: string
-  name: string
-  cwd: string
-  isHome: boolean
-  avatar: string | null
-  intro: string
-}
+export type BotRecord = BotInfo
 
 interface BotFile {
   version: number
-  bots: BotRecord[]
+  bots: unknown[]
 }
+
+export const DEFAULT_BOT_ID = 'pi'
 
 export class BotStore {
   readonly homeDir: string
@@ -25,61 +21,75 @@ export class BotStore {
     this.file = path.join(homeDir, 'bots.json')
   }
 
-  list(): BotRecord[] {
+  list(): BotInfo[] {
     const loaded = this.read()
     if (loaded.length > 0) return loaded
-    const created = this.ensureHome()
+    const created = this.defaultBots()
     this.write(created)
     return created
   }
 
-  save(bots: BotRecord[]): BotRecord[] {
-    const normalized = bots.map((bot) => ({ ...bot, cwd: path.resolve(bot.cwd) }))
-    this.write(normalized)
-    return normalized
+  save(bots: BotInfo[]): BotInfo[] {
+    const normalized = normalizeBots(bots)
+    const next = normalized.length > 0 ? normalized : this.defaultBots()
+    this.write(next)
+    return next
   }
 
-  add(bot: BotRecord): BotRecord[] {
-    const current = this.list().filter((entry) => entry.id !== bot.id)
-    return this.save([...current, { ...bot, cwd: path.resolve(bot.cwd) }])
+  add(bot: BotInfo): BotInfo[] {
+    const normalized = normalizeBot(bot)
+    if (!normalized) throw new Error('A bot needs an id, a name and a working directory')
+    const current = this.list().filter((entry) => entry.id !== normalized.id)
+    return this.save([...current, normalized])
   }
 
-  remove(id: string): BotRecord[] {
-    const current = this.list().filter((entry) => entry.id !== id || entry.isHome)
+  remove(id: string): BotInfo[] {
+    const current = this.list().filter((entry) => entry.id !== id || entry.id === DEFAULT_BOT_ID)
     return this.save(current)
   }
 
-  private read(): BotRecord[] {
+  private read(): BotInfo[] {
     if (!existsSync(this.file)) return []
     try {
       const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as BotFile
       if (!Array.isArray(parsed.bots)) return []
-      return parsed.bots.filter(isBotRecord)
+      return normalizeBots(parsed.bots)
     } catch {
       return []
     }
   }
 
-  private write(bots: BotRecord[]): void {
+  private write(bots: BotInfo[]): void {
     mkdirSync(this.homeDir, { recursive: true })
     const payload: BotFile = { version: 1, bots }
     writeFileSync(this.file, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
   }
 
-  private ensureHome(): BotRecord[] {
+  private defaultBots(): BotInfo[] {
     const workspace = path.join(this.homeDir, 'workspace')
     mkdirSync(workspace, { recursive: true })
-    return [{ id: 'pi', name: 'PI', cwd: workspace, isHome: true, avatar: null, intro: '' }]
+    return [{ id: DEFAULT_BOT_ID, name: 'PI', cwd: workspace }]
   }
 }
 
-function isBotRecord(value: unknown): value is BotRecord {
-  if (typeof value !== 'object' || value === null) return false
+function normalizeBots(value: unknown[]): BotInfo[] {
+  const bots: BotInfo[] = []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    const bot = normalizeBot(entry)
+    if (!bot || seen.has(bot.id)) continue
+    seen.add(bot.id)
+    bots.push(bot)
+  }
+  return bots
+}
+
+function normalizeBot(value: unknown): BotInfo | null {
+  if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>
-  return (
-    typeof record.id === 'string' &&
-    typeof record.name === 'string' &&
-    typeof record.cwd === 'string' &&
-    typeof record.isHome === 'boolean'
-  )
+  const id = typeof record.id === 'string' ? record.id.trim() : ''
+  const name = typeof record.name === 'string' ? record.name.trim() : ''
+  const cwd = typeof record.cwd === 'string' ? record.cwd.trim() : ''
+  if (id === '' || name === '' || cwd === '') return null
+  return { id, name, cwd: path.resolve(cwd) }
 }
