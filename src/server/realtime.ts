@@ -39,7 +39,7 @@ interface PendingRoute {
 }
 
 const HELLO_TIMEOUT_MS = 10_000
-const ROUTE_TTL_MS = 5 * 60 * 1000
+const ROUTE_TTL_MS = 30 * 60 * 1000
 
 export function createRealtimeHub(
   store: RelayStore,
@@ -161,6 +161,7 @@ export function createRealtimeHub(
       return
     }
     const requester = connections.get(pending.from)
+    pending.at = now()
     if (frame.type === 'route_event') {
       if (requester) send(requester, frame as unknown as ServerFrame)
       const event = (frame as { event?: { type?: string } }).event
