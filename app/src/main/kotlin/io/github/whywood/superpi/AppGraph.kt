@@ -88,6 +88,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class AppGraph(context: Context) : AppDependencies {
@@ -96,6 +98,8 @@ class AppGraph(context: Context) : AppDependencies {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val appScope: CoroutineScope get() = scope
     val activeSessionId = MutableStateFlow<String?>(null)
+    private val prepareMutex = Mutex()
+    @Volatile
     private var questionRecoveryLoaded = false
 
     private val dataGraph by lazy {
@@ -480,11 +484,13 @@ class AppGraph(context: Context) : AppDependencies {
     )
 
     override suspend fun prepare() {
-        if (!questionRecoveryLoaded) {
-            questionRecoveryLoaded = true
-            withContext(Dispatchers.IO) { questionCenter.loadPersisted() }
-            host.start()
-            notificationCenter.notifyInterruptedWork(questionCenter.interrupted.value, host.interruptedRuns.value)
+        prepareMutex.withLock {
+            if (!questionRecoveryLoaded) {
+                withContext(Dispatchers.IO) { questionCenter.loadPersisted() }
+                host.start()
+                notificationCenter.notifyInterruptedWork(questionCenter.interrupted.value, host.interruptedRuns.value)
+                questionRecoveryLoaded = true
+            }
         }
         withContext(Dispatchers.IO) {
             importDebugKey()
