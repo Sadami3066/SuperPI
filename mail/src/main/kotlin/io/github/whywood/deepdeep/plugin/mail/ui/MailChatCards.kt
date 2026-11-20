@@ -37,7 +37,7 @@ import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdText
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
-import io.github.whywood.superpi.plugin.api.CustomMessageSlotState
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import io.github.whywood.superpi.plugin.api.PluginHost
 import io.github.whywood.superpi.plugin.mail.MailFolderRole
 import io.github.whywood.superpi.plugin.mail.tools.MailReadCardPayload
@@ -49,8 +49,8 @@ private const val SearchCollapsedRows = 5
 private const val ReadBodyCollapsedLines = 4
 
 @Composable
-internal fun MailSearchChatCard(host: PluginHost, state: CustomMessageSlotState) {
-    val payload = remember(state.payload) { state.decodeCardPayload(MailSearchCardPayload.serializer()) }
+internal fun MailSearchChatCard(host: PluginHost, state: ToolResultState) {
+    val payload = remember(state.result?.details) { state.decodeCardPayload(MailSearchCardPayload.serializer()) }
     if (payload == null) {
         MailUnavailableCard(
             host = host,
@@ -307,8 +307,8 @@ private fun SearchEmptyBody(host: PluginHost, payload: MailSearchCardPayload) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun MailReadChatCard(host: PluginHost, state: CustomMessageSlotState) {
-    val payload = remember(state.payload) { state.decodeCardPayload(MailReadCardPayload.serializer()) }
+internal fun MailReadChatCard(host: PluginHost, state: ToolResultState) {
+    val payload = remember(state.result?.details) { state.decodeCardPayload(MailReadCardPayload.serializer()) }
     if (payload == null || payload.messageId.isBlank()) {
         MailUnavailableCard(
             host = host,

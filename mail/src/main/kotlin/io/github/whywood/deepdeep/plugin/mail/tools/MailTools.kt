@@ -55,14 +55,9 @@ private data class MailCard(
 
 private fun PluginToolCall.withCard(text: String, card: MailCard): PluginToolResult {
     val details = buildJsonObject {
-        put(
-            CARD_DETAILS_KEY,
-            buildJsonObject {
-                put("customType", card.customType)
-                put("title", card.title)
-                put("payload", card.payload)
-            },
-        )
+        put(CARD_DETAILS_KEY, Cards.descriptor(customType = null, title = card.title, payload = null))
+        put("cardType", card.customType)
+        put("payload", card.payload)
     }
     return textResult(text, details = details)
 }

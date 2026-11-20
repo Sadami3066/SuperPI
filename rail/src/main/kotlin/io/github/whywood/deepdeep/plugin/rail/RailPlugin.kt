@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.plugin.rail
 
+import androidx.compose.runtime.Composable
 import io.github.whywood.superpi.plugin.api.SuperPIPlugin
 import io.github.whywood.superpi.plugin.api.PluginAvailability
 import io.github.whywood.superpi.plugin.api.PluginHost
@@ -7,16 +8,18 @@ import io.github.whywood.superpi.plugin.api.PluginToolCall
 import io.github.whywood.superpi.plugin.api.PluginToolResult
 import io.github.whywood.superpi.plugin.api.PluginUiContributions
 import io.github.whywood.superpi.plugin.api.SlotBinding
-import io.github.whywood.superpi.plugin.api.SlotIds
-import io.github.whywood.superpi.plugin.api.ToolCardSlotState
+import io.github.whywood.superpi.plugin.api.ToolResultRenderer
+import io.github.whywood.superpi.plugin.api.ToolResultRendererContributor
+import io.github.whywood.superpi.plugin.api.ToolResultSource
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import io.github.whywood.superpi.plugin.api.available
-import io.github.whywood.superpi.plugin.api.composeSlot
 import io.github.whywood.superpi.plugin.api.contributions
 import io.github.whywood.superpi.plugin.api.localizedText
 import io.github.whywood.superpi.plugin.api.pluginPage
 import io.github.whywood.superpi.plugin.api.pluginTool
-import io.github.whywood.superpi.plugin.api.slotBinding
 import io.github.whywood.superpi.plugin.api.textResult
+import io.github.whywood.superpi.plugin.api.toolResultMatch
+import io.github.whywood.superpi.plugin.api.toolResultRenderer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -38,20 +41,12 @@ class RailPlugin : SuperPIPlugin {
         tools = listOf(searchTool(host), priceTool(host)),
     )
 
-    override fun ui(host: PluginHost): PluginUiContributions = object : PluginUiContributions {
-        override val bindings: List<SlotBinding> = listOf(
-            slotBinding(
-                slotId = SlotIds.toolCard(SEARCH_TOOL),
-                content = composeSlot { state ->
-                    TrainToolCard(host, state as ToolCardSlotState)
-                },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard(PRICE_TOOL),
-                content = composeSlot { state ->
-                    RailPriceCard(host, state as ToolCardSlotState)
-                },
-            ),
+    override fun ui(host: PluginHost): PluginUiContributions = object : PluginUiContributions, ToolResultRendererContributor {
+        override val bindings: List<SlotBinding> = emptyList()
+
+        override val toolResultRenderers: List<ToolResultRenderer> = listOf(
+            railRenderer("rail-search", SEARCH_TOOL) { state -> TrainToolCard(host, state) },
+            railRenderer("rail-price", PRICE_TOOL) { state -> RailPriceCard(host, state) },
         )
 
         override val pages = listOf(
@@ -276,6 +271,17 @@ class RailPlugin : SuperPIPlugin {
         is TrainPriceUnavailableException -> raw
         else -> ""
     }
+
+    private fun railRenderer(
+        id: String,
+        tool: String,
+        content: @Composable (ToolResultState) -> Unit,
+    ): ToolResultRenderer = toolResultRenderer(
+        id = id,
+        match = toolResultMatch(source = ToolResultSource.PLUGIN, tool = tool),
+        priority = 20,
+        content = content,
+    )
 
     private fun encodeSearch(details: TrainSearchDetails): JsonObject =
         JsonFormat.encodeToJsonElement(TrainSearchDetails.serializer(), details) as JsonObject

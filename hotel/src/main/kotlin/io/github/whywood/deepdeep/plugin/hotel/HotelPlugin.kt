@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.plugin.hotel
 
+import androidx.compose.runtime.Composable
 import io.github.whywood.superpi.plugin.api.Contributions
 import io.github.whywood.superpi.plugin.api.SuperPIPlugin
 import io.github.whywood.superpi.plugin.api.NotificationActionEvent
@@ -11,16 +12,18 @@ import io.github.whywood.superpi.plugin.api.PluginSkill
 import io.github.whywood.superpi.plugin.api.PluginUiContributions
 import io.github.whywood.superpi.plugin.api.PromptSection
 import io.github.whywood.superpi.plugin.api.SlotBinding
-import io.github.whywood.superpi.plugin.api.SlotIds
-import io.github.whywood.superpi.plugin.api.ToolCardSlotState
+import io.github.whywood.superpi.plugin.api.ToolResultRenderer
+import io.github.whywood.superpi.plugin.api.ToolResultRendererContributor
+import io.github.whywood.superpi.plugin.api.ToolResultSource
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import io.github.whywood.superpi.plugin.api.assetIcon
 import io.github.whywood.superpi.plugin.api.available
-import io.github.whywood.superpi.plugin.api.composeSlot
 import io.github.whywood.superpi.plugin.api.contributions
 import io.github.whywood.superpi.plugin.api.pluginPage
 import io.github.whywood.superpi.plugin.api.pluginSkill
 import io.github.whywood.superpi.plugin.api.promptSection
-import io.github.whywood.superpi.plugin.api.slotBinding
+import io.github.whywood.superpi.plugin.api.toolResultMatch
+import io.github.whywood.superpi.plugin.api.toolResultRenderer
 import io.github.whywood.superpi.plugin.api.unavailable
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -69,36 +72,17 @@ class HotelPlugin : SuperPIPlugin {
         promptSection(HOTEL_SECTION_ID, promptBody(host, runtime.currentSnapshot())),
     )
 
-    override fun ui(host: PluginHost): PluginUiContributions = object : PluginUiContributions {
-        override val bindings: List<SlotBinding> = listOf(
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_search"),
-                content = composeSlot { state -> HotelSearchCard(host, state as ToolCardSlotState) },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_detail"),
-                content = composeSlot { state -> HotelDetailCard(host, state as ToolCardSlotState) },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_orders"),
-                content = composeSlot { state -> HotelOrdersCard(host, state as ToolCardSlotState) },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_order_detail"),
-                content = composeSlot { state -> HotelOrderDetailCard(host, state as ToolCardSlotState) },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_book"),
-                content = composeSlot { state -> HotelBookCard(host, state as ToolCardSlotState) },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_cancel"),
-                content = composeSlot { state -> HotelCancelCard(host, state as ToolCardSlotState) },
-            ),
-            slotBinding(
-                slotId = SlotIds.toolCard("hotel_tags"),
-                content = composeSlot { state -> HotelTagsCard(host, state as ToolCardSlotState) },
-            ),
+    override fun ui(host: PluginHost): PluginUiContributions = object : PluginUiContributions, ToolResultRendererContributor {
+        override val bindings: List<SlotBinding> = emptyList()
+
+        override val toolResultRenderers: List<ToolResultRenderer> = listOf(
+            hotelRenderer("hotel-search", "hotel_search") { state -> HotelSearchCard(host, state) },
+            hotelRenderer("hotel-detail", "hotel_detail") { state -> HotelDetailCard(host, state) },
+            hotelRenderer("hotel-orders", "hotel_orders") { state -> HotelOrdersCard(host, state) },
+            hotelRenderer("hotel-order-detail", "hotel_order_detail") { state -> HotelOrderDetailCard(host, state) },
+            hotelRenderer("hotel-book", "hotel_book") { state -> HotelBookCard(host, state) },
+            hotelRenderer("hotel-cancel", "hotel_cancel") { state -> HotelCancelCard(host, state) },
+            hotelRenderer("hotel-tags", "hotel_tags") { state -> HotelTagsCard(host, state) },
         )
 
         override val pages: List<PluginPage> = listOf(
@@ -131,6 +115,17 @@ class HotelPlugin : SuperPIPlugin {
             append("只有用户明确确认酒店、房型、价格方案、日期和总价，并提供联系人名、姓和邮箱（首次预订后插件会记住联系人，之后可省略）后，才能调用 hotel_book；多房间或多人入住时传 guests，特殊要求传 customer_request；插件只创建待支付订单并返回官方支付链接，不代替用户支付。")
         }
     }
+
+    private fun hotelRenderer(
+        id: String,
+        tool: String,
+        content: @Composable (ToolResultState) -> Unit,
+    ): ToolResultRenderer = toolResultRenderer(
+        id = id,
+        match = toolResultMatch(source = ToolResultSource.PLUGIN, tool = tool),
+        priority = 20,
+        content = content,
+    )
 
     private companion object {
         const val ACTION_OPEN_PAGE = "open_hotel_page"

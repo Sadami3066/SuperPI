@@ -49,11 +49,7 @@
       "mail_save_attachment"
     ],
     "skills": [],
-    "uiSlots": [
-      "chat.message:mail.search",
-      "chat.message:mail.draft",
-      "chat.message:mail.read"
-    ],
+    "uiSlots": [],
     "pages": [
       "mail"
     ]

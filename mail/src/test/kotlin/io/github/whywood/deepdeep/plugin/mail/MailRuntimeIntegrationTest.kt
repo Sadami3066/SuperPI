@@ -414,9 +414,11 @@ class MailRuntimeIntegrationTest {
             assertTrue(draftResult.text.orEmpty().contains(draft.id))
             val draftCard = draftResult.details?.get("superpi.card")?.jsonObject
             assertNotNull(draftCard)
-            assertEquals(MailChatCardTypes.DRAFT, (draftCard!!["customType"] as JsonPrimitive).contentOrNull)
+            assertFalse(draftCard!!.containsKey("customType"))
+            assertFalse(draftCard.containsKey("payload"))
             assertTrue((draftCard["title"] as JsonPrimitive).contentOrNull.orEmpty().isNotBlank())
-            val draftPayload = draftCard["payload"] as JsonObject
+            assertEquals(MailChatCardTypes.DRAFT, (draftResult.details?.get("cardType") as? JsonPrimitive)?.contentOrNull)
+            val draftPayload = draftResult.details?.get("payload") as JsonObject
             assertEquals(draft.id, (draftPayload["draftId"] as JsonPrimitive).contentOrNull)
             assertFalse(rig.host.chatCustomMessages.contains(MailChatCardTypes.DRAFT))
 
@@ -1041,7 +1043,8 @@ class MailRuntimeIntegrationTest {
             assertFalse(text, text.contains("卡片 id："))
             val card = result.details?.get("superpi.card")?.jsonObject
             assertNotNull(card)
-            assertEquals(MailChatCardTypes.SEARCH, (card!!["customType"] as JsonPrimitive).contentOrNull)
+            assertFalse(card!!.containsKey("customType"))
+            assertEquals(MailChatCardTypes.SEARCH, (result.details?.get("cardType") as? JsonPrimitive)?.contentOrNull)
         } finally {
             closeRig(rig)
         }
@@ -1084,7 +1087,8 @@ class MailRuntimeIntegrationTest {
             assertFalse(text, text.contains("卡片 id："))
             val card = result.details?.get("superpi.card")?.jsonObject
             assertNotNull(card)
-            assertEquals(MailChatCardTypes.READ, (card!!["customType"] as JsonPrimitive).contentOrNull)
+            assertFalse(card!!.containsKey("customType"))
+            assertEquals(MailChatCardTypes.READ, (result.details?.get("cardType") as? JsonPrimitive)?.contentOrNull)
         } finally {
             closeRig(rig)
         }
@@ -1175,7 +1179,7 @@ class MailRuntimeIntegrationTest {
             assertNotNull(pageCard)
             val pagePayload = mailCardJson.decodeFromJsonElement(
                 MailSearchCardPayload.serializer(),
-                pageCard!!["payload"]!!.jsonObject,
+                page.details?.get("payload")!!.jsonObject,
             )
             assertEquals(3, pagePayload.items.size)
             assertEquals(7, pagePayload.total)
@@ -1192,7 +1196,7 @@ class MailRuntimeIntegrationTest {
             assertNotNull(card)
             val payload = mailCardJson.decodeFromJsonElement(
                 MailSearchCardPayload.serializer(),
-                card!!["payload"]!!.jsonObject,
+                all.details?.get("payload")!!.jsonObject,
             )
             assertEquals(7, payload.total)
             assertEquals(7, payload.items.size)
@@ -1238,7 +1242,7 @@ class MailRuntimeIntegrationTest {
             assertNotNull(card)
             val payload = mailCardJson.decodeFromJsonElement(
                 MailReadCardPayload.serializer(),
-                card!!["payload"]!!.jsonObject,
+                result.details?.get("payload")!!.jsonObject,
             )
             assertTrue(payload.body.length > 240)
             assertTrue(payload.body, payload.body.contains("完整的 HTML 正文段落。"))

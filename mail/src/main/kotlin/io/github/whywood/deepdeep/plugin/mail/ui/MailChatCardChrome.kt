@@ -50,10 +50,12 @@ import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
-import io.github.whywood.superpi.plugin.api.CustomMessageSlotState
+import io.github.whywood.superpi.plugin.api.Cards
 import io.github.whywood.superpi.plugin.api.PluginHost
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
@@ -379,6 +381,12 @@ internal val mailChatCardJson = Json {
     coerceInputValues = true
 }
 
-internal fun <T> CustomMessageSlotState.decodeCardPayload(
+internal fun <T> ToolResultState.decodeCardPayload(
     deserializer: DeserializationStrategy<T>,
-): T? = runCatching { mailChatCardJson.decodeFromJsonElement(deserializer, payload) }.getOrNull()
+): T? {
+    val details = result?.details ?: return null
+    val payload = (details["payload"] as? JsonObject)
+        ?: ((details[Cards.KEY] as? JsonObject)?.get("payload") as? JsonObject)
+        ?: return null
+    return runCatching { mailChatCardJson.decodeFromJsonElement(deserializer, payload) }.getOrNull()
+}

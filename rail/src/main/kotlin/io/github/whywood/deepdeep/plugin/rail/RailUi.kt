@@ -61,7 +61,7 @@ import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.api.LocalPluginPageContext
 import io.github.whywood.superpi.plugin.api.PluginHost
 import io.github.whywood.superpi.plugin.api.PluginToolResult
-import io.github.whywood.superpi.plugin.api.ToolCardSlotState
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -423,7 +423,7 @@ private fun RailSkeleton(width: androidx.compose.ui.unit.Dp, height: androidx.co
 }
 
 @Composable
-internal fun TrainToolCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun TrainToolCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         TrainTicketLoading(host)
@@ -776,7 +776,7 @@ private fun TrainTicketFooter(host: PluginHost, bookingUrl: String) {
 }
 
 @Composable
-internal fun RailPriceCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun RailPriceCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         RailPriceLoading(host)

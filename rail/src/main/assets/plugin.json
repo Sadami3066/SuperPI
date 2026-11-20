@@ -37,10 +37,7 @@
       "train_price"
     ],
     "skills": [],
-    "uiSlots": [
-      "tool.card.content:train_search",
-      "tool.card.content:train_price"
-    ],
+    "uiSlots": [],
     "pages": [
       "main"
     ]

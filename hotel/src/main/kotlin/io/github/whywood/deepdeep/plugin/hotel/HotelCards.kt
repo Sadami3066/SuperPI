@@ -59,7 +59,7 @@ import io.github.whywood.superpi.design.SuperPIColors
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.api.PluginHost
-import io.github.whywood.superpi.plugin.api.ToolCardSlotState
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.serialization.json.JsonObject
@@ -242,7 +242,7 @@ private fun HotelFallbackCard(host: PluginHost, text: String?) {
 }
 
 @Composable
-internal fun HotelSearchCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelSearchCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelSearchLoading(host)
@@ -684,7 +684,7 @@ private fun SearchFooter(host: PluginHost, details: HotelSearchDetails) {
 }
 
 @Composable
-internal fun HotelDetailCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelDetailCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelDetailLoading(host)
@@ -1087,7 +1087,7 @@ private fun DetailFooter(host: PluginHost, details: HotelDetailDetails, nights: 
 }
 
 @Composable
-internal fun HotelOrdersCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelOrdersCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelOrdersLoading(host)
@@ -1332,7 +1332,7 @@ private fun OrderRail(tone: androidx.compose.ui.graphics.Color, drawLine: Boolea
 }
 
 @Composable
-internal fun HotelOrderDetailCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelOrderDetailCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelOrderDetailLoading(host)
@@ -1544,7 +1544,7 @@ private fun HotelOrderDetailLoading(host: PluginHost) {
 }
 
 @Composable
-internal fun HotelBookCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelBookCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelBookLoading(host)
@@ -1992,7 +1992,7 @@ private fun decodeTags(details: JsonObject): HotelSearchTags? = runCatching {
 }.getOrNull()
 
 @Composable
-internal fun HotelCancelCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelCancelCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelCancelLoading(host)
@@ -2182,7 +2182,7 @@ private fun HotelCancelLoading(host: PluginHost) {
 }
 
 @Composable
-internal fun HotelTagsCard(host: PluginHost, state: ToolCardSlotState) {
+internal fun HotelTagsCard(host: PluginHost, state: ToolResultState) {
     val result = state.result
     if (result == null) {
         HotelTagsLoading()

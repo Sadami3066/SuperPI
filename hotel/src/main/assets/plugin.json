@@ -47,15 +47,7 @@
     "skills": [
       "superpi-hotel"
     ],
-    "uiSlots": [
-      "tool.card.content:hotel_search",
-      "tool.card.content:hotel_detail",
-      "tool.card.content:hotel_orders",
-      "tool.card.content:hotel_order_detail",
-      "tool.card.content:hotel_book",
-      "tool.card.content:hotel_cancel",
-      "tool.card.content:hotel_tags"
-    ],
+    "uiSlots": [],
     "pages": [
       "main"
     ]

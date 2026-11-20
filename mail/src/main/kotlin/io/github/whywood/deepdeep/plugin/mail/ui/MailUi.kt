@@ -1,40 +1,29 @@
 package io.github.whywood.superpi.plugin.mail.ui
 
-import io.github.whywood.superpi.plugin.api.CustomMessageSlotState
+import androidx.compose.runtime.Composable
 import io.github.whywood.superpi.plugin.api.PluginHost
 import io.github.whywood.superpi.plugin.api.PluginUiContributions
-import io.github.whywood.superpi.plugin.api.SlotIds
-import io.github.whywood.superpi.plugin.api.composeSlot
+import io.github.whywood.superpi.plugin.api.SlotBinding
+import io.github.whywood.superpi.plugin.api.ToolResultRenderer
+import io.github.whywood.superpi.plugin.api.ToolResultRendererContributor
+import io.github.whywood.superpi.plugin.api.ToolResultSource
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import io.github.whywood.superpi.plugin.api.localizedText
 import io.github.whywood.superpi.plugin.api.pluginPage
-import io.github.whywood.superpi.plugin.api.slotBinding
+import io.github.whywood.superpi.plugin.api.toolResultMatch
+import io.github.whywood.superpi.plugin.api.toolResultRenderer
 import io.github.whywood.superpi.plugin.mail.MailRepository
-import io.github.whywood.superpi.plugin.mail.tools.MailChatCardTypes
 
 internal fun mailUi(host: PluginHost, repository: MailRepository): PluginUiContributions =
-    object : PluginUiContributions {
-        override val bindings = listOf(
-            slotBinding(
-                slotId = SlotIds.chatMessage(MailChatCardTypes.SEARCH),
-                content = composeSlot { state ->
-                    val custom = state as? CustomMessageSlotState ?: return@composeSlot
-                    MailSearchChatCard(host = host, state = custom)
-                },
-            ),
-            slotBinding(
-                slotId = SlotIds.chatMessage(MailChatCardTypes.DRAFT),
-                content = composeSlot { state ->
-                    val custom = state as? CustomMessageSlotState ?: return@composeSlot
-                    MailDraftChatCard(host = host, repository = repository, state = custom)
-                },
-            ),
-            slotBinding(
-                slotId = SlotIds.chatMessage(MailChatCardTypes.READ),
-                content = composeSlot { state ->
-                    val custom = state as? CustomMessageSlotState ?: return@composeSlot
-                    MailReadChatCard(host = host, state = custom)
-                },
-            ),
+    object : PluginUiContributions, ToolResultRendererContributor {
+        override val bindings: List<SlotBinding> = emptyList()
+
+        override val toolResultRenderers: List<ToolResultRenderer> = listOf(
+            mailRenderer("mail-search", "mail_search") { state -> MailSearchChatCard(host = host, state = state) },
+            mailRenderer("mail-draft", "mail_draft") { state ->
+                MailDraftChatCard(host = host, repository = repository, state = state)
+            },
+            mailRenderer("mail-read", "mail_read") { state -> MailReadChatCard(host = host, state = state) },
         )
 
         override val pages = listOf(
@@ -45,3 +34,14 @@ internal fun mailUi(host: PluginHost, repository: MailRepository): PluginUiContr
             ),
         )
     }
+
+private fun mailRenderer(
+    id: String,
+    tool: String,
+    content: @Composable (ToolResultState) -> Unit,
+): ToolResultRenderer = toolResultRenderer(
+    id = id,
+    match = toolResultMatch(source = ToolResultSource.PLUGIN, tool = tool),
+    priority = 20,
+    content = content,
+)

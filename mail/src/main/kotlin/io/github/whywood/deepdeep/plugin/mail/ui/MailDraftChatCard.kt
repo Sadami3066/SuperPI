@@ -36,7 +36,7 @@ import io.github.whywood.superpi.design.DdText
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
-import io.github.whywood.superpi.plugin.api.CustomMessageSlotState
+import io.github.whywood.superpi.plugin.api.ToolResultState
 import io.github.whywood.superpi.plugin.api.PluginHost
 import io.github.whywood.superpi.plugin.mail.MailRepository
 import io.github.whywood.superpi.plugin.mail.MailSendResult
@@ -69,9 +69,9 @@ private object MailCardSends {
 internal fun MailDraftChatCard(
     host: PluginHost,
     repository: MailRepository,
-    state: CustomMessageSlotState,
+    state: ToolResultState,
 ) {
-    val payload = remember(state.payload) { state.decodeCardPayload(MailDraftCardPayload.serializer()) }
+    val payload = remember(state.result?.details) { state.decodeCardPayload(MailDraftCardPayload.serializer()) }
     if (payload == null || payload.draftId.isBlank()) {
         MailUnavailableCard(
             host = host,
