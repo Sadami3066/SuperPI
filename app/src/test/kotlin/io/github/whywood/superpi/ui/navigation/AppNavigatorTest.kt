@@ -58,7 +58,7 @@ class AppNavigatorTest {
             AppDestination.MiniappDetail("study-board"),
             AppDestination.WorkspaceSettings("workspace-1"),
             AppDestination.Files("/data/user/0/io.github.whywood.superpi/files/home"),
-            AppDestination.AssistantSettings,
+            AppDestination.AndroidSettings,
         )
         destinations.forEach { destination ->
             assertEquals(destination, AppDestination.fromRouteKey(destination.routeKey))

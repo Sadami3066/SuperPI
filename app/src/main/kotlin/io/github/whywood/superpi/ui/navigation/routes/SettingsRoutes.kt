@@ -21,13 +21,12 @@ import io.github.whywood.superpi.runtime.host.HostAccess
 import io.github.whywood.superpi.service.AgentService
 import io.github.whywood.superpi.ui.navigation.AppNavigator
 import io.github.whywood.superpi.ui.navigation.ShellRouteUi
+import io.github.whywood.superpi.ui.settings.AndroidSettingsScreen
 import io.github.whywood.superpi.ui.settings.ChatSettingsScreen
 import io.github.whywood.superpi.ui.settings.FontScreen
 import io.github.whywood.superpi.ui.settings.PersonalizationScreen
 import io.github.whywood.superpi.ui.settings.SettingsScreen
 import io.github.whywood.superpi.ui.settings.SystemAccessScreen
-import io.github.whywood.superpi.ui.settings.UsageHabitsScreen
-import io.github.whywood.superpi.ui.settings.ScanJsonScreen
 import io.github.whywood.superpi.ui.settings.ScanSettingsScreen
 import io.github.whywood.superpi.ui.settings.SoftwareUpdateScreen
 import io.github.whywood.superpi.ui.settings.ThemeScreen
@@ -52,9 +51,6 @@ internal fun SettingsRoute(
             HostAccess.ROOT -> R.string.access_level_root
         },
     )
-    val overlayEntryMode by dependencies.overlayEntryPreferences.mode.collectAsStateWithLifecycle(
-        initialValue = OverlayEntryMode.VOICE,
-    )
     val updateUi by dependencies.updateManager.ui.collectAsStateWithLifecycle()
     SettingsScreen(
         nickname = ui.nickname,
@@ -72,8 +68,6 @@ internal fun SettingsRoute(
         onBack = onBack,
         onOpenTheme = { navigator.push(AppDestination.Theme) },
         onOpenChatSettings = { navigator.push(AppDestination.ChatSettings) },
-        overlayEntryMode = overlayEntryMode,
-        onOpenUsageHabits = { navigator.push(AppDestination.UsageHabits) },
         onOpenScan = { navigator.push(AppDestination.Scan) },
         onOpenProviders = { navigator.push(AppDestination.Providers) },
         onOpenAccess = { navigator.push(AppDestination.SystemAccess) },
@@ -139,14 +133,14 @@ internal fun ChatSettingsRoute(dependencies: AppDependencies, scope: CoroutineSc
 }
 
 @Composable
-internal fun UsageHabitsRoute(dependencies: AppDependencies, scope: CoroutineScope, onBack: () -> Unit) {
+internal fun AndroidSettingsRoute(dependencies: AppDependencies, scope: CoroutineScope, onBack: () -> Unit) {
     val mode by dependencies.overlayEntryPreferences.mode.collectAsStateWithLifecycle(
         initialValue = OverlayEntryMode.VOICE,
     )
-    UsageHabitsScreen(
-        mode = mode,
+    AndroidSettingsScreen(
+        overlayEntryMode = mode,
+        onOverlayEntryModeChange = { value -> scope.launch { dependencies.overlayEntryPreferences.setMode(value) } },
         onBack = onBack,
-        onModeChange = { value -> scope.launch { dependencies.overlayEntryPreferences.setMode(value) } },
     )
 }
 
@@ -184,13 +178,8 @@ internal fun PersonalizationRoute(dependencies: AppDependencies, scope: Coroutin
 }
 
 @Composable
-internal fun ScanSettingsRoute(onBack: () -> Unit, onOpenJsonEditor: () -> Unit) {
-    ScanSettingsScreen(onBack = onBack, onOpenJsonEditor = onOpenJsonEditor)
-}
-
-@Composable
-internal fun ScanJsonRoute(onBack: () -> Unit) {
-    ScanJsonScreen(onBack = onBack)
+internal fun ScanSettingsRoute(onBack: () -> Unit) {
+    ScanSettingsScreen(onBack = onBack)
 }
 
 @Composable

@@ -1,6 +1,5 @@
 <resources>
     <string name="settings_chat">Chat settings</string>
-    <string name="settings_usage_habits">Usage habits</string>
     <string name="usage_habits_entry_mode">Behavior when opening overlay</string>
     <string name="usage_habits_mode_voice">Voice mode</string>
     <string name="usage_habits_mode_camera">Camera mode</string>
@@ -195,7 +194,6 @@
     <string name="settings_new_chat_model">Default model for new chats</string>
     <string name="settings_assistant">System assistant</string>
     <string name="assistant_settings_title">System assistant</string>
-    <string name="assistant_settings_subtitle">Replaces the phone\'s default assistant</string>
     <string name="assistant_settings_role">Default assistant</string>
     <string name="assistant_settings_role_held">Set</string>
     <string name="assistant_settings_role_missing">Not set</string>

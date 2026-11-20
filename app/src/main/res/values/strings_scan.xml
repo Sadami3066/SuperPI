@@ -41,10 +41,6 @@
     <string name="scan_settings_file">策略文件路径</string>
     <string name="scan_settings_file_hint">可让 Agent 直接编辑此文件</string>
     <string name="scan_settings_file_copied">路径已复制</string>
-    <string name="scan_settings_json_editor">编辑策略文件</string>
-    <string name="scan_settings_json_title">编辑策略文件</string>
-    <string name="scan_settings_json_hint">只编辑自定义策略；官方策略只读。</string>
-    <string name="scan_settings_json_invalid">JSON 无效</string>
     <string name="scan_settings_import">导入策略</string>
     <string name="scan_settings_export">导出策略</string>
     <string name="scan_settings_field_package">应用包名</string>

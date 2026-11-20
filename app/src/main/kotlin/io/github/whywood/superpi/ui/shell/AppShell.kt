@@ -631,7 +631,7 @@ internal fun AppShell(
                     onOpenChat = ::openChat,
                     onOpenMiniappCreate = ::openMiniappCreate,
                     onOpenFile = openWorkspaceFile,
-                    onOpenAssistantSettings = { navigator.push(AppDestination.AssistantSettings) },
+                    onOpenAssistantSettings = { navigator.push(AppDestination.AndroidSettings) },
                     pluginImportUri = pluginImportUri,
                     onPluginImportHandled = { pluginImportUri = null },
                 ),

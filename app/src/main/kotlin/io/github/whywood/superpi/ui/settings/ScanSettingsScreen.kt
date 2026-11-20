@@ -76,7 +76,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ScanSettingsScreen(
     onBack: () -> Unit,
-    onOpenJsonEditor: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
@@ -221,14 +220,6 @@ fun ScanSettingsScreen(
                             Toast.makeText(context, R.string.scan_settings_file_copied, Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.testTag("scan_settings_file"),
-                    )
-                    DdHairline()
-                    DdListRow(
-                        icon = DdIcons.Compose,
-                        title = stringResource(R.string.scan_settings_json_editor),
-                        onClick = onOpenJsonEditor,
-                        showChevron = true,
-                        modifier = Modifier.testTag("scan_settings_json"),
                     )
                     DdHairline()
                     DdListRow(

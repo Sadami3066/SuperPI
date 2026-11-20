@@ -64,29 +64,14 @@ sealed interface AppDestination {
         override val depth: Int = 2
     }
 
-    data object AssistantSettings : AppDestination {
-        override val routeKey: String = "settings/assistant"
-        override val depth: Int = 2
-    }
-
     data object ChatSettings : AppDestination {
         override val routeKey: String = "settings/chat"
-        override val depth: Int = 2
-    }
-
-    data object UsageHabits : AppDestination {
-        override val routeKey: String = "settings/usage-habits"
         override val depth: Int = 2
     }
 
     data object Scan : AppDestination {
         override val routeKey: String = "settings/scan"
         override val depth: Int = 2
-    }
-
-    data object ScanJson : AppDestination {
-        override val routeKey: String = "settings/scan/json"
-        override val depth: Int = 3
     }
 
     data object Privacy : AppDestination {
@@ -223,10 +208,8 @@ sealed interface AppDestination {
             routeKey == Theme.routeKey -> Theme
             routeKey == Fonts.routeKey -> Fonts
             routeKey == ChatSettings.routeKey -> ChatSettings
-            routeKey == UsageHabits.routeKey -> UsageHabits
             routeKey == Scan.routeKey -> Scan
-            routeKey == ScanJson.routeKey -> ScanJson
-            routeKey == AssistantSettings.routeKey -> AssistantSettings
+            routeKey == "settings/assistant" -> AndroidSettings
             routeKey == Privacy.routeKey -> Privacy
             routeKey == AndroidSettings.routeKey -> AndroidSettings
             routeKey == AgentSettings.routeKey -> AgentSettings

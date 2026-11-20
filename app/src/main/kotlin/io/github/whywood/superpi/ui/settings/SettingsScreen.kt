@@ -49,7 +49,6 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.AppLanguage
 import io.github.whywood.superpi.data.LanguagePreferences
-import io.github.whywood.superpi.data.OverlayEntryMode
 import io.github.whywood.superpi.data.crash.CrashLogStore
 import io.github.whywood.superpi.design.DdDropdown
 import io.github.whywood.superpi.design.DdGroupCard
@@ -94,8 +93,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenTheme: () -> Unit,
     onOpenChatSettings: () -> Unit,
-    overlayEntryMode: OverlayEntryMode = OverlayEntryMode.VOICE,
-    onOpenUsageHabits: () -> Unit = {},
     onOpenScan: () -> Unit = {},
     onOpenProviders: () -> Unit,
     onOpenAccess: () -> Unit = {},
@@ -240,15 +237,6 @@ fun SettingsScreen(
                     onClick = onOpenChatSettings,
                     showChevron = true,
                     modifier = Modifier.testTag("settings_chat"),
-                )
-                DdRowDivider(leadingInset = SettingsDividerInset)
-                DdListRow(
-                    icon = DdIcons.HandClick,
-                    title = stringResource(R.string.settings_usage_habits),
-                    value = overlayEntryModeLabel(overlayEntryMode),
-                    onClick = onOpenUsageHabits,
-                    showChevron = true,
-                    modifier = Modifier.testTag("settings_usage_habits"),
                 )
                 DdRowDivider(leadingInset = SettingsDividerInset)
                 DdListRow(

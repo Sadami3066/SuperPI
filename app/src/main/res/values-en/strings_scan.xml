@@ -41,10 +41,6 @@
     <string name="scan_settings_file">Strategy file path</string>
     <string name="scan_settings_file_hint">The agent can edit this file directly</string>
     <string name="scan_settings_file_copied">Path copied</string>
-    <string name="scan_settings_json_editor">Edit strategy file</string>
-    <string name="scan_settings_json_title">Edit strategy file</string>
-    <string name="scan_settings_json_hint">Only custom strategies are editable; official ones are read-only.</string>
-    <string name="scan_settings_json_invalid">Invalid JSON</string>
     <string name="scan_settings_import">Import strategies</string>
     <string name="scan_settings_export">Export strategies</string>
     <string name="scan_settings_field_package">Package name</string>

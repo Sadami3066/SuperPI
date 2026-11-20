@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import io.github.whywood.superpi.ui.assistant.AssistantSettingsScreen
 import io.github.whywood.superpi.ui.mcp.McpScreen
+import io.github.whywood.superpi.ui.navigation.routes.AndroidSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.ArchivedRoute
 import io.github.whywood.superpi.ui.navigation.routes.AgentSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.WebSearchRoute
@@ -20,20 +20,17 @@ import io.github.whywood.superpi.ui.navigation.routes.CustomProviderEditorRoute
 import io.github.whywood.superpi.ui.navigation.routes.ProviderDetailRoute
 import io.github.whywood.superpi.ui.navigation.routes.ProvidersRoute
 import io.github.whywood.superpi.ui.navigation.routes.RelayRoute
-import io.github.whywood.superpi.ui.navigation.routes.ScanJsonRoute
 import io.github.whywood.superpi.ui.navigation.routes.ScanSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.SearchRoute
 import io.github.whywood.superpi.ui.navigation.routes.SettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.SoftwareUpdateRoute
 import io.github.whywood.superpi.ui.navigation.routes.SystemAccessRoute
 import io.github.whywood.superpi.ui.navigation.routes.TimersRoute
-import io.github.whywood.superpi.ui.navigation.routes.UsageHabitsRoute
 import io.github.whywood.superpi.ui.navigation.routes.MiniappDetailRoute
 import io.github.whywood.superpi.ui.navigation.routes.MemoryRoute
 import io.github.whywood.superpi.ui.navigation.routes.MiniappRoute
 import io.github.whywood.superpi.ui.navigation.routes.WorkspaceSettingsRoute
 import io.github.whywood.superpi.ui.settings.AgreementScreen
-import io.github.whywood.superpi.ui.settings.AndroidSettingsScreen
 import io.github.whywood.superpi.ui.skills.SkillsScreen
 
 data class RouteSpec(
@@ -103,7 +100,7 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
 
         AppDestination.SystemAccess -> SystemAccessRoute(dependencies, host.scope, onBack)
 
-        AppDestination.AndroidSettings -> AndroidSettingsScreen(onBack = onBack)
+        AppDestination.AndroidSettings -> AndroidSettingsRoute(dependencies, host.scope, onBack)
 
         AppDestination.AgentSettings -> AgentSettingsRoute(
             dependencies = dependencies,
@@ -121,22 +118,13 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
 
         AppDestination.Privacy -> AgreementScreen(onBack = onBack)
 
-        AppDestination.AssistantSettings -> AssistantSettingsScreen(onBack = onBack)
-
         AppDestination.Theme -> ThemeRoute(dependencies, onBack)
 
         AppDestination.Fonts -> FontsRoute(host.ui, onBack)
 
         AppDestination.ChatSettings -> ChatSettingsRoute(dependencies, host.scope, onBack)
 
-        AppDestination.UsageHabits -> UsageHabitsRoute(dependencies, host.scope, onBack)
-
-        AppDestination.Scan -> ScanSettingsRoute(
-            onBack = onBack,
-            onOpenJsonEditor = { host.navigator.push(AppDestination.ScanJson) },
-        )
-
-        AppDestination.ScanJson -> ScanJsonRoute(onBack)
+        AppDestination.Scan -> ScanSettingsRoute(onBack = onBack)
 
         is AppDestination.ProviderDetail -> ProviderDetailRoute(
             dependencies = dependencies,

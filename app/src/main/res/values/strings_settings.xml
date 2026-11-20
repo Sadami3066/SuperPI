@@ -1,6 +1,5 @@
 <resources>
     <string name="settings_chat">聊天设置</string>
-    <string name="settings_usage_habits">使用习惯</string>
     <string name="usage_habits_entry_mode">进入浮层时的行为</string>
     <string name="usage_habits_mode_voice">语音模式</string>
     <string name="usage_habits_mode_camera">拍照模式</string>
@@ -201,7 +200,6 @@
     <string name="settings_new_chat_model">新会话默认模型</string>
     <string name="settings_assistant">系统助手</string>
     <string name="assistant_settings_title">系统助手</string>
-    <string name="assistant_settings_subtitle">用于替换手机默认助手</string>
     <string name="assistant_settings_role">默认助手</string>
     <string name="assistant_settings_role_held">已设置</string>
     <string name="assistant_settings_role_missing">未设置</string>

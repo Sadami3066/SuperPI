@@ -89,7 +89,6 @@ fun AgentSettingsScreen(
             DdSectionLabel(stringResource(R.string.agent_section_capabilities))
             Spacer(Modifier.height(DdSpacing.Sm))
             SettingsGroup {
-                DdHairline(Modifier.padding(horizontal = DdSpacing.Lg))
                 AgentRow(
                     title = stringResource(R.string.agent_web_search),
                     value = stringResource(R.string.agent_web_search_value),

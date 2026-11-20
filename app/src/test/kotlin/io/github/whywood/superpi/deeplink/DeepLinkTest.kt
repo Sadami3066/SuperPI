@@ -48,7 +48,7 @@ class DeepLinkTest {
             "superpi://settings/access" to AppDestination.SystemAccess,
             "superpi://settings/personalization" to AppDestination.Personalization,
             "superpi://settings/fonts" to AppDestination.Fonts,
-            "superpi://settings/assistant" to AppDestination.AssistantSettings,
+            "superpi://settings/assistant" to AppDestination.AndroidSettings,
             "superpi://settings/chat" to AppDestination.ChatSettings,
         )
         pages.forEach { (raw, destination) ->
