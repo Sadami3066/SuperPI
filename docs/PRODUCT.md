@@ -1,6 +1,6 @@
 # Product principles
 
-Super PI Agent is a personal agent that runs on Android. It combines a conversational assistant, a local Linux environment, device control, and an extensible plugin system in one app. It works without a server: model requests go to the provider you configure, and conversations, files, credentials, and plugin data stay on the device.
+Super PI Agent is a personal agent that runs on Android. It combines a conversational assistant, a local Linux environment, device control, and an extensible plugin system in one app. It is local-first and works without a mandatory server: model requests go to the provider you configure, conversations, files, credentials, and plugin data stay on the device by default, and users can optionally pair with a self-hosted SuperPI-Remote relay for cross-device bot routing and shared memory.
 
 This document records the product constraints that all surfaces share. Architecture and implementation details live in [ARCHITECTURE.md](ARCHITECTURE.md).
 

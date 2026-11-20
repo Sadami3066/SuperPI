@@ -7,7 +7,7 @@ Applies to the current version. The interface and capabilities will keep changin
 - Requires Android 10 or later.
 - Download the package from [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases). The first launch runs a 6-screen onboarding: welcome, account, models, notifications and permissions, choosing a work environment, system access.
 - You can skip onboarding or leave it midway, then fill in each item later in Settings.
-- The app has no account system and needs no sign-up; model keys stay on this device.
+- The app works local-first without requiring an account; model keys stay on this device, and you can optionally pair with your own self-hosted SuperPI-Remote relay.
 
 ## Updates
 
@@ -140,18 +140,16 @@ Good for timetables, expense tracking, anniversaries, drawing lots and small uti
 
 ## Remote connection
 
-Connect to DSH on a computer through `dsh-mobile`:
+Link your phone and desktop (`SuperPI-Desktop`) through a self-hosted `SuperPI-Remote` relay:
 
-1. Install and enable `dsh-mobile` on the computer, and turn on LAN or remote access.
-2. On the phone open Drawer → Remote connection and scan the code or paste the pairing link.
-3. The first connection pins the computer certificate; a certificate change asks you to pair again.
-4. When the LAN is unreachable it tries the remote entry automatically; one computer at a time.
-
-The connection page is DSH's mobile UI on the computer; sessions, messages and bots match the computer.
+1. Start `SuperPI-Remote` on your server or computer with HTTPS/WSS enabled.
+2. In the app drawer, open the account / relay entry to sign in with your relay address and secret, or pair via a short-lived `superpi://pair` link / pairing code.
+3. On first connection the app pins the relay CA certificate fingerprint (`sha256:...`); if the certificate changes, you must pair again.
+4. Once connected, online remote devices and their bots appear in the drawer, shared memory syncs automatically with optimistic version checks, and you can generate pairing links or revoke devices from the account sheet.
 
 ## Data and privacy
 
-- There is no PI account and no relay server; conversation content goes only to the model provider you configure.
+- There is no central PI cloud account; conversation content goes only to the model provider you configure, plus your own self-hosted relay if you pair one.
 - Sessions are stored on this device; pinning, archiving and renaming are local markers only.
 - API keys are stored encrypted; plugin sign-in information lives in the plugin's own data directory.
 - Update checks and marketplace index access go to GitHub.
