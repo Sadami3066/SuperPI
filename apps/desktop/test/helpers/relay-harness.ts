@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { EnrollResponse } from '@superpi/protocol'
 import { RelayService, type RemoteEventPayload } from '../../src/main/relay/service'
+import type { RemoteBotHost } from '../../src/main/relay/remote-server'
 import type { MemorySummary } from '../../src/main/relay/memory-client'
 
 export const remoteRepo = fileURLToPath(new URL('../../../../../SuperPI-Remote/', import.meta.url))
@@ -77,11 +78,13 @@ export function createService(
     onRemoteEvent?: (payload: RemoteEventPayload) => void
     onMemory?: (summary: MemorySummary | null) => void
     homeDir?: string
+    host?: RemoteBotHost
   } = {},
 ): RelayService {
   return new RelayService({
     homeDir: options.homeDir ?? tempDir('superpi-relay-home-'),
     bots: () => [{ id: 'pi', name: 'PI' }],
+    host: options.host,
     broadcast: () => undefined,
     broadcastMemory: options.onMemory,
     onRemoteEvent: options.onRemoteEvent,

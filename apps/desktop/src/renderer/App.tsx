@@ -678,6 +678,21 @@ function applyEvent(
       setEntries((current) => updateTool(current, id, { detail }))
       break
     }
+    case 'tool_call': {
+      const id = typeof event.callId === 'string' ? event.callId : entryId()
+      const name = typeof event.name === 'string' ? event.name : 'tool'
+      setEntries((current) => startTool(current, id, name, event.args))
+      break
+    }
+    case 'tool_result': {
+      const id = typeof event.callId === 'string' ? event.callId : ''
+      if (id === '') break
+      const name = typeof event.name === 'string' ? event.name : 'tool'
+      const detail = typeof event.result === 'string' ? event.result : ''
+      const status = event.isError === true ? 'error' : 'done'
+      setEntries((current) => finishTool(current, id, name, status, detail))
+      break
+    }
     case 'tool_execution_end': {
       const id = typeof event.toolCallId === 'string' ? event.toolCallId : ''
       if (id === '') break

@@ -1,11 +1,20 @@
 import os from 'node:os'
 import path from 'node:path'
-import type { BotEvent, BotInfo, DeviceInfo, EnrollResponse, RouteMethod, ServerFrame } from '@superpi/protocol'
+import type {
+  BotEvent,
+  BotInfo,
+  ClientFrame,
+  DeviceInfo,
+  EnrollResponse,
+  RouteMethod,
+  ServerFrame,
+} from '@superpi/protocol'
 import { RelayCredentialStore, type RelayCredentials } from './credentials.ts'
 import { RelayClient, type RelayConnectionState } from './relay-client.ts'
 import { fetchCaPem, fingerprintOfPem, relayRequest } from './http.ts'
 import { parsePairingLink } from './pairing.ts'
 import { MemoryClient, type MemorySummary } from './memory-client.ts'
+import { RemoteAgentServer, type RemoteBotHost } from './remote-server.ts'
 
 export type RelayState = 'disconnected' | 'connecting' | 'online' | 'offline' | 'error'
 
@@ -28,6 +37,7 @@ export interface PairInput {
 export interface RelayServiceOptions {
   homeDir: string
   bots: () => BotInfo[]
+  host?: RemoteBotHost
   broadcast: (status: RelayStatus) => void
   broadcastMemory?: (summary: MemorySummary | null) => void
   onRemoteEvent?: (payload: RemoteEventPayload) => void
@@ -58,6 +68,7 @@ export class RelayService {
   private readonly remoteRoutes = new Map<string, string>()
   private remoteCounter = 0
   private readonly memoryClient: MemoryClient
+  private readonly remoteServer: RemoteAgentServer | null
   private memorySummary: MemorySummary | null = null
   private memorySync: Promise<void> | null = null
 
@@ -66,6 +77,14 @@ export class RelayService {
     this.credentials = this.store.read()
     this.memoryClient = new MemoryClient(options.homeDir)
     this.memorySummary = this.memoryClient.cached()
+    this.remoteServer = options.host
+      ? new RemoteAgentServer({
+          host: options.host,
+          send: (frame: ClientFrame) => {
+            if (this.client?.connected) this.client.send(frame)
+          },
+        })
+      : null
     if (this.credentials) this.startClient()
   }
 
@@ -203,6 +222,7 @@ export class RelayService {
   dispose(): void {
     this.client?.disconnect()
     this.client = null
+    this.remoteServer?.dispose()
   }
 
   private startClient(): void {
@@ -258,6 +278,10 @@ export class RelayService {
   }
 
   private handleFrame(frame: ServerFrame): void {
+    if (frame.type === 'route') {
+      void this.remoteServer?.handle(frame)
+      return
+    }
     if (frame.type === 'memory_changed') {
       void this.syncMemory()
       return

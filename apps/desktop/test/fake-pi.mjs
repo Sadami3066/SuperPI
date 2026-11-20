@@ -22,6 +22,16 @@ function handle(command) {
     case 'prompt': {
       emit({ id: command.id, type: 'response', command: 'prompt', success: true, data: { disposition: 'started' } })
       emit({ type: 'agent_start' })
+      if (process.env.FAKE_PI_TOOL === '1') {
+        emit({ type: 'tool_execution_start', toolCallId: 'call_1', toolName: 'bash', args: { command: 'pwd' } })
+        emit({
+          type: 'tool_execution_end',
+          toolCallId: 'call_1',
+          toolName: 'bash',
+          result: { content: [{ type: 'text', text: '/home/fake' }] },
+          isError: false,
+        })
+      }
       const update = {
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: 'hello from fake pi' },
@@ -42,9 +52,19 @@ function handle(command) {
       }
       break
     }
-    case 'get_state':
-      emit({ id: command.id, type: 'response', command: 'get_state', success: true, data: { model: 'fake/model', messageCount: 0 } })
+    case 'get_state': {
+      const data = { model: 'fake/model', messageCount: 0 }
+      if (process.env.FAKE_PI_SESSION_ID) {
+        Object.assign(data, {
+          sessionId: process.env.FAKE_PI_SESSION_ID,
+          sessionFile: `${process.cwd()}/${process.env.FAKE_PI_SESSION_ID}.jsonl`,
+          thinkingLevel: 'off',
+          sessionName: 'fake session',
+        })
+      }
+      emit({ id: command.id, type: 'response', command: 'get_state', success: true, data })
       break
+    }
     case 'get_messages':
       emit({ id: command.id, type: 'response', command: 'get_messages', success: true, data: { messages: [] } })
       break

@@ -23,6 +23,10 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 const relay = new RelayService({
   homeDir,
   bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
+  host: {
+    botIds: () => botStore.list().map((bot) => bot.id),
+    client: (botId: string) => ensureClient(resolveBot(botId)),
+  },
   broadcast: (status) => broadcast('relay:state', status),
   broadcastMemory: (summary) => broadcast('memory:state', summary),
   onRemoteEvent: (payload) => broadcast('remote:event', payload),
