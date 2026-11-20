@@ -25,6 +25,11 @@ import { newDeviceId, newPairCode, randomToken, sha256, verifySecret } from './a
 import type { DeviceRecord, RelayStore } from './store.ts'
 import { MemoryConflictError, MemoryRequestError, type MemoryStore } from './memory.ts'
 
+export interface EnrollRateLimitOptions {
+  maxFailures?: number
+  windowMs?: number
+}
+
 export interface RelayServerOptions {
   config: RelayConfig
   store: RelayStore
@@ -33,6 +38,8 @@ export interface RelayServerOptions {
   caPem?: string | null
   memory?: MemoryStore | null
   onMemoryChanged?: (version: number) => void
+  onDeviceRevoked?: (deviceId: string) => void
+  enrollRateLimit?: EnrollRateLimitOptions
   now?: () => number
   online?: (deviceId: string) => boolean
   botsOf?: (deviceId: string) => BotInfo[]
@@ -46,11 +53,18 @@ export interface RelayServer {
 
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000
 const BODY_LIMIT = 64 * 1024
+const MEMORY_BODY_LIMIT = 2 * 1024 * 1024
+const DEFAULT_ENROLL_MAX_FAILURES = 10
+const DEFAULT_ENROLL_WINDOW_MS = 15 * 60 * 1000
 
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const now = options.now ?? (() => Date.now())
+  const rateLimiter = new FailureRateLimiter(
+    options.enrollRateLimit?.maxFailures ?? DEFAULT_ENROLL_MAX_FAILURES,
+    options.enrollRateLimit?.windowMs ?? DEFAULT_ENROLL_WINDOW_MS,
+  )
   const listener = (request: IncomingMessage, response: ServerResponse): void => {
-    void handle(options, now, request, response)
+    void handle(options, now, rateLimiter, request, response)
   }
   const server = createListener(options.config, listener)
 
@@ -92,6 +106,7 @@ function createListener(config: RelayConfig, listener: (request: IncomingMessage
 async function handle(
   options: RelayServerOptions,
   now: () => number,
+  rateLimiter: FailureRateLimiter,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
@@ -146,7 +161,7 @@ async function handle(
       const device = authenticate(options, now(), request, response)
       if (!device || response.writableEnded) return
       const memory = requireMemory(options)
-      const body = await readJson(request)
+      const body = await readJson(request, MEMORY_BODY_LIMIT)
       if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
       const result = memory.write({ deviceId: device.id, deviceName: device.name }, body as MemoryWriteRequest, now())
       if (result.applied) options.onMemoryChanged?.(result.version)
@@ -156,7 +171,7 @@ async function handle(
     }
 
     if (method === 'POST' && url.pathname === '/v1/pair/enroll') {
-      const body = await enroll(options, now(), request)
+      const body = await enroll(options, now(), rateLimiter, request)
       sendJson(response, 200, body)
       return
     }
@@ -195,6 +210,7 @@ async function handle(
       const id = decodeURIComponent(url.pathname.slice('/v1/devices/'.length))
       if (id === '') throw new HttpError(400, 'bad_request', 'device id is required')
       if (!options.store.revokeDevice(id, now())) throw new HttpError(404, 'not_found', `unknown device: ${id}`)
+      options.onDeviceRevoked?.(id)
       const body: RevokeResponse = { revoked: id }
       sendJson(response, 200, body)
       return
@@ -223,7 +239,16 @@ async function handle(
   }
 }
 
-async function enroll(options: RelayServerOptions, now: number, request: IncomingMessage): Promise<EnrollResponse> {
+async function enroll(
+  options: RelayServerOptions,
+  now: number,
+  rateLimiter: FailureRateLimiter,
+  request: IncomingMessage,
+): Promise<EnrollResponse> {
+  const ip = clientIp(request)
+  if (rateLimiter.isLimited(ip, now)) {
+    throw new HttpError(429, 'rate_limited', 'too many failed enrollment attempts')
+  }
   const body = await readJson(request)
   if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
   const payload = body as Partial<EnrollRequest>
@@ -237,11 +262,15 @@ async function enroll(options: RelayServerOptions, now: number, request: Incomin
 
   if (typeof payload.loginSecret === 'string' && payload.loginSecret !== '') {
     if (!verifySecret(payload.loginSecret, account.secretHash)) {
+      rateLimiter.recordFailure(ip, now)
       throw new HttpError(401, 'unauthorized', 'invalid login secret')
     }
-  } else if (typeof payload.pairCode === 'string' && payload.pairCode !== '') {
-    const status = options.store.consumePairCode(payload.pairCode.toUpperCase(), now)
+  } else if (typeof payload.pairCode === 'string' && payload.pairCode.trim() !== '') {
+    const code = payload.pairCode.trim().toUpperCase()
+    const status = options.store.consumePairCode(code, now)
     if (status !== 'ok') {
+      options.store.registerPairCodeFailure(code, now)
+      rateLimiter.recordFailure(ip, now)
       throw new HttpError(401, 'unauthorized', `pair code rejected: ${status}`)
     }
   } else {
@@ -366,5 +395,44 @@ class HttpError extends Error {
     super(message)
     this.status = status
     this.code = code
+  }
+}
+
+function clientIp(request: IncomingMessage): string {
+  const remote = request.socket.remoteAddress ?? 'unknown'
+  return remote.startsWith('::ffff:') ? remote.slice('::ffff:'.length) : remote
+}
+
+class FailureRateLimiter {
+  private readonly maxFailures: number
+  private readonly windowMs: number
+  private readonly failures = new Map<string, number[]>()
+
+  constructor(maxFailures: number, windowMs: number) {
+    this.maxFailures = maxFailures
+    this.windowMs = windowMs
+  }
+
+  isLimited(key: string, now: number): boolean {
+    return this.prune(key, now).length >= this.maxFailures
+  }
+
+  recordFailure(key: string, now: number): void {
+    const timestamps = this.prune(key, now)
+    timestamps.push(now)
+    this.failures.set(key, timestamps)
+    if (this.failures.size > 1000) {
+      for (const entryKey of this.failures.keys()) this.prune(entryKey, now)
+    }
+  }
+
+  private prune(key: string, now: number): number[] {
+    const existing = this.failures.get(key)
+    if (!existing) return []
+    const cutoff = now - this.windowMs
+    const recent = existing.filter((timestamp) => timestamp > cutoff)
+    if (recent.length === 0) this.failures.delete(key)
+    else if (recent.length !== existing.length) this.failures.set(key, recent)
+    return recent
   }
 }

@@ -18,10 +18,10 @@ if (!account) {
   console.log(`login secret (shown once): ${secret}`)
 }
 
-const fingerprint = readFingerprint(config.certPath)
+const fingerprint = readFingerprint(config.caPath ?? config.certPath)
 const caPem = config.caPath ? readFileSync(config.caPath, 'utf8') : null
-const hub = createRealtimeHub(store)
 const memory = new MemoryStore(path.join(config.dataDir, 'memory'), store.database)
+const hub = createRealtimeHub(store, () => memory.version())
 const relay = createRelayServer({
   config,
   store,
@@ -30,6 +30,7 @@ const relay = createRelayServer({
   caPem,
   memory,
   onMemoryChanged: (version) => hub.broadcastMemoryChanged(version),
+  onDeviceRevoked: (id) => hub.disconnectDevice(id),
   online: (deviceId) => hub.isOnline(deviceId),
   botsOf: (deviceId) => hub.botsOf(deviceId),
 })

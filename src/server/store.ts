@@ -120,16 +120,18 @@ export class RelayStore {
     if (!row) return 'missing'
     if (row.used_at !== null) return 'used'
     if (row.attempts >= PAIR_CODE_ATTEMPTS) return 'too_many_attempts'
-    if (row.expires_at < now) {
-      this.db.prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE code = ?').run(code)
-      return 'expired'
-    }
+    if (row.expires_at < now) return 'expired'
     this.db.prepare('UPDATE pair_codes SET used_at = ? WHERE code = ?').run(now, code)
     return 'ok'
   }
 
-  registerPairCodeFailure(code: string): void {
-    this.db.prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE code = ?').run(code)
+  registerPairCodeFailure(code: string, now = Date.now()): void {
+    const result = this.db.prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE code = ?').run(code)
+    if (Number(result.changes) === 0) {
+      this.db
+        .prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE used_at IS NULL AND expires_at >= ?')
+        .run(now)
+    }
   }
 }
 

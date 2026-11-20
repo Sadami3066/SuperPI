@@ -24,31 +24,47 @@ export interface RealtimeHub {
   isOnline(deviceId: string): boolean
   botsOf(deviceId: string): BotInfo[]
   broadcastMemoryChanged(version: number): void
+  disconnectDevice(deviceId: string): void
+}
+
+export interface RealtimeHubOptions {
+  heartbeatIntervalMs?: number
+  heartbeatTimeoutMs?: number
 }
 
 interface Connection {
   deviceId: string
   bots: BotInfo[]
   socket: WebSocket
+  lastActivityAt: number
 }
 
 interface PendingRoute {
   from: string
   to: string
   at: number
+  streaming: boolean
 }
 
 const HELLO_TIMEOUT_MS = 10_000
 const ROUTE_TTL_MS = 30 * 60 * 1000
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000
 
 export function createRealtimeHub(
   store: RelayStore,
   memoryVersion: () => number = () => 0,
   now: () => number = Date.now,
+  options: RealtimeHubOptions = {},
 ): RealtimeHub {
   const wss = new WebSocketServer({ noServer: true })
   const connections = new Map<string, Connection>()
+  const pendingSockets = new Map<WebSocket, string>()
   const pendingRoutes = new Map<string, PendingRoute>()
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
+  const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
+  const heartbeatDeadlineMs = heartbeatIntervalMs + heartbeatTimeoutMs
+
   const sweeper = setInterval(() => {
     const cutoff = now() - ROUTE_TTL_MS
     for (const [id, pending] of pendingRoutes) {
@@ -62,22 +78,64 @@ export function createRealtimeHub(
   }, 60_000)
   sweeper.unref?.()
 
-  function deviceList(): DeviceInfo[] {
-    return store.listDevices().map((device) => {
-      const connection = connections.get(device.id)
-      return {
-        deviceId: device.id,
-        name: device.name,
-        platform: device.platform as DeviceInfo['platform'],
-        online: connection !== undefined,
-        lastSeen: device.lastSeen,
-        bots: connection?.bots ?? [],
+  const heartbeat = setInterval(() => {
+    const current = now()
+    for (const connection of [...connections.values()]) {
+      if (current - connection.lastActivityAt > heartbeatDeadlineMs) {
+        if (connections.get(connection.deviceId) === connection) {
+          connections.delete(connection.deviceId)
+          dropDevice(connection.deviceId, `device ${connection.deviceId} timed out`)
+        }
+        connection.socket.terminate()
+        continue
       }
-    })
+      if (connection.socket.readyState === WebSocket.OPEN) {
+        try {
+          connection.socket.ping()
+        } catch {}
+      }
+    }
+  }, heartbeatIntervalMs)
+  heartbeat.unref?.()
+
+  function deviceList(): DeviceInfo[] {
+    return store
+      .listDevices()
+      .filter((device) => !device.revoked)
+      .map((device) => {
+        const connection = connections.get(device.id)
+        return {
+          deviceId: device.id,
+          name: device.name,
+          platform: device.platform as DeviceInfo['platform'],
+          online: connection !== undefined,
+          lastSeen: device.lastSeen,
+          bots: connection?.bots ?? [],
+        }
+      })
   }
 
   function send(connection: Connection, frame: ServerFrame): void {
     if (connection.socket.readyState === WebSocket.OPEN) connection.socket.send(encodeFrame(frame))
+  }
+
+  function dropDevice(deviceId: string, reason: string): void {
+    const offline: PresenceFrame = { type: 'presence', deviceId, online: false, lastSeen: now() }
+    for (const entry of connections.values()) send(entry, offline)
+    for (const [id, pending] of pendingRoutes) {
+      if (pending.to === deviceId || pending.from === deviceId) {
+        pendingRoutes.delete(id)
+        const requester = connections.get(pending.from)
+        if (requester && pending.to === deviceId) {
+          send(requester, {
+            type: 'route_error',
+            id,
+            code: 'device_offline',
+            message: reason,
+          })
+        }
+      }
+    }
   }
 
   function broadcastPresence(deviceId: string, online: boolean, bots?: BotInfo[]): void {
@@ -103,7 +161,19 @@ export function createRealtimeHub(
       connection.socket.close(1008, 'protocol mismatch')
       return
     }
+    const record = store.listDevices().find((entry) => entry.id === connection.deviceId)
+    if (!record || record.revoked) {
+      connection.socket.close(4001, 'device revoked')
+      return
+    }
+    pendingSockets.delete(connection.socket)
     connection.bots = frame.bots
+    connection.lastActivityAt = now()
+    const previous = connections.get(connection.deviceId)
+    connections.set(connection.deviceId, connection)
+    if (previous && previous !== connection) {
+      previous.socket.close(1000, 'replaced by new connection')
+    }
     const body: HelloOkFrame = {
       type: 'hello_ok',
       accountId: store.account()?.id ?? '',
@@ -126,7 +196,8 @@ export function createRealtimeHub(
       send(connection, error)
       return
     }
-    pendingRoutes.set(frame.id, { from: connection.deviceId, to: frame.to, at: now() })
+    const streaming = frame.method === 'bot.prompt' || frame.method === 'bot.resume'
+    pendingRoutes.set(frame.id, { from: connection.deviceId, to: frame.to, at: now(), streaming })
     const inbound: InboundRouteFrame = {
       type: 'route',
       id: frame.id,
@@ -170,6 +241,7 @@ export function createRealtimeHub(
     }
     if (frame.type === 'route_ok') {
       if (requester) send(requester, { type: 'route_ok', id: frame.id, result: frame.result })
+      if (!pending.streaming) pendingRoutes.delete(frame.id)
       return
     }
     pendingRoutes.delete(frame.id)
@@ -183,11 +255,17 @@ export function createRealtimeHub(
   }
 
   function handleConnection(socket: WebSocket, deviceId: string): void {
-    const connection: Connection = { deviceId, bots: [], socket }
-    connections.set(deviceId, connection)
+    const connection: Connection = { deviceId, bots: [], socket, lastActivityAt: now() }
+    pendingSockets.set(socket, deviceId)
     const helloTimer = setTimeout(() => socket.close(1008, 'hello timeout'), HELLO_TIMEOUT_MS)
+    helloTimer.unref?.()
+
+    socket.on('pong', () => {
+      connection.lastActivityAt = now()
+    })
 
     socket.on('message', (raw) => {
+      connection.lastActivityAt = now()
       let frame: ClientFrame
       try {
         frame = decodeFrameLine('client', raw.toString()) as ClientFrame
@@ -216,24 +294,10 @@ export function createRealtimeHub(
 
     socket.on('close', () => {
       clearTimeout(helloTimer)
+      pendingSockets.delete(socket)
       if (connections.get(deviceId) === connection) {
         connections.delete(deviceId)
-        const offline: PresenceFrame = { type: 'presence', deviceId, online: false, lastSeen: now() }
-        for (const entry of connections.values()) send(entry, offline)
-        for (const [id, pending] of pendingRoutes) {
-          if (pending.to === deviceId || pending.from === deviceId) {
-            pendingRoutes.delete(id)
-            const requester = connections.get(pending.from)
-            if (requester && pending.to === deviceId) {
-              send(requester, {
-                type: 'route_error',
-                id,
-                code: 'device_offline',
-                message: `device ${deviceId} disconnected`,
-              })
-            }
-          }
-        }
+        dropDevice(deviceId, `device ${deviceId} disconnected`)
       }
     })
 
@@ -263,6 +327,9 @@ export function createRealtimeHub(
     },
     close() {
       clearInterval(sweeper)
+      clearInterval(heartbeat)
+      for (const socket of pendingSockets.keys()) socket.close(1001, 'server shutting down')
+      pendingSockets.clear()
       for (const connection of connections.values()) connection.socket.close(1001, 'server shutting down')
       connections.clear()
       return new Promise((resolve) => wss.close(() => resolve()))
@@ -277,6 +344,18 @@ export function createRealtimeHub(
       for (const connection of connections.values()) {
         send(connection, { type: 'memory_changed', version })
       }
+    },
+    disconnectDevice(deviceId: string) {
+      for (const [socket, pendingDeviceId] of [...pendingSockets.entries()]) {
+        if (pendingDeviceId !== deviceId) continue
+        pendingSockets.delete(socket)
+        socket.close(4001, 'device revoked')
+      }
+      const connection = connections.get(deviceId)
+      if (!connection) return
+      connections.delete(deviceId)
+      connection.socket.close(4001, 'device revoked')
+      dropDevice(deviceId, `device ${deviceId} revoked`)
     },
   }
 }

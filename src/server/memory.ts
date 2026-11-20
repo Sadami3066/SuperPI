@@ -113,12 +113,12 @@ export class MemoryStore {
         throw new MemoryRequestError(`unknown memory op: ${request.op}`)
     }
 
+    if (request.op === 'overwrite' && current !== '') {
+      this.backupFile(relative, current, now)
+    }
+
     this.writeFile(relative, next)
-    const version = this.bumpVersion()
-    this.setFileVersion(relative, version)
-    this.db
-      .prepare('INSERT INTO memory_writes (idempotency_key, path, source_device, created_at, version) VALUES (?, ?, ?, ?, ?)')
-      .run(key, relative, source.deviceId, now, version)
+    const version = this.commitWriteMetadata(key, relative, source.deviceId, now)
     return { version, applied: true }
   }
 
@@ -136,16 +136,7 @@ export class MemoryStore {
       const base = content.trimEnd()
       return `${base === '' ? '' : `${base}\n\n`}${block}\n`
     }
-    const heading = `## ${section}`
-    const index = content.indexOf(heading)
-    if (index < 0) {
-      const base = content.trimEnd()
-      return `${base === '' ? '' : `${base}\n\n`}${heading}\n\n${block}\n`
-    }
-    const after = content.indexOf('\n## ', index + heading.length)
-    const head = content.slice(0, after < 0 ? content.length : after).trimEnd()
-    const tail = after < 0 ? '' : content.slice(after)
-    return `${head}\n${block}\n${tail}`
+    return appendSectionBlock(content, section, block)
   }
 
   private requireVersion(current: number, requested: number | undefined): void {
@@ -180,10 +171,19 @@ export class MemoryStore {
     renameSync(temporary, file)
   }
 
+  private backupFile(relative: string, content: string, now: number): void {
+    const backupRoot = path.resolve(this.rootDir, '.backup')
+    const target = path.resolve(backupRoot, `${relative}.${now}.bak`)
+    if (!target.startsWith(backupRoot + path.sep)) throw new MemoryRequestError('invalid memory path')
+    mkdirSync(path.dirname(target), { recursive: true })
+    writeFileSync(target, content, 'utf8')
+  }
+
   private listFiles(): Record<string, string> {
     const files: Record<string, string> = {}
     for (const file of this.walk(this.rootDir)) {
       const relative = path.relative(this.rootDir, file).split(path.sep).join('/')
+      if (relative === '.backup' || relative.startsWith('.backup/')) continue
       if (!relative.endsWith('.md') && relative !== 'summaries.log') continue
       files[relative] = readFileSync(file, 'utf8')
     }
@@ -193,11 +193,30 @@ export class MemoryStore {
   private walk(dir: string): string[] {
     const result: string[] = []
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name === '.backup') continue
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) result.push(...this.walk(full))
       else if (statSync(full).isFile()) result.push(full)
     }
     return result
+  }
+
+  private commitWriteMetadata(key: string, relative: string, deviceId: string, now: number): number {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const version = this.bumpVersion()
+      this.setFileVersion(relative, version)
+      this.db
+        .prepare('INSERT INTO memory_writes (idempotency_key, path, source_device, created_at, version) VALUES (?, ?, ?, ?, ?)')
+        .run(key, relative, deviceId, now, version)
+      this.db.exec('COMMIT')
+      return version
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {}
+      throw error
+    }
   }
 
   private findWrite(key: string): number | null {
@@ -232,16 +251,85 @@ export class MemoryStore {
   }
 }
 
-function replaceSection(content: string, section: string, block: string): string {
-  const heading = `## ${section}`
-  const index = content.indexOf(heading)
-  if (index < 0) {
-    const base = content.trimEnd()
-    return `${base === '' ? '' : `${base}\n\n`}${heading}\n\n${block}\n`
+interface FenceState {
+  char: '`' | '~'
+  length: number
+}
+
+interface SectionBounds {
+  headingIndex: number
+  endIndex: number
+}
+
+function updateFence(line: string, current: FenceState | null): FenceState | null {
+  const trimmed = line.trim()
+  if (!current) {
+    const match = /^(`{3,}|~{3,})/.exec(trimmed)
+    if (!match) return null
+    const marker = match[1] ?? ''
+    const char = marker[0] as '`' | '~'
+    if (char === '`' && trimmed.slice(marker.length).includes('`')) return null
+    return { char, length: marker.length }
   }
-  const after = content.indexOf('\n## ', index + heading.length)
-  const head = content.slice(0, index + heading.length).trimEnd()
-  const tail = after < 0 ? '' : content.slice(after)
-  return `${head}\n\n${block}\n${tail}`
+  const closing = new RegExp(`^${current.char}{${current.length},}$`)
+  return closing.test(trimmed) ? null : current
+}
+
+function findSectionBounds(lines: string[], section: string): SectionBounds | null {
+  const target = `## ${section.trim()}`
+  let fence: FenceState | null = null
+  let headingIndex = -1
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const nextFence = updateFence(line, fence)
+    if (fence !== null || nextFence !== null) {
+      fence = nextFence
+      continue
+    }
+    const trimmed = line.trim()
+    if (headingIndex < 0) {
+      if (trimmed === target) headingIndex = index
+    } else if (trimmed.startsWith('## ')) {
+      return { headingIndex, endIndex: index }
+    }
+  }
+
+  if (headingIndex < 0) return null
+  return { headingIndex, endIndex: lines.length }
+}
+
+function appendSectionBlock(content: string, section: string, block: string): string {
+  const normalized = content.replaceAll('\r\n', '\n')
+  const lines = normalized.split('\n')
+  const bounds = findSectionBounds(lines, section)
+  if (!bounds) {
+    const base = normalized.trimEnd()
+    return `${base === '' ? '' : `${base}\n\n`}## ${section.trim()}\n\n${block}\n`
+  }
+  const head = lines.slice(0, bounds.endIndex).join('\n').trimEnd()
+  const hasBody = lines.slice(bounds.headingIndex + 1, bounds.endIndex).some((line) => line.trim() !== '')
+  const separator = hasBody ? '\n' : '\n\n'
+  const tailLines = lines.slice(bounds.endIndex)
+  if (tailLines.length === 0) return `${head}${separator}${block}\n`
+  const tail = tailLines.join('\n')
+  const normalizedTail = tail.endsWith('\n') ? tail : `${tail}\n`
+  return `${head}${separator}${block}\n\n${normalizedTail}`
+}
+
+function replaceSection(content: string, section: string, block: string): string {
+  const normalized = content.replaceAll('\r\n', '\n')
+  const lines = normalized.split('\n')
+  const bounds = findSectionBounds(lines, section)
+  if (!bounds) {
+    const base = normalized.trimEnd()
+    return `${base === '' ? '' : `${base}\n\n`}## ${section.trim()}\n\n${block}\n`
+  }
+  const head = lines.slice(0, bounds.headingIndex + 1).join('\n').trimEnd()
+  const tailLines = lines.slice(bounds.endIndex)
+  if (tailLines.length === 0) return `${head}\n\n${block}\n`
+  const tail = tailLines.join('\n')
+  const normalizedTail = tail.endsWith('\n') ? tail : `${tail}\n`
+  return `${head}\n\n${block}\n\n${normalizedTail}`
 }
 

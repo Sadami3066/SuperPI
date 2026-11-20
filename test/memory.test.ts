@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
@@ -23,6 +23,7 @@ interface Harness {
   relay: RelayServer
   hub: RealtimeHub
   store: RelayStore
+  memory: MemoryStore
   dir: string
   baseUrl: string
   wsBase: string
@@ -44,10 +45,10 @@ afterEach(async () => {
   }
 })
 
-async function start(): Promise<Harness> {
+async function start(now?: () => number): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), 'superpi-memory-'))
   const store = new RelayStore(dir)
-  store.createAccount(newAccountId(), hashSecret(LOGIN_SECRET), Date.now())
+  store.createAccount(newAccountId(), hashSecret(LOGIN_SECRET), now?.() ?? Date.now())
   const memory = new MemoryStore(path.join(dir, 'memory'), store.database)
   const changed: number[] = []
   const config: RelayConfig = {
@@ -60,13 +61,14 @@ async function start(): Promise<Harness> {
     version: '0.1.0',
     entries: [],
   }
-  const hub = createRealtimeHub(store)
+  const hub = createRealtimeHub(store, () => memory.version(), now ?? Date.now)
   const relay = createRelayServer({
     config,
     store,
     fingerprint: null,
     entries: [],
     memory,
+    now,
     onMemoryChanged: (version) => {
       changed.push(version)
       hub.broadcastMemoryChanged(version)
@@ -86,6 +88,7 @@ async function start(): Promise<Harness> {
     relay,
     hub,
     store,
+    memory,
     dir,
     baseUrl,
     wsBase: `ws://127.0.0.1:${address.port}/v1/ws`,
@@ -259,5 +262,172 @@ describe('shared memory', () => {
     const harness = await start()
     const response = await fetch(`${harness.baseUrl}/v1/memory/snapshot`)
     expect(response.status).toBe(401)
+  })
+
+  it('matches exact level-2 headings and ignores prefix matches and fenced code blocks', async () => {
+    const harness = await start()
+    const seed = [
+      '## Workflow',
+      '',
+      'Keep workflow intact.',
+      '',
+      '## Notes',
+      '',
+      '```markdown',
+      '## Work',
+      '',
+      'Inside code block.',
+      '```',
+      '',
+      '## Work',
+      '',
+      'Original work item.',
+    ].join('\n')
+
+    const initial = await write(harness, {
+      op: 'overwrite',
+      path: 'context.md',
+      text: seed,
+      idempotencyKey: 'sec-seed',
+      baseVersion: 0,
+    })
+    expect(initial.status).toBe(200)
+
+    const appended = await write(harness, {
+      op: 'append',
+      path: 'context.md',
+      section: 'Work',
+      text: 'Appended work item.',
+      idempotencyKey: 'sec-append',
+    })
+    expect(appended.status).toBe(200)
+
+    let content = (await snapshot(harness)).files['context.md'] ?? ''
+    expect(content).toContain('## Workflow\n\nKeep workflow intact.\n\n## Notes')
+    expect(content).toContain('```markdown\n## Work\n\nInside code block.\n```')
+    expect(content.indexOf('Appended work item.')).toBeGreaterThan(content.indexOf('Original work item.'))
+
+    const currentVersion = (await snapshot(harness)).versions['context.md']
+    const replaced = await write(harness, {
+      op: 'replace_section',
+      path: 'context.md',
+      section: 'Work',
+      text: 'Replaced work item.',
+      idempotencyKey: 'sec-replace',
+      baseVersion: currentVersion,
+    })
+    expect(replaced.status).toBe(200)
+
+    content = (await snapshot(harness)).files['context.md'] ?? ''
+    expect(content).toContain('## Workflow\n\nKeep workflow intact.\n\n## Notes')
+    expect(content).toContain('```markdown\n## Work\n\nInside code block.\n```')
+    expect(content).toContain('Replaced work item.')
+    expect(content).not.toContain('Original work item.')
+    expect(content).not.toContain('Appended work item.')
+
+    const onlyPrefixAndFence = [
+      '## Workflow',
+      '',
+      'Still workflow.',
+      '',
+      '```md',
+      '## Work',
+      'Example only.',
+      '```',
+    ].join('\n')
+    await write(harness, {
+      op: 'overwrite',
+      path: 'profile.md',
+      text: onlyPrefixAndFence,
+      idempotencyKey: 'sec-prefix-seed',
+      baseVersion: 0,
+    })
+    await write(harness, {
+      op: 'append',
+      path: 'profile.md',
+      section: 'Work',
+      text: 'New section item.',
+      idempotencyKey: 'sec-prefix-append',
+    })
+    const profile = (await snapshot(harness)).files['profile.md'] ?? ''
+    expect(profile).toContain('## Workflow\n\nStill workflow.')
+    expect(profile).toContain('```md\n## Work\nExample only.\n```')
+    expect(profile.indexOf('New section item.')).toBeGreaterThan(profile.indexOf('Example only.'))
+  })
+
+  it('backs up non-empty files on overwrite and excludes .backup from snapshots', async () => {
+    let clock = 1_700_000_000_000
+    const harness = await start(() => clock)
+
+    const first = await write(harness, {
+      op: 'overwrite',
+      path: 'daily/2026/11/2026-11/2026-11-20.md',
+      text: '# First draft',
+      idempotencyKey: 'bak-1',
+      baseVersion: 0,
+    })
+    expect(first.status).toBe(200)
+    const firstBackup = path.join(harness.dir, 'memory', '.backup', `daily/2026/11/2026-11/2026-11-20.md.${clock}.bak`)
+    expect(existsSync(firstBackup)).toBe(false)
+
+    clock += 5_000
+    const second = await write(harness, {
+      op: 'overwrite',
+      path: 'daily/2026/11/2026-11/2026-11-20.md',
+      text: '# Second draft',
+      idempotencyKey: 'bak-2',
+      baseVersion: 1,
+    })
+    expect(second.status).toBe(200)
+
+    const secondBackup = path.join(harness.dir, 'memory', '.backup', `daily/2026/11/2026-11/2026-11-20.md.${clock}.bak`)
+    expect(existsSync(secondBackup)).toBe(true)
+    expect(readFileSync(secondBackup, 'utf8')).toContain('# First draft')
+
+    const snap = await snapshot(harness)
+    expect(Object.keys(snap.files)).toEqual(['daily/2026/11/2026-11/2026-11-20.md'])
+    expect(snap.files['daily/2026/11/2026-11/2026-11-20.md']).toContain('# Second draft')
+  })
+
+  it('accepts memory writes larger than 64KB', async () => {
+    const harness = await start()
+    const largeText = 'x'.repeat(120 * 1024)
+    const response = await write(harness, {
+      op: 'overwrite',
+      path: 'cookbook.md',
+      text: largeText,
+      idempotencyKey: 'large-1',
+      baseVersion: 0,
+    })
+    expect(response.status).toBe(200)
+    const snap = await snapshot(harness)
+    expect(snap.files['cookbook.md']?.length).toBeGreaterThan(120 * 1024)
+  })
+
+  it('rolls back metadata atomically if recording the write fails', async () => {
+    const harness = await start()
+    harness.memory.write(
+      { deviceId: harness.deviceId, deviceName: 'My phone' },
+      { op: 'append', path: 'profile.md', text: 'Initial', idempotencyKey: 'tx-1' },
+    )
+    expect(harness.memory.version()).toBe(1)
+
+    harness.store.database.exec(`
+      CREATE TRIGGER fail_memory_write
+      BEFORE INSERT ON memory_writes
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated failure');
+      END;
+    `)
+
+    expect(() =>
+      harness.memory.write(
+        { deviceId: harness.deviceId, deviceName: 'My phone' },
+        { op: 'append', path: 'profile.md', text: 'Broken', idempotencyKey: 'tx-2' },
+      ),
+    ).toThrow('simulated failure')
+
+    expect(harness.memory.version()).toBe(1)
+    expect(harness.memory.file('profile.md').fileVersion).toBe(1)
   })
 })
