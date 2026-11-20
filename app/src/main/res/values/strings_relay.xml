@@ -40,4 +40,15 @@
     <string name="relay_devices_empty_hint">在另一台设备上连接同一个账号后，会显示在这里</string>
     <string name="relay_devices_offline">离线</string>
     <string name="relay_devices_no_bots">没有可用的 Bot</string>
+    <string name="relay_pair_new">添加新设备</string>
+    <string name="relay_pair_generating">正在生成配对链接…</string>
+    <string name="relay_pair_dialog_title">配对新设备</string>
+    <string name="relay_pair_dialog_hint">10 分钟内有效，仅可使用一次。复制下方链接到另一台设备完成连接。</string>
+    <string name="relay_pair_copy">复制链接</string>
+    <string name="relay_pair_copied">已复制</string>
+    <string name="relay_pair_close">关闭</string>
+    <string name="relay_device_remove">移除</string>
+    <string name="relay_device_remove_title">移除设备</string>
+    <string name="relay_device_remove_message">移除「%1$s」后，该设备会立即断开连接，需要重新配对才能访问。</string>
+    <string name="relay_device_remove_confirm">移除</string>
 </resources>

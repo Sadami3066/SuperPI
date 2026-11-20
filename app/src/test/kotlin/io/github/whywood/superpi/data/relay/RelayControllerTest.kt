@@ -158,9 +158,33 @@ class RelayControllerTest {
         assertEquals(null, store.read())
     }
 
-    private class FakeStore(initial: RelayAccount? = null) : RelayAccountStore {
+    @Test
+    fun generatesPairLinkAndRevokesDevicesAndSelfOnSignOut() = runTest {
+        val fp = "ab".repeat(32)
+        val initial = account("tok-1")
+        val store = FakeStore(initial, initialToken = "tok-1")
+        val enroller = FakeEnroller(caPem = "PEM", fingerprint = fp)
+        val controller = controller(store, enroller)
+
+        controller.generatePairCode()
+        testScheduler.advanceUntilIdle()
+        assertEquals("https://relay.example:8443/pair#fp=$fp&code=PAIR1234", controller.state.value.pairLink)
+
+        val revokedCallback = mutableListOf<String>()
+        controller.revokeDevice("dev-desktop") { revokedCallback += it }
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("dev-desktop"), revokedCallback)
+        assertEquals(listOf("dev-desktop"), enroller.revokedDevices)
+
+        controller.signOut()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("dev-desktop", "dev"), enroller.revokedDevices)
+        assertEquals(true, store.cleared)
+    }
+
+    private class FakeStore(initial: RelayAccount? = null, initialToken: String? = null) : RelayAccountStore {
         private val values = MutableStateFlow(initial)
-        var savedToken: String? = null
+        var savedToken: String? = initialToken
             private set
         var cleared = false
             private set
@@ -197,6 +221,7 @@ class RelayControllerTest {
             private set
         var loginSecret: String? = null
             private set
+        val revokedDevices = mutableListOf<String>()
 
         override suspend fun fetchCa(origin: String): String? {
             failure?.let { throw it }
@@ -222,6 +247,21 @@ class RelayControllerTest {
                 entries = listOf(RelayEntry(RelayEntryKind.Lan, origin)),
                 fingerprint = enrollmentFingerprint,
             )
+        }
+
+        override suspend fun createPairCode(account: RelayAccount, token: String): RelayPairCode {
+            failure?.let { throw it }
+            return RelayPairCode(
+                code = "PAIR1234",
+                expiresAt = 999L,
+                entries = listOf(RelayEntry(RelayEntryKind.Public, account.origin)),
+                fingerprint = fingerprint,
+            )
+        }
+
+        override suspend fun revokeDevice(account: RelayAccount, token: String, deviceId: String) {
+            failure?.let { throw it }
+            revokedDevices += deviceId
         }
 
         override fun fingerprintOf(caPem: String): String? = fingerprint

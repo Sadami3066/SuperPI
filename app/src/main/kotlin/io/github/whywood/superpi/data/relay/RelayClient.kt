@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.data.relay
 
 import java.io.IOException
+import java.net.URLEncoder
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -74,6 +75,61 @@ class RelayClient(
             throw RelayException(RelayFailure.Unreachable, cause = error)
         }
     }
+
+    override suspend fun createPairCode(account: RelayAccount, token: String): RelayPairCode =
+        withContext(Dispatchers.IO) {
+            val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
+            val client = RelayTls.client(pin = pin, remote = true)
+            val request = Request.Builder()
+                .url("${account.origin}/v1/pair/code")
+                .header("authorization", "Bearer $token")
+                .post("{}".toRequestBody(JSON))
+                .build()
+            try {
+                client.newCall(request).execute().use { response ->
+                    val text = response.body.string()
+                    when {
+                        response.isSuccessful -> RelayProtocol.parsePairCode(text)
+                            ?: throw RelayException(RelayFailure.BadResponse)
+                        response.code == 401 || response.code == 403 -> throw RelayException(RelayFailure.Unauthorized)
+                        else -> throw RelayException(RelayFailure.BadResponse)
+                    }
+                }
+            } catch (error: RelayException) {
+                throw error
+            } catch (error: SSLException) {
+                throw RelayException(RelayFailure.CertificateRejected, cause = error)
+            } catch (error: IOException) {
+                throw RelayException(RelayFailure.Unreachable, cause = error)
+            }
+        }
+
+    override suspend fun revokeDevice(account: RelayAccount, token: String, deviceId: String) =
+        withContext(Dispatchers.IO) {
+            val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
+            val client = RelayTls.client(pin = pin, remote = true)
+            val encodedId = URLEncoder.encode(deviceId, Charsets.UTF_8.name())
+            val request = Request.Builder()
+                .url("${account.origin}/v1/devices/$encodedId")
+                .header("authorization", "Bearer $token")
+                .delete()
+                .build()
+            try {
+                client.newCall(request).execute().use { response ->
+                    when {
+                        response.isSuccessful -> Unit
+                        response.code == 401 || response.code == 403 -> throw RelayException(RelayFailure.Unauthorized)
+                        else -> throw RelayException(RelayFailure.BadResponse)
+                    }
+                }
+            } catch (error: RelayException) {
+                throw error
+            } catch (error: SSLException) {
+                throw RelayException(RelayFailure.CertificateRejected, cause = error)
+            } catch (error: IOException) {
+                throw RelayException(RelayFailure.Unreachable, cause = error)
+            }
+        }
 
     override fun fingerprintOf(caPem: String): String? {
         val certificate = RelayTls.decodeBytes(caPem.toByteArray(Charsets.UTF_8)) ?: return null

@@ -29,6 +29,15 @@ object RelayPairingLink {
         )
     }
 
+    fun build(origin: String, fingerprint: String?, pairCode: String, lanOrigin: String? = null): String {
+        val base = origin.trimEnd('/')
+        val parts = mutableListOf<String>()
+        normalizeFingerprint(fingerprint)?.let { parts += "fp=$it" }
+        parts += "code=${pairCode.trim().uppercase()}"
+        lanOrigin?.trim()?.takeIf { it.isNotEmpty() }?.let { parts += "lan=$it" }
+        return "$base/pair#${parts.joinToString("&")}"
+    }
+
     fun normalizeFingerprint(raw: String?): String? {
         if (raw == null) return null
         val cleaned = raw.replace(":", "").replace(" ", "").trim().lowercase()

@@ -22,6 +22,10 @@ data class RelayUiState(
     val account: RelayAccount? = null,
     val signingIn: Boolean = false,
     val error: RelayError? = null,
+    val pairLink: String? = null,
+    val pairExpiresAt: Long? = null,
+    val generatingPairCode: Boolean = false,
+    val revokingDeviceId: String? = null,
 )
 
 class RelayController(
@@ -95,8 +99,91 @@ class RelayController(
     }
 
     fun signOut() {
-        _state.update { state -> state.copy(account = null, error = null) }
-        scope.launch { store.clear() }
+        val current = _state.value.account
+        _state.update { state ->
+            state.copy(
+                account = null,
+                error = null,
+                pairLink = null,
+                pairExpiresAt = null,
+                generatingPairCode = false,
+                revokingDeviceId = null,
+            )
+        }
+        scope.launch {
+            if (current != null) {
+                val token = runCatching { store.token() }.getOrNull()
+                if (!token.isNullOrBlank()) {
+                    runCatching { enroller.revokeDevice(current, token, current.deviceId) }
+                }
+            }
+            store.clear()
+        }
+    }
+
+    fun generatePairCode() {
+        val current = _state.value.account ?: return
+        if (_state.value.generatingPairCode) return
+        _state.update { state -> state.copy(generatingPairCode = true, error = null) }
+        scope.launch {
+            try {
+                val token = store.token() ?: throw RelayException(RelayFailure.Unauthorized)
+                val issued = enroller.createPairCode(current, token)
+                val origin = issued.entries.firstOrNull { it.kind == RelayEntryKind.Public }?.origin
+                    ?: issued.entries.firstOrNull()?.origin
+                    ?: current.origin
+                val lan = issued.entries.firstOrNull { it.kind == RelayEntryKind.Lan }?.origin
+                    ?.takeIf { it != origin }
+                val link = RelayPairingLink.build(
+                    origin = origin,
+                    fingerprint = issued.fingerprint ?: current.fingerprint,
+                    pairCode = issued.code,
+                    lanOrigin = lan,
+                )
+                _state.update { state ->
+                    state.copy(
+                        pairLink = link,
+                        pairExpiresAt = issued.expiresAt,
+                        generatingPairCode = false,
+                        error = null,
+                    )
+                }
+            } catch (error: RelayException) {
+                _state.update { state ->
+                    state.copy(generatingPairCode = false, error = error.failure.toRelayError())
+                }
+            } catch (_: IOException) {
+                _state.update { state ->
+                    state.copy(generatingPairCode = false, error = RelayError.Unreachable)
+                }
+            }
+        }
+    }
+
+    fun dismissPairCode() {
+        _state.update { state -> state.copy(pairLink = null, pairExpiresAt = null) }
+    }
+
+    fun revokeDevice(deviceId: String, onRevoked: (String) -> Unit = {}) {
+        val current = _state.value.account ?: return
+        if (_state.value.revokingDeviceId != null) return
+        _state.update { state -> state.copy(revokingDeviceId = deviceId, error = null) }
+        scope.launch {
+            try {
+                val token = store.token() ?: throw RelayException(RelayFailure.Unauthorized)
+                enroller.revokeDevice(current, token, deviceId)
+                onRevoked(deviceId)
+                _state.update { state -> state.copy(revokingDeviceId = null, error = null) }
+            } catch (error: RelayException) {
+                _state.update { state ->
+                    state.copy(revokingDeviceId = null, error = error.failure.toRelayError())
+                }
+            } catch (_: IOException) {
+                _state.update { state ->
+                    state.copy(revokingDeviceId = null, error = RelayError.Unreachable)
+                }
+            }
+        }
     }
 
     fun dismissError() {

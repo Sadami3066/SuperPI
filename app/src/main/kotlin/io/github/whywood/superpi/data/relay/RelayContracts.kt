@@ -25,5 +25,9 @@ interface RelayEnroller {
         loginSecret: String?,
     ): RelayEnrollment
 
+    suspend fun createPairCode(account: RelayAccount, token: String): RelayPairCode
+
+    suspend fun revokeDevice(account: RelayAccount, token: String, deviceId: String)
+
     fun fingerprintOf(caPem: String): String?
 }

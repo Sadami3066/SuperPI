@@ -29,5 +29,12 @@ internal fun RelayRoute(
         onSignOut = dependencies.relayController::signOut,
         onDismissError = dependencies.relayController::dismissError,
         onToggleAllowRemote = dependencies.relayLive::setAllowRemote,
+        onGeneratePairCode = dependencies.relayController::generatePairCode,
+        onDismissPairCode = dependencies.relayController::dismissPairCode,
+        onRevokeDevice = { deviceId ->
+            dependencies.relayController.revokeDevice(deviceId) { revoked ->
+                dependencies.relayLive.removeDevice(revoked)
+            }
+        },
     )
 }

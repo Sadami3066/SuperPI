@@ -1,5 +1,7 @@
 package io.github.whywood.superpi.ui.relay
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -26,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -72,12 +76,18 @@ internal fun RelayScreen(
     onSignOut: () -> Unit,
     onDismissError: () -> Unit,
     onToggleAllowRemote: (Boolean) -> Unit,
+    onGeneratePairCode: () -> Unit = {},
+    onDismissPairCode: () -> Unit = {},
+    onRevokeDevice: (String) -> Unit = {},
 ) {
     val colors = superPiColors()
+    val context = LocalContext.current
     var link by rememberSaveable { mutableStateOf("") }
     var secret by rememberSaveable { mutableStateOf("") }
     var deviceName by rememberSaveable { mutableStateOf(defaultDeviceName) }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
+    var confirmRevokeDevice by remember { mutableStateOf<RelayDevice?>(null) }
+    var pairCopied by remember(state.pairLink) { mutableStateOf(false) }
     val fingerprint = remember(link) { RelayPairingLink.parse(link)?.fingerprint }
     val connect = { onConnect(link.trim(), secret.trim().ifEmpty { null }, deviceName.trim()) }
 
@@ -121,10 +131,87 @@ internal fun RelayScreen(
                 liveState = liveState,
                 allowRemote = allowRemote,
                 devices = devices,
+                generatingPairCode = state.generatingPairCode,
+                revokingDeviceId = state.revokingDeviceId,
+                error = state.error,
                 onToggleAllowRemote = onToggleAllowRemote,
+                onGeneratePairCode = onGeneratePairCode,
+                onRequestRevokeDevice = { device -> confirmRevokeDevice = device },
+                onDismissError = onDismissError,
                 onSignOut = { confirmSignOut = true },
             )
         }
+    }
+
+    val activePairLink = state.pairLink
+    if (activePairLink != null) {
+        DdDialog(
+            onDismissRequest = onDismissPairCode,
+            title = stringResource(R.string.relay_pair_dialog_title),
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(DdSpacing.Md)) {
+                    Text(
+                        text = stringResource(R.string.relay_pair_dialog_hint),
+                        style = DdType.bodySmall,
+                        color = colors.inkSecondary,
+                    )
+                    SelectionContainer {
+                        Text(
+                            text = activePairLink,
+                            style = DdType.numeric,
+                            color = colors.ink,
+                        )
+                    }
+                }
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.relay_pair_close),
+                    onClick = onDismissPairCode,
+                    color = colors.inkSecondary,
+                )
+                DdTextAction(
+                    text = stringResource(if (pairCopied) R.string.relay_pair_copied else R.string.relay_pair_copy),
+                    onClick = {
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("pair-link", activePairLink))
+                        pairCopied = true
+                    },
+                    color = colors.accent,
+                )
+            },
+        )
+    }
+
+    val pendingRevoke = confirmRevokeDevice
+    if (pendingRevoke != null) {
+        DdDialog(
+            onDismissRequest = { confirmRevokeDevice = null },
+            title = stringResource(R.string.relay_device_remove_title),
+            content = {
+                Text(
+                    text = stringResource(R.string.relay_device_remove_message, pendingRevoke.name),
+                    style = DdType.bodySmall,
+                    color = colors.inkSecondary,
+                )
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.relay_cancel),
+                    onClick = { confirmRevokeDevice = null },
+                    color = colors.inkSecondary,
+                )
+                DdTextAction(
+                    text = stringResource(R.string.relay_device_remove_confirm),
+                    onClick = {
+                        val id = pendingRevoke.deviceId
+                        confirmRevokeDevice = null
+                        onRevokeDevice(id)
+                    },
+                    color = colors.danger,
+                )
+            },
+        )
     }
 
     if (confirmSignOut) {
@@ -255,7 +342,13 @@ private fun ColumnScope.ConnectedAccount(
     liveState: RelayLiveState,
     allowRemote: Boolean,
     devices: List<RelayDevice>,
+    generatingPairCode: Boolean,
+    revokingDeviceId: String?,
+    error: RelayError?,
     onToggleAllowRemote: (Boolean) -> Unit,
+    onGeneratePairCode: () -> Unit,
+    onRequestRevokeDevice: (RelayDevice) -> Unit,
+    onDismissError: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val colors = superPiColors()
@@ -293,8 +386,26 @@ private fun ColumnScope.ConnectedAccount(
             liveState = liveState,
             allowRemote = allowRemote,
             devices = devices,
+            revokingDeviceId = revokingDeviceId,
             onToggleAllowRemote = onToggleAllowRemote,
+            onRequestRevokeDevice = onRequestRevokeDevice,
         )
+        Spacer(Modifier.height(DdSpacing.Lg))
+        DdPrimaryButton(
+            text = stringResource(if (generatingPairCode) R.string.relay_pair_generating else R.string.relay_pair_new),
+            onClick = onGeneratePairCode,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !generatingPairCode,
+        )
+        if (error != null) {
+            Spacer(Modifier.height(DdSpacing.Lg))
+            DdNoticeBar(
+                text = stringResource(error.textRes()),
+                tone = DdNoticeTone.DANGER,
+                actionLabel = stringResource(R.string.relay_pair_close),
+                onAction = onDismissError,
+            )
+        }
         Spacer(Modifier.height(DdSpacing.Xxxl))
         DdTextAction(
             text = stringResource(R.string.relay_sign_out),
@@ -309,7 +420,9 @@ private fun ShareCard(
     liveState: RelayLiveState,
     allowRemote: Boolean,
     devices: List<RelayDevice>,
+    revokingDeviceId: String?,
     onToggleAllowRemote: (Boolean) -> Unit,
+    onRequestRevokeDevice: (RelayDevice) -> Unit,
 ) {
     val colors = superPiColors()
     DdGroupCard(
@@ -358,12 +471,23 @@ private fun ShareCard(
                         stringResource(R.string.relay_devices_offline)
                     },
                     trailing = {
-                        Box(
-                            Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(if (device.online) colors.accent else colors.hairline),
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(DdSpacing.Sm),
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (device.online) colors.accent else colors.hairline),
+                            )
+                            DdTextAction(
+                                text = stringResource(R.string.relay_device_remove),
+                                onClick = { onRequestRevokeDevice(device) },
+                                enabled = revokingDeviceId == null,
+                                color = colors.danger,
+                            )
+                        }
                     },
                 )
             }

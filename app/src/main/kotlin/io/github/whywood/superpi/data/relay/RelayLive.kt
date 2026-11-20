@@ -131,6 +131,13 @@ class RelayLive(
         socket.reconnectNow()
     }
 
+    fun removeDevice(deviceId: String) {
+        val updated = _devices.value.filterNot { it.deviceId == deviceId }
+        if (updated.size == _devices.value.size) return
+        _devices.value = updated
+        persistDevices()
+    }
+
     fun setAllowRemote(enabled: Boolean) {
         scope.launch { accounts.setAllowRemote(enabled) }
     }

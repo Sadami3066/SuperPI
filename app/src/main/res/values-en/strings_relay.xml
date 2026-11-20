@@ -40,4 +40,15 @@
     <string name="relay_devices_empty_hint">Connect the same account on another device to see it here</string>
     <string name="relay_devices_offline">Offline</string>
     <string name="relay_devices_no_bots">No bots available</string>
+    <string name="relay_pair_new">Add new device</string>
+    <string name="relay_pair_generating">Generating pairing link…</string>
+    <string name="relay_pair_dialog_title">Pair a new device</string>
+    <string name="relay_pair_dialog_hint">Valid for 10 minutes and one-time use. Copy this link to another device to connect.</string>
+    <string name="relay_pair_copy">Copy link</string>
+    <string name="relay_pair_copied">Copied</string>
+    <string name="relay_pair_close">Close</string>
+    <string name="relay_device_remove">Remove</string>
+    <string name="relay_device_remove_title">Remove device</string>
+    <string name="relay_device_remove_message">Removing “%1$s” disconnects it immediately. It must be paired again to reconnect.</string>
+    <string name="relay_device_remove_confirm">Remove</string>
 </resources>

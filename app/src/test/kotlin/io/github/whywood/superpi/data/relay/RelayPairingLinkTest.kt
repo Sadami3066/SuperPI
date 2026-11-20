@@ -55,4 +55,19 @@ class RelayPairingLinkTest {
         assertNull(RelayPairingLink.normalizeFingerprint("z".repeat(64)))
         assertNull(RelayPairingLink.normalizeFingerprint("ab".repeat(31)))
     }
+
+    @Test
+    fun buildsPairingLinkThatRoundTripsThroughParse() {
+        val fp = "ab".repeat(32)
+        val built = RelayPairingLink.build(
+            origin = "https://203.0.113.10:8443/",
+            fingerprint = fp.uppercase(),
+            pairCode = "abcd2345",
+        )
+        assertEquals("https://203.0.113.10:8443/pair#fp=$fp&code=ABCD2345", built)
+        val parsed = RelayPairingLink.parse(built)
+        assertEquals("https://203.0.113.10:8443", parsed?.origin)
+        assertEquals(fp, parsed?.fingerprint)
+        assertEquals("ABCD2345", parsed?.pairCode)
+    }
 }
