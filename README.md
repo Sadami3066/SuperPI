@@ -54,3 +54,11 @@ The wire format lives in `packages/protocol`: frame types, error codes, memory w
 ## License
 
 Private. Not published.
+
+## Local pairing
+
+```bash
+./scripts/dev-relay.sh
+```
+
+The script generates a self-signed certificate for the LAN address, starts the relay, and prints the pairing link with the certificate fingerprint embedded. On first start it also prints the account login secret once. Enter the link in the desktop app and in the phone app; the first device can use the login secret alone, later devices use a pairing code or the same login secret while the account is still single-user.
