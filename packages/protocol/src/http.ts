@@ -20,7 +20,7 @@ export interface EnrollResponse {
   token: string
   accountId: string
   entries: PairEntry[]
-  fingerprint: string
+  fingerprint: string | null
 }
 
 export interface PairEntry {
@@ -32,11 +32,15 @@ export interface PairCodeResponse {
   code: string
   expiresAt: number
   entries: PairEntry[]
-  fingerprint: string
+  fingerprint: string | null
 }
 
 export interface DeviceListResponse {
   devices: DeviceInfo[]
+}
+
+export interface RevokeResponse {
+  revoked: string
 }
 
 export interface ApiErrorBody {

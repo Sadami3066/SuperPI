@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import type { PairEntry } from '@superpi/protocol'
 
 export interface RelayConfig {
   host: string
@@ -8,6 +9,7 @@ export interface RelayConfig {
   certPath: string | null
   keyPath: string | null
   version: string
+  entries: PairEntry[]
 }
 
 const DEFAULT_PORT = 8443
@@ -25,7 +27,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     certPath: env.SUPERPI_CERT ?? null,
     keyPath: env.SUPERPI_KEY ?? null,
     version,
+    entries: readEntries(env),
   }
+}
+
+function readEntries(env: NodeJS.ProcessEnv): PairEntry[] {
+  const entries: PairEntry[] = []
+  if (env.SUPERPI_PUBLIC_ORIGIN) entries.push({ kind: 'public', origin: env.SUPERPI_PUBLIC_ORIGIN })
+  if (env.SUPERPI_LAN_ORIGIN) entries.push({ kind: 'lan', origin: env.SUPERPI_LAN_ORIGIN })
+  return entries
 }
 
 function readVersion(): string {

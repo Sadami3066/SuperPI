@@ -8,6 +8,7 @@ export const ERROR_CODES = [
   'session_not_found',
   'memory_conflict',
   'rate_limited',
+  'bad_request',
   'not_found',
   'internal',
 ] as const
