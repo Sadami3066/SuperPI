@@ -48,13 +48,13 @@ class PRootExecutor(
                 try {
                     val result = executeBlocking(command, timeoutMillis, onOutputLine) { running ->
                         runningRef.set(running)
-                        if (cancelled.get()) killTree(running.process, running.pid)
+                        if (cancelled.get()) killTree(running)
                     }
                     if (continuation.isActive) continuation.resumeWith(Result.success(result))
                 } catch (error: Throwable) {
                     if (continuation.isActive) continuation.resumeWith(Result.failure(error))
                 } finally {
-                    runningRef.get()?.let { if (it.process.isAlive) killTree(it.process, it.pid) }
+                    runningRef.get()?.let { if (it.process.isAlive) killTree(it) }
                     runningRef.set(null)
                 }
             }, "linux-command")
@@ -63,12 +63,18 @@ class PRootExecutor(
 
             continuation.invokeOnCancellation {
                 cancelled.set(true)
-                runningRef.get()?.let { killTree(it.process, it.pid) }
+                runningRef.get()?.let { killTree(it) }
                 worker.interrupt()
             }
             if (continuation.isActive) worker.start()
         } } finally {
-            withContext(NonCancellable + Dispatchers.IO) { workerRef.get()?.join() }
+            withContext(NonCancellable + Dispatchers.IO) {
+                val worker = workerRef.get()
+                if (worker != null) {
+                    worker.join(WORKER_JOIN_TIMEOUT_MILLIS)
+                    if (worker.isAlive) worker.interrupt()
+                }
+            }
         }
     }
 
@@ -133,7 +139,7 @@ class PRootExecutor(
             try {
                 if (!process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) {
                     timedOut.set(true)
-                    killTree(process, running.pid)
+                    killTree(running)
                 }
             } catch (_: InterruptedException) {
             }
@@ -161,7 +167,7 @@ class PRootExecutor(
             process.waitFor()
         } finally {
             output.close()
-            if (process.isAlive) killTree(process, running.pid)
+            if (process.isAlive) killTree(running)
             watchdog.interrupt()
             runCatching { watchdog.join(500) }
             pidFile.delete()
@@ -208,17 +214,26 @@ class PRootExecutor(
             throw IllegalStateException("failed to start PRoot: ${error.message}", error)
         }
 
-        val initial = RunningProcess(process, 0)
+        val initial = RunningProcess(process, 0, pidFile)
         onStarted(initial)
         return try {
             val ready = initial.copy(pid = pidReader(pidFile))
             onStarted(ready)
             ready
         } catch (error: Throwable) {
-            killTree(process, 0)
+            killTree(initial)
             runCatching { pidFile.delete() }
             throw error
         }
+    }
+
+    private fun killTree(running: RunningProcess) {
+        val resolvedPid = if (running.pid > 0) {
+            running.pid
+        } else {
+            runCatching { running.pidFile.readText().trim().toLong() }.getOrDefault(0L)
+        }
+        killTree(running.process, resolvedPid)
     }
 
     private fun killTree(process: Process, pid: Long) {
@@ -281,6 +296,7 @@ class PRootExecutor(
     private data class RunningProcess(
         val process: Process,
         val pid: Long,
+        val pidFile: File,
     )
 }
 
@@ -355,6 +371,7 @@ private fun utf8Cut(bytes: ByteArray): Int {
 }
 
 private const val LINE_CHUNK_LIMIT = 8 * 1024
+private const val WORKER_JOIN_TIMEOUT_MILLIS = 2_000L
 private const val SIGSTOP = -19
 private const val SIGKILL = -9
 

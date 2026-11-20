@@ -237,6 +237,20 @@ class PRootExecutorTest {
         assertFalse("cancelled command kept running", File(fixture.workspace, "late.txt").exists())
     }
 
+    @Test
+    fun cancellationDoesNotHangWhenPidReaderReturnsZeroAndGrandchildHoldsStdout() = runBlocking {
+        val fixture = fixture(pidReader = { 0L })
+        val job = launch(Dispatchers.Default) {
+            fixture.executor.execute("sleep 10 & wait", timeoutMillis = 30_000)
+        }
+        delay(300)
+
+        val elapsed = kotlin.system.measureTimeMillis { job.cancelAndJoin() }
+
+        assertTrue(job.isCancelled)
+        assertTrue("cancelAndJoin took ${elapsed}ms", elapsed < 5_000)
+    }
+
     private fun fixture(
         maxOutputBytes: Int = 1024,
         pidReader: ((File) -> Long)? = null,

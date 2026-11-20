@@ -89,7 +89,14 @@ class RootShell internal constructor(
     }
 }
 
-internal class ProcessRootCommandRunner : RootCommandRunner {
+internal class ProcessRootCommandRunner(
+    private val maxOutputBytes: Int = MAX_OUTPUT_BYTES,
+    private val rootBinaries: List<String> = ROOT_BINARIES,
+) : RootCommandRunner {
+    init {
+        require(maxOutputBytes > 0) { "maxOutputBytes must be positive" }
+    }
+
     override suspend fun run(command: String, timeoutMillis: Long, stdin: String?): RootProcessResult =
         run(command, timeoutMillis, stdin, null)
 
@@ -101,46 +108,48 @@ internal class ProcessRootCommandRunner : RootCommandRunner {
     ): RootProcessResult =
         runInterruptible(Dispatchers.IO) {
             val commandPid = File.createTempFile("superpi-root-", ".pid")
-            val process = startRootProcess(wrapRootCommand(command, timeoutMillis, commandPid))
-                ?: return@runInterruptible RootProcessResult(NO_EXIT_CODE, "", "", false, false)
-            val budget = AtomicInteger(MAX_OUTPUT_BYTES + 1)
-            val stdout = ByteArrayOutputStream()
-            val stderr = ByteArrayOutputStream()
-            val callback = onOutputLine?.let { handler ->
-                val lock = Any()
-                val lineCallback: (String) -> Unit = { line -> synchronized(lock) { handler(line) } }
-                lineCallback
-            }
-            val stdoutReader = startReader("root-shell-stdout", process.inputStream, stdout, budget, callback)
-            val stderrReader = startReader("root-shell-stderr", process.errorStream, stderr, budget, callback)
-            runCatching {
-                process.outputStream.use { output ->
-                    if (stdin != null) output.write(stdin.toByteArray(Charsets.UTF_8))
-                    output.flush()
+            try {
+                val process = startRootProcess(wrapRootCommand(command, timeoutMillis, commandPid))
+                    ?: return@runInterruptible RootProcessResult(NO_EXIT_CODE, "", "", false, false)
+                val budget = AtomicInteger(maxOutputBytes + 1)
+                val stdout = ByteArrayOutputStream()
+                val stderr = ByteArrayOutputStream()
+                val callback = onOutputLine?.let { handler ->
+                    val lock = Any()
+                    val lineCallback: (String) -> Unit = { line -> synchronized(lock) { handler(line) } }
+                    lineCallback
                 }
-            }
-            val timedOut = try {
-                !process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
-            } catch (interrupted: InterruptedException) {
-                kill(process, commandPid)
+                val stdoutReader = startReader("root-shell-stdout", process.inputStream, stdout, budget, callback)
+                val stderrReader = startReader("root-shell-stderr", process.errorStream, stderr, budget, callback)
+                runCatching {
+                    process.outputStream.use { output ->
+                        if (stdin != null) output.write(stdin.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                    }
+                }
+                val timedOut = try {
+                    !process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+                } catch (interrupted: InterruptedException) {
+                    kill(process, commandPid)
+                    joinReaders(stdoutReader, stderrReader)
+                    throw interrupted
+                }
+                if (timedOut) kill(process, commandPid)
                 joinReaders(stdoutReader, stderrReader)
+                RootProcessResult(
+                    exitCode = runCatching { process.exitValue() }.getOrDefault(NO_EXIT_CODE),
+                    stdout = stdout.toByteArray().toString(Charsets.UTF_8),
+                    stderr = stderr.toByteArray().toString(Charsets.UTF_8),
+                    timedOut = timedOut,
+                    started = true,
+                )
+            } finally {
                 commandPid.delete()
-                throw interrupted
             }
-            if (timedOut) kill(process, commandPid)
-            joinReaders(stdoutReader, stderrReader)
-            commandPid.delete()
-            RootProcessResult(
-                exitCode = runCatching { process.exitValue() }.getOrDefault(NO_EXIT_CODE),
-                stdout = stdout.toByteArray().toString(Charsets.UTF_8),
-                stderr = stderr.toByteArray().toString(Charsets.UTF_8),
-                timedOut = timedOut,
-                started = true,
-            )
         }
 
     private fun startRootProcess(command: String): Process? {
-        for (binary in ROOT_BINARIES) {
+        for (binary in rootBinaries) {
             try {
                 return ProcessBuilder(binary, "-c", command).start()
             } catch (_: IOException) {

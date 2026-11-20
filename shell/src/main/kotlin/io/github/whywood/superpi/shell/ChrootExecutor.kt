@@ -26,7 +26,7 @@ class ChrootExecutor internal constructor(
         resolvConf = resolvConf,
         maxOutputBytes = maxOutputBytes,
         logDir = logDir,
-        runner = ProcessRootCommandRunner(),
+        runner = ProcessRootCommandRunner(maxOutputBytes = maxOf(maxOutputBytes, MAX_LOG_CHARS)),
     )
 
     init {

@@ -169,4 +169,39 @@ class RootShellTest {
         } catch (_: IllegalArgumentException) {
         }
     }
+
+    @Test
+    fun processRunnerRespectsConfiguredOutputBudgetBeyondSixtyFourKilobytes() = runBlocking {
+        val runner = ProcessRootCommandRunner(
+            maxOutputBytes = 128 * 1024,
+            rootBinaries = listOf("/bin/sh"),
+        )
+
+        val result = runner.run("head -c 100000 /dev/zero | tr '\\0' x", 5_000, null)
+
+        assertTrue(result.started)
+        assertEquals(0, result.exitCode)
+        assertEquals(100_000, result.stdout.length)
+    }
+
+    @Test
+    fun processRunnerCleansUpPidFileWhenRootBinaryIsMissing() = runBlocking {
+        val tmpDir = java.io.File(requireNotNull(System.getProperty("java.io.tmpdir")))
+        val before = tmpDir.listFiles { _, name -> name.startsWith("superpi-root-") && name.endsWith(".pid") }
+            ?.map { it.name }
+            ?.toSet()
+            .orEmpty()
+        val runner = ProcessRootCommandRunner(
+            rootBinaries = listOf("/nonexistent/superpi-missing-su"),
+        )
+
+        val result = runner.run("id", 1_000, null)
+
+        val after = tmpDir.listFiles { _, name -> name.startsWith("superpi-root-") && name.endsWith(".pid") }
+            ?.map { it.name }
+            ?.toSet()
+            .orEmpty()
+        assertFalse(result.started)
+        assertEquals(emptySet<String>(), after - before)
+    }
 }
