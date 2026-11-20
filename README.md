@@ -1,0 +1,56 @@
+# SuperPI Remote
+
+Relay, account, presence and shared-memory server for SuperPI devices.
+
+A single self-hosted service that lets a phone and a desktop act as one assistant: it keeps the account, tracks which devices are online, routes a request from one device to a bot running on another, and holds the one shared memory both devices read and write.
+
+## What it does
+
+- **Account and devices** — one account per deployment, device tokens with revocation, pairing by short-lived codes.
+- **Presence** — online state derived from the live connection, never self-reported.
+- **Routing** — a device asks another device to run one of its bots; events stream back over the same channel.
+- **Shared memory** — one authoritative copy of the memory documents, written with source tags and version checks.
+- **Transport** — HTTPS and WSS under a self-signed CA whose fingerprint is pinned at pairing time.
+
+It does not run models, execute tools, or interpret conversations.
+
+## Repository layout
+
+```
+packages/protocol/   wire protocol shared with desktop and mobile clients, plus JSON test vectors
+src/server/          HTTP and WebSocket server, configuration, entry point
+test/                server tests
+scripts/             deployment, certificate and backup helpers
+```
+
+## Requirements
+
+- Node.js 24 or newer
+- A Linux host reachable by both devices (bare IP is fine)
+
+## Run
+
+```bash
+pnpm install
+SUPERPI_PORT=8443 SUPERPI_HOST=0.0.0.0 pnpm start
+```
+
+`GET /v1/health` returns the running version and protocol version. Configuration is read from environment variables: `SUPERPI_HOST`, `SUPERPI_PORT`, `SUPERPI_DATA_DIR`, `SUPERPI_CERT`, `SUPERPI_KEY`.
+
+For production the service runs under systemd with a generated certificate; see `scripts/` and the deployment notes in the design document.
+
+## Development
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm dev
+```
+
+## Protocol
+
+The wire format lives in `packages/protocol`: frame types, error codes, memory write operations and HTTP payloads, with JSON vectors under `packages/protocol/vectors` used by every client implementation. Version 1 is described in `../rewrite/DESKTOP-REMOTE.md` (section 7) in the author's workspace; the package is the canonical source.
+
+## License
+
+Private. Not published.

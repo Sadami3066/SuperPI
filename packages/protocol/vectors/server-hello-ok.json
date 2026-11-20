@@ -1,0 +1,23 @@
+{
+  "type": "hello_ok",
+  "accountId": "acct-main",
+  "devices": [
+    {
+      "deviceId": "dev-phone",
+      "name": "My phone",
+      "platform": "android",
+      "online": true,
+      "lastSeen": 1795000000000,
+      "bots": [{ "id": "pi", "name": "PI" }]
+    },
+    {
+      "deviceId": "dev-desktop",
+      "name": "Desktop",
+      "platform": "desktop",
+      "online": false,
+      "lastSeen": 1794990000000,
+      "bots": [{ "id": "pi", "name": "PI" }]
+    }
+  ],
+  "memoryVersion": 12
+}
