@@ -145,9 +145,7 @@ private fun createHtmlWebView(
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 if (uri.scheme == "file") {
-                    val folder = File(path).parentFile?.absolutePath ?: return true
-                    val target = uri.path ?: return true
-                    return !target.startsWith(folder)
+                    return !isAllowedHtmlFileNavigation(basePath = path, targetPath = uri.path)
                 }
                 val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 runCatching { context.startActivity(intent) }
@@ -173,3 +171,12 @@ private fun createHtmlWebView(
         )
         loadUrl(Uri.fromFile(File(path)).toString())
     }
+
+internal fun isAllowedHtmlFileNavigation(basePath: String, targetPath: String?): Boolean {
+    if (targetPath.isNullOrBlank()) return false
+    val baseFolder = runCatching { File(basePath).canonicalFile.parentFile }.getOrNull() ?: return false
+    val targetFile = runCatching { File(targetPath).canonicalFile }.getOrNull() ?: return false
+    val folderPath = baseFolder.path
+    val targetCanonical = targetFile.path
+    return targetCanonical == folderPath || targetCanonical.startsWith(folderPath + File.separator)
+}
