@@ -2,7 +2,7 @@
 
 SuperPI 设备的中继、账号、在线状态与共享记忆服务。
 
-一个自托管的小服务，让手机和电脑像同一个助手：保存账号、跟踪在线设备、把一台设备的请求路由到另一台设备上的 bot，并持有两端共同读写的唯一一份记忆。
+一个自托管的小服务，让多台 SuperPI 安卓设备像同一个助手：保存账号、跟踪在线设备、把一台设备的请求路由到另一台设备上的 bot，并持有各设备共同读写的唯一一份记忆。
 
 ## 它做什么
 
@@ -17,7 +17,7 @@ SuperPI 设备的中继、账号、在线状态与共享记忆服务。
 ## 目录
 
 ```
-packages/protocol/   两端共用的线协议与 JSON 测试向量
+packages/protocol/   各端共用的线协议与 JSON 测试向量
 src/server/          HTTP 与 WebSocket 服务、配置、入口
 test/                服务端测试
 scripts/             部署、证书与备份脚本
@@ -44,7 +44,7 @@ pnpm dev
 
 ## 协议
 
-线协议在 `packages/protocol`：帧类型、错误码、记忆写入操作与 HTTP 载荷；`packages/protocol/vectors` 下的 JSON 向量供各端实现共用。版本 1 见作者工作区的 `../rewrite/DESKTOP-REMOTE.md` 第 7 节，协议包本身是权威来源。
+线协议在 `packages/protocol`：帧类型、错误码、记忆写入操作与 HTTP 载荷；`packages/protocol/vectors` 下的 JSON 向量供各端实现共用，`packages/protocol` 包本身是权威来源。
 
 ## 许可证
 

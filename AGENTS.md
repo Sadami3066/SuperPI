@@ -24,4 +24,4 @@ pnpm start    # 生产启动
 
 ## 边界
 
-不跑模型、不执行工具；协议改动必须同步更新 `../rewrite/DESKTOP-REMOTE.md` 第 7 节与手机端 Kotlin 数据类。
+不跑模型、不执行工具；协议改动必须同步更新客户端 Kotlin 数据类。

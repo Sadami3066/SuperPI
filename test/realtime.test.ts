@@ -384,6 +384,10 @@ describe('realtime hub', () => {
     phoneClient.send({ type: 'route_event', id: 'req-resume', seq: 1, event: { type: 'agent_settled' } })
     const settled = await nextOf(desktopClient, 'route_event')
     expect(settled).toMatchObject({ id: 'req-resume', seq: 1 })
+
+    phoneClient.send({ type: 'route_event', id: 'req-resume', seq: 2, event: { type: 'agent_start' } })
+    const nextTurnStart = await nextOf(desktopClient, 'route_event')
+    expect(nextTurnStart).toMatchObject({ id: 'req-resume', seq: 2, event: { type: 'agent_start' } })
   })
 
   it('kicks active websockets with code 4001 and broadcasts offline presence on device revocation', async () => {
@@ -670,5 +674,107 @@ describe('realtime hub', () => {
     attackerClient.socket.send(JSON.stringify({ type: 'X'.repeat(240) }))
     await closed
     expect(harness.hub.isOnline(desktop.deviceId)).toBe(true)
+  })
+
+  it('stamps deviceId on sync_event, delivers only to sync-events peers, rate-limits bursts, and validates file routes', async () => {
+    let clock = 10_000
+    const harness = await startRelay({ now: () => clock })
+    const desktop = await enrollDevice(harness, 'Desktop', 'desktop')
+    const phone = await enrollDevice(harness, 'Phone', 'android')
+    const legacy = await enrollDevice(harness, 'Legacy', 'cli')
+
+    const desktopClient = await Client.open(harness.wsBase, desktop.token)
+    desktopClient.send({
+      ...hello(desktop.deviceId, [{ id: 'pi', name: 'Desktop PI' }]),
+      capabilities: ['remote-bot', 'bot-sessions', 'bot-manage', 'session-manage', 'workspace-files', 'sync-events'],
+    })
+    const helloOk = await nextOf(desktopClient, 'hello_ok')
+    expect(helloOk.capabilities).toContain('sync-events')
+    expect(helloOk.capabilities).toContain('workspace-files')
+
+    const phoneClient = await Client.open(harness.wsBase, phone.token)
+    phoneClient.send({
+      ...hello(phone.deviceId, [{ id: 'pi', name: 'Phone PI' }]),
+      capabilities: ['remote-bot', 'sync-events'],
+    })
+    await nextOf(phoneClient, 'hello_ok')
+    await nextOf(desktopClient, 'presence')
+
+    const legacyClient = await Client.open(harness.wsBase, legacy.token)
+    legacyClient.send(hello(legacy.deviceId, []))
+    await nextOf(legacyClient, 'hello_ok')
+    await nextOf(desktopClient, 'presence')
+    await nextOf(phoneClient, 'presence')
+
+    desktopClient.send({
+      type: 'sync_event',
+      deviceId: phone.deviceId,
+      kind: 'sessions_changed',
+      botId: 'pi',
+      sessionId: 's-1',
+      busy: true,
+      ts: 12345,
+    })
+
+    const phoneSync = await nextOf(phoneClient, 'sync_event')
+    expect(phoneSync).toEqual({
+      type: 'sync_event',
+      deviceId: desktop.deviceId,
+      kind: 'sessions_changed',
+      botId: 'pi',
+      sessionId: 's-1',
+      busy: true,
+      ts: 12345,
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(legacyClient.drain().some((frame) => frame.type === 'sync_event')).toBe(false)
+    expect(desktopClient.drain().some((frame) => frame.type === 'sync_event')).toBe(false)
+
+    desktopClient.socket.send(
+      JSON.stringify({
+        type: 'route',
+        id: 'bad-path-route',
+        to: phone.deviceId,
+        method: 'file.stat',
+        params: { botId: 'pi', path: '../escape.txt' },
+      }),
+    )
+    const pathErr = await nextOf(desktopClient, 'route_error')
+    expect(pathErr).toMatchObject({ id: 'bad-path-route', code: 'bad_request' })
+
+    clock += 1_100
+    for (let i = 0; i < 35; i += 1) {
+      desktopClient.send({
+        type: 'sync_event',
+        kind: 'bot_activity',
+        botId: 'pi',
+        busy: i % 2 === 0,
+        ts: clock + i,
+      })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    const burst = phoneClient.drain().filter((frame) => frame.type === 'sync_event')
+    expect(burst.length).toBe(30)
+    expect(harness.hub.isOnline(desktop.deviceId)).toBe(true)
+
+    clock += 1_100
+    desktopClient.send({
+      type: 'sync_event',
+      kind: 'model_changed',
+      botId: 'pi',
+      sessionId: 's-1',
+      provider: 'openai',
+      modelId: 'gpt-5',
+      thinkingLevel: 'high',
+      ts: clock,
+    })
+    const recovered = await nextOf(phoneClient, 'sync_event')
+    expect(recovered).toMatchObject({
+      kind: 'model_changed',
+      provider: 'openai',
+      modelId: 'gpt-5',
+      thinkingLevel: 'high',
+    })
   })
 })

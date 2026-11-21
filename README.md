@@ -2,7 +2,7 @@
 
 Relay, account, presence and shared-memory server for SuperPI devices.
 
-A single self-hosted service that lets a phone and a desktop act as one assistant: it keeps the account, tracks which devices are online, routes a request from one device to a bot running on another, and holds the one shared memory both devices read and write.
+A single self-hosted service that lets multiple SuperPI Android devices act as one assistant: it keeps the account, tracks which devices are online, routes a request from one device to a bot running on another, and holds the one shared memory all devices read and write.
 
 ## What it does
 
@@ -17,7 +17,7 @@ It does not run models, execute tools, or interpret conversations.
 ## Repository layout
 
 ```
-packages/protocol/   wire protocol shared with desktop and mobile clients, plus JSON test vectors
+packages/protocol/   wire protocol shared with SuperPI Android clients, plus JSON test vectors
 src/server/          HTTP and WebSocket server, configuration, entry point
 test/                server tests
 scripts/             deployment, certificate and backup helpers
@@ -49,7 +49,7 @@ pnpm dev
 
 ## Protocol
 
-The wire format lives in `packages/protocol`: frame types, error codes, memory write operations and HTTP payloads, with JSON vectors under `packages/protocol/vectors` used by every client implementation. Version 1 is described in `../rewrite/DESKTOP-REMOTE.md` (section 7) in the author's workspace; the package is the canonical source.
+The wire format lives in `packages/protocol`: frame types, error codes, memory write operations and HTTP payloads, with JSON vectors under `packages/protocol/vectors` used by every client implementation. The `@superpi/protocol` package is the canonical source.
 
 ## License
 
@@ -61,4 +61,4 @@ Apache-2.0. See [LICENSE](LICENSE).
 ./scripts/dev-relay.sh
 ```
 
-The script generates a self-signed certificate for the LAN address, starts the relay, and prints the pairing link with the certificate fingerprint embedded. On first start it also prints the account login secret once. Enter the link in the desktop app and in the phone app; the first device can use the login secret alone, later devices use a pairing code or the same login secret while the account is still single-user.
+The script generates a self-signed certificate for the LAN address, starts the relay, and prints the pairing link with the certificate fingerprint embedded. On first start it also prints the account login secret once. Enter or scan the link in your SuperPI Android devices; the first device can use the login secret alone, later devices use a pairing code (or QR code) or the same login secret while the account is single-user.

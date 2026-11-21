@@ -2,13 +2,20 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_FILE_CHUNK_BYTES,
+  MAX_FILE_TRANSFER_BYTES,
   PROTOCOL_VERSION,
   ProtocolError,
+  RELAY_CAPABILITIES,
+  RouteValidationError,
+  UnknownRouteMethodError,
   decodeFrameLine,
   encodeFrame,
   parseClientFrame,
   parseServerFrame,
+  validateRelativeWorkspacePath,
   type ClientFrame,
+  type RemoteSessionSummary,
   type ServerFrame,
 } from '../src/index.ts'
 
@@ -197,5 +204,471 @@ describe('protocol validation', () => {
         },
       }),
     ).toThrow(/image format/i)
+  })
+
+  it('validates structured approval_request questions, resolved events, user_message events, and busy sessions', () => {
+    const summary: RemoteSessionSummary = {
+      id: 'sess-1',
+      title: 'Test',
+      updatedAt: 1000,
+      busy: true,
+    }
+    expect(summary.busy).toBe(true)
+
+    const questionEvent = parseClientFrame({
+      type: 'route_event',
+      id: 'r-q',
+      seq: 1,
+      event: {
+        type: 'approval_request',
+        approvalId: 'ask:tc-1',
+        kind: 'question',
+        toolCallId: 'tc-1',
+        summary: 'Which option?',
+        title: 'Pick one',
+        questions: [
+          {
+            id: 'q1',
+            header: 'Choice',
+            question: 'Which option?',
+            multiSelect: false,
+            options: [
+              { label: 'Alpha', description: 'First choice' },
+              { label: 'Beta' },
+            ],
+          },
+        ],
+      },
+    })
+    expect(questionEvent).toMatchObject({ type: 'route_event', id: 'r-q', seq: 1 })
+
+    const resolvedEvent = parseServerFrame({
+      type: 'route_event',
+      id: 'r-q',
+      seq: 2,
+      event: {
+        type: 'approval_request',
+        approvalId: 'ask:tc-1',
+        kind: 'resolved',
+        summary: 'resolved',
+        resolved: true,
+      },
+    })
+    expect(resolvedEvent).toMatchObject({ type: 'route_event', id: 'r-q', seq: 2 })
+
+    const userMessageEvent = parseServerFrame({
+      type: 'route_event',
+      id: 'r-q',
+      seq: 3,
+      event: {
+        type: 'user_message',
+        text: 'hello from phone',
+        images: [{ data: '/9j/4AAQ', mimeType: 'IMAGE/JPG', name: '  pic.jpg  ', extra: true }],
+      },
+    })
+    expect(userMessageEvent).toEqual({
+      type: 'route_event',
+      id: 'r-q',
+      seq: 3,
+      event: {
+        type: 'user_message',
+        text: 'hello from phone',
+        images: [{ data: '/9j/4AAQ', mimeType: 'image/jpeg', name: 'pic.jpg' }],
+      },
+    })
+
+    const imageOnlyUserMessage = parseClientFrame({
+      type: 'route_event',
+      id: 'r-img-only',
+      seq: 3,
+      event: {
+        type: 'user_message',
+        text: '   ',
+        images: [{ data: '/9j/4AAQ', mimeType: 'image/jpeg' }],
+      },
+    })
+    expect(imageOnlyUserMessage).toMatchObject({ type: 'route_event', id: 'r-img-only' })
+
+    const approvalRoute = parseClientFrame({
+      type: 'route',
+      id: 'r-app',
+      to: 'dev-2',
+      method: 'bot.approval',
+      params: {
+        approvalId: 'ask:tc-1',
+        answers: [{ id: 'q1', selected: ['Alpha'] }],
+      },
+    })
+    expect(approvalRoute).toMatchObject({ type: 'route', id: 'r-app', method: 'bot.approval' })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-app-bad',
+        to: 'dev-2',
+        method: 'bot.approval',
+        params: { approvalId: 'ask:tc-1', answers: [{ id: 123 }] },
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route_event',
+        id: 'r-empty-user',
+        seq: 4,
+        event: { type: 'user_message', text: '   ' },
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route_event',
+        id: 'r-empty-q',
+        seq: 4,
+        event: {
+          type: 'approval_request',
+          approvalId: 'ask:tc-2',
+          kind: 'question',
+          summary: 'Empty questions',
+          questions: [],
+        },
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route_event',
+        id: 'r-dup-q',
+        seq: 4,
+        event: {
+          type: 'approval_request',
+          approvalId: 'ask:tc-2',
+          kind: 'question',
+          summary: 'Dup',
+          questions: [
+            { id: 'q1', question: 'One' },
+            { id: 'q1', question: 'Two' },
+          ],
+        },
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route_event',
+        id: 'r-bad',
+        seq: 4,
+        event: {
+          type: 'approval_request',
+          approvalId: 'ask:tc-2',
+          kind: 'question',
+          summary: 'Bad',
+          questions: [{ id: 'q1', question: 123 }],
+        },
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route_event',
+        id: 'r-bad-user',
+        seq: 5,
+        event: {
+          type: 'user_message',
+          text: 'hi',
+          images: [{ data: 'AAECAw==', mimeType: 'image/png' }],
+        },
+      }),
+    ).toThrow(ProtocolError)
+
+    const startWithUser = parseServerFrame({
+      type: 'route_event',
+      id: 'r-start',
+      seq: 6,
+      event: {
+        type: 'agent_start',
+        runId: 'run-1',
+        sessionId: 'sess-1',
+        originRouteId: 'r-origin',
+        userMessage: {
+          text: 'from desktop',
+          images: [{ data: '/9j/4AAQ', mimeType: 'IMAGE/JPG', name: '  img.jpg  ' }],
+        },
+      },
+    })
+    expect(startWithUser).toEqual({
+      type: 'route_event',
+      id: 'r-start',
+      seq: 6,
+      event: {
+        type: 'agent_start',
+        runId: 'run-1',
+        sessionId: 'sess-1',
+        originRouteId: 'r-origin',
+        userMessage: {
+          text: 'from desktop',
+          images: [{ data: '/9j/4AAQ', mimeType: 'image/jpeg', name: 'img.jpg' }],
+        },
+      },
+    })
+
+    const queueWithUser = parseServerFrame({
+      type: 'route_event',
+      id: 'r-queue',
+      seq: 7,
+      event: {
+        type: 'queue_update',
+        steering: [],
+        followUp: ['follow up'],
+        sessionId: 'sess-1',
+        userMessage: {
+          text: 'follow up',
+          images: [{ data: '/9j/4AAQ', mimeType: 'image/jpeg' }],
+        },
+      },
+    })
+    expect(queueWithUser).toMatchObject({
+      type: 'route_event',
+      id: 'r-queue',
+      seq: 7,
+      event: {
+        type: 'queue_update',
+        sessionId: 'sess-1',
+        userMessage: { text: 'follow up' },
+      },
+    })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route_event',
+        id: 'r-bad-start',
+        seq: 8,
+        event: {
+          type: 'agent_start',
+          userMessage: { text: '   ' },
+        },
+      }),
+    ).toThrow(ProtocolError)
+  })
+
+  it('validates bot manage, session manage, workspace file routes, relative paths, and sync_event frames', () => {
+    expect(RELAY_CAPABILITIES).toContain('bot-manage')
+    expect(RELAY_CAPABILITIES).toContain('session-manage')
+    expect(RELAY_CAPABILITIES).toContain('workspace-files')
+    expect(RELAY_CAPABILITIES).toContain('sync-events')
+
+    expect(validateRelativeWorkspacePath('', true)).toBe('')
+    expect(validateRelativeWorkspacePath('src//app/main.ts', false)).toBe('src/app/main.ts')
+    for (const invalid of ['', '/etc/passwd', '../secret', 'a/../b', './a', 'a\\b', 'C:foo', 'a\u0000b']) {
+      expect(() => validateRelativeWorkspacePath(invalid, false)).toThrow(ProtocolError)
+    }
+
+    const botCreate = parseClientFrame({
+      type: 'route',
+      id: 'r-bc',
+      to: 'dev-phone-2',
+      method: 'bot.create',
+      params: { name: 'Researcher', avatar: 'data:image/jpeg;base64,/9j/4AAQ', intro: 'Notes' },
+    })
+    expect(botCreate).toMatchObject({ method: 'bot.create', params: { name: 'Researcher' } })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-bc-cwd',
+        to: 'dev-phone-2',
+        method: 'bot.create',
+        params: { name: 'Bad', cwd: '/tmp/work' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-bc-bad-avatar',
+        to: 'dev-desktop',
+        method: 'bot.create',
+        params: { name: 'Bad', avatar: 'https://example.com/x.png' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    const sessionMeta = parseClientFrame({
+      type: 'route',
+      id: 'r-sm',
+      to: 'dev-desktop',
+      method: 'session.update_meta',
+      params: { botId: 'pi', sessionId: 's1', pinned: true, archived: false },
+    })
+    expect(sessionMeta).toMatchObject({ method: 'session.update_meta' })
+
+    const fileList = parseClientFrame({
+      type: 'route',
+      id: 'r-fl',
+      to: 'dev-desktop',
+      method: 'file.list',
+      params: { botId: 'pi', path: 'docs//notes' },
+    })
+    expect(fileList).toMatchObject({ params: { botId: 'pi', path: 'docs/notes' } })
+
+    const writeChunk = parseClientFrame({
+      type: 'route',
+      id: 'r-fw',
+      to: 'dev-desktop',
+      method: 'file.write_chunk',
+      params: {
+        botId: 'pi',
+        path: 'out/hello.txt',
+        transferId: 't-1',
+        offset: 0,
+        data: Buffer.from('hello world').toString('base64'),
+        eof: true,
+        expectedSha256: 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9',
+      },
+    })
+    expect(writeChunk).toMatchObject({ method: 'file.write_chunk', params: { path: 'out/hello.txt' } })
+
+    try {
+      parseClientFrame({
+        type: 'route',
+        id: 'r-fw-big',
+        to: 'dev-desktop',
+        method: 'file.write_chunk',
+        params: {
+          botId: 'pi',
+          path: 'out/big.bin',
+          offset: 0,
+          data: Buffer.alloc(MAX_FILE_CHUNK_BYTES + 1, 65).toString('base64'),
+          eof: false,
+        },
+      })
+      throw new Error('expected validation error')
+    } catch (error) {
+      expect(error).toBeInstanceOf(RouteValidationError)
+      expect((error as RouteValidationError).code).toBe('payload_too_large')
+    }
+
+    try {
+      parseClientFrame({
+        type: 'route',
+        id: 'r-fw-max-offset',
+        to: 'dev-desktop',
+        method: 'file.write_chunk',
+        params: {
+          botId: 'pi',
+          path: 'out/big.bin',
+          offset: MAX_FILE_TRANSFER_BYTES,
+          data: Buffer.from('a').toString('base64'),
+          eof: true,
+        },
+      })
+      throw new Error('expected offset validation error')
+    } catch (error) {
+      expect(error).toBeInstanceOf(RouteValidationError)
+      expect((error as RouteValidationError).code).toBe('payload_too_large')
+    }
+
+    const clientSync = parseClientFrame({
+      type: 'sync_event',
+      kind: 'sessions_changed',
+      botId: 'pi',
+      sessionId: 's1',
+      busy: false,
+      ts: 1234,
+    })
+    expect(clientSync).toMatchObject({ type: 'sync_event', kind: 'sessions_changed', botId: 'pi', ts: 1234 })
+
+    const serverSync = parseServerFrame({
+      type: 'sync_event',
+      deviceId: 'dev-desktop',
+      kind: 'bot_activity',
+      botId: 'pi',
+      busy: true,
+      pendingApprovals: 1,
+      ts: 5678,
+    })
+    expect(serverSync).toMatchObject({ type: 'sync_event', deviceId: 'dev-desktop', busy: true, pendingApprovals: 1 })
+    expect(() =>
+      parseServerFrame({
+        type: 'sync_event',
+        kind: 'bot_activity',
+        botId: 'pi',
+        ts: 5678,
+      }),
+    ).toThrow(ProtocolError)
+
+    const setModel = parseClientFrame({
+      type: 'route',
+      id: 'r-sm-ctrl',
+      to: 'dev-desktop',
+      method: 'bot.set_model',
+      params: { botId: 'pi', sessionId: 's1', provider: 'anthropic', modelId: 'claude-sonnet', thinkingLevel: 'high' },
+    })
+    expect(setModel).toMatchObject({ method: 'bot.set_model', params: { provider: 'anthropic', thinkingLevel: 'high' } })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-set-thinking-bad',
+        to: 'dev-desktop',
+        method: 'bot.set_thinking',
+        params: { botId: 'pi', thinkingLevel: '   ' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    const compactFrame = parseClientFrame({
+      type: 'route',
+      id: 'r-cmp',
+      to: 'dev-desktop',
+      method: 'session.compact',
+      params: { botId: 'pi', sessionId: 's1', customInstructions: 'focus on decisions' },
+    })
+    expect(compactFrame).toMatchObject({ method: 'session.compact' })
+
+    expect(RELAY_CAPABILITIES).not.toContain('workspace-git')
+    expect(RELAY_CAPABILITIES).not.toContain('session-fork')
+    for (const removedMethod of ['workspace.git_status', 'session.fork_messages', 'session.fork']) {
+      expect(() =>
+        parseClientFrame({
+          type: 'route',
+          id: `r-removed-${removedMethod}`,
+          to: 'dev-phone-2',
+          method: removedMethod,
+          params: { botId: 'home' },
+        }),
+      ).toThrow(UnknownRouteMethodError)
+    }
+
+    try {
+      parseClientFrame({
+        type: 'route',
+        id: 'r-inst-big',
+        to: 'dev-desktop',
+        method: 'bot.instructions.set',
+        params: { botId: 'pi', content: 'a'.repeat(65537) },
+      })
+      throw new Error('expected instructions validation error')
+    } catch (error) {
+      expect(error).toBeInstanceOf(RouteValidationError)
+      expect((error as RouteValidationError).code).toBe('payload_too_large')
+    }
+
+    const modelSync = parseServerFrame({
+      type: 'sync_event',
+      deviceId: 'dev-desktop',
+      kind: 'model_changed',
+      botId: 'pi',
+      sessionId: 's1',
+      provider: 'openai',
+      modelId: 'gpt-5',
+      thinkingLevel: 'xhigh',
+      ts: 9999,
+    })
+    expect(modelSync).toMatchObject({
+      type: 'sync_event',
+      kind: 'model_changed',
+      provider: 'openai',
+      modelId: 'gpt-5',
+      thinkingLevel: 'xhigh',
+    })
   })
 })

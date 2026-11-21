@@ -1,6 +1,18 @@
 export const PROTOCOL_VERSION = 1
 
-export const RELAY_CAPABILITIES = ['remote-bot', 'bot-sessions', 'bot-images', 'bot-approval'] as const
+export const RELAY_CAPABILITIES = [
+  'remote-bot',
+  'bot-sessions',
+  'bot-images',
+  'bot-approval',
+  'bot-live-sync',
+  'bot-manage',
+  'session-manage',
+  'workspace-files',
+  'sync-events',
+  'bot-controls',
+  'session-controls',
+] as const
 export type RelayCapability = (typeof RELAY_CAPABILITIES)[number]
 
 export const ERROR_CODES = [
@@ -13,6 +25,10 @@ export const ERROR_CODES = [
   'rate_limited',
   'bad_request',
   'not_found',
+  'permission_denied',
+  'already_exists',
+  'payload_too_large',
+  'conflict',
   'internal',
 ] as const
 
@@ -28,6 +44,29 @@ export const ROUTE_METHODS = [
   'bot.approval',
   'bot.sessions',
   'bot.history',
+  'bot.create',
+  'bot.update',
+  'bot.delete',
+  'bot.models',
+  'bot.set_model',
+  'bot.set_thinking',
+  'bot.commands',
+  'bot.instructions.get',
+  'bot.instructions.set',
+  'bot.reload',
+  'session.create',
+  'session.rename',
+  'session.delete',
+  'session.update_meta',
+  'session.compact',
+  'session.retry',
+  'file.list',
+  'file.stat',
+  'file.read_chunk',
+  'file.write_chunk',
+  'file.mkdir',
+  'file.rename',
+  'file.delete',
 ] as const
 
 export type RouteMethod = (typeof ROUTE_METHODS)[number]
@@ -46,6 +85,54 @@ export interface RemoteSessionSummary {
   updatedAt: number
   messageCount?: number
   pinned?: boolean
+  archived?: boolean
+  busy?: boolean
+}
+
+export interface RemoteFileEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+  modifiedAt: number
+  mimeType?: string
+}
+
+export const SYNC_EVENT_KINDS = ['sessions_changed', 'bot_activity', 'approval_changed', 'model_changed'] as const
+export type SyncEventKind = (typeof SYNC_EVENT_KINDS)[number]
+
+export interface SyncEventFrame {
+  type: 'sync_event'
+  deviceId?: string
+  kind: SyncEventKind
+  botId: string
+  sessionId?: string
+  busy?: boolean
+  pendingApprovals?: number
+  provider?: string
+  modelId?: string
+  thinkingLevel?: string
+  ts: number
+}
+
+export interface BotQuestionOption {
+  label: string
+  description?: string
+}
+
+export interface BotQuestionItem {
+  id: string
+  header?: string
+  question: string
+  multiSelect?: boolean
+  options?: BotQuestionOption[]
+}
+
+export interface BotQuestionAnswer {
+  id: string
+  selected?: string[]
+  custom?: string
+  skipped?: boolean
 }
 
 export interface RouteImagePart {
@@ -69,8 +156,20 @@ export interface TextDeltaEvent {
   delta: string
 }
 
+export interface BotUserMessagePayload {
+  text: string
+  images?: RouteImagePart[]
+}
+
 export type BotEvent =
-  | { type: 'agent_start'; runId?: string }
+  | {
+      type: 'agent_start'
+      runId?: string
+      sessionId?: string
+      title?: string
+      userMessage?: BotUserMessagePayload
+      originRouteId?: string
+    }
   | { type: 'message_update'; assistantMessageEvent: TextDeltaEvent }
   | { type: 'tool_call'; callId: string; name: string; args?: unknown }
   | { type: 'tool_result'; callId: string; result?: string; isError?: boolean; details?: unknown }
@@ -84,8 +183,12 @@ export type BotEvent =
       options?: string[]
       placeholder?: string
       prefill?: string
+      toolCallId?: string
+      questions?: BotQuestionItem[]
+      resolved?: boolean
     }
-  | { type: 'queue_update'; steering: string[]; followUp: string[] }
+  | { type: 'user_message'; text: string; images?: RouteImagePart[]; sessionId?: string }
+  | { type: 'queue_update'; steering: string[]; followUp: string[]; sessionId?: string; userMessage?: BotUserMessagePayload }
   | { type: 'agent_end'; status?: string }
   | { type: 'agent_settled' }
   | { type: 'error'; message: string }
@@ -132,7 +235,14 @@ export interface PingFrame {
   type: 'ping'
 }
 
-export type ClientFrame = HelloFrame | RouteFrame | RouteOkFrame | RouteErrorFrame | RouteEventFrame | PingFrame
+export type ClientFrame =
+  | HelloFrame
+  | RouteFrame
+  | RouteOkFrame
+  | RouteErrorFrame
+  | RouteEventFrame
+  | SyncEventFrame
+  | PingFrame
 
 export interface HelloOkFrame {
   type: 'hello_ok'
@@ -171,6 +281,7 @@ export type ServerFrame =
   | RouteOkFrame
   | RouteErrorFrame
   | RouteEventFrame
+  | SyncEventFrame
   | MemoryChangedFrame
   | PongFrame
 
@@ -211,7 +322,13 @@ export function isBotEvent(value: unknown): value is BotEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false
   switch (value.type) {
     case 'agent_start':
-      return value.runId === undefined || typeof value.runId === 'string'
+      return (
+        (value.runId === undefined || typeof value.runId === 'string') &&
+        (value.sessionId === undefined || typeof value.sessionId === 'string') &&
+        (value.title === undefined || typeof value.title === 'string') &&
+        (value.originRouteId === undefined || typeof value.originRouteId === 'string') &&
+        (value.userMessage === undefined || isBotUserMessagePayload(value.userMessage))
+      )
     case 'message_update': {
       const update = value.assistantMessageEvent
       if (!isRecord(update)) return false
@@ -223,17 +340,32 @@ export function isBotEvent(value: unknown): value is BotEvent {
       return typeof value.callId === 'string'
     case 'approval_request':
       return (
-        typeof value.approvalId === 'string' &&
-        typeof value.kind === 'string' &&
-        typeof value.summary === 'string' &&
+        isNonEmptyString(value.approvalId) &&
+        isNonEmptyString(value.kind) &&
+        isNonEmptyString(value.summary) &&
         (value.title === undefined || typeof value.title === 'string') &&
         (value.message === undefined || typeof value.message === 'string') &&
         (value.options === undefined || isStringArray(value.options)) &&
         (value.placeholder === undefined || typeof value.placeholder === 'string') &&
-        (value.prefill === undefined || typeof value.prefill === 'string')
+        (value.prefill === undefined || typeof value.prefill === 'string') &&
+        (value.toolCallId === undefined || typeof value.toolCallId === 'string') &&
+        (value.resolved === undefined || typeof value.resolved === 'boolean') &&
+        (value.kind === 'question' && value.resolved !== true
+          ? isBotQuestionItems(value.questions)
+          : value.questions === undefined || isBotQuestionItems(value.questions))
+      )
+    case 'user_message':
+      return (
+        (value.sessionId === undefined || typeof value.sessionId === 'string') &&
+        isBotUserMessagePayload(value)
       )
     case 'queue_update':
-      return isStringArray(value.steering) && isStringArray(value.followUp)
+      return (
+        isStringArray(value.steering) &&
+        isStringArray(value.followUp) &&
+        (value.sessionId === undefined || typeof value.sessionId === 'string') &&
+        (value.userMessage === undefined || isBotUserMessagePayload(value.userMessage))
+      )
     case 'agent_end':
       return value.status === undefined || typeof value.status === 'string'
     case 'agent_settled':
@@ -263,6 +395,8 @@ export function parseClientFrame(value: unknown): ClientFrame {
       }
     case 'route_event':
       return parseRouteEvent(value)
+    case 'sync_event':
+      return parseSyncEvent(value, false)
     case 'ping':
       return { type: 'ping' }
     default:
@@ -310,6 +444,8 @@ export function parseServerFrame(value: unknown): ServerFrame {
       }
     case 'route_event':
       return parseRouteEvent(value)
+    case 'sync_event':
+      return parseSyncEvent(value, true)
     case 'memory_changed':
       return { type: 'memory_changed', version: requireNumber(value, 'version') }
     case 'pong':
@@ -364,19 +500,71 @@ function parseRoute(value: Record<string, unknown>, inbound: boolean): RouteFram
       throw new RouteValidationError(id, error instanceof Error ? error.message : 'invalid route images')
     }
   }
+  nextParams = validateRouteParams(method, nextParams, id)
   const base: RouteFrame = { type: 'route', id, to, method, params: nextParams }
   if (!inbound) return base
   return { ...base, from: from as string }
 }
 
+function parseSyncEvent(value: Record<string, unknown>, requireDeviceId: boolean): SyncEventFrame {
+  let deviceId: string | undefined
+  if (requireDeviceId || value.deviceId !== undefined) {
+    deviceId = requireIdentifier(value, 'deviceId')
+  }
+  const kind = requireSyncEventKind(value, 'kind')
+  const botId = requireBoundedString(value, 'botId', MAX_BOT_ID_LENGTH, true)
+  const ts = requireNumber(value, 'ts')
+  if (ts < 0) throw new ProtocolError('ts must be non-negative')
+  const frame: SyncEventFrame = { type: 'sync_event', kind, botId, ts }
+  if (deviceId !== undefined) frame.deviceId = deviceId
+  if (value.sessionId !== undefined) {
+    frame.sessionId = requireBoundedString(value, 'sessionId', MAX_IDENTIFIER_LENGTH, true)
+  }
+  if (value.busy !== undefined) {
+    frame.busy = requireBoolean(value, 'busy')
+  }
+  if (value.pendingApprovals !== undefined) {
+    const count = requireNumber(value, 'pendingApprovals')
+    if (!Number.isInteger(count) || count < 0) {
+      throw new ProtocolError('pendingApprovals must be a non-negative integer')
+    }
+    frame.pendingApprovals = count
+  }
+  if (value.provider !== undefined) {
+    frame.provider = requireBoundedString(value, 'provider', 128, true)
+  }
+  if (value.modelId !== undefined) {
+    frame.modelId = requireBoundedString(value, 'modelId', 256, true)
+  }
+  if (value.thinkingLevel !== undefined) {
+    frame.thinkingLevel = requireBoundedString(value, 'thinkingLevel', 32, true)
+  }
+  return frame
+}
+
 function parseRouteEvent(value: Record<string, unknown>): RouteEventFrame {
   const event = value.event
   if (!isBotEvent(event)) throw new ProtocolError('route_event.event is not a valid bot event')
+  let normalizedEvent: BotEvent = event
+  if (event.type === 'user_message' && event.images !== undefined) {
+    normalizedEvent = { ...event, images: validateRouteImages(event.images) }
+  } else if (
+    (event.type === 'agent_start' || event.type === 'queue_update') &&
+    event.userMessage?.images !== undefined
+  ) {
+    normalizedEvent = {
+      ...event,
+      userMessage: {
+        ...event.userMessage,
+        images: validateRouteImages(event.userMessage.images),
+      },
+    }
+  }
   return {
     type: 'route_event',
     id: requireIdentifier(value, 'id'),
     seq: requireNumber(value, 'seq'),
-    event,
+    event: normalizedEvent,
   }
 }
 
@@ -398,6 +586,11 @@ function requireDevices(value: unknown, tolerantAvatars: boolean): DeviceInfo[] 
   })
 }
 
+export const MAX_FILE_CHUNK_BYTES = 256 * 1024
+export const MAX_FILE_CHUNK_BASE64_CHARS = 360_000
+export const MAX_FILE_TRANSFER_BYTES = 50 * 1024 * 1024
+export const MAX_RELATIVE_PATH_LENGTH = 512
+
 const MAX_BOTS_PER_DEVICE = 64
 const MAX_BOT_ID_LENGTH = 128
 const MAX_BOT_NAME_LENGTH = 128
@@ -410,6 +603,7 @@ const MAX_ROUTE_IMAGES = 4
 const MAX_ROUTE_IMAGE_BASE64_LENGTH = 2_000_000
 const MAX_ROUTE_IMAGES_TOTAL_LENGTH = 3_000_000
 const STRICT_BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+const SHA256_HEX_PATTERN = /^[a-fA-F0-9]{64}$/
 
 function decodeAndCheckImageMagic(
   subtype: string,
@@ -585,6 +779,411 @@ export function requireStringArray(record: Record<string, unknown>, key: string)
 
 export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+function isBotUserMessagePayload(value: unknown): value is BotUserMessagePayload {
+  if (!isRecord(value) || typeof value.text !== 'string') return false
+  if (value.images === undefined) return value.text.trim() !== ''
+  try {
+    const sanitized = validateRouteImages(value.images)
+    return value.text.trim() !== '' || sanitized.length > 0
+  } catch {
+    return false
+  }
+}
+
+function isBotQuestionOption(value: unknown): value is BotQuestionOption {
+  if (!isRecord(value)) return false
+  if (!isNonEmptyString(value.label)) return false
+  return value.description === undefined || typeof value.description === 'string'
+}
+
+function isBotQuestionItem(value: unknown): value is BotQuestionItem {
+  if (!isRecord(value)) return false
+  if (!isNonEmptyString(value.id) || !isNonEmptyString(value.question)) return false
+  if (value.header !== undefined && typeof value.header !== 'string') return false
+  if (value.multiSelect !== undefined && typeof value.multiSelect !== 'boolean') return false
+  if (
+    value.options !== undefined &&
+    (!Array.isArray(value.options) || value.options.length > 16 || !value.options.every(isBotQuestionOption))
+  ) {
+    return false
+  }
+  return true
+}
+
+function isBotQuestionItems(value: unknown): value is BotQuestionItem[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) return false
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (!isBotQuestionItem(item)) return false
+    const key = item.id.trim()
+    if (seen.has(key)) return false
+    seen.add(key)
+  }
+  return true
+}
+
+function isBotQuestionAnswer(value: unknown): value is BotQuestionAnswer {
+  if (!isRecord(value)) return false
+  if (!isNonEmptyString(value.id)) return false
+  if (value.selected !== undefined && !isStringArray(value.selected)) return false
+  if (value.custom !== undefined && typeof value.custom !== 'string') return false
+  if (value.skipped !== undefined && typeof value.skipped !== 'boolean') return false
+  return true
+}
+
+function validateBotApprovalParams(params: Record<string, unknown>, routeId: string): void {
+  if (!isNonEmptyString(params.approvalId)) {
+    throw new RouteValidationError(routeId, 'approvalId is required')
+  }
+  if (params.answers !== undefined) {
+    if (!Array.isArray(params.answers) || params.answers.length > 16 || !params.answers.every(isBotQuestionAnswer)) {
+      throw new RouteValidationError(routeId, 'invalid approval answers')
+    }
+  }
+  const hasResolution =
+    params.cancelled === true ||
+    typeof params.confirmed === 'boolean' ||
+    typeof params.value === 'string' ||
+    params.answers !== undefined
+  if (!hasResolution) {
+    throw new RouteValidationError(routeId, 'approval response payload is required')
+  }
+}
+
+export function validateRelativeWorkspacePath(raw: string, allowEmpty = false): string {
+  if (typeof raw !== 'string') {
+    throw new ProtocolError('path must be a string')
+  }
+  if (raw.length > MAX_RELATIVE_PATH_LENGTH) {
+    throw new ProtocolError('path exceeds maximum length')
+  }
+  if (raw.includes('\u0000') || raw.includes('\\') || raw.includes(':')) {
+    throw new ProtocolError('path contains invalid characters')
+  }
+  if (raw.startsWith('/')) {
+    throw new ProtocolError('path must be relative')
+  }
+  const segments = raw.split('/').filter((segment) => segment !== '')
+  if (segments.length === 0) {
+    if (allowEmpty) return ''
+    throw new ProtocolError('path must not be empty')
+  }
+  for (const segment of segments) {
+    if (segment === '.' || segment === '..') {
+      throw new ProtocolError('path traversal is not allowed')
+    }
+  }
+  return segments.join('/')
+}
+
+function validateRouteParams(
+  method: RouteMethod,
+  params: Record<string, unknown>,
+  routeId: string,
+): Record<string, unknown> {
+  switch (method) {
+    case 'bot.approval':
+      validateBotApprovalParams(params, routeId)
+      return params
+    case 'bot.create':
+      return validateBotCreateParams(params, routeId)
+    case 'bot.update':
+      return validateBotUpdateParams(params, routeId)
+    case 'bot.delete':
+    case 'bot.commands':
+    case 'bot.instructions.get':
+      requireRouteBotId(params, routeId)
+      return params
+    case 'bot.models':
+    case 'bot.reload':
+      requireRouteBotId(params, routeId)
+      if (params.sessionId !== undefined) {
+        requireRouteIdentifier(params, 'sessionId', routeId)
+      }
+      return params
+    case 'bot.set_model':
+      requireRouteBotId(params, routeId)
+      requireRouteBoundedNonEmpty(params, 'provider', 128, routeId)
+      requireRouteBoundedNonEmpty(params, 'modelId', 256, routeId)
+      if (params.sessionId !== undefined) {
+        requireRouteIdentifier(params, 'sessionId', routeId)
+      }
+      if (params.thinkingLevel !== undefined) {
+        requireRouteBoundedNonEmpty(params, 'thinkingLevel', 32, routeId)
+      }
+      return params
+    case 'bot.set_thinking':
+      requireRouteBotId(params, routeId)
+      requireRouteBoundedNonEmpty(params, 'thinkingLevel', 32, routeId)
+      if (params.sessionId !== undefined) {
+        requireRouteIdentifier(params, 'sessionId', routeId)
+      }
+      return params
+    case 'bot.instructions.set':
+      requireRouteBotId(params, routeId)
+      if (typeof params.content !== 'string') {
+        throw new RouteValidationError(routeId, 'content must be a string')
+      }
+      if (Buffer.byteLength(params.content, 'utf8') > 65536) {
+        throw new RouteValidationError(routeId, 'instructions exceed 64 KiB limit', 'payload_too_large')
+      }
+      return params
+    case 'session.create':
+      requireRouteBotId(params, routeId)
+      if (params.title !== undefined && (typeof params.title !== 'string' || params.title.length > 128)) {
+        throw new RouteValidationError(routeId, 'title must be a string within 128 characters')
+      }
+      return params
+    case 'session.rename':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'sessionId', routeId)
+      requireRouteBoundedNonEmpty(params, 'title', 128, routeId)
+      return params
+    case 'session.delete':
+    case 'session.retry':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'sessionId', routeId)
+      return params
+    case 'session.compact':
+      requireRouteBotId(params, routeId)
+      if (params.sessionId !== undefined) {
+        requireRouteIdentifier(params, 'sessionId', routeId)
+      }
+      if (
+        params.customInstructions !== undefined &&
+        (typeof params.customInstructions !== 'string' || params.customInstructions.length > 2000)
+      ) {
+        throw new RouteValidationError(routeId, 'customInstructions must be a string within 2000 characters')
+      }
+      return params
+    case 'session.update_meta':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'sessionId', routeId)
+      if (params.pinned !== undefined && typeof params.pinned !== 'boolean') {
+        throw new RouteValidationError(routeId, 'pinned must be a boolean')
+      }
+      if (params.archived !== undefined && typeof params.archived !== 'boolean') {
+        throw new RouteValidationError(routeId, 'archived must be a boolean')
+      }
+      if (typeof params.pinned !== 'boolean' && typeof params.archived !== 'boolean') {
+        throw new RouteValidationError(routeId, 'pinned or archived is required')
+      }
+      return params
+    case 'file.list':
+      return validateFileListParams(params, routeId)
+    case 'file.stat':
+      requireRouteBotId(params, routeId)
+      return { ...params, path: requireRoutePath(params.path, false, routeId) }
+    case 'file.read_chunk':
+      return validateFileReadChunkParams(params, routeId)
+    case 'file.write_chunk':
+      return validateFileWriteChunkParams(params, routeId)
+    case 'file.mkdir':
+      requireRouteBotId(params, routeId)
+      return { ...params, path: requireRoutePath(params.path, false, routeId) }
+    case 'file.rename':
+      requireRouteBotId(params, routeId)
+      return {
+        ...params,
+        from: requireRoutePath(params.from, false, routeId),
+        to: requireRoutePath(params.to, false, routeId),
+      }
+    case 'file.delete':
+      requireRouteBotId(params, routeId)
+      if (params.recursive !== undefined && typeof params.recursive !== 'boolean') {
+        throw new RouteValidationError(routeId, 'recursive must be a boolean')
+      }
+      return { ...params, path: requireRoutePath(params.path, false, routeId) }
+    default:
+      return params
+  }
+}
+
+function validateBotCreateParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {
+  requireRouteBoundedNonEmpty(params, 'name', MAX_BOT_NAME_LENGTH, routeId)
+  if (params.cwd !== undefined) {
+    throw new RouteValidationError(routeId, 'cwd is not supported')
+  }
+  if (
+    params.intro !== undefined &&
+    params.intro !== null &&
+    (typeof params.intro !== 'string' || params.intro.length > 256)
+  ) {
+    throw new RouteValidationError(routeId, 'intro must be a string within 256 characters')
+  }
+  if (params.avatar !== undefined && params.avatar !== null) {
+    if (typeof params.avatar !== 'string') {
+      throw new RouteValidationError(routeId, 'avatar must be a valid data URL')
+    }
+    const normalized = normalizeBotAvatar(params.avatar)
+    if (!normalized) {
+      throw new RouteValidationError(routeId, 'avatar image format or size is invalid')
+    }
+    return { ...params, avatar: normalized }
+  }
+  return params
+}
+
+function validateBotUpdateParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  if (params.name !== undefined) {
+    requireRouteBoundedNonEmpty(params, 'name', MAX_BOT_NAME_LENGTH, routeId)
+  }
+  if (
+    params.intro !== undefined &&
+    params.intro !== null &&
+    (typeof params.intro !== 'string' || params.intro.length > 256)
+  ) {
+    throw new RouteValidationError(routeId, 'intro must be a string within 256 characters')
+  }
+  if (params.avatar !== undefined && params.avatar !== null) {
+    if (typeof params.avatar !== 'string') {
+      throw new RouteValidationError(routeId, 'avatar must be a valid data URL or null')
+    }
+    const normalized = normalizeBotAvatar(params.avatar)
+    if (!normalized) {
+      throw new RouteValidationError(routeId, 'avatar image format or size is invalid')
+    }
+    return { ...params, avatar: normalized }
+  }
+  return params
+}
+
+function validateFileListParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  let next = params
+  if (params.path !== undefined) {
+    next = { ...next, path: requireRoutePath(params.path, true, routeId) }
+  }
+  if (params.query !== undefined && (typeof params.query !== 'string' || params.query.length > 256)) {
+    throw new RouteValidationError(routeId, 'query must be a string within 256 characters')
+  }
+  if (params.limit !== undefined) {
+    if (typeof params.limit !== 'number' || !Number.isInteger(params.limit) || params.limit < 1 || params.limit > 500) {
+      throw new RouteValidationError(routeId, 'limit must be an integer between 1 and 500')
+    }
+  }
+  return next
+}
+
+function validateFileReadChunkParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  const safePath = requireRoutePath(params.path, false, routeId)
+  const offset = params.offset
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
+    throw new RouteValidationError(routeId, 'offset must be a non-negative integer')
+  }
+  const length = params.length
+  if (typeof length !== 'number' || !Number.isInteger(length) || length < 1 || length > MAX_FILE_CHUNK_BYTES) {
+    const code = typeof length === 'number' && length > MAX_FILE_CHUNK_BYTES ? 'payload_too_large' : 'bad_request'
+    throw new RouteValidationError(routeId, `length must be an integer between 1 and ${MAX_FILE_CHUNK_BYTES}`, code)
+  }
+  return { ...params, path: safePath }
+}
+
+function validateFileWriteChunkParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  const safePath = requireRoutePath(params.path, false, routeId)
+  if (params.transferId !== undefined) {
+    requireRouteIdentifier(params, 'transferId', routeId)
+  }
+  const offset = params.offset
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
+    throw new RouteValidationError(routeId, 'offset must be a non-negative integer')
+  }
+  if (offset > MAX_FILE_TRANSFER_BYTES) {
+    throw new RouteValidationError(routeId, 'file exceeds maximum transfer size', 'payload_too_large')
+  }
+  if (typeof params.eof !== 'boolean') {
+    throw new RouteValidationError(routeId, 'eof must be a boolean')
+  }
+  if (typeof params.data !== 'string') {
+    throw new RouteValidationError(routeId, 'data must be a base64 string')
+  }
+  if (params.data.length > MAX_FILE_CHUNK_BASE64_CHARS) {
+    throw new RouteValidationError(routeId, 'chunk payload exceeds limit', 'payload_too_large')
+  }
+  let decodedBytes = 0
+  if (params.data === '') {
+    if (!params.eof) {
+      throw new RouteValidationError(routeId, 'data must not be empty before eof')
+    }
+  } else {
+    decodedBytes = base64DecodedLength(params.data)
+    if (decodedBytes < 0) {
+      throw new RouteValidationError(routeId, 'data must be valid base64')
+    }
+    if (decodedBytes > MAX_FILE_CHUNK_BYTES) {
+      throw new RouteValidationError(routeId, 'chunk exceeds maximum byte size', 'payload_too_large')
+    }
+  }
+  if (offset + decodedBytes > MAX_FILE_TRANSFER_BYTES) {
+    throw new RouteValidationError(routeId, 'file exceeds maximum transfer size', 'payload_too_large')
+  }
+  if (params.overwrite !== undefined && typeof params.overwrite !== 'boolean') {
+    throw new RouteValidationError(routeId, 'overwrite must be a boolean')
+  }
+  if (
+    params.expectedSha256 !== undefined &&
+    (typeof params.expectedSha256 !== 'string' || !SHA256_HEX_PATTERN.test(params.expectedSha256))
+  ) {
+    throw new RouteValidationError(routeId, 'expectedSha256 must be a 64-character hex digest')
+  }
+  return { ...params, path: safePath }
+}
+
+function base64DecodedLength(data: string): number {
+  if (data.length % 4 !== 0 || !STRICT_BASE64_PATTERN.test(data)) return -1
+  let padding = 0
+  if (data.endsWith('==')) padding = 2
+  else if (data.endsWith('=')) padding = 1
+  return (data.length * 3) / 4 - padding
+}
+
+function requireRouteBotId(params: Record<string, unknown>, routeId: string): string {
+  return requireRouteBoundedNonEmpty(params, 'botId', MAX_BOT_ID_LENGTH, routeId)
+}
+
+function requireRouteIdentifier(params: Record<string, unknown>, key: string, routeId: string): string {
+  return requireRouteBoundedNonEmpty(params, key, MAX_IDENTIFIER_LENGTH, routeId)
+}
+
+function requireRouteBoundedNonEmpty(
+  params: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+  routeId: string,
+): string {
+  const value = params[key]
+  if (typeof value !== 'string' || value.trim() === '' || value.length > maxLength) {
+    throw new RouteValidationError(routeId, `${key} must be a non-empty string within ${maxLength} characters`)
+  }
+  return value
+}
+
+function requireRoutePath(value: unknown, allowEmpty: boolean, routeId: string): string {
+  if (typeof value !== 'string') {
+    throw new RouteValidationError(routeId, 'path must be a string')
+  }
+  try {
+    return validateRelativeWorkspacePath(value, allowEmpty)
+  } catch (error) {
+    throw new RouteValidationError(routeId, error instanceof Error ? error.message : 'invalid workspace path')
+  }
+}
+
+function requireSyncEventKind(record: Record<string, unknown>, key: string): SyncEventKind {
+  const value = record[key]
+  if (typeof value !== 'string' || !(SYNC_EVENT_KINDS as readonly string[]).includes(value)) {
+    throw new ProtocolError(`${key} must be a known sync event kind`)
+  }
+  return value as SyncEventKind
 }
 
 function requireErrorCode(record: Record<string, unknown>, key: string): ErrorCode {

@@ -17,6 +17,7 @@ import {
   type PresenceFrame,
   type RouteErrorFrame,
   type ServerFrame,
+  type SyncEventFrame,
 } from '@superpi/protocol'
 import type { RelayStore } from './store.ts'
 import { sha256 } from './auth.ts'
@@ -45,11 +46,14 @@ interface Connection {
   lastActivityAt: number
   lastHelloDigest: string
   lastHelloBroadcastAt: number
+  syncEventTimestamps: number[]
 }
 
 interface PendingRoute {
   from: string
   to: string
+  method: InboundRouteFrame['method']
+  sessionKey?: string
   at: number
   createdAt: number
   streaming: boolean
@@ -67,6 +71,8 @@ const MAX_PENDING_PER_DEVICE = 8
 const MAX_PENDING_ROUTES = 2048
 const MAX_ROUTES_PER_DEVICE = 64
 const MIN_IDENTICAL_HELLO_INTERVAL_MS = 1_000
+const SYNC_EVENT_WINDOW_MS = 1_000
+const MAX_SYNC_EVENTS_PER_WINDOW = 30
 const SHUTDOWN_TERMINATE_MS = 300
 
 export function createRealtimeHub(
@@ -293,10 +299,28 @@ export function createRealtimeHub(
       return
     }
     const streaming = frame.method === 'bot.prompt' || frame.method === 'bot.resume'
+    const sessionKey =
+      frame.method === 'bot.resume'
+        ? `${typeof frame.params.botId === 'string' ? frame.params.botId : ''}:${typeof frame.params.sessionId === 'string' ? frame.params.sessionId : ''}`
+        : undefined
+    if (sessionKey !== undefined) {
+      for (const [existingId, existingRoute] of pendingRoutes) {
+        if (
+          existingRoute.from === connection.deviceId &&
+          existingRoute.to === frame.to &&
+          existingRoute.method === 'bot.resume' &&
+          existingRoute.sessionKey === sessionKey
+        ) {
+          pendingRoutes.delete(existingId)
+        }
+      }
+    }
     const current = now()
     pendingRoutes.set(frame.id, {
       from: connection.deviceId,
       to: frame.to,
+      method: frame.method as InboundRouteFrame['method'],
+      ...(sessionKey !== undefined ? { sessionKey } : {}),
       at: current,
       createdAt: current,
       streaming,
@@ -349,7 +373,9 @@ export function createRealtimeHub(
       }
       if (requester) send(requester, frame as unknown as ServerFrame)
       const event = (frame as { event?: { type?: string } }).event
-      if (event?.type === 'agent_settled') pendingRoutes.delete(frame.id)
+      if (event?.type === 'agent_settled' && pending.method !== 'bot.resume') {
+        pendingRoutes.delete(frame.id)
+      }
       return
     }
     if (frame.type === 'route_ok') {
@@ -377,6 +403,41 @@ export function createRealtimeHub(
     })
   }
 
+  function handleSyncEvent(connection: Connection, frame: SyncEventFrame): void {
+    const current = now()
+    const cutoff = current - SYNC_EVENT_WINDOW_MS
+    while (connection.syncEventTimestamps.length > 0 && connection.syncEventTimestamps[0]! <= cutoff) {
+      connection.syncEventTimestamps.shift()
+    }
+    if (connection.syncEventTimestamps.length >= MAX_SYNC_EVENTS_PER_WINDOW) {
+      return
+    }
+    connection.syncEventTimestamps.push(current)
+    const outbound: SyncEventFrame = {
+      type: 'sync_event',
+      deviceId: connection.deviceId,
+      kind: frame.kind,
+      botId: frame.botId,
+      ts: Number.isFinite(frame.ts) && frame.ts > 0 ? frame.ts : current,
+    }
+    if (frame.sessionId !== undefined) outbound.sessionId = frame.sessionId
+    if (frame.busy !== undefined) outbound.busy = frame.busy
+    if (frame.pendingApprovals !== undefined) outbound.pendingApprovals = frame.pendingApprovals
+    if (frame.provider !== undefined) outbound.provider = frame.provider
+    if (frame.modelId !== undefined) outbound.modelId = frame.modelId
+    if (frame.thinkingLevel !== undefined) outbound.thinkingLevel = frame.thinkingLevel
+    for (const target of connections.values()) {
+      if (
+        target !== connection &&
+        target.deviceId !== connection.deviceId &&
+        target.state === 'active' &&
+        target.capabilities.includes('sync-events')
+      ) {
+        send(target, outbound)
+      }
+    }
+  }
+
   function handleConnection(socket: WebSocket, deviceId: string): void {
     const connection: Connection = {
       deviceId,
@@ -387,6 +448,7 @@ export function createRealtimeHub(
       lastActivityAt: now(),
       lastHelloDigest: '',
       lastHelloBroadcastAt: 0,
+      syncEventTimestamps: [],
     }
     pendingSockets.set(socket, deviceId)
     const helloTimer = setTimeout(() => {
@@ -439,6 +501,10 @@ export function createRealtimeHub(
       if (connections.get(deviceId) !== connection) return
       if (frame.type === 'ping') {
         send(connection, { type: 'pong' })
+        return
+      }
+      if (frame.type === 'sync_event') {
+        handleSyncEvent(connection, frame)
         return
       }
       if (frame.type === 'route') {
