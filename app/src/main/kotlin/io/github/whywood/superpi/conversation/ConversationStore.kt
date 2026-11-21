@@ -1,8 +1,10 @@
 package io.github.whywood.superpi.conversation
 
+import io.github.whywood.superpi.remote.RemoteSessionRegistry
 import io.github.whywood.superpi.runtime.ActiveRunSnapshot
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.AssistantMessage
+import io.github.whywood.superpi.runtime.BackgroundTurnStarted
 import io.github.whywood.superpi.runtime.ImagePart
 import io.github.whywood.superpi.runtime.InputQueueKind
 import io.github.whywood.superpi.runtime.MessageStatus
@@ -222,7 +224,8 @@ class ConversationStore(
                 sessionModel = model,
                 queuedInputs = queued,
             )
-            runtime.activeRuns.value[sessionId]?.let { run ->
+            val activeRun = runtime.activeRuns.value[sessionId] ?: RemoteSessionRegistry.activePassiveRun(sessionId)
+            activeRun?.let { run ->
                 seededState = seededState.adoptActiveRun(run.runId, RuntimeActivity.Thinking, run.startedAt)
             }
             val decorated = decorate(seededState, sessionId)
@@ -232,6 +235,15 @@ class ConversationStore(
                 loading.remove(sessionId)
                 stateFor(sessionId).value = merged
                 trimLocked(sessionId)
+                if (merged.sending && !active.containsKey(sessionId)) {
+                    active[sessionId] = ActiveRunView(
+                        sessionId = sessionId,
+                        title = merged.title.ifBlank { title.orEmpty() },
+                        activity = merged.activity ?: RuntimeActivity.Thinking,
+                        startedAt = merged.activityStartedAt ?: System.currentTimeMillis(),
+                    )
+                    publishLocked()
+                }
                 loadingWaiters.remove(sessionId)?.complete(merged)
                 merged
             }
@@ -374,8 +386,9 @@ class ConversationStore(
         mutate(sessionId) { state ->
             if (state.sending) state.finishWithStatus("", "", RunStatus.STOPPED, now) else state
         }
+        val abortedPassive = RemoteSessionRegistry.abort(sessionId)
         val dropped = runtime.stop(sessionId)
-        if (runtime.activeRuns.value[sessionId] == null) {
+        if (!abortedPassive && runtime.activeRuns.value[sessionId] == null) {
             scheduleReconcile(sessionId, RECONCILE_DELAY_MS, force = true)
         }
         return dropped
@@ -411,7 +424,7 @@ class ConversationStore(
     }
 
     suspend fun reconcile(sessionId: String, force: Boolean = false) {
-        val activeRun = runtime.activeRuns.value[sessionId]
+        val activeRun = runtime.activeRuns.value[sessionId] ?: RemoteSessionRegistry.activePassiveRun(sessionId)
         val current = peek(sessionId)
         if (activeRun != null) {
             if (current == null || !current.sending) return
@@ -451,6 +464,36 @@ class ConversationStore(
                 sessionModel = model ?: state.sessionModel,
             )
         }
+    }
+
+    suspend fun ingestRemoteEvent(scoped: SessionRuntimeEvent) {
+        val sessionId = scoped.sessionId
+        if (sessionId.isBlank()) return
+        val event = scoped.event
+        val deferredNow = synchronized(lock) {
+            val loaded = states[sessionId]?.value?.loaded == true
+            when {
+                sessionId in loading -> {
+                    val queue = deferred.getOrPut(sessionId) { mutableListOf() }
+                    if (queue.size < MAX_DEFERRED_REMOTE_EVENTS) queue += event
+                    true
+                }
+
+                !loaded -> {
+                    if (event is RuntimeEvent.RunFinished || event is RuntimeEvent.RunFailed) {
+                        deferred.remove(sessionId)
+                    } else {
+                        val queue = deferred.getOrPut(sessionId) { mutableListOf() }
+                        if (queue.size < MAX_DEFERRED_REMOTE_EVENTS) queue += event
+                    }
+                    true
+                }
+
+                else -> false
+            }
+        }
+        if (deferredNow) return
+        onEvent(scoped)
     }
 
     private suspend fun onEvent(scoped: SessionRuntimeEvent) {
@@ -513,6 +556,21 @@ class ConversationStore(
                     title = titleOf(sessionId),
                     activity = RuntimeActivity.Thinking,
                     startedAt = event.startedAt,
+                )
+                synchronized(lock) {
+                    finished -= sessionId
+                    seeded -= sessionId
+                    active[sessionId] = view
+                    publishLocked()
+                }
+            }
+
+            is BackgroundTurnStarted -> {
+                val view = ActiveRunView(
+                    sessionId = sessionId,
+                    title = titleOf(sessionId),
+                    activity = RuntimeActivity.Thinking,
+                    startedAt = System.currentTimeMillis(),
                 )
                 synchronized(lock) {
                     finished -= sessionId
@@ -711,6 +769,7 @@ class ConversationStore(
         if (text.isEmpty()) return
         scope.launch {
             try {
+                if (RemoteSessionRegistry.sendQueued(sessionId, text, images, followUp)) return@launch
                 if (followUp) {
                     runtime.followUp(sessionId, text, images)
                 } else {
@@ -769,5 +828,6 @@ class ConversationStore(
         const val RECONCILE_DELAY_MS = 500L
         const val COMPLETION_BUFFER = 128
         const val FAILURE_BUFFER = 64
+        const val MAX_DEFERRED_REMOTE_EVENTS = 2_000
     }
 }

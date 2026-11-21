@@ -85,11 +85,22 @@ class FakeAgentRuntime : AgentRuntime {
         return workspace
     }
 
-    override suspend fun renameWorkspace(id: String, name: String) = Unit
+    override suspend fun renameWorkspace(id: String, name: String) {
+        if (id == HOME_ID) return
+        val idx = extraProjects.indexOfFirst { it.id == id }
+        if (idx >= 0) extraProjects[idx] = extraProjects[idx].copy(name = name)
+    }
 
-    override suspend fun updateWorkspaceProfile(id: String, avatar: String?, intro: String?) = Unit
+    override suspend fun updateWorkspaceProfile(id: String, avatar: String?, intro: String?) {
+        if (id == HOME_ID) return
+        val idx = extraProjects.indexOfFirst { it.id == id }
+        if (idx >= 0) extraProjects[idx] = extraProjects[idx].copy(avatar = avatar, intro = intro)
+    }
 
-    override suspend fun deleteWorkspace(id: String) = Unit
+    override suspend fun deleteWorkspace(id: String) {
+        if (id == HOME_ID) return
+        extraProjects.removeAll { it.id == id }
+    }
 
     override suspend fun allSessions(): List<ConversationSummary> = sessions.filter { !it.archived }
 
@@ -197,13 +208,21 @@ class FakeAgentRuntime : AgentRuntime {
     override suspend fun archivedSessions(): List<ConversationSummary> =
         sessions.filter { it.archived }
 
-    override suspend fun renameSession(id: String, title: String) = Unit
+    override suspend fun renameSession(id: String, title: String) {
+        sessions = sessions.map { if (it.id == id) it.copy(title = title) else it }
+    }
 
-    override suspend fun setSessionPinned(id: String, pinned: Boolean) = Unit
+    override suspend fun setSessionPinned(id: String, pinned: Boolean) {
+        sessions = sessions.map { if (it.id == id) it.copy(pinned = pinned) else it }
+    }
 
-    override suspend fun setSessionArchived(id: String, archived: Boolean) = Unit
+    override suspend fun setSessionArchived(id: String, archived: Boolean) {
+        sessions = sessions.map { if (it.id == id) it.copy(archived = archived) else it }
+    }
 
-    override suspend fun deleteSession(id: String) = Unit
+    override suspend fun deleteSession(id: String) {
+        sessions = sessions.filterNot { it.id == id }
+    }
 
     override suspend fun sessionModel(sessionId: String): SessionModelSnapshot? = sessionModels[sessionId]
 

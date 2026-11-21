@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.ui
 
+import io.github.whywood.superpi.data.relay.RemoteSessionSummaryDto
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.RemoteBotRef
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
@@ -27,13 +28,13 @@ class SuperPIDrawerEntriesTest {
     )
 
     private fun remoteWorkspace(online: Boolean) = RuntimeWorkspace(
-        id = "remote:desktop:pi",
+        id = "remote:phone-b:home",
         name = "PI",
-        cwd = "/remote/desktop/pi",
+        cwd = "/remote/phone-b/home",
         remote = RemoteBotRef(
-            deviceId = "desktop",
-            deviceName = "Mac",
-            botId = "pi",
+            deviceId = "phone-b",
+            deviceName = "Backup Phone",
+            botId = "home",
             botName = "PI",
             online = online,
         ),
@@ -113,20 +114,22 @@ class SuperPIDrawerEntriesTest {
             workspaces = listOf(local, remote),
             sessionsByCwd = mapOf(
                 local.cwd to listOf(session("s1", 1)),
-                remote.cwd to listOf(session("remote-s1", 2, cwd = remote.cwd)),
             ),
             expandedWorkspaceIds = setOf(local.id, remote.id),
             expandedSessionWorkspaceIds = emptySet(),
+            remoteDrawerStates = mapOf(
+                remote.id to RemoteDrawerState(
+                    sessions = listOf(RemoteSessionSummaryDto(id = "remote-s1", title = "Remote chat", updatedAt = 2L)),
+                ),
+            ),
         )
 
         assertEquals(
             listOf(local.id, remote.id),
             result.filterIsInstance<DrawerEntry.WorkspaceEntry>().map { it.workspace.id },
         )
-        assertEquals(
-            listOf(local.id, remote.id),
-            result.filterIsInstance<DrawerEntry.Session>().map { it.workspaceId },
-        )
+        assertEquals(listOf(local.id), result.filterIsInstance<DrawerEntry.Session>().map { it.workspaceId })
+        assertEquals(listOf("remote-s1"), result.filterIsInstance<DrawerEntry.RemoteSession>().map { it.session.id })
         assertEquals(result.size, result.map { it.key }.toSet().size)
     }
 
@@ -148,5 +151,33 @@ class SuperPIDrawerEntriesTest {
     fun uniqueKeysForAllEntries() {
         val result = entries((1..7).map { session("s$it", it.toLong()) })
         assertEquals(result.size, result.map { it.key }.toSet().size)
+    }
+
+    @Test
+    fun remoteSessionsSortPinnedFirstAndRenderArchivedToggleWhenManageable() {
+        val remote = remoteWorkspace(online = true)
+        val state = RemoteDrawerState(
+            sessions = listOf(
+                RemoteSessionSummaryDto(id = "r1", title = "Recent", updatedAt = 50L, pinned = false),
+                RemoteSessionSummaryDto(id = "r2", title = "Pinned old", updatedAt = 10L, pinned = true),
+                RemoteSessionSummaryDto(id = "r3", title = "Archived", updatedAt = 99L, pinned = false, archived = true),
+            ),
+            status = null,
+        )
+        val result = buildDrawerEntries(
+            workspaces = listOf(remote),
+            sessionsByCwd = emptyMap(),
+            expandedWorkspaceIds = setOf(remote.id),
+            expandedSessionWorkspaceIds = emptySet(),
+            remoteDrawerStates = mapOf(remote.id to state),
+            relayOnline = true,
+            remoteSessionManageWorkspaceIds = setOf(remote.id),
+            remoteShowArchivedWorkspaceIds = setOf(remote.id),
+        )
+
+        val rows = result.filterIsInstance<DrawerEntry.RemoteSession>()
+        assertEquals(listOf("r2", "r1", "r3"), rows.map { it.session.id })
+        val toggle = result.filterIsInstance<DrawerEntry.RemoteArchivedToggle>().single()
+        assertTrue(toggle.showingArchived)
     }
 }

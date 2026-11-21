@@ -12,13 +12,13 @@ class RemoteChatControlsTest {
     private val local = RuntimeWorkspace(id = "ws-1", name = "Work", cwd = "/work")
 
     private fun remote(online: Boolean) = RuntimeWorkspace(
-        id = "remote:desktop:pi",
+        id = "remote:phone-b:home",
         name = "PI",
-        cwd = "/remote/desktop/pi",
+        cwd = "/remote/phone-b/home",
         remote = RemoteBotRef(
-            deviceId = "desktop",
-            deviceName = "Mac",
-            botId = "pi",
+            deviceId = "phone-b",
+            deviceName = "Backup Phone",
+            botId = "home",
             botName = "PI",
             online = online,
         ),
@@ -34,19 +34,23 @@ class RemoteChatControlsTest {
     }
 
     @Test
-    fun onlineRemoteWorkspaceHidesModelControls() {
+    fun onlineRemoteWorkspaceHidesModelControlsByDefaultAndShowsWithCapability() {
         val workspace = remote(online = true)
-        val controls = remoteChatControls(listOf(local, workspace), workspace.id)
+        val defaultControls = remoteChatControls(listOf(local, workspace), workspace.id)
 
-        assertEquals("Mac", controls.remote?.deviceName)
-        assertTrue(controls.inputEnabled)
-        assertFalse(controls.modelControlsVisible)
+        assertEquals("Backup Phone", defaultControls.remote?.deviceName)
+        assertTrue(defaultControls.inputEnabled)
+        assertFalse(defaultControls.modelControlsVisible)
+
+        val capableControls = remoteChatControls(listOf(local, workspace), workspace.id, canControlModel = true)
+        assertTrue(capableControls.inputEnabled)
+        assertTrue(capableControls.modelControlsVisible)
     }
 
     @Test
-    fun offlineRemoteWorkspaceDisablesInput() {
+    fun offlineRemoteWorkspaceDisablesInputEvenWithCapability() {
         val workspace = remote(online = false)
-        val controls = remoteChatControls(listOf(workspace), workspace.id)
+        val controls = remoteChatControls(listOf(workspace), workspace.id, canControlModel = true)
 
         assertFalse(controls.inputEnabled)
         assertFalse(controls.modelControlsVisible)

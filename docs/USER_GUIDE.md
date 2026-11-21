@@ -140,12 +140,12 @@ Good for timetables, expense tracking, anniversaries, drawing lots and small uti
 
 ## Remote connection
 
-Link your phone and desktop (`SuperPI-Desktop`) through a self-hosted `SuperPI-Remote` relay:
+Link your Android phones through a self-hosted `SuperPI-Remote` relay:
 
-1. Start `SuperPI-Remote` on your server or computer with HTTPS/WSS enabled.
-2. In the app drawer, open the account / relay entry to sign in with your relay address and secret, or pair via a short-lived `superpi://pair` link / pairing code.
+1. Start `SuperPI-Remote` on your server or host with HTTPS/WSS enabled.
+2. In the app drawer, open the account / relay entry to sign in with your relay address and secret, or pair via a short-lived `superpi://pair` link, QR scan, or pairing code.
 3. On first connection the app pins the relay CA certificate fingerprint (`sha256:...`); if the certificate changes, you must pair again.
-4. Once connected, online remote devices and their bots appear in the drawer, shared memory syncs automatically with optimistic version checks, and you can generate pairing links or revoke devices from the account sheet.
+4. Once connected, paired phones and their bots appear grouped by device in the drawer, shared memory syncs automatically with optimistic version checks, and you can generate pairing links or revoke devices from the account sheet.
 
 ## Data and privacy
 

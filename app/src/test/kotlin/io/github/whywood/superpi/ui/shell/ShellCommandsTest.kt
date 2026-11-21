@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.ui.shell
 
+import io.github.whywood.superpi.remote.RemoteSlashCommand
 import io.github.whywood.superpi.runtime.SkillSummary
 import io.github.whywood.superpi.ui.common.chat.ChatCommand
 import org.junit.Assert.assertEquals
@@ -67,5 +68,56 @@ class ShellCommandsTest {
             compactTitle = "c", compactDescription = "cd", goalTitle = "g", goalDescription = "gd",
         )
         assertEquals(listOf(false, true), busy.map { it.enabled })
+    }
+
+    @Test
+    fun remoteSubmissionRoutesCompactLocallyAndForwardsPeerSlashCommands() {
+        assertEquals(
+            ShellSubmitPlan.RunCommand(ShellCommandAction.Compact),
+            planSubmission("/compact focus", sending = false, isRemote = true),
+        )
+        assertEquals(
+            ShellSubmitPlan.RejectWhileSending,
+            planSubmission("/compact", sending = true, isRemote = true),
+        )
+        assertEquals(ShellSubmitPlan.Send, planSubmission("/goal pause", sending = false, isRemote = true))
+        assertEquals(ShellSubmitPlan.Send, planSubmission("/custom-template", sending = false, isRemote = true))
+        assertEquals(ShellSubmitPlan.Send, planSubmission("/skill:miniapp", sending = true, isRemote = true))
+    }
+
+    @Test
+    fun remoteCommandItemsReplaceLocalGoalAndSkillsWithPeerCommands() {
+        val items = buildCommandItems(
+            conversationId = "s1",
+            sending = false,
+            compacting = false,
+            skills = listOf(SkillSummary("local-skill", "local")),
+            compactTitle = "c",
+            compactDescription = "cd",
+            goalTitle = "g",
+            goalDescription = "gd",
+            isRemote = true,
+            canCompact = true,
+            remoteCommands = listOf(
+                RemoteSlashCommand(name = "compact", description = "dup", source = "builtin"),
+                RemoteSlashCommand(name = "review", description = "Review PR", source = "prompt"),
+            ),
+        )
+        assertEquals(listOf("compact", "remote:review"), items.map { it.id })
+        assertEquals(listOf("/compact ", "/review "), items.map { it.insertText })
+        val withoutCompact = buildCommandItems(
+            conversationId = "s1",
+            sending = false,
+            compacting = false,
+            skills = listOf(SkillSummary("local-skill", "local")),
+            compactTitle = "c",
+            compactDescription = "cd",
+            goalTitle = "g",
+            goalDescription = "gd",
+            isRemote = true,
+            canCompact = false,
+            remoteCommands = listOf(RemoteSlashCommand(name = "review", description = "Review PR", source = "prompt")),
+        )
+        assertEquals(listOf("remote:review"), withoutCompact.map { it.id })
     }
 }

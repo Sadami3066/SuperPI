@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,8 +21,8 @@ class RelayFramesTest {
         val frame = RelayFrames.parse(
             """
             {"type":"hello_ok","accountId":"acct","memoryVersion":4,"devices":[
-              {"deviceId":"dev-1","name":"Desktop","platform":"desktop","online":true,"lastSeen":10,
-               "bots":[{"id":"pi","name":"PI"}]}
+              {"deviceId":"dev-1","name":"Phone B","platform":"android","online":true,"lastSeen":10,
+               "bots":[{"id":"home","name":"PI"}]}
             ]}
             """.trimIndent(),
         ) as RelayServerFrame.HelloOk
@@ -29,7 +30,7 @@ class RelayFramesTest {
         assertEquals("acct", frame.accountId)
         assertEquals(4L, frame.memoryVersion)
         val device = frame.devices.single()
-        assertEquals("Desktop", device.name)
+        assertEquals("Phone B", device.name)
         assertTrue(device.online)
         assertEquals("PI", device.bots.single().name)
     }
@@ -48,10 +49,10 @@ class RelayFramesTest {
     @Test
     fun parsesRouteAndResults() {
         val route = RelayFrames.parse(
-            """{"type":"route","id":"r1","from":"dev-2","method":"bot.prompt","params":{"botId":"pi","text":"hi"}}""",
+            """{"type":"route","id":"r1","from":"dev-2","method":"bot.prompt","params":{"botId":"home","text":"hi"}}""",
         ) as RelayServerFrame.Route
         assertEquals("dev-2", route.from)
-        assertEquals("pi", route.params.getValue("botId").jsonPrimitive.content)
+        assertEquals("home", route.params.getValue("botId").jsonPrimitive.content)
 
         val ok = RelayFrames.parse("""{"type":"route_ok","id":"r1","result":{"sessionId":"s1"}}""") as RelayServerFrame.RouteOk
         assertEquals("s1", ok.result?.getValue("sessionId")?.jsonPrimitive?.content)
@@ -181,6 +182,104 @@ class RelayFramesTest {
             },
         )
         assertEquals(listOf(RouteImagePart("YWJj", "image/png")), images)
+    }
+
+    @Test
+    fun parsesAndEncodesCapabilitiesSyncEventsFileEntriesAndPaths() {
+        assertTrue(RELAY_CAPABILITIES.containsAll(listOf("bot-live-sync", "bot-manage", "session-manage", "workspace-files", "bot-controls", "session-controls", "sync-events")))
+        assertFalse(RELAY_CAPABILITIES.contains("workspace-git"))
+        assertFalse(RELAY_CAPABILITIES.contains("session-fork"))
+        assertFalse(RELAY_CAPABILITIES_READONLY.contains("bot-manage"))
+        assertFalse(RELAY_CAPABILITIES_READONLY.contains("bot-controls"))
+        assertFalse(RELAY_CAPABILITIES_READONLY.contains("session-controls"))
+        assertTrue(RELAY_CAPABILITIES_READONLY.contains("sync-events"))
+
+        val modelSyncJson = RelayFrames.syncEvent(
+            kind = "model_changed",
+            botId = "home",
+            sessionId = "s1",
+            provider = "openai",
+            modelId = "gpt-5",
+            thinkingLevel = "xhigh",
+            ts = 1234L,
+        )
+        val parsedModelSync = RelayFrames.parse(modelSyncJson.toString()
+            .replace("}", ""","deviceId":"dev-1"}""")) as RelayServerFrame.SyncEvent
+        assertEquals("model_changed", parsedModelSync.kind)
+        assertEquals("openai", parsedModelSync.provider)
+        assertEquals("gpt-5", parsedModelSync.modelId)
+        assertEquals("xhigh", parsedModelSync.thinkingLevel)
+
+        val syncJson = RelayFrames.syncEvent(
+            kind = "sessions_changed",
+            botId = "home",
+            sessionId = "s-9",
+            busy = true,
+            pendingApprovals = 2,
+            ts = 1234L,
+        )
+        assertEquals("sync_event", syncJson.getValue("type").jsonPrimitive.content)
+        val parsedSync = RelayFrames.parse(
+            """{"type":"sync_event","deviceId":"dev-2","kind":"sessions_changed","botId":"home","sessionId":"s-9","busy":true,"pendingApprovals":2,"ts":1234}""",
+        ) as RelayServerFrame.SyncEvent
+        assertEquals("dev-2", parsedSync.deviceId)
+        assertEquals("home", parsedSync.botId)
+        assertEquals("s-9", parsedSync.sessionId)
+        assertEquals(true, parsedSync.busy)
+        assertEquals(2, parsedSync.pendingApprovals)
+
+        val sessions = RelayFrames.parseRemoteSessions(
+            buildJsonObject {
+                put(
+                    "sessions",
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("id", "s-1")
+                                put("title", "Archived Pin")
+                                put("updatedAt", 99L)
+                                put("pinned", true)
+                                put("archived", true)
+                            },
+                        )
+                    },
+                )
+            },
+        )
+        assertEquals(true, sessions.single().pinned)
+        assertEquals(true, sessions.single().archived)
+
+        val parsedBot = RelayFrames.parseRemoteBot(buildJsonObject { put("id", "b1"); put("name", "Coder") })
+        assertEquals("b1", parsedBot?.id)
+        assertEquals("Coder", parsedBot?.name)
+
+        val fileList = RelayFrames.parseRemoteFileList(
+            buildJsonObject {
+                put("path", "src")
+                put(
+                    "entries",
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("name", "a.txt")
+                                put("path", "src/a.txt")
+                                put("type", "file")
+                                put("size", 12L)
+                                put("modifiedAt", 42L)
+                                put("mimeType", "text/plain")
+                            },
+                        )
+                    },
+                )
+            },
+        )
+        assertEquals("src", fileList?.first)
+        assertEquals("src/a.txt", fileList?.second?.single()?.path)
+
+        assertEquals("docs/readme.md", RelayFrames.validateRelativeWorkspacePath("docs/readme.md"))
+        assertEquals("", RelayFrames.validateRelativeWorkspacePath("", allowEmpty = true))
+        assertTrue(runCatching { RelayFrames.validateRelativeWorkspacePath("../secret") }.isFailure)
+        assertEquals("image/png", RelayFrames.detectImageMime(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 0, 0, 0)))
     }
 }
 

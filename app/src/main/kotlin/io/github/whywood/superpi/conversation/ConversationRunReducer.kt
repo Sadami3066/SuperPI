@@ -2,11 +2,13 @@ package io.github.whywood.superpi.conversation
 
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.AssistantRole
+import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.BackgroundTurnStarted
 import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.RunStatus
+import io.github.whywood.superpi.runtime.ToolActivityStatus
 
 internal fun ConversationState.onRunStarted(event: RuntimeEvent.RunStarted): ConversationState {
     val known = event.runId.isNotBlank() && messages.any { it.runId == event.runId }
@@ -131,6 +133,30 @@ internal fun ConversationState.startBackgroundTurn(
     event: BackgroundTurnStarted,
     now: Long,
 ): ConversationState {
+    if (event.notice == null) {
+        val last = messages.lastOrNull()
+        if (last != null &&
+            last.role == AssistantRole.ASSISTANT &&
+            last.status != MessageStatus.FAILED &&
+            last.status != MessageStatus.STOPPED &&
+            (last.streaming || last.steps.any { it is AssistantStep.Tool && it.trace.status == ToolActivityStatus.RUNNING })
+        ) {
+            val updated = last.copy(
+                streaming = true,
+                status = MessageStatus.RUNNING,
+                finishedAt = null,
+                error = null,
+                rawError = null,
+                runId = event.runId,
+            )
+            return copy(
+                messages = messages.dropLast(1) + updated,
+                sending = true,
+                activity = RuntimeActivity.Thinking,
+                activityStartedAt = activityStartedAt ?: now,
+            )
+        }
+    }
     val added = event.notice?.let { notice ->
         AssistantMessage(
             id = nextMessageId(messages),

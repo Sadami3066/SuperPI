@@ -9,15 +9,15 @@ import org.junit.Test
 class RemoteWorkspacesTest {
     private val bot = RemoteBot(
         deviceId = "dev-1",
-        deviceName = "Desktop",
-        botId = "pi main",
+        deviceName = "Backup Phone",
+        botId = "home main",
         botName = "PI",
         online = true,
     )
 
     @Test
     fun buildsStableWorkspaceIdentity() {
-        assertEquals("remote:dev-1:pi main", RemoteWorkspaces.workspaceId(bot))
+        assertEquals("remote:dev-1:home main", RemoteWorkspaces.workspaceId(bot))
         assertEquals(RemoteWorkspaces.workspaceId(bot), RemoteWorkspaces.workspaceId(bot.copy(online = false)))
     }
 
@@ -27,8 +27,8 @@ class RemoteWorkspacesTest {
 
         assertEquals("PI", workspace.name)
         assertEquals("dev-1", workspace.remote?.deviceId)
-        assertEquals("Desktop", workspace.remote?.deviceName)
-        assertEquals("pi main", workspace.remote?.botId)
+        assertEquals("Backup Phone", workspace.remote?.deviceName)
+        assertEquals("home main", workspace.remote?.botId)
         assertTrue(workspace.remote?.online == true)
         assertTrue(workspace.cwd.startsWith(File("/data/app/files/remote").absolutePath))
         assertNull(workspace.avatar)

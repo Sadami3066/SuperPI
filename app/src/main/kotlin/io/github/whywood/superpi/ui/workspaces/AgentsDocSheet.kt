@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -295,6 +296,233 @@ fun AgentsDocSheet(
                     },
                     color = colors.danger,
                     modifier = Modifier.testTag("agents_doc_delete_confirm"),
+                )
+            },
+        )
+    }
+}
+
+@Composable
+fun RemoteAgentsDocSheet(
+    botName: String,
+    deviceName: String,
+    loadContent: suspend () -> Result<String>,
+    saveContent: suspend (String) -> Result<String>,
+    onDismiss: () -> Unit,
+) {
+    val colors = superPiColors()
+    val scope = rememberCoroutineScope()
+    var loadEpoch by remember { mutableStateOf(0) }
+    var loading by remember { mutableStateOf(true) }
+    var saving by remember { mutableStateOf(false) }
+    var initial by remember { mutableStateOf("") }
+    var draft by remember { mutableStateOf("") }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var saveError by remember { mutableStateOf<String?>(null) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+    var discardedFromOutside by remember { mutableStateOf(false) }
+    var sheetEpoch by remember { mutableStateOf(0) }
+    val loadFailedFallback = stringResource(R.string.agents_doc_load_failed)
+    val saveFailedFallback = stringResource(R.string.agents_doc_save_failed)
+
+    LaunchedEffect(botName, deviceName, loadEpoch) {
+        loading = true
+        loadError = null
+        saveError = null
+        loadContent().fold(
+            onSuccess = { content ->
+                initial = content
+                draft = content
+                loading = false
+            },
+            onFailure = { error ->
+                loadError = error.message?.takeIf { it.isNotBlank() } ?: loadFailedFallback
+                loading = false
+            },
+        )
+    }
+
+    val bytes = remember(draft) { draft.toByteArray(Charsets.UTF_8).size }
+    val tooLarge = bytes > AGENT_DOC_MAX_BYTES
+    val dirty = !loading && loadError == null && draft != initial
+
+    val close: (Boolean) -> Unit = { fromOutside ->
+        if (dirty) {
+            discardedFromOutside = fromOutside
+            confirmDiscard = true
+        } else {
+            onDismiss()
+        }
+    }
+
+    val cancelDiscard: () -> Unit = {
+        confirmDiscard = false
+        if (discardedFromOutside) sheetEpoch += 1
+    }
+
+    val save: () -> Unit = {
+        if (!loading && loadError == null && !saving && !tooLarge) {
+            saving = true
+            saveError = null
+            scope.launch {
+                saveContent(draft).fold(
+                    onSuccess = {
+                        saving = false
+                        onDismiss()
+                    },
+                    onFailure = { error ->
+                        saving = false
+                        saveError = error.message?.takeIf { it.isNotBlank() } ?: saveFailedFallback
+                    },
+                )
+            }
+        }
+    }
+
+    key(sheetEpoch) {
+        DdSheet(onDismiss = { close(true) }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.94f)
+                    .imePadding()
+                    .testTag("remote_agents_doc_sheet"),
+            ) {
+                DdSheetHeader(
+                    title = stringResource(R.string.agents_doc_title),
+                    onClose = { close(false) },
+                )
+                if (loading) {
+                    Box(
+                        Modifier.fillMaxWidth().weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        DdSpinner(size = 22.dp, strokeWidth = 2.dp)
+                    }
+                } else if (loadError != null) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = loadError.orEmpty(),
+                            style = DdType.bodySmall,
+                            color = colors.danger,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        DdTextAction(
+                            text = stringResource(R.string.drawer_remote_retry),
+                            onClick = { loadEpoch += 1 },
+                        )
+                        Spacer(Modifier.weight(1f))
+                    }
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 24.dp),
+                    ) {
+                        Text(
+                            text = "$deviceName · $botName",
+                            style = DdType.bodySmall,
+                            color = colors.inkTertiary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        DdTextArea(
+                            value = draft,
+                            onValueChange = {
+                                draft = it
+                                saveError = null
+                            },
+                            placeholder = stringResource(R.string.agents_doc_placeholder),
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            minHeight = 140.dp,
+                            maxHeight = 2000.dp,
+                            testTag = "remote_agents_doc_editor",
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = stringResource(R.string.agents_doc_note),
+                                modifier = Modifier.weight(1f),
+                                style = DdType.bodySmall,
+                                color = colors.inkTertiary,
+                            )
+                            Text(
+                                text = stringResource(R.string.agents_doc_counter, draft.length),
+                                style = DdType.numeric,
+                                color = if (tooLarge) colors.danger else colors.inkTertiary,
+                            )
+                        }
+                        if (tooLarge) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(R.string.agents_doc_too_large),
+                                style = DdType.bodySmall,
+                                color = colors.danger,
+                            )
+                        }
+                        saveError?.let { msg ->
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = msg,
+                                style = DdType.bodySmall,
+                                color = colors.danger,
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spacer(Modifier.weight(1f))
+                    DdPrimaryButton(
+                        text = stringResource(R.string.agents_doc_save),
+                        onClick = save,
+                        modifier = Modifier.width(148.dp).testTag("remote_agents_doc_save"),
+                        enabled = !loading && loadError == null && !saving && !tooLarge,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+
+    if (confirmDiscard) {
+        DdDialog(
+            onDismissRequest = cancelDiscard,
+            modifier = Modifier.testTag("agents_doc_discard_dialog"),
+            title = stringResource(R.string.agents_doc_discard_title),
+            content = {
+                Text(
+                    text = stringResource(R.string.agents_doc_discard_message),
+                    style = DdType.bodySmall,
+                    color = colors.inkSecondary,
+                )
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.agents_doc_cancel),
+                    onClick = cancelDiscard,
+                    color = colors.inkSecondary,
+                )
+                DdTextAction(
+                    text = stringResource(R.string.agents_doc_discard_confirm),
+                    onClick = {
+                        confirmDiscard = false
+                        onDismiss()
+                    },
+                    color = colors.danger,
+                    modifier = Modifier.testTag("agents_doc_discard_confirm"),
                 )
             },
         )

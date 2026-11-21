@@ -66,6 +66,13 @@ internal class FakeAppDependencies(
 
     override val relayLive: io.github.whywood.superpi.data.relay.RelayLive get() = unavailable("relayLive")
 
+    override val remoteTransport: io.github.whywood.superpi.remote.RemoteAgentTransport get() = unavailable("remoteTransport")
+
+    override val remoteBotAdminClient: io.github.whywood.superpi.remote.RemoteBotAdminClient get() = unavailable("remoteBotAdminClient")
+
+    override val remoteBotControlClient: io.github.whywood.superpi.remote.RemoteBotControlClient get() = unavailable("remoteBotControlClient")
+
+    override val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient get() = unavailable("remoteFileClient")
 
     override val updateManager: UpdateManager get() = unavailable("updateManager")
 

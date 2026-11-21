@@ -141,6 +141,14 @@ interface FeatureDependencies {
 
     val relayLive: RelayLive
 
+    val remoteTransport: io.github.whywood.superpi.remote.RemoteAgentTransport
+
+    val remoteBotAdminClient: io.github.whywood.superpi.remote.RemoteBotAdminClient
+
+    val remoteBotControlClient: io.github.whywood.superpi.remote.RemoteBotControlClient
+
+    val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient
+
     val updateManager: UpdateManager
 }
 

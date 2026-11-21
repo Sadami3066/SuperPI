@@ -21,7 +21,9 @@
     <string name="agents_doc_delete">Delete</string>
     <string name="agents_doc_cancel">Cancel</string>
     <string name="agents_doc_too_large">Content exceeds the 64 KB limit.</string>
+    <string name="agents_doc_load_failed">Could not load instructions. Try again.</string>
     <string name="agents_doc_save_failed">Save failed. Try again.</string>
+    <string name="agents_doc_remote_saved">Instructions saved</string>
     <string name="agents_doc_delete_title">Delete instructions?</string>
     <string name="agents_doc_delete_message">This deletes the bot instructions.</string>
     <string name="agents_doc_delete_confirm">Delete</string>

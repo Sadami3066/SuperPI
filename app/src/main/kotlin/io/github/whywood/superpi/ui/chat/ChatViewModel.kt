@@ -30,9 +30,11 @@ import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.ModelSettings
 import io.github.whywood.superpi.runtime.ProviderDirectory
+import io.github.whywood.superpi.remote.RemoteSessionBrowser
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.runtime.SessionModelSnapshot
+import io.github.whywood.superpi.runtime.SessionUsage
 import io.github.whywood.superpi.runtime.SkillExpander
 import io.github.whywood.superpi.runtime.SkillSummary
 import io.github.whywood.superpi.runtime.ThinkingLevel
@@ -51,7 +53,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,6 +80,7 @@ class ChatViewModel(
     private val normalizeImage: suspend (File, String) -> NormalizedImage? = { file, mime ->
         ImageNormalizer.normalize(file, mime)
     },
+    private val onLocalModelPersisted: ((workspaceId: String, sessionId: String, model: SessionModelSnapshot) -> Unit)? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = mutableState.asStateFlow()
@@ -127,6 +129,13 @@ class ChatViewModel(
         userFacingError = { message -> chatError(uiStrings, message) },
         switchModelFailedText = { uiStrings.switchModelFailed },
         switchThinkingFailedText = { uiStrings.switchThinkingFailed },
+        onModelPersisted = { sessionId, model ->
+            val current = mutableState.value
+            val workspace = current.workspaces.firstOrNull { it.id == current.currentWorkspaceId }
+            if (workspace != null && workspace.remote == null) {
+                onLocalModelPersisted?.invoke(workspace.id, sessionId, model)
+            }
+        },
     )
     private val sessionOpener: SessionOpener = SessionOpener(
         runtime = runtime,
@@ -163,7 +172,6 @@ class ChatViewModel(
     private var observationJob: Job? = null
     private var observedSessionId: String? = null
     private var remoteOpenJob: Job? = null
-    private var remoteBusyWatchJob: Job? = null
     private var expanding = false
     private val busyPinned = mutableSetOf<String>()
 
@@ -600,7 +608,6 @@ class ChatViewModel(
         sessionTitle: String,
         errorFallback: String,
         loadSession: suspend () -> RemoteSessionOpenResult,
-        pollUpdates: suspend () -> RemoteHistoryPoll = { RemoteHistoryPoll(busy = false, summary = null) },
     ) {
         cancelRemoteSessionSync()
         rememberDraft()
@@ -624,9 +631,6 @@ class ChatViewModel(
                 when (val result = withContext(ioDispatcher) { loadSession() }) {
                     is RemoteSessionOpenResult.Success -> {
                         sessionOpener.switchToSummary(result.summary)
-                        if (result.busy) {
-                            watchRemoteBusySession(result.summary.id, pollUpdates)
-                        }
                     }
 
                     is RemoteSessionOpenResult.Failure -> {
@@ -665,49 +669,9 @@ class ChatViewModel(
         }
     }
 
-    private fun watchRemoteBusySession(
-        expectedSessionId: String,
-        pollUpdates: suspend () -> RemoteHistoryPoll,
-    ) {
-        remoteBusyWatchJob = viewModelScope.launch {
-            var currentId = expectedSessionId
-            repeat(400) {
-                delay(1_500L)
-                val current = mutableState.value
-                if (current.conversationId != currentId) return@launch
-                if (current.sending) return@launch
-                val poll = try {
-                    withContext(ioDispatcher) { pollUpdates() }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    return@repeat
-                }
-                val updatedSummary = poll.summary
-                if (updatedSummary != null) {
-                    val active = mutableState.value
-                    if (active.conversationId == currentId && !active.sending) {
-                        if (updatedSummary.id != currentId) {
-                            sessionDrafts.remember(currentId, active)
-                            sessionDrafts.reopen(currentId, updatedSummary.id)
-                            currentId = updatedSummary.id
-                            sessionOpener.switchToSummary(updatedSummary)
-                        } else {
-                            val resolved = store.reopen(currentId)
-                            mutableState.update { it.copy(conversation = resolved) }
-                        }
-                    }
-                }
-                if (!poll.busy) return@launch
-            }
-        }
-    }
-
     private fun cancelRemoteSessionSync() {
         remoteOpenJob?.cancel()
         remoteOpenJob = null
-        remoteBusyWatchJob?.cancel()
-        remoteBusyWatchJob = null
     }
 
     fun createWorkspace(
@@ -741,6 +705,10 @@ class ChatViewModel(
     fun setProvider(providerId: String) = modelController.setProvider(providerId)
 
     fun setThinkingLevel(level: ThinkingLevel) = modelController.setThinkingLevel(level)
+
+    fun updateSessionUsage(sessionId: String, usage: SessionUsage?) {
+        store.updateIfPresent(sessionId) { state -> state.copy(usage = usage) }
+    }
 
     fun adoptConfiguredModel(config: ModelConfig) = modelController.adoptConfiguredModel(config)
 
@@ -835,6 +803,80 @@ class ChatViewModel(
         }
     }
 
+    fun deleteRemoteMirrorSession(workspaceId: String, peerSessionId: String) {
+        viewModelScope.launch {
+            val mirror = withContext(ioDispatcher) {
+                RemoteSessionBrowser.findMirrorByPeerSession(runtime.sessions(workspaceId), peerSessionId)
+            } ?: return@launch
+            val wasActive = mutableState.value.conversationId == mirror.id
+            if (wasActive) {
+                store.stop(mirror.id)
+                store.evict(mirror.id)
+            }
+            runCatching { withContext(ioDispatcher) { runtime.deleteSession(mirror.id) } }
+            if (wasActive) {
+                val next = withContext(ioDispatcher) { runtime.sessions(workspaceId).firstOrNull() }
+                if (next != null) {
+                    sessionOpener.switchToSummary(next)
+                } else {
+                    val workspaces = withContext(ioDispatcher) { runtime.workspaces() }
+                    val fallback = workspaces.firstOrNull { it.isHome } ?: workspaces.firstOrNull { it.remote == null }
+                    if (fallback != null) {
+                        sessionOpener.selectWorkspace(fallback.id)
+                    } else {
+                        refreshSessions()
+                    }
+                }
+            } else {
+                refreshSessions()
+            }
+        }
+    }
+
+    fun renameRemoteMirrorSession(workspaceId: String, peerSessionId: String, title: String) {
+        viewModelScope.launch {
+            val mirror = withContext(ioDispatcher) {
+                RemoteSessionBrowser.findMirrorByPeerSession(runtime.sessions(workspaceId), peerSessionId)
+            } ?: return@launch
+            runCatching { runtime.renameSession(mirror.id, title) }
+            refreshSessions()
+        }
+    }
+
+    fun setRemoteMirrorPinned(workspaceId: String, peerSessionId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            val mirror = withContext(ioDispatcher) {
+                RemoteSessionBrowser.findMirrorByPeerSession(runtime.sessions(workspaceId), peerSessionId)
+            } ?: return@launch
+            runCatching { runtime.setSessionPinned(mirror.id, pinned) }
+            refreshSessions()
+        }
+    }
+
+    fun setRemoteMirrorArchived(workspaceId: String, peerSessionId: String, archived: Boolean) {
+        viewModelScope.launch {
+            val mirror = withContext(ioDispatcher) {
+                RemoteSessionBrowser.findMirrorByPeerSession(runtime.sessions(workspaceId), peerSessionId)
+            } ?: return@launch
+            runCatching { runtime.setSessionArchived(mirror.id, archived) }
+            refreshSessions()
+        }
+    }
+
+    fun onRemoteBotDeleted(workspaceId: String) {
+        viewModelScope.launch {
+            if (mutableState.value.currentWorkspaceId == workspaceId) {
+                val workspaces = withContext(ioDispatcher) { runtime.workspaces() }
+                val fallback = workspaces.firstOrNull { it.isHome && it.id != workspaceId }
+                    ?: workspaces.firstOrNull { it.id != workspaceId }
+                if (fallback != null) {
+                    sessionOpener.selectWorkspace(fallback.id)
+                }
+            }
+            refreshSessions()
+        }
+    }
+
     override fun onCleared() {
         cancelRemoteSessionSync()
         observationJob?.cancel()
@@ -896,13 +938,7 @@ class ChatViewModel(
 sealed interface RemoteSessionOpenResult {
     data class Success(
         val summary: ConversationSummary,
-        val busy: Boolean,
     ) : RemoteSessionOpenResult
 
     data class Failure(val message: String) : RemoteSessionOpenResult
 }
-
-data class RemoteHistoryPoll(
-    val busy: Boolean,
-    val summary: ConversationSummary? = null,
-)

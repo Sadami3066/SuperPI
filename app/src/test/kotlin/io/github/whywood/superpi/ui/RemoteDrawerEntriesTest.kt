@@ -11,13 +11,13 @@ import org.junit.Test
 class RemoteDrawerEntriesTest {
     private val remoteWorkspace = RuntimeWorkspace(
         id = "remote:dev-1:bot-1",
-        name = "Desktop Bot",
+        name = "Helper Bot",
         cwd = "/tmp/remote/dev-1/bot-1",
         remote = RemoteBotRef(
             deviceId = "dev-1",
-            deviceName = "Workstation",
+            deviceName = "Backup Phone",
             botId = "bot-1",
-            botName = "Desktop Bot",
+            botName = "Helper Bot",
             online = true,
         ),
     )

@@ -138,6 +138,13 @@ internal sealed interface DrawerEntry {
         override val key: String = "remote_session_${workspace.id}_${session.id}"
     }
 
+    data class RemoteArchivedToggle(
+        val workspace: RuntimeWorkspace,
+        val showingArchived: Boolean,
+    ) : DrawerEntry {
+        override val key: String = "remote_archived_toggle_${workspace.id}"
+    }
+
     data class Session(val conversation: ConversationSummary, val workspaceId: String) : DrawerEntry {
         override val key: String = "session_${workspaceId}_${conversation.id}"
     }
@@ -159,6 +166,8 @@ internal fun buildDrawerEntries(
     remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
     relayOnline: Boolean = true,
     collapsedCount: Int = 5,
+    remoteSessionManageWorkspaceIds: Set<String> = emptySet(),
+    remoteShowArchivedWorkspaceIds: Set<String> = emptySet(),
 ): List<DrawerEntry> = buildList {
     add(DrawerEntry.WorkspacesHeader)
     workspaces.forEachIndexed { index, workspace ->
@@ -174,7 +183,12 @@ internal fun buildDrawerEntries(
                         .thenByDescending { it.updatedAt },
                 )
             if (remote.online) {
-                val remoteSessions = remoteState?.sessions.orEmpty().distinctBy { it.id }
+                val canToggleArchived = workspace.id in remoteSessionManageWorkspaceIds &&
+                    remoteState != null &&
+                    remoteState.status == null
+                val remoteSessions = remoteState?.sessions.orEmpty()
+                    .distinctBy { it.id }
+                    .sortedByDescending { it.pinned }
                 if (remoteSessions.isNotEmpty()) {
                     if (remoteSessions.size <= collapsedCount) {
                         remoteSessions.forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
@@ -184,6 +198,9 @@ internal fun buildDrawerEntries(
                     } else {
                         remoteSessions.take(collapsedCount).forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
                         add(DrawerEntry.SessionMore(workspace.id, remoteSessions.size - collapsedCount))
+                    }
+                    if (canToggleArchived) {
+                        add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
                     }
                     return@forEachIndexed
                 }
@@ -196,6 +213,9 @@ internal fun buildDrawerEntries(
                         }
                     } else {
                         add(DrawerEntry.WorkspaceEmpty(workspace.id))
+                        if (canToggleArchived) {
+                            add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
+                        }
                     }
 
                     RemoteDrawerStatus.Loading -> if (relayOnline) {
@@ -284,8 +304,21 @@ fun SuperPIDrawer(
     hasUpdate: Boolean = false,
     remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
     relayOnline: Boolean = true,
+    remoteBotManageWorkspaceIds: Set<String> = emptySet(),
+    remoteSessionManageWorkspaceIds: Set<String> = emptySet(),
+    remoteFilesWorkspaceIds: Set<String> = emptySet(),
+    remoteControlsWorkspaceIds: Set<String> = emptySet(),
+    remoteShowArchivedWorkspaceIds: Set<String> = emptySet(),
     onOpenRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
     onRetryRemoteSessions: (RuntimeWorkspace) -> Unit = {},
+    onOpenRemoteFiles: (RuntimeWorkspace) -> Unit = {},
+    onOpenRemoteInstructions: (RuntimeWorkspace) -> Unit = {},
+    onEditRemoteBot: (RuntimeWorkspace) -> Unit = {},
+    onToggleRemoteShowArchived: (RuntimeWorkspace) -> Unit = {},
+    onRenameRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto, String) -> Unit = { _, _, _ -> },
+    onSetRemoteSessionPinned: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
+    onSetRemoteSessionArchived: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
+    onDeleteRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
@@ -293,6 +326,10 @@ fun SuperPIDrawer(
     var sessionMenuAnchor by remember { mutableStateOf(Offset.Zero) }
     var renameTarget by remember { mutableStateOf<ConversationSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<ConversationSummary?>(null) }
+    var remoteSessionMenuTarget by remember { mutableStateOf<Pair<RuntimeWorkspace, RemoteSessionSummaryDto>?>(null) }
+    var remoteSessionMenuAnchor by remember { mutableStateOf(Offset.Zero) }
+    var remoteRenameTarget by remember { mutableStateOf<Pair<RuntimeWorkspace, RemoteSessionSummaryDto>?>(null) }
+    var remoteDeleteTarget by remember { mutableStateOf<Pair<RuntimeWorkspace, RemoteSessionSummaryDto>?>(null) }
     val orderedWorkspaces = remember(workspaces, pinnedWorkspaceIds) {
         workspaces.filter { it.id in pinnedWorkspaceIds } + workspaces.filterNot { it.id in pinnedWorkspaceIds }
     }
@@ -316,6 +353,8 @@ fun SuperPIDrawer(
         expandedSessionWorkspaceIds,
         remoteDrawerStates,
         relayOnline,
+        remoteSessionManageWorkspaceIds,
+        remoteShowArchivedWorkspaceIds,
     ) {
         buildDrawerEntries(
             workspaces = orderedWorkspaces,
@@ -324,6 +363,8 @@ fun SuperPIDrawer(
             expandedSessionWorkspaceIds = expandedSessionWorkspaceIds,
             remoteDrawerStates = remoteDrawerStates,
             relayOnline = relayOnline,
+            remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
+            remoteShowArchivedWorkspaceIds = remoteShowArchivedWorkspaceIds,
         )
     }
     Column(
@@ -465,6 +506,9 @@ fun SuperPIDrawer(
                         first = entry.first,
                         pinned = entry.workspace.id in pinnedWorkspaceIds,
                         expanded = entry.workspace.id in expandedWorkspaceIds,
+                        supportsBotManage = entry.workspace.id in remoteBotManageWorkspaceIds,
+                        supportsWorkspaceFiles = entry.workspace.id in remoteFilesWorkspaceIds,
+                        supportsBotControls = entry.workspace.id in remoteControlsWorkspaceIds,
                         modifier = Modifier.animateItem(),
                         onToggleExpanded = {
                             if (entry.workspace.id in expandedWorkspaceIds) {
@@ -474,6 +518,9 @@ fun SuperPIDrawer(
                         },
                         onTogglePinned = { onToggleWorkspacePinned(entry.workspace.id) },
                         onNewSession = { onNewSessionInWorkspace(entry.workspace.id) },
+                        onFiles = { onOpenRemoteFiles(entry.workspace) },
+                        onRemoteInstructions = { onOpenRemoteInstructions(entry.workspace) },
+                        onEditRemote = { onEditRemoteBot(entry.workspace) },
                         onSettings = { onWorkspaceSettings(entry.workspace.id) },
                         onRename = { onRenameWorkspace(entry.workspace.id) },
                         onDelete = { onDeleteWorkspace(entry.workspace.id) },
@@ -493,10 +540,48 @@ fun SuperPIDrawer(
                         modifier = Modifier.animateItem(),
                     )
 
-                    is DrawerEntry.RemoteSession -> DrawerRemoteSessionRow(
-                        session = entry.session,
-                        onClick = { onOpenRemoteSession(entry.workspace, entry.session) },
-                        testTag = "drawer_remote_session_${entry.workspace.id}_${entry.session.id}",
+                    is DrawerEntry.RemoteSession -> {
+                        val remoteKey = entry.workspace.id to entry.session.id
+                        val currentMenuKey = remoteSessionMenuTarget?.let { it.first.id to it.second.id }
+                        DrawerRemoteSessionRow(
+                            session = entry.session,
+                            manageable = entry.workspace.id in remoteSessionManageWorkspaceIds,
+                            menuExpanded = currentMenuKey == remoteKey,
+                            menuAnchor = remoteSessionMenuAnchor,
+                            onClick = { onOpenRemoteSession(entry.workspace, entry.session) },
+                            onLongClick = { offset ->
+                                remoteSessionMenuAnchor = offset
+                                remoteSessionMenuTarget = entry.workspace to entry.session
+                            },
+                            onDismissMenu = { remoteSessionMenuTarget = null },
+                            onAction = { action ->
+                                when (action) {
+                                    SessionAction.RENAME ->
+                                        remoteRenameTarget = entry.workspace to entry.session
+
+                                    SessionAction.TOGGLE_PIN ->
+                                        onSetRemoteSessionPinned(entry.workspace, entry.session, !entry.session.pinned)
+
+                                    SessionAction.TOGGLE_ARCHIVE ->
+                                        onSetRemoteSessionArchived(entry.workspace, entry.session, !entry.session.archived)
+
+                                    SessionAction.DELETE ->
+                                        remoteDeleteTarget = entry.workspace to entry.session
+                                }
+                            },
+                            testTag = "drawer_remote_session_${entry.workspace.id}_${entry.session.id}",
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+
+                    is DrawerEntry.RemoteArchivedToggle -> DrawerSessionsToggleRow(
+                        text = stringResource(
+                            if (entry.showingArchived) R.string.drawer_remote_hide_archived else R.string.drawer_remote_show_archived,
+                        ),
+                        icon = DdIcons.Archive,
+                        rotation = 0f,
+                        testTag = "drawer_remote_archived_${entry.workspace.id}",
+                        onClick = { onToggleRemoteShowArchived(entry.workspace) },
                         modifier = Modifier.animateItem(),
                     )
 
@@ -579,6 +664,26 @@ fun SuperPIDrawer(
             },
         )
     }
+    remoteRenameTarget?.let { (workspace, session) ->
+        RenameSessionDialog(
+            initialTitle = session.title,
+            onDismiss = { remoteRenameTarget = null },
+            onConfirm = { title ->
+                remoteRenameTarget = null
+                onRenameRemoteSession(workspace, session, title)
+            },
+        )
+    }
+    remoteDeleteTarget?.let { (workspace, session) ->
+        DeleteSessionDialog(
+            sessionTitle = session.title,
+            onDismiss = { remoteDeleteTarget = null },
+            onConfirm = {
+                remoteDeleteTarget = null
+                onDeleteRemoteSession(workspace, session)
+            },
+        )
+    }
 }
 
 @Composable
@@ -650,9 +755,15 @@ private fun DrawerWorkspaceRow(
     first: Boolean,
     pinned: Boolean,
     expanded: Boolean,
+    supportsBotManage: Boolean,
+    supportsWorkspaceFiles: Boolean,
+    supportsBotControls: Boolean,
     onToggleExpanded: () -> Unit,
     onTogglePinned: () -> Unit,
     onNewSession: () -> Unit,
+    onFiles: () -> Unit,
+    onRemoteInstructions: () -> Unit,
+    onEditRemote: () -> Unit,
     onSettings: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -667,7 +778,12 @@ private fun DrawerWorkspaceRow(
         label = "workspace-row-wash",
     )
     var menuOpen by remember { mutableStateOf(false) }
-    val menuActions = workspaceMenuActions(workspace)
+    val menuActions = workspaceMenuActions(
+        workspace = workspace,
+        supportsBotManage = supportsBotManage,
+        supportsWorkspaceFiles = supportsWorkspaceFiles,
+        supportsBotControls = supportsBotControls,
+    )
     Box(modifier.fillMaxWidth().padding(top = if (first) DdSpacing.None else 6.dp)) {
         Row(
             modifier = Modifier
@@ -750,6 +866,36 @@ private fun DrawerWorkspaceRow(
                         onClick = {
                             menuOpen = false
                             onNewSession()
+                        },
+                    )
+
+                    WorkspaceMenuAction.FILES -> DdMenuItem(
+                        text = stringResource(R.string.drawer_workspace_files),
+                        icon = DdIcons.Folder,
+                        testTag = "workspace_menu_files_${workspace.id}",
+                        onClick = {
+                            menuOpen = false
+                            onFiles()
+                        },
+                    )
+
+                    WorkspaceMenuAction.INSTRUCTIONS -> DdMenuItem(
+                        text = stringResource(R.string.bot_instructions),
+                        icon = DdIcons.File,
+                        testTag = "workspace_menu_instructions_${workspace.id}",
+                        onClick = {
+                            menuOpen = false
+                            onRemoteInstructions()
+                        },
+                    )
+
+                    WorkspaceMenuAction.EDIT_REMOTE -> DdMenuItem(
+                        text = stringResource(R.string.drawer_workspace_edit),
+                        icon = DdIcons.Pen,
+                        testTag = "workspace_menu_edit_${workspace.id}",
+                        onClick = {
+                            menuOpen = false
+                            onEditRemote()
                         },
                     )
 
@@ -927,46 +1073,126 @@ private fun DrawerRemoteNoticeRow(
 @Composable
 private fun DrawerRemoteSessionRow(
     session: RemoteSessionSummaryDto,
+    manageable: Boolean,
+    menuExpanded: Boolean,
+    menuAnchor: Offset,
     onClick: () -> Unit,
+    onLongClick: (Offset) -> Unit,
+    onDismissMenu: () -> Unit,
+    onAction: (SessionAction) -> Unit,
     testTag: String,
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val haptic = LocalHapticFeedback.current
+    val hapticsEnabled = LocalHapticsEnabled.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val wash by animateFloatAsState(
+        targetValue = if (pressed) 0.06f else 0f,
+        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        label = "remote-session-row-wash",
+    )
     val relativeTime = remember(session.updatedAt) { session.updatedAt }.let { updatedAt ->
         if (updatedAt > 0L) rememberRelativeTime(updatedAt) else ""
     }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .clip(DdShapes.Medium)
-            .clickable(onClick = onClick)
-            .testTag(testTag)
-            .padding(start = 34.dp, end = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val displayTitle = session.title.trim().let { title ->
-            if (title.isEmpty() || title == "Untitled") {
-                stringResource(R.string.drawer_new_chat)
-            } else {
-                title
+    val displayTitle = session.title.trim().let { title ->
+        if (title.isEmpty() || title == "Untitled") {
+            stringResource(R.string.drawer_new_chat)
+        } else {
+            title
+        }
+    }
+    Box(modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .clip(DdShapes.Medium)
+                .background(colors.ink.copy(alpha = wash))
+                .pointerInput(manageable, session.id) {
+                    detectTapGestures(
+                        onPress = { offset ->
+                            val press = PressInteraction.Press(offset)
+                            interaction.emit(press)
+                            if (tryAwaitRelease()) {
+                                interaction.emit(PressInteraction.Release(press))
+                            } else {
+                                interaction.emit(PressInteraction.Cancel(press))
+                            }
+                        },
+                        onTap = { onClick() },
+                        onLongPress = if (manageable) {
+                            { offset ->
+                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongClick(offset)
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                }
+                .testTag(testTag)
+                .padding(start = 34.dp, end = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = displayTitle,
+                modifier = Modifier.weight(1f),
+                style = DdType.bodySmall.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
+                color = if (session.archived) colors.inkTertiary else colors.inkSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (session.archived) {
+                Spacer(Modifier.width(DdSpacing.Xs))
+                Text(
+                    text = stringResource(R.string.drawer_remote_archived_badge),
+                    style = DdType.micro,
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                )
+            }
+            if (session.busy) {
+                Spacer(Modifier.width(DdSpacing.Sm))
+                DdSpinner(
+                    color = colors.accent,
+                    size = 12.dp,
+                    strokeWidth = 1.5.dp,
+                )
+            } else if (session.pinned) {
+                Spacer(Modifier.width(DdSpacing.Sm))
+                DdIcon(
+                    icon = DdIcons.Pin,
+                    tint = colors.inkTertiary,
+                    size = 12.dp,
+                )
+            }
+            if (relativeTime.isNotEmpty() && !session.pinned) {
+                Spacer(Modifier.width(DdSpacing.Sm))
+                Text(
+                    text = relativeTime,
+                    style = DdType.bodySmall.copy(fontSize = 10.5.sp),
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                )
             }
         }
-        Text(
-            text = displayTitle,
-            modifier = Modifier.weight(1f),
-            style = DdType.bodySmall.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
-            color = colors.inkSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (relativeTime.isNotEmpty()) {
-            Spacer(Modifier.width(DdSpacing.Sm))
-            Text(
-                text = relativeTime,
-                style = DdType.bodySmall.copy(fontSize = 10.5.sp),
-                color = colors.inkTertiary,
-                maxLines = 1,
+        if (manageable) {
+            SessionActionMenu(
+                session = ConversationSummary(
+                    id = session.id,
+                    title = displayTitle,
+                    updatedAt = session.updatedAt,
+                    filePath = "",
+                    cwd = "",
+                    pinned = session.pinned,
+                    archived = session.archived,
+                ),
+                expanded = menuExpanded,
+                onDismissRequest = onDismissMenu,
+                onAction = onAction,
+                anchor = menuAnchor,
             )
         }
     }

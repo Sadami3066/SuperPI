@@ -10,13 +10,13 @@ class WorkspaceRowMetaTest {
     private val local = RuntimeWorkspace(id = "ws-1", name = "Work", cwd = "/work")
 
     private fun remote(online: Boolean) = RuntimeWorkspace(
-        id = "remote:desktop:pi",
+        id = "remote:phone-b:home",
         name = "PI",
-        cwd = "/remote/desktop/pi",
+        cwd = "/remote/phone-b/home",
         remote = RemoteBotRef(
-            deviceId = "desktop",
-            deviceName = "Mac",
-            botId = "pi",
+            deviceId = "phone-b",
+            deviceName = "Backup Phone",
+            botId = "home",
             botName = "PI",
             online = online,
         ),
@@ -41,7 +41,7 @@ class WorkspaceRowMetaTest {
         assertEquals(true, meta.canCreateSession)
         assertEquals(false, meta.manageable)
         assertEquals(false, meta.offline)
-        assertEquals("Mac", meta.sourceDevice)
+        assertEquals("Backup Phone", meta.sourceDevice)
     }
 
     @Test
@@ -52,7 +52,7 @@ class WorkspaceRowMetaTest {
         assertEquals(false, meta.canCreateSession)
         assertEquals(false, meta.manageable)
         assertEquals(true, meta.offline)
-        assertEquals("Mac", meta.sourceDevice)
+        assertEquals("Backup Phone", meta.sourceDevice)
     }
 
     @Test
@@ -78,6 +78,58 @@ class WorkspaceRowMetaTest {
             workspaceMenuActions(remote(online = true)),
         )
         assertEquals(listOf(WorkspaceMenuAction.PIN), workspaceMenuActions(remote(online = false)))
+    }
+
+    @Test
+    fun remoteMenuActionsFollowPeerCapabilitiesAndDefaultProtection() {
+        val defaultPi = remote(online = true)
+        val customRemote = defaultPi.copy(
+            id = "remote:phone-b:research",
+            name = "Research",
+            remote = defaultPi.remote!!.copy(botId = "research", botName = "Research"),
+        )
+        val offlineCustom = customRemote.copy(remote = customRemote.remote!!.copy(online = false))
+
+        assertEquals(
+            listOf(
+                WorkspaceMenuAction.NEW_SESSION,
+                WorkspaceMenuAction.FILES,
+                WorkspaceMenuAction.INSTRUCTIONS,
+                WorkspaceMenuAction.EDIT_REMOTE,
+                WorkspaceMenuAction.PIN,
+            ),
+            workspaceMenuActions(
+                defaultPi,
+                supportsBotManage = true,
+                supportsWorkspaceFiles = true,
+                supportsBotControls = true,
+            ),
+        )
+        assertEquals(
+            listOf(
+                WorkspaceMenuAction.NEW_SESSION,
+                WorkspaceMenuAction.FILES,
+                WorkspaceMenuAction.INSTRUCTIONS,
+                WorkspaceMenuAction.EDIT_REMOTE,
+                WorkspaceMenuAction.PIN,
+                WorkspaceMenuAction.DELETE,
+            ),
+            workspaceMenuActions(
+                customRemote,
+                supportsBotManage = true,
+                supportsWorkspaceFiles = true,
+                supportsBotControls = true,
+            ),
+        )
+        assertEquals(
+            listOf(WorkspaceMenuAction.PIN),
+            workspaceMenuActions(
+                offlineCustom,
+                supportsBotManage = true,
+                supportsWorkspaceFiles = true,
+                supportsBotControls = true,
+            ),
+        )
     }
 
     @Test

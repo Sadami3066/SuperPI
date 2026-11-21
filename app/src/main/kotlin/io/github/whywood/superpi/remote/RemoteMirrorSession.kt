@@ -49,6 +49,9 @@ class RemoteMirrorSession internal constructor(
     var historyDigest: String? = null
         private set
 
+    var historySeq: Long? = null
+        private set
+
     init {
         val mapping = manager.getEntries().asReversed()
             .filterIsInstance<CustomEntry>()
@@ -56,6 +59,7 @@ class RemoteMirrorSession internal constructor(
         val data = mapping?.data as? JsonObject
         peerSessionId = (data?.get("peerSessionId") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         historyDigest = (data?.get("historyDigest") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        historySeq = (data?.get("historySeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
     }
 
     suspend fun appendUserMessage(text: String, images: List<ImagePart> = emptyList()) {
@@ -78,7 +82,8 @@ class RemoteMirrorSession internal constructor(
         history: RemoteHistoryDto,
         digest: String? = null,
     ) {
-        appendRemoteMapping(deviceId, botId, history.sessionId, digest)
+        appendRemoteMapping(deviceId, botId, history.sessionId, digest, history.seq)
+        historySeq = history.seq
         history.title?.trim()?.takeIf { it.isNotBlank() }?.let { appendName(it) }
         for (item in history.messages) {
             appendHistoryItem(botId, item)
@@ -211,6 +216,7 @@ class RemoteMirrorSession internal constructor(
         botId: String,
         peerSessionId: String,
         historyDigest: String? = null,
+        historySeq: Long? = null,
     ) {
         manager.appendCustomEntry(
             CUSTOM_TYPE,
@@ -219,10 +225,12 @@ class RemoteMirrorSession internal constructor(
                 put("botId", botId)
                 put("peerSessionId", peerSessionId)
                 historyDigest?.let { put("historyDigest", it) }
+                historySeq?.let { put("historySeq", it) }
             },
         )
         this.peerSessionId = peerSessionId
         if (historyDigest != null) this.historyDigest = historyDigest
+        if (historySeq != null) this.historySeq = historySeq
     }
 
     suspend fun clearRemoteMapping(deviceId: String, botId: String) {
@@ -236,6 +244,7 @@ class RemoteMirrorSession internal constructor(
         )
         peerSessionId = null
         historyDigest = null
+        historySeq = null
     }
 
     suspend fun appendName(name: String) {

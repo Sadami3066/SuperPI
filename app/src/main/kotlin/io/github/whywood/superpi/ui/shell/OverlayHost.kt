@@ -54,6 +54,8 @@ import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import io.github.whywood.superpi.ui.jobs.JobsSheet
 import io.github.whywood.superpi.ui.navigation.AppDestination
 import io.github.whywood.superpi.ui.workspaces.DeleteWorkspaceDialog
+import io.github.whywood.superpi.ui.workspaces.RemoteBotEditDialog
+import io.github.whywood.superpi.ui.workspaces.RemoteHostTarget
 import io.github.whywood.superpi.ui.workspaces.WorkspaceCreateDialog
 import io.github.whywood.superpi.ui.workspaces.WorkspaceNameDialog
 import java.io.File
@@ -61,9 +63,32 @@ import java.io.File
 
 
 sealed interface ShellOverlay {
-    data class WorkspaceCreate(val existingNames: List<String>, val privateDirectory: String) : ShellOverlay
+    data class WorkspaceCreate(
+        val existingNames: List<String>,
+        val privateDirectory: String,
+        val remoteTargets: List<RemoteHostTarget> = emptyList(),
+        val remoteBotNamesByDevice: Map<String, List<String>> = emptyMap(),
+        val submitting: Boolean = false,
+        val remoteError: String? = null,
+    ) : ShellOverlay
     data class WorkspaceRename(val workspaceId: String, val initial: String, val existingNames: List<String>) : ShellOverlay
-    data class WorkspaceDelete(val workspaceId: String, val name: String, val sessionCount: Int) : ShellOverlay
+    data class RemoteBotEdit(
+        val workspaceId: String,
+        val initialName: String,
+        val initialIntro: String?,
+        val hasAvatar: Boolean,
+        val existingNames: List<String>,
+        val submitting: Boolean = false,
+        val errorMessage: String? = null,
+    ) : ShellOverlay
+    data class WorkspaceDelete(
+        val workspaceId: String,
+        val name: String,
+        val sessionCount: Int,
+        val isRemote: Boolean = false,
+        val submitting: Boolean = false,
+        val errorMessage: String? = null,
+    ) : ShellOverlay
     data class AttachmentPreview(val attachment: AttachmentRef, val file: File) : ShellOverlay
     data class Usage(val usage: SessionUsage) : ShellOverlay
     data class Jobs(val jobs: List<JobSnapshot>, val selectedJobId: String?, val output: String?) : ShellOverlay
@@ -73,6 +98,7 @@ data class ShellOverlayState(
     val pluginPage: PluginPageRequest? = null,
     val workspaceCreate: ShellOverlay.WorkspaceCreate? = null,
     val workspaceRename: ShellOverlay.WorkspaceRename? = null,
+    val remoteBotEdit: ShellOverlay.RemoteBotEdit? = null,
     val workspaceDelete: ShellOverlay.WorkspaceDelete? = null,
     val attachmentPreview: ShellOverlay.AttachmentPreview? = null,
     val usage: ShellOverlay.Usage? = null,
@@ -82,7 +108,10 @@ data class ShellOverlayState(
 data class ShellOverlayActions(
     val onDismissPluginPage: () -> Unit,
     val onConfirmWorkspaceCreate: (String, String?, Bitmap?, String?) -> Unit, val onDismissWorkspaceCreate: () -> Unit,
+    val onConfirmWorkspaceCreateRemote: (RemoteHostTarget, String, Bitmap?, String?) -> Unit = { _, _, _, _ -> },
     val onConfirmWorkspaceRename: (String) -> Unit, val onDismissWorkspaceRename: () -> Unit,
+    val onConfirmRemoteBotEdit: (String?, String?, Boolean, Bitmap?, Boolean) -> Unit = { _, _, _, _, _ -> },
+    val onDismissRemoteBotEdit: () -> Unit = {},
     val onConfirmWorkspaceDelete: () -> Unit, val onDismissWorkspaceDelete: () -> Unit,
     val onDismissAttachmentPreview: () -> Unit, val onShareAttachmentPreview: () -> Unit,
     val onExportAttachmentPreview: () -> Unit,
@@ -106,6 +135,11 @@ data class ShellDrawerState(
     val hasUpdate: Boolean = false,
     val remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
     val relayOnline: Boolean = true,
+    val remoteBotManageWorkspaceIds: Set<String> = emptySet(),
+    val remoteSessionManageWorkspaceIds: Set<String> = emptySet(),
+    val remoteFilesWorkspaceIds: Set<String> = emptySet(),
+    val remoteControlsWorkspaceIds: Set<String> = emptySet(),
+    val remoteShowArchivedWorkspaceIds: Set<String> = emptySet(),
 )
 data class ShellDrawerActions(
     val onNavigate: (AppDestination) -> Unit, val onDismiss: () -> Unit,
@@ -118,10 +152,19 @@ data class ShellDrawerActions(
     val onSettings: () -> Unit,
     val onOpenRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
     val onRetryRemoteSessions: (RuntimeWorkspace) -> Unit = {},
+    val onOpenRemoteFiles: (RuntimeWorkspace) -> Unit = {},
+    val onOpenRemoteInstructions: (RuntimeWorkspace) -> Unit = {},
+    val onEditRemoteBot: (RuntimeWorkspace) -> Unit = {},
+    val onToggleRemoteShowArchived: (RuntimeWorkspace) -> Unit = {},
+    val onRenameRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto, String) -> Unit = { _, _, _ -> },
+    val onSetRemoteSessionPinned: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
+    val onSetRemoteSessionArchived: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
+    val onDeleteRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
 )
 fun resolveOverlays(state: ShellOverlayState): List<ShellOverlay> = buildList {
     state.workspaceCreate?.let(::add)
     state.workspaceRename?.let(::add)
+    state.remoteBotEdit?.let(::add)
     state.workspaceDelete?.let(::add)
     state.attachmentPreview?.let(::add)
     state.usage?.let(::add)
@@ -143,7 +186,12 @@ internal fun OverlayHost(
                 is ShellOverlay.WorkspaceCreate -> WorkspaceCreateDialog(
                     existingNames = overlay.existingNames,
                     privateDirectory = overlay.privateDirectory,
+                    remoteTargets = overlay.remoteTargets,
+                    remoteBotNamesByDevice = overlay.remoteBotNamesByDevice,
+                    submitting = overlay.submitting,
+                    remoteError = overlay.remoteError,
                     onConfirm = overlayActions.onConfirmWorkspaceCreate,
+                    onConfirmRemote = overlayActions.onConfirmWorkspaceCreateRemote,
                     onDismiss = overlayActions.onDismissWorkspaceCreate,
                 )
 
@@ -153,8 +201,23 @@ internal fun OverlayHost(
                     onDismiss = overlayActions.onDismissWorkspaceRename,
                 )
 
+                is ShellOverlay.RemoteBotEdit -> RemoteBotEditDialog(
+                    initialName = overlay.initialName,
+                    initialIntro = overlay.initialIntro,
+                    hasAvatar = overlay.hasAvatar,
+                    existingNames = overlay.existingNames,
+                    submitting = overlay.submitting,
+                    errorMessage = overlay.errorMessage,
+                    onConfirm = overlayActions.onConfirmRemoteBotEdit,
+                    onDismiss = overlayActions.onDismissRemoteBotEdit,
+                )
+
                 is ShellOverlay.WorkspaceDelete -> DeleteWorkspaceDialog(
-                    overlay.name, overlay.sessionCount,
+                    name = overlay.name,
+                    sessionCount = overlay.sessionCount,
+                    isRemote = overlay.isRemote,
+                    submitting = overlay.submitting,
+                    errorMessage = overlay.errorMessage,
                     onConfirm = overlayActions.onConfirmWorkspaceDelete,
                     onDismiss = overlayActions.onDismissWorkspaceDelete,
                 )
@@ -268,6 +331,11 @@ private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions
                 hasUpdate = state.hasUpdate,
                 remoteDrawerStates = state.remoteDrawerStates,
                 relayOnline = state.relayOnline,
+                remoteBotManageWorkspaceIds = state.remoteBotManageWorkspaceIds,
+                remoteSessionManageWorkspaceIds = state.remoteSessionManageWorkspaceIds,
+                remoteFilesWorkspaceIds = state.remoteFilesWorkspaceIds,
+                remoteControlsWorkspaceIds = state.remoteControlsWorkspaceIds,
+                remoteShowArchivedWorkspaceIds = state.remoteShowArchivedWorkspaceIds,
                 onOpenSearch = { actions.onNavigate(AppDestination.Search) },
                 onOpenMiniapp = { actions.onNavigate(AppDestination.Miniapp) },
                 onOpenSkills = { actions.onNavigate(AppDestination.Skills) },
@@ -291,6 +359,14 @@ private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions
                 onSettings = actions.onSettings,
                 onOpenRemoteSession = actions.onOpenRemoteSession,
                 onRetryRemoteSessions = actions.onRetryRemoteSessions,
+                onOpenRemoteFiles = actions.onOpenRemoteFiles,
+                onOpenRemoteInstructions = actions.onOpenRemoteInstructions,
+                onEditRemoteBot = actions.onEditRemoteBot,
+                onToggleRemoteShowArchived = actions.onToggleRemoteShowArchived,
+                onRenameRemoteSession = actions.onRenameRemoteSession,
+                onSetRemoteSessionPinned = actions.onSetRemoteSessionPinned,
+                onSetRemoteSessionArchived = actions.onSetRemoteSessionArchived,
+                onDeleteRemoteSession = actions.onDeleteRemoteSession,
             )
         }
     }

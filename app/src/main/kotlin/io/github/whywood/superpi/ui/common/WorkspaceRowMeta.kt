@@ -4,6 +4,9 @@ import io.github.whywood.superpi.runtime.RuntimeWorkspace
 
 internal enum class WorkspaceMenuAction {
     NEW_SESSION,
+    FILES,
+    INSTRUCTIONS,
+    EDIT_REMOTE,
     RENAME,
     PIN,
     SETTINGS,
@@ -29,14 +32,33 @@ internal fun workspaceRowMeta(workspace: RuntimeWorkspace): WorkspaceRowMeta {
     )
 }
 
-internal fun workspaceMenuActions(workspace: RuntimeWorkspace): List<WorkspaceMenuAction> {
+internal fun workspaceMenuActions(
+    workspace: RuntimeWorkspace,
+    supportsBotManage: Boolean = false,
+    supportsWorkspaceFiles: Boolean = false,
+    supportsBotControls: Boolean = false,
+): List<WorkspaceMenuAction> {
     val meta = workspaceRowMeta(workspace)
+    val remote = workspace.remote
+    val isProtectedDefault = remote?.botId == "home"
     return buildList {
         if (meta.canCreateSession) add(WorkspaceMenuAction.NEW_SESSION)
+        if (remote != null && remote.online && supportsWorkspaceFiles) {
+            add(WorkspaceMenuAction.FILES)
+        }
+        if (remote != null && remote.online && supportsBotControls) {
+            add(WorkspaceMenuAction.INSTRUCTIONS)
+        }
+        if (remote != null && remote.online && supportsBotManage) {
+            add(WorkspaceMenuAction.EDIT_REMOTE)
+        }
         if (!workspace.isHome && meta.manageable) add(WorkspaceMenuAction.RENAME)
         add(WorkspaceMenuAction.PIN)
         if (meta.manageable) add(WorkspaceMenuAction.SETTINGS)
-        if (!workspace.isHome && meta.manageable) add(WorkspaceMenuAction.DELETE)
+        val canDeleteRemote = remote != null && remote.online && supportsBotManage && !isProtectedDefault
+        if ((!workspace.isHome && meta.manageable) || canDeleteRemote) {
+            add(WorkspaceMenuAction.DELETE)
+        }
     }
 }
 

@@ -140,6 +140,10 @@ internal class SessionOpener(
         jobs[summary.id] = job
     }
 
+    suspend fun awaitOpen(sessionId: String) {
+        jobs[sessionId]?.join()
+    }
+
     private suspend fun loadAndApply(summary: ConversationSummary, epoch: Int) {
         withContext(ioDispatcher) { runtime.openSession(summary.filePath, summary.cwd) }
         if (epoch != latestEpoch) return

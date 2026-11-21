@@ -26,7 +26,7 @@
 
 Super PI Agent is a personal agent that runs on an Android phone. Hold the power button, ask in voice or text, and it does the work on the device: managing files, controlling other apps, running Linux commands, and connecting to external services.
 
-It runs local-first without requiring a server or an always-on computer. Model requests go only to the provider you configure; conversations, files, credentials, and plugin data stay on the phone by default, and an optional self-hosted SuperPI-Remote relay can link your phone and desktop.
+It runs local-first without requiring a server or an always-on computer. Model requests go only to the provider you configure; conversations, files, credentials, and plugin data stay on the phone by default, and an optional self-hosted SuperPI-Remote relay can link multiple Android phones together.
 
 Super PI Agent ships a complete agent harness: tools, skills, long-term memory, MCP connectors, and a plugin system. A lightweight Linux environment covers most desktop office and coding tasks. Plugins connect external services such as Feishu, WeCom, email, maps, ride hailing, hotels, and rail.
 
@@ -73,7 +73,7 @@ Installers are available from [GitHub Releases](https://github.com/Sadami3066/Su
 | System access | Settings → System access | Normal, wireless ADB, or root |
 | Linux | Settings → System access → Linux environment | Initialize Alpine; install shell, Node, Python, and toolchains |
 | Android integration | Settings → Android setup | Overlay, system assistant, notifications, and share targets |
-| Multi-device relay | Drawer → Account / Devices | Pair with a self-hosted SuperPI-Remote relay to share memory and invoke desktop/phone bots |
+| Multi-device relay | Drawer → Account / Devices | Pair with a self-hosted SuperPI-Remote relay to share memory and invoke bots across your Android phones |
 | Plugins | Drawer → Plugins | Import signed `.ddp` files; inspect capabilities and runtime state |
 | Memory | Automatic | Distilled when a session ends; searchable and injectable into the current session |
 

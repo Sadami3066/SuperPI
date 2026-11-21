@@ -9,11 +9,15 @@ internal data class RemoteChatControls(
     val modelControlsVisible: Boolean,
 )
 
-internal fun remoteChatControls(workspaces: List<RuntimeWorkspace>, workspaceId: String): RemoteChatControls {
+internal fun remoteChatControls(
+    workspaces: List<RuntimeWorkspace>,
+    workspaceId: String,
+    canControlModel: Boolean = false,
+): RemoteChatControls {
     val remote = workspaces.firstOrNull { workspace -> workspace.id == workspaceId }?.remote
     return RemoteChatControls(
         remote = remote,
         inputEnabled = remote?.online != false,
-        modelControlsVisible = remote == null,
+        modelControlsVisible = remote == null || (remote.online && canControlModel),
     )
 }

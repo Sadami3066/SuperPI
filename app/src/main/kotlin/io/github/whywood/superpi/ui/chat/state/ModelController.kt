@@ -30,6 +30,7 @@ internal class ModelController(
     private val userFacingError: (String) -> String,
     private val switchModelFailedText: () -> String,
     private val switchThinkingFailedText: () -> String,
+    private val onModelPersisted: (String, SessionModelSnapshot) -> Unit = { _, _ -> },
 ) {
     fun setModel(modelId: String) {
         val current = state()
@@ -110,6 +111,7 @@ internal class ModelController(
         applySessionModel(model)
         onModelChanged(sessionId, model)
         scope.launch {
+            var succeeded = false
             try {
                 if (thinkingOnly) {
                     runtime.setSessionThinkingLevel(sessionId, model.thinkingLevel)
@@ -117,6 +119,7 @@ internal class ModelController(
                     runtime.setSessionModel(sessionId, model.providerId, model.modelId, model.thinkingLevel)
                 }
                 settings.save(ModelConfig(model.providerId, model.modelId, model.thinkingLevel))
+                succeeded = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -127,6 +130,9 @@ internal class ModelController(
             if (truth != null && state().conversationId == sessionId) {
                 applySessionModel(truth)
                 onModelChanged(sessionId, truth)
+            }
+            if (succeeded) {
+                onModelPersisted(sessionId, truth ?: model)
             }
         }
     }

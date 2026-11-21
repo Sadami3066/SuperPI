@@ -21,6 +21,8 @@ import io.github.whywood.superpi.data.BotAvatarStore
 import io.github.whywood.superpi.data.AttachmentRef
 import io.github.whywood.superpi.data.exportShareIntent
 import io.github.whywood.superpi.plugin.host.services.PluginPageRequest
+import io.github.whywood.superpi.remote.RemoteAdminResult
+import io.github.whywood.superpi.remote.RemoteControlResult
 import io.github.whywood.superpi.runtime.JobSnapshot
 import io.github.whywood.superpi.runtime.JobStatus
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
@@ -30,7 +32,10 @@ import io.github.whywood.superpi.ui.common.chat.AttachmentSourceSheet
 import io.github.whywood.superpi.ui.common.chat.CameraCaptureSheet
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import io.github.whywood.superpi.ui.common.chat.rememberAttachmentPickers
+import io.github.whywood.superpi.ui.common.encodeAvatarBitmapDataUrl
 import io.github.whywood.superpi.ui.common.shareChooser
+import io.github.whywood.superpi.ui.workspaces.RemoteAgentsDocSheet
+import io.github.whywood.superpi.ui.workspaces.RemoteHostTarget
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -51,8 +56,12 @@ internal class AppOverlaysState {
     var jobOutput by mutableStateOf<String?>(null)
     var workspaceCreateOpen by mutableStateOf(false)
     var workspaceRenameId by mutableStateOf<String?>(null)
+    var remoteBotEditTarget by mutableStateOf<RuntimeWorkspace?>(null)
+    var remoteAgentsDocTarget by mutableStateOf<RuntimeWorkspace?>(null)
     var workspaceDeleteTarget by mutableStateOf<RuntimeWorkspace?>(null)
     var workspaceDeleteCount by mutableIntStateOf(0)
+    var remoteOpSubmitting by mutableStateOf(false)
+    var remoteOpError by mutableStateOf<String?>(null)
 
     companion object {
         val Saver: Saver<AppOverlaysState, Any> = listSaver(
@@ -88,6 +97,8 @@ internal fun AppOverlays(
     drawer: ShellDrawerState,
     drawerActions: ShellDrawerActions,
     overlays: AppOverlaysState,
+    remoteTargets: List<RemoteHostTarget> = emptyList(),
+    remoteBotNamesByDevice: Map<String, List<String>> = emptyMap(),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -95,6 +106,16 @@ internal fun AppOverlays(
     val shareChooserTitle = stringResource(R.string.assistant_attach_share)
     val exportDone = stringResource(R.string.files_export_done)
     val exportDonePathFormat = stringResource(R.string.files_export_done_path)
+    val remoteOfflineText = stringResource(R.string.drawer_remote_device_offline)
+    val remoteUpgradeText = stringResource(R.string.drawer_remote_peer_upgrade)
+    val remoteTimeoutText = stringResource(R.string.drawer_remote_timeout)
+    val remoteActionFailedText = stringResource(R.string.drawer_remote_action_failed)
+    fun localizeAdminError(code: String, fallback: String): String = when (code) {
+        "not_connected", "disconnected", "device_offline" -> remoteOfflineText
+        "capability_unavailable" -> remoteUpgradeText
+        "timeout" -> remoteTimeoutText
+        else -> fallback.ifBlank { remoteActionFailedText }
+    }
     val attachmentPickers = rememberAttachmentPickers { uri -> chatViewModel.attach(uri) }
     val botAvatarStore = remember { BotAvatarStore(context) }
     LaunchedEffect(state.workspaces, state.ready) {
@@ -116,8 +137,12 @@ internal fun AppOverlays(
         overlays = ShellOverlayState(
             pluginPage = overlays.pluginPage,
             workspaceCreate = ShellOverlay.WorkspaceCreate(
-                state.workspaces.map { it.name },
-                privateWorkspacesDir,
+                existingNames = state.workspaces.filter { it.remote == null }.map { it.name },
+                privateDirectory = privateWorkspacesDir,
+                remoteTargets = remoteTargets,
+                remoteBotNamesByDevice = remoteBotNamesByDevice,
+                submitting = overlays.remoteOpSubmitting,
+                remoteError = overlays.remoteOpError,
             ).takeIf { overlays.workspaceCreateOpen },
             workspaceRename = overlays.workspaceRenameId
                 ?.let { id -> state.workspaces.firstOrNull { it.id == id } }
@@ -128,8 +153,32 @@ internal fun AppOverlays(
                         state.workspaces.filterNot { it.id == target.id }.map { it.name },
                     )
                 },
+            remoteBotEdit = overlays.remoteBotEditTarget?.let { target ->
+                val deviceId = target.remote?.deviceId
+                val deviceNames = if (deviceId != null) {
+                    remoteBotNamesByDevice[deviceId].orEmpty().filterNot { it == target.name }
+                } else {
+                    emptyList()
+                }
+                ShellOverlay.RemoteBotEdit(
+                    workspaceId = target.id,
+                    initialName = target.name,
+                    initialIntro = target.intro,
+                    hasAvatar = !target.avatar.isNullOrBlank(),
+                    existingNames = deviceNames,
+                    submitting = overlays.remoteOpSubmitting,
+                    errorMessage = overlays.remoteOpError,
+                )
+            },
             workspaceDelete = overlays.workspaceDeleteTarget?.let {
-                ShellOverlay.WorkspaceDelete(it.id, it.name, overlays.workspaceDeleteCount)
+                ShellOverlay.WorkspaceDelete(
+                    workspaceId = it.id,
+                    name = it.name,
+                    sessionCount = overlays.workspaceDeleteCount,
+                    isRemote = it.remote != null,
+                    submitting = overlays.remoteOpSubmitting,
+                    errorMessage = overlays.remoteOpError,
+                )
             },
             attachmentPreview = overlays.previewAttachment?.let {
                 ShellOverlay.AttachmentPreview(it, graph.attachmentStore.file(it, overlays.previewRoot ?: attachmentRoot))
@@ -148,23 +197,107 @@ internal fun AppOverlays(
                     }
                 }
             },
-            onDismissWorkspaceCreate = { overlays.workspaceCreateOpen = false },
+            onDismissWorkspaceCreate = {
+                overlays.workspaceCreateOpen = false
+                overlays.remoteOpSubmitting = false
+                overlays.remoteOpError = null
+            },
+            onConfirmWorkspaceCreateRemote = { target, name, avatar, intro ->
+                overlays.remoteOpSubmitting = true
+                overlays.remoteOpError = null
+                scope.launch {
+                    val dataUrl = avatar?.let { withContext(Dispatchers.IO) { encodeAvatarBitmapDataUrl(it) } }
+                    when (val res = graph.remoteBotAdminClient.createBot(target.deviceId, name, dataUrl, intro)) {
+                        is RemoteAdminResult.Ok -> {
+                            overlays.remoteOpSubmitting = false
+                            overlays.remoteOpError = null
+                            overlays.workspaceCreateOpen = false
+                            Toast.makeText(context, R.string.bot_created_toast, Toast.LENGTH_SHORT).show()
+                        }
+                        is RemoteAdminResult.Error -> {
+                            overlays.remoteOpSubmitting = false
+                            overlays.remoteOpError = localizeAdminError(res.code, res.message)
+                        }
+                    }
+                }
+            },
             onConfirmWorkspaceRename = { name ->
                 val id = overlays.workspaceRenameId
                 overlays.workspaceRenameId = null
                 id?.let { chatViewModel.renameWorkspace(it, name) }
             },
             onDismissWorkspaceRename = { overlays.workspaceRenameId = null },
-            onConfirmWorkspaceDelete = {
-                val target = overlays.workspaceDeleteTarget
-                overlays.workspaceDeleteTarget = null
-                target?.let { workspace ->
-                    chatViewModel.deleteWorkspace(workspace.id) {
-                        scope.launch(Dispatchers.IO) { botAvatarStore.delete(workspace.avatar) }
+            onConfirmRemoteBotEdit = { nextName, nextIntro, clearIntro, avatarBitmap, clearAvatar ->
+                val target = overlays.remoteBotEditTarget
+                val remote = target?.remote
+                if (target != null && remote != null) {
+                    overlays.remoteOpSubmitting = true
+                    overlays.remoteOpError = null
+                    scope.launch {
+                        val dataUrl = avatarBitmap?.let { withContext(Dispatchers.IO) { encodeAvatarBitmapDataUrl(it) } }
+                        when (
+                            val res = graph.remoteBotAdminClient.updateBot(
+                                deviceId = remote.deviceId,
+                                botId = remote.botId,
+                                name = nextName,
+                                avatarDataUrl = dataUrl,
+                                clearAvatar = clearAvatar,
+                                intro = nextIntro,
+                                clearIntro = clearIntro,
+                            )
+                        ) {
+                            is RemoteAdminResult.Ok -> {
+                                overlays.remoteOpSubmitting = false
+                                overlays.remoteOpError = null
+                                overlays.remoteBotEditTarget = null
+                            }
+                            is RemoteAdminResult.Error -> {
+                                overlays.remoteOpSubmitting = false
+                                overlays.remoteOpError = localizeAdminError(res.code, res.message)
+                            }
+                        }
                     }
                 }
             },
-            onDismissWorkspaceDelete = { overlays.workspaceDeleteTarget = null },
+            onDismissRemoteBotEdit = {
+                overlays.remoteBotEditTarget = null
+                overlays.remoteOpSubmitting = false
+                overlays.remoteOpError = null
+            },
+            onConfirmWorkspaceDelete = {
+                val target = overlays.workspaceDeleteTarget
+                val remote = target?.remote
+                if (target != null && remote != null) {
+                    overlays.remoteOpSubmitting = true
+                    overlays.remoteOpError = null
+                    scope.launch {
+                        when (val res = graph.remoteBotAdminClient.deleteBot(remote.deviceId, remote.botId)) {
+                            is RemoteAdminResult.Ok -> {
+                                overlays.remoteOpSubmitting = false
+                                overlays.remoteOpError = null
+                                overlays.workspaceDeleteTarget = null
+                                chatViewModel.onRemoteBotDeleted(target.id)
+                            }
+                            is RemoteAdminResult.Error -> {
+                                overlays.remoteOpSubmitting = false
+                                overlays.remoteOpError = localizeAdminError(res.code, res.message)
+                            }
+                        }
+                    }
+                } else {
+                    overlays.workspaceDeleteTarget = null
+                    target?.let { workspace ->
+                        chatViewModel.deleteWorkspace(workspace.id) {
+                            scope.launch(Dispatchers.IO) { botAvatarStore.delete(workspace.avatar) }
+                        }
+                    }
+                }
+            },
+            onDismissWorkspaceDelete = {
+                overlays.workspaceDeleteTarget = null
+                overlays.remoteOpSubmitting = false
+                overlays.remoteOpError = null
+            },
             onDismissAttachmentPreview = { overlays.previewAttachment = null; overlays.previewRoot = null },
             onShareAttachmentPreview = {
                 scope.launch {
@@ -231,5 +364,32 @@ internal fun AppOverlays(
                 chatViewModel.attach(uri)
             },
         )
+    }
+    overlays.remoteAgentsDocTarget?.let { target ->
+        val remote = target.remote
+        if (remote != null) {
+            RemoteAgentsDocSheet(
+                botName = remote.botName,
+                deviceName = remote.deviceName,
+                loadContent = {
+                    when (val res = graph.remoteBotControlClient.readInstructions(remote.deviceId, remote.botId)) {
+                        is RemoteControlResult.Ok -> Result.success(res.value.content)
+                        is RemoteControlResult.Error ->
+                            Result.failure(IllegalStateException(localizeAdminError(res.code, res.message)))
+                    }
+                },
+                saveContent = { content ->
+                    when (val res = graph.remoteBotControlClient.writeInstructions(remote.deviceId, remote.botId, content)) {
+                        is RemoteControlResult.Ok -> {
+                            Toast.makeText(context, R.string.agents_doc_remote_saved, Toast.LENGTH_SHORT).show()
+                            Result.success(res.value.content)
+                        }
+                        is RemoteControlResult.Error ->
+                            Result.failure(IllegalStateException(localizeAdminError(res.code, res.message)))
+                    }
+                },
+                onDismiss = { overlays.remoteAgentsDocTarget = null },
+            )
+        }
     }
 }

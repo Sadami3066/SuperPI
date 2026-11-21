@@ -110,6 +110,21 @@ sealed interface AppDestination {
         override val depth: Int = 1
     }
 
+    data class RemoteFiles(
+        val deviceId: String,
+        val deviceName: String,
+        val botId: String,
+        val botName: String,
+    ) : AppDestination {
+        override val routeKey: String = listOf(
+            encodeRoutePath(deviceId),
+            encodeRoutePath(deviceName),
+            encodeRoutePath(botId),
+            encodeRoutePath(botName),
+        ).joinToString(separator = "/", prefix = REMOTE_FILES_PREFIX)
+        override val depth: Int = 1
+    }
+
     data object Skills : AppDestination {
         override val routeKey: String = "skills"
         override val depth: Int = 1
@@ -171,6 +186,7 @@ sealed interface AppDestination {
 
     companion object {
         private const val FILES_PREFIX = "files/"
+        private const val REMOTE_FILES_PREFIX = "remote-files/"
         private const val PROVIDER_DETAIL_PREFIX = "providers/"
         private const val CUSTOM_PROVIDER_PREFIX = "providers/custom/"
         private const val CUSTOM_PROVIDER_NEW_ROUTE = "providers/custom"
@@ -252,6 +268,23 @@ sealed interface AppDestination {
             }
 
             routeKey.startsWith(FILES_PREFIX) -> decodeRoutePath(routeKey.removePrefix(FILES_PREFIX))?.let(::Files)
+
+            routeKey.startsWith(REMOTE_FILES_PREFIX) -> {
+                val parts = routeKey.removePrefix(REMOTE_FILES_PREFIX).split('/')
+                if (parts.size == 4) {
+                    val deviceId = decodeRoutePath(parts[0])
+                    val deviceName = decodeRoutePath(parts[1])
+                    val botId = decodeRoutePath(parts[2])
+                    val botName = decodeRoutePath(parts[3])
+                    if (deviceId != null && deviceName != null && botId != null && botName != null) {
+                        RemoteFiles(deviceId, deviceName, botId, botName)
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+            }
 
             routeKey == CUSTOM_PROVIDER_NEW_ROUTE -> CustomProviderEditor()
 

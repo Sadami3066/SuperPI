@@ -114,12 +114,12 @@ class RelayMemorySyncTest {
         env.login()
         env.sync.refreshIfStale(maxAgeMillis = 0)
 
-        env.server.put("profile.md", "# You & I\n\n- Desktop edit\n")
+        env.server.put("profile.md", "# You & I\n\n- Peer edit\n")
         val outcome = env.sync.overwrite("profile.md", "# You & I\n\n- Stale phone edit\n")
 
         assertTrue(outcome is MemoryWriteOutcome.Rejected)
-        assertTrue(env.server.files.getValue("profile.md").contains("Desktop edit"))
-        assertTrue(File(env.root, "profile.md").readText().contains("Desktop edit"))
+        assertTrue(env.server.files.getValue("profile.md").contains("Peer edit"))
+        assertTrue(File(env.root, "profile.md").readText().contains("Peer edit"))
     }
 
     @Test

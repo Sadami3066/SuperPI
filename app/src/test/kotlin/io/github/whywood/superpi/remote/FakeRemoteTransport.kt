@@ -22,13 +22,45 @@ internal data class FakeCall(
 
 internal class FakeRemoteTransport(online: Boolean = true) : RemoteAgentTransport {
     private val events = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = 128)
+    private val syncEventsFlow = MutableSharedFlow<RemoteSyncEvent>(extraBufferCapacity = 64)
     private val onlineState = MutableStateFlow(if (online) setOf(DEVICE_ID) else emptySet())
+    private val devicesFlow = MutableStateFlow(
+        if (online) {
+            listOf(
+                RemoteDeviceSummary(
+                    deviceId = DEVICE_ID,
+                    name = "Desktop",
+                    platform = "desktop",
+                    online = true,
+                    capabilities = listOf(
+                        "remote-bot",
+                        "bot-sessions",
+                        "bot-manage",
+                        "session-manage",
+                        "workspace-files",
+                        "bot-controls",
+                        "session-controls",
+                        "sync-events",
+                    ),
+                ),
+            )
+        } else {
+            emptyList()
+        },
+    )
+    private val relayOnlineState = MutableStateFlow(online)
     private val lastError = MutableStateFlow<RemoteCallError?>(null)
     private var callCount = 0
 
     override val remoteEvents: SharedFlow<RemoteEvent> = events.asSharedFlow()
 
     override val onlineDevices: StateFlow<Set<String>> = onlineState.asStateFlow()
+
+    override val syncEvents: SharedFlow<RemoteSyncEvent> = syncEventsFlow.asSharedFlow()
+
+    override val devices: StateFlow<List<RemoteDeviceSummary>> = devicesFlow.asStateFlow()
+
+    override val isRelayOnline: StateFlow<Boolean> = relayOnlineState.asStateFlow()
 
     val calls: MutableList<FakeCall> = mutableListOf()
 
@@ -44,8 +76,17 @@ internal class FakeRemoteTransport(online: Boolean = true) : RemoteAgentTranspor
 
     override fun lastCallError(): RemoteCallError? = lastError.value
 
+    override fun supportsPeerCapability(deviceId: String, capability: String): Boolean =
+        devicesFlow.value.firstOrNull { it.deviceId == deviceId }?.capabilities?.contains(capability) == true
+
     fun setOnline(online: Boolean) {
         onlineState.value = if (online) setOf(DEVICE_ID) else emptySet()
+        relayOnlineState.value = online
+        devicesFlow.value = devicesFlow.value.map { it.copy(online = online) }
+    }
+
+    fun emitSyncEvent(event: RemoteSyncEvent) {
+        syncEventsFlow.tryEmit(event)
     }
 
     override suspend fun call(

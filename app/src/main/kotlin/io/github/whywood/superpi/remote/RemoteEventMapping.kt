@@ -1,5 +1,8 @@
 package io.github.whywood.superpi.remote
 
+import io.github.whywood.superpi.data.relay.RelayFrames
+import io.github.whywood.superpi.runtime.ImagePart
+import io.github.whywood.superpi.runtime.UserQuestion
 import io.github.whywood.superpi.sdk.agent.AgentEvent
 import io.github.whywood.superpi.sdk.agent.asAgentMessage
 import io.github.whywood.superpi.sdk.agent.AgentToolResult
@@ -22,8 +25,18 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
+internal data class RemoteUserMessage(
+    val text: String,
+    val images: List<ImagePart> = emptyList(),
+)
+
 internal sealed interface RemoteBotEvent {
-    data object AgentStart : RemoteBotEvent
+    data class AgentStart(
+        val sessionId: String? = null,
+        val title: String? = null,
+        val userMessage: RemoteUserMessage? = null,
+        val originRouteId: String? = null,
+    ) : RemoteBotEvent
 
     data class TextDelta(val delta: String) : RemoteBotEvent
 
@@ -44,43 +57,89 @@ internal sealed interface RemoteBotEvent {
 
     data object Settled : RemoteBotEvent
 
-    data class QueueUpdate(val steering: List<String>, val followUp: List<String>) : RemoteBotEvent
+    data class QueueUpdate(
+        val steering: List<String>,
+        val followUp: List<String>,
+        val sessionId: String? = null,
+        val userMessage: RemoteUserMessage? = null,
+    ) : RemoteBotEvent
+
+    data class UserMessage(
+        val text: String,
+        val images: List<ImagePart> = emptyList(),
+        val sessionId: String? = null,
+    ) : RemoteBotEvent
 
     data class ApprovalRequest(
-        val requestId: String,
-        val method: String?,
+        val approvalId: String,
+        val kind: String?,
+        val toolCallId: String?,
         val title: String?,
         val message: String,
         val options: List<String> = emptyList(),
+        val questions: List<UserQuestion> = emptyList(),
+        val resolved: Boolean = false,
     ) : RemoteBotEvent
 }
 
 internal object RemoteEventMapping {
     fun decode(event: JsonObject): RemoteBotEvent? = when (event.string("type")) {
-        "agent_start" -> RemoteBotEvent.AgentStart
+        "agent_start" -> decodeAgentStart(event)
+        "user_message" -> decodeUserMessage(event)
         "message_update" -> decodeMessageUpdate(event)
         "tool_call" -> decodeToolCall(event)
         "tool_result" -> decodeToolResult(event)
         "error" -> RemoteBotEvent.Failed(event.string("message").orEmpty().ifBlank { "The remote bot failed." })
         "agent_end" -> RemoteBotEvent.Ended(event.string("status"))
         "agent_settled" -> RemoteBotEvent.Settled
-        "queue_update" -> RemoteBotEvent.QueueUpdate(
-            steering = event.strings("steering"),
-            followUp = event.strings("followUp"),
-        )
+        "queue_update" -> decodeQueueUpdate(event)
         "approval_request" -> decodeApprovalRequest(event)
 
         else -> null
     }
 
+    private fun decodeAgentStart(event: JsonObject): RemoteBotEvent.AgentStart = RemoteBotEvent.AgentStart(
+        sessionId = event.string("sessionId")?.takeIf { it.isNotBlank() },
+        title = event.string("title")?.takeIf { it.isNotBlank() },
+        userMessage = decodeNestedUserMessage(event["userMessage"] as? JsonObject),
+        originRouteId = event.string("originRouteId")?.takeIf { it.isNotBlank() },
+    )
+
+    private fun decodeUserMessage(event: JsonObject): RemoteBotEvent.UserMessage = RemoteBotEvent.UserMessage(
+        text = event.string("text").orEmpty(),
+        images = decodeImages(event),
+        sessionId = event.string("sessionId")?.takeIf { it.isNotBlank() },
+    )
+
+    private fun decodeQueueUpdate(event: JsonObject): RemoteBotEvent.QueueUpdate = RemoteBotEvent.QueueUpdate(
+        steering = event.strings("steering"),
+        followUp = event.strings("followUp"),
+        sessionId = event.string("sessionId")?.takeIf { it.isNotBlank() },
+        userMessage = decodeNestedUserMessage(event["userMessage"] as? JsonObject),
+    )
+
+    private fun decodeNestedUserMessage(payload: JsonObject?): RemoteUserMessage? {
+        if (payload == null) return null
+        val text = payload.string("text").orEmpty()
+        val images = decodeImages(payload)
+        if (text.isEmpty() && images.isEmpty()) return null
+        return RemoteUserMessage(text = text, images = images)
+    }
+
+    private fun decodeImages(payload: JsonObject): List<ImagePart> =
+        RelayFrames.parseImages(payload).map { ImagePart(data = it.data, mimeType = it.mimeType) }
+
     private fun decodeApprovalRequest(event: JsonObject): RemoteBotEvent.ApprovalRequest? {
-        val requestId = event.string("requestId") ?: return null
+        val approvalId = event.string("approvalId") ?: event.string("requestId") ?: return null
         return RemoteBotEvent.ApprovalRequest(
-            requestId = requestId,
-            method = event.string("method"),
-            title = event.string("title"),
-            message = event.string("message").orEmpty(),
+            approvalId = approvalId,
+            kind = event.string("kind") ?: event.string("method"),
+            toolCallId = event.string("toolCallId"),
+            title = event.string("title") ?: event.string("summary"),
+            message = event.string("message") ?: event.string("summary").orEmpty(),
             options = event.strings("options"),
+            questions = RelayFrames.parseQuestions(event["questions"]),
+            resolved = event.boolean("resolved") == true,
         )
     }
 
@@ -232,7 +291,8 @@ internal class RemoteTurnState(
     }
 
     private fun consumeLocked(event: RemoteBotEvent): List<AgentEvent> = when (event) {
-        RemoteBotEvent.AgentStart -> listOf(AgentEvent.AgentStart)
+        is RemoteBotEvent.AgentStart -> listOf(AgentEvent.AgentStart)
+        is RemoteBotEvent.UserMessage -> emptyList()
         is RemoteBotEvent.TextDelta -> {
             rollStepIfNeededLocked()
             textBuilder.append(event.delta)
@@ -407,6 +467,9 @@ internal class RemoteTurnState(
 
 private fun JsonObject.string(key: String): String? =
     ((this[key] as? JsonPrimitive)?.contentOrNull)?.takeIf { it.isNotEmpty() }
+
+private fun JsonObject.boolean(key: String): Boolean? =
+    (this[key] as? JsonPrimitive)?.booleanOrNull
 
 private fun JsonObject.strings(key: String): List<String> {
     val array = this[key] as? JsonArray ?: return emptyList()

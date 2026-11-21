@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.ui.common.chat
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +32,7 @@ import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
+import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ModelOption
@@ -53,6 +55,8 @@ internal fun ModelPickerSheet(
     onModelChange: (String) -> Unit,
     onThinkingLevelChange: (ThinkingLevel) -> Unit,
     onManageProviders: () -> Unit,
+    manageProvidersVisible: Boolean = true,
+    loading: Boolean = false,
 ) {
     val colors = superPiColors()
     var showProviders by remember { mutableStateOf(false) }
@@ -70,72 +74,26 @@ internal fun ModelPickerSheet(
                 .padding(horizontal = DdSpacing.Xxl),
         ) {
             Spacer(Modifier.height(DdSpacing.Sm))
-            if (providers.isNotEmpty()) {
-                val providerName = providers.firstOrNull { it.id == providerId }?.name ?: providerId
-                DdDropdown(
-                    expanded = showProviders,
-                    onDismissRequest = { showProviders = false },
-                    anchor = {
-                        DdListRow(
-                            title = stringResource(R.string.assistant_model_provider),
-                            trailing = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = providerName,
-                                        style = DdType.bodySmall,
-                                        color = colors.inkTertiary,
-                                        maxLines = 1,
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
-                                }
-                            },
-                            onClick = { showProviders = true },
-                            modifier = Modifier.testTag("assistant_provider_row"),
-                        )
-                    },
+            if (loading) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = DdSpacing.Xxl),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    providers.forEach { provider ->
-                        DdMenuItem(
-                            text = provider.name,
-                            onClick = {
-                                showProviders = false
-                                onProviderChange(provider.id)
-                            },
-                            selected = provider.id == providerId,
-                            trailing = if (provider.id == providerId) {
-                                {
-                                    DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
-                                }
-                            } else {
-                                null
-                            },
-                            testTag = "assistant_provider_${provider.id}",
-                        )
-                    }
+                    DdSpinner(size = 20.dp, strokeWidth = 2.dp)
                 }
-                DdHairline()
-            }
-
-            if (!configured) {
-                DdListRow(
-                    title = stringResource(R.string.assistant_model_unconfigured),
-                    onClick = null,
-                    enabled = false,
-                )
-                DdHairline()
             } else {
-                if (thinkingLevels.any { it != ThinkingLevel.OFF }) {
+                if (providers.isNotEmpty()) {
+                    val providerName = providers.firstOrNull { it.id == providerId }?.name ?: providerId
                     DdDropdown(
-                        expanded = showThinking,
-                        onDismissRequest = { showThinking = false },
+                        expanded = showProviders,
+                        onDismissRequest = { showProviders = false },
                         anchor = {
                             DdListRow(
-                                title = stringResource(R.string.assistant_thinking_sheet),
+                                title = stringResource(R.string.assistant_model_provider),
                                 trailing = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = thinkingLabel(thinkingLevel),
+                                            text = providerName,
                                             style = DdType.bodySmall,
                                             color = colors.inkTertiary,
                                             maxLines = 1,
@@ -144,60 +102,125 @@ internal fun ModelPickerSheet(
                                         DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
                                     }
                                 },
-                                onClick = { showThinking = true },
-                                modifier = Modifier.testTag("assistant_thinking_row"),
+                                onClick = { showProviders = true },
+                                modifier = Modifier.testTag("assistant_provider_row"),
                             )
                         },
                     ) {
-                        thinkingLevels.forEach { level ->
+                        providers.forEach { provider ->
                             DdMenuItem(
-                                text = thinkingLabel(level),
+                                text = provider.name,
                                 onClick = {
-                                    showThinking = false
-                                    onDismiss()
-                                    onThinkingLevelChange(level)
+                                    showProviders = false
+                                    onProviderChange(provider.id)
                                 },
-                                selected = level == thinkingLevel,
-                                trailing = if (level == thinkingLevel) {
+                                selected = provider.id == providerId,
+                                trailing = if (provider.id == providerId) {
                                     {
                                         DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
                                     }
                                 } else {
                                     null
                                 },
-                                testTag = "assistant_thinking_${level.name.lowercase()}",
+                                testTag = "assistant_provider_${provider.id}",
                             )
                         }
                     }
+                    DdHairline()
                 }
-                models.forEachIndexed { index, option ->
+
+                if (!configured) {
                     DdListRow(
-                        title = option.displayName,
-                        onClick = {
-                            onDismiss()
-                            onModelChange(option.id)
-                        },
-                        trailing = {
-                            if (option.id == modelId) {
-                                DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 20.dp)
-                            }
-                        },
+                        title = stringResource(R.string.assistant_model_unconfigured),
+                        onClick = null,
+                        enabled = false,
                     )
-                    if (index != models.lastIndex) DdHairline()
+                    DdHairline()
+                } else {
+                    if (thinkingLevels.any { it != ThinkingLevel.OFF }) {
+                        DdDropdown(
+                            expanded = showThinking,
+                            onDismissRequest = { showThinking = false },
+                            anchor = {
+                                DdListRow(
+                                    title = stringResource(R.string.assistant_thinking_sheet),
+                                    trailing = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = thinkingLabel(thinkingLevel),
+                                                style = DdType.bodySmall,
+                                                color = colors.inkTertiary,
+                                                maxLines = 1,
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
+                                        }
+                                    },
+                                    onClick = { showThinking = true },
+                                    modifier = Modifier.testTag("assistant_thinking_row"),
+                                )
+                            },
+                        ) {
+                            thinkingLevels.forEach { level ->
+                                DdMenuItem(
+                                    text = thinkingLabel(level),
+                                    onClick = {
+                                        showThinking = false
+                                        onDismiss()
+                                        onThinkingLevelChange(level)
+                                    },
+                                    selected = level == thinkingLevel,
+                                    trailing = if (level == thinkingLevel) {
+                                        {
+                                            DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    testTag = "assistant_thinking_${level.name.lowercase()}",
+                                )
+                            }
+                        }
+                    }
+                    if (models.isEmpty()) {
+                        DdListRow(
+                            title = stringResource(R.string.assistant_remote_models_empty),
+                            onClick = null,
+                            enabled = false,
+                        )
+                    } else {
+                        models.forEachIndexed { index, option ->
+                            DdListRow(
+                                title = option.displayName,
+                                onClick = {
+                                    onDismiss()
+                                    onModelChange(option.id)
+                                },
+                                trailing = {
+                                    if (option.id == modelId) {
+                                        DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 20.dp)
+                                    }
+                                },
+                            )
+                            if (index != models.lastIndex) DdHairline()
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(28.dp))
         }
-        DdHairline(Modifier.padding(horizontal = DdSpacing.Xxl))
-        DdListRow(
-            title = stringResource(R.string.assistant_model_manage_providers),
-            onClick = {
-                onDismiss()
-                onManageProviders()
-            },
-            showChevron = true,
-            modifier = Modifier.padding(horizontal = DdSpacing.Xxl),
-        )
+        if (manageProvidersVisible) {
+            DdHairline(Modifier.padding(horizontal = DdSpacing.Xxl))
+            DdListRow(
+                title = stringResource(R.string.assistant_model_manage_providers),
+                onClick = {
+                    onDismiss()
+                    onManageProviders()
+                },
+                showChevron = true,
+                modifier = Modifier.padding(horizontal = DdSpacing.Xxl),
+            )
+        }
         Spacer(Modifier.height(DdSpacing.Xl))
     }
 }

@@ -240,6 +240,16 @@ internal fun rememberShellChatViewModel(dependencies: AppDependencies, uiStrings
                     skillExpander = dependencies.skillCatalog,
                     dismissInterruptedQuestions = dependencies.questionCenter::dismissInterrupted,
                     dismissInterruptedRun = dependencies.host::dismissInterruptedRun,
+                    onLocalModelPersisted = { workspaceId, sessionId, model ->
+                        dependencies.remoteTransport.emitSyncEvent(
+                            kind = "model_changed",
+                            botId = workspaceId,
+                            sessionId = sessionId,
+                            provider = model.providerId,
+                            modelId = model.modelId,
+                            thinkingLevel = model.thinkingLevel.name.lowercase(),
+                        )
+                    },
                 )
             }
         },

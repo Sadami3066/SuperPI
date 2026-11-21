@@ -216,6 +216,11 @@ fun ChatScreen(
     processDetail: ProcessDetail = ProcessDetail.DETAILED,
     chatFontScale: Float = 1f,
     voiceLanguage: AppLanguage = AppLanguage.SYSTEM,
+    canControlRemoteModel: Boolean = false,
+    remoteFilesVisible: Boolean = false,
+    reloadVisible: Boolean = true,
+    remoteModelsLoading: Boolean = false,
+    remoteThinkingLevels: List<ThinkingLevel> = emptyList(),
 ) {
     val (
         onInputChange, onSend, onStop, onOpenDrawer, onManageProviders, onReload,
@@ -279,8 +284,8 @@ fun ChatScreen(
     var overlayHeightPx by remember { mutableIntStateOf(0) }
     val copiedMessage = stringResource(R.string.assistant_copied)
     val configured = state.configured
-    val remoteControls = remember(state.workspaces, state.currentWorkspaceId) {
-        remoteChatControls(state.workspaces, state.currentWorkspaceId)
+    val remoteControls = remember(state.workspaces, state.currentWorkspaceId, canControlRemoteModel) {
+        remoteChatControls(state.workspaces, state.currentWorkspaceId, canControlRemoteModel)
     }
     val remoteBot = remoteControls.remote
     val remoteOnline = remoteControls.inputEnabled
@@ -330,8 +335,10 @@ fun ChatScreen(
     val retryActivity = state.activity as? RuntimeActivity.Retrying
     val retryTargetId = messages.lastOrNull { it.streaming || it.retrying }?.id
     val stablePendingQuestions = remember(pendingQuestions) { pendingQuestions }
-    val thinkingLevels = remember(state.models, state.modelId) {
-        state.models.firstOrNull { it.id == state.modelId }?.thinkingLevels.orEmpty()
+    val thinkingLevels = remember(state.models, state.modelId, remoteBot, remoteThinkingLevels) {
+        state.models.firstOrNull { it.id == state.modelId }?.thinkingLevels.orEmpty().ifEmpty {
+            if (remoteBot != null) remoteThinkingLevels else emptyList()
+        }
     }
     val latestScrollAnchorFor by rememberUpdatedState(scrollAnchorFor)
     val latestScrollAnchorChange by rememberUpdatedState(onScrollAnchorChange)
@@ -533,6 +540,8 @@ fun ChatScreen(
                 reloading = reloading,
                 usage = state.usage,
                 jobCount = jobCount,
+                remoteFilesVisible = remoteFilesVisible,
+                reloadVisible = reloadVisible,
             ),
             actions = ChatTopBarActions(
                 onMenu = {
@@ -767,7 +776,7 @@ fun ChatScreen(
                         ready = state.ready && state.historyLoaded && !state.switchingConversation,
                         sending = state.sending,
                         configured = configured || remoteBot != null,
-                        modelLabel = if (configured) state.modelLabel else "",
+                        modelLabel = if (configured || remoteBot != null) state.modelLabel else "",
                         modelId = state.modelId,
                         models = state.models,
                         providerId = state.providerId,
@@ -782,6 +791,8 @@ fun ChatScreen(
                         modelsOpen = modelsOpen,
                         inputEnabled = remoteOnline,
                         modelControlsVisible = modelControlsVisible,
+                        manageProvidersVisible = remoteBot == null,
+                        modelsLoading = remoteBot != null && remoteModelsLoading,
                         blockedReason = if (remoteOnline) {
                             null
                         } else {

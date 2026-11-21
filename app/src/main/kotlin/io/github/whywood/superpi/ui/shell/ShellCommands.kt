@@ -2,6 +2,7 @@ package io.github.whywood.superpi.ui.shell
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import io.github.whywood.superpi.remote.RemoteSlashCommand
 import io.github.whywood.superpi.runtime.SkillSummary
 import io.github.whywood.superpi.ui.common.chat.ChatCommand
 import io.github.whywood.superpi.ui.chat.CommandItem
@@ -39,8 +40,14 @@ fun resolveChatCommand(command: ChatCommand, args: String): ShellCommandAction =
     ChatCommand.GOAL -> resolveGoalCommand(args)
 }
 
-fun planSubmission(input: String, sending: Boolean): ShellSubmitPlan {
+fun planSubmission(input: String, sending: Boolean, isRemote: Boolean = false): ShellSubmitPlan {
     val parsed = parseChatCommand(input)
+    if (isRemote) {
+        if (parsed is ParsedCommand.Found && parsed.command == ChatCommand.COMPACT) {
+            return if (sending) ShellSubmitPlan.RejectWhileSending else ShellSubmitPlan.RunCommand(ShellCommandAction.Compact)
+        }
+        return ShellSubmitPlan.Send
+    }
     if (sending && parsed !is ParsedCommand.None) return ShellSubmitPlan.RejectWhileSending
     return when (parsed) {
         ParsedCommand.None, is ParsedCommand.Skill -> ShellSubmitPlan.Send
@@ -69,28 +76,49 @@ fun buildCommandItems(
     compactDescription: String,
     goalTitle: String,
     goalDescription: String,
+    isRemote: Boolean = false,
+    canCompact: Boolean = true,
+    remoteCommands: List<RemoteSlashCommand> = emptyList(),
 ): List<CommandItem> = buildList {
-    add(
-        CommandItem(
-            ChatCommand.COMPACT.commandName, ChatCommand.COMPACT.commandName,
-            compactTitle, compactDescription,
-            conversationId != null && !sending && !compacting,
-            "/${ChatCommand.COMPACT.commandName} ",
-        ),
-    )
-    add(
-        CommandItem(
-            ChatCommand.GOAL.commandName, ChatCommand.GOAL.commandName, goalTitle, goalDescription,
-            conversationId != null, "/${ChatCommand.GOAL.commandName} ",
-        ),
-    )
-    skills.forEach { skill ->
+    if (canCompact) {
         add(
             CommandItem(
-                "skill:${skill.name}", "skill:${skill.name}", skill.name, skill.description,
-                conversationId != null && !sending, "/skill:${skill.name} ",
+                ChatCommand.COMPACT.commandName, ChatCommand.COMPACT.commandName,
+                compactTitle, compactDescription,
+                conversationId != null && !sending && !compacting,
+                "/${ChatCommand.COMPACT.commandName} ",
             ),
         )
+    }
+    if (!isRemote) {
+        add(
+            CommandItem(
+                ChatCommand.GOAL.commandName, ChatCommand.GOAL.commandName, goalTitle, goalDescription,
+                conversationId != null, "/${ChatCommand.GOAL.commandName} ",
+            ),
+        )
+        skills.forEach { skill ->
+            add(
+                CommandItem(
+                    "skill:${skill.name}", "skill:${skill.name}", skill.name, skill.description,
+                    conversationId != null && !sending, "/skill:${skill.name} ",
+                ),
+            )
+        }
+    } else {
+        remoteCommands.forEach { cmd ->
+            if (canCompact && cmd.name == ChatCommand.COMPACT.commandName) return@forEach
+            add(
+                CommandItem(
+                    id = "remote:${cmd.name}",
+                    name = cmd.name,
+                    title = cmd.name,
+                    description = cmd.description,
+                    enabled = conversationId != null && !sending,
+                    insertText = "/${cmd.name} ",
+                ),
+            )
+        }
     }
 }
 interface ShellCommandExecutor {

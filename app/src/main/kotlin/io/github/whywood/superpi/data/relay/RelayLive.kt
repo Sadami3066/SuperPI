@@ -2,7 +2,10 @@ package io.github.whywood.superpi.data.relay
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import io.github.whywood.superpi.data.AgentDocStore
 import io.github.whywood.superpi.runtime.AgentRuntime
+import io.github.whywood.superpi.runtime.ProviderDirectory
+import io.github.whywood.superpi.runtime.QuestionCenter
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Base64
@@ -65,9 +68,14 @@ class RelayLive(
     private val memorySync: RelayMemorySync,
     private val appVersion: String,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    questionCenter: QuestionCenter? = null,
+    avatarStorageDir: File? = null,
+    providerCatalog: () -> ProviderDirectory? = { null },
+    configuredProviderIds: () -> Set<String> = { emptySet() },
+    agentDocStore: () -> AgentDocStore? = { null },
+    slashCommands: suspend (String) -> List<RemoteCommandSpec> = { emptyList() },
 ) {
     private val socket = RelaySocket(scope, io)
-    private val server = RemoteAgentServer(host, ::bots, ::send, scope)
     private val mutex = Mutex()
     private val devicesMutex = Mutex()
     private val calls = RemoteCallTracker()
@@ -76,6 +84,20 @@ class RelayLive(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
             size > MAX_AVATAR_CACHE
     }
+    private val server = RemoteAgentServer(
+        host = host,
+        bots = ::bots,
+        send = ::send,
+        scope = scope,
+        questionCenter = questionCenter,
+        onBotsChanged = { refreshBots() },
+        onSyncEvent = ::emitSyncEvent,
+        avatarStorageDir = avatarStorageDir,
+        providerCatalog = providerCatalog,
+        configuredProviderIds = configuredProviderIds,
+        agentDocStore = agentDocStore,
+        slashCommands = slashCommands,
+    )
 
     private val _state = MutableStateFlow(RelayLiveState.Disabled)
     val state: StateFlow<RelayLiveState> = _state.asStateFlow()
@@ -108,6 +130,9 @@ class RelayLive(
 
     private val _remoteEvents = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = REMOTE_EVENT_BUFFER)
     val remoteEvents: SharedFlow<RemoteEvent> = _remoteEvents.asSharedFlow()
+
+    private val _syncEvents = MutableSharedFlow<RelaySyncEvent>(extraBufferCapacity = SYNC_EVENT_BUFFER)
+    val syncEvents: SharedFlow<RelaySyncEvent> = _syncEvents.asSharedFlow()
 
     private val _lastCallError = MutableStateFlow<RemoteCallError?>(null)
     val lastCallError: StateFlow<RemoteCallError?> = _lastCallError.asStateFlow()
@@ -217,18 +242,54 @@ class RelayLive(
 
     fun supportsCapability(deviceId: String, capability: String): Boolean {
         if (!_relayCapabilities.value.contains(capability)) return false
-        val peer = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return true
+        val peer = _devices.value.firstOrNull { it.deviceId == deviceId }
+        if (capability !in LEGACY_CAPABILITIES) {
+            return peer != null && peer.capabilities.contains(capability)
+        }
+        if (peer == null) return true
         return peer.capabilities.isEmpty() || peer.capabilities.contains(capability)
     }
 
-    suspend fun listRemoteSessions(deviceId: String, botId: String): RemoteSessionsOutcome {
+    fun supportsPeerCapability(deviceId: String, capability: String): Boolean {
+        if (!_relayCapabilities.value.contains(capability)) return false
+        val peer = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return false
+        return peer.capabilities.contains(capability)
+    }
+
+    fun emitSyncEvent(event: RelaySyncEvent) {
+        if (!started || socket.state.value != RelaySocketState.Online) return
+        if (!_relayCapabilities.value.contains(CAPABILITY_SYNC_EVENTS)) return
+        send(
+            RelayFrames.syncEvent(
+                kind = event.kind,
+                botId = event.botId,
+                sessionId = event.sessionId,
+                busy = event.busy,
+                pendingApprovals = event.pendingApprovals,
+                provider = event.provider,
+                modelId = event.modelId,
+                thinkingLevel = event.thinkingLevel,
+                ts = event.ts,
+            ),
+        )
+    }
+
+    suspend fun listRemoteSessions(
+        deviceId: String,
+        botId: String,
+        includeArchived: Boolean = false,
+    ): RemoteSessionsOutcome {
         when (val check = checkSessionBrowseSupport(deviceId)) {
             SessionBrowseCheck.Ok -> Unit
             SessionBrowseCheck.RelayUpgrade -> return RemoteSessionsOutcome.RelayUpgradeRequired
             SessionBrowseCheck.PeerUpgrade -> return RemoteSessionsOutcome.PeerUpgradeRequired
             is SessionBrowseCheck.Failed -> return RemoteSessionsOutcome.Failed(check.error)
         }
-        return when (val outcome = callWithOutcome(deviceId, BOT_SESSIONS, buildJsonObject { put("botId", botId) })) {
+        val params = buildJsonObject {
+            put("botId", botId)
+            if (includeArchived) put("includeArchived", true)
+        }
+        return when (val outcome = callWithOutcome(deviceId, BOT_SESSIONS, params)) {
             is RemoteCallOutcome.Ok -> RemoteSessionsOutcome.Ok(RelayFrames.parseRemoteSessions(outcome.result))
             is RemoteCallOutcome.Failed -> {
                 if (isUnsupportedMethodError(outcome.error)) {
@@ -459,7 +520,7 @@ class RelayLive(
         }.getOrNull()
         val resolved = encoded ?: if (file.length() in 1L..44_000L) {
             val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
-            val mime = detectImageMime(bytes)
+            val mime = RelayFrames.detectImageMime(bytes)
             if (mime != null && mime != "image/gif") {
                 val fallback = "data:$mime;base64," + Base64.getEncoder().encodeToString(bytes)
                 fallback.takeIf { it.length <= MAX_AVATAR_DATA_URL_CHARS }
@@ -475,22 +536,6 @@ class RelayLive(
             }
         }
         return resolved
-    }
-
-    private fun detectImageMime(bytes: ByteArray): String? {
-        if (bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) {
-            return "image/jpeg"
-        }
-        if (bytes.size >= 8 && bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()) {
-            return "image/png"
-        }
-        if (bytes.size >= 12 &&
-            bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
-            bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() && bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
-        ) {
-            return "image/webp"
-        }
-        return null
     }
 
     private fun send(frame: JsonObject): Boolean = socket.send(frame.toString())
@@ -527,6 +572,7 @@ class RelayLive(
         platform = "android",
         appVersion = appVersion,
         bots = if (_allowRemote.value) bots() else emptyList(),
+        capabilities = if (_allowRemote.value) RELAY_CAPABILITIES else RELAY_CAPABILITIES_READONLY,
     )
 
     private suspend fun resendHelloLocked(current: RelayAccount) {
@@ -598,10 +644,34 @@ class RelayLive(
             }
 
             is RelayServerFrame.MemoryChanged -> scope.launch(io) { runCatching { memorySync.refreshIfStale(0) } }
+            is RelayServerFrame.SyncEvent -> {
+                val syncEvent = frame.toEvent()
+                if (!_syncEvents.tryEmit(syncEvent)) {
+                    scope.launch { _syncEvents.emit(syncEvent) }
+                }
+            }
             is RelayServerFrame.Route -> if (_allowRemote.value) {
                 scope.launch(io) { server.handle(frame) }
             } else {
-                send(RelayFrames.routeError(frame.id, "bot_not_found", "remote use is disabled on this device"))
+                val code = if (frame.method.startsWith("session.") ||
+                    frame.method.startsWith("file.") ||
+                    frame.method.startsWith("workspace.") ||
+                    frame.method == "bot.create" ||
+                    frame.method == "bot.update" ||
+                    frame.method == "bot.delete" ||
+                    frame.method == "bot.models" ||
+                    frame.method == "bot.set_model" ||
+                    frame.method == "bot.set_thinking" ||
+                    frame.method == "bot.commands" ||
+                    frame.method == "bot.instructions.get" ||
+                    frame.method == "bot.instructions.set" ||
+                    frame.method == "bot.reload"
+                ) {
+                    "permission_denied"
+                } else {
+                    "bot_not_found"
+                }
+                send(RelayFrames.routeError(frame.id, code, "remote use is disabled on this device"))
             }
             is RelayServerFrame.RouteOk -> calls.settle(frame.id, RemoteCallOutcome.Ok(frame.result))
             is RelayServerFrame.RouteError -> calls.settle(
@@ -623,10 +693,13 @@ class RelayLive(
     private companion object {
         private const val CALL_TIMEOUT_MILLIS = 15_000L
         private const val REMOTE_EVENT_BUFFER = 2_048
+        private const val SYNC_EVENT_BUFFER = 256
         private const val MAX_AVATAR_PX = 128
         private const val MAX_AVATAR_DATA_URL_CHARS = 60_000
         private const val MAX_AVATAR_CACHE = 32
         private const val CAPABILITY_BOT_SESSIONS = "bot-sessions"
+        private const val CAPABILITY_SYNC_EVENTS = "sync-events"
+        private val LEGACY_CAPABILITIES = setOf("remote-bot", "bot-sessions", "bot-images", "bot-approval")
         private const val BOT_SESSIONS = "bot.sessions"
         private const val BOT_HISTORY = "bot.history"
     }

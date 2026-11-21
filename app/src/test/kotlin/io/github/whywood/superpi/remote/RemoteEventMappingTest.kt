@@ -22,7 +22,7 @@ import org.junit.Test
 class RemoteEventMappingTest {
     @Test
     fun decodesBotEvents() {
-        assertEquals(RemoteBotEvent.AgentStart, decode("""{"type":"agent_start"}"""))
+        assertEquals(RemoteBotEvent.AgentStart(), decode("""{"type":"agent_start"}"""))
         assertEquals(
             RemoteBotEvent.TextDelta("hi"),
             decode("""{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hi"}}"""),
@@ -46,11 +46,38 @@ class RemoteEventMappingTest {
             RemoteBotEvent.QueueUpdate(listOf("a"), listOf("b")),
             decode("""{"type":"queue_update","steering":["a"],"followUp":["b"]}"""),
         )
+        assertEquals(
+            RemoteBotEvent.UserMessage("queued"),
+            decode("""{"type":"user_message","text":"queued"}"""),
+        )
+        assertEquals(
+            RemoteBotEvent.ApprovalRequest(
+                approvalId = "a",
+                kind = "k",
+                toolCallId = "call_q",
+                title = "Choose",
+                message = "Choose",
+                options = listOf("Yes", "No"),
+                questions = listOf(
+                    io.github.whywood.superpi.runtime.UserQuestion(
+                        id = "q1",
+                        header = "Mode",
+                        question = "Pick one",
+                        options = listOf(io.github.whywood.superpi.runtime.QuestionOption("Yes")),
+                        multiSelect = false,
+                    ),
+                ),
+                resolved = false,
+            ),
+            decode(
+                """{"type":"approval_request","approvalId":"a","kind":"k","toolCallId":"call_q","summary":"Choose","options":["Yes","No"],"questions":[{"id":"q1","header":"Mode","question":"Pick one","options":[{"label":"Yes"}]}]}""",
+            ),
+        )
     }
 
     @Test
     fun ignoresUnknownAndMalformedEvents() {
-        assertNull(decode("""{"type":"approval_request","approvalId":"a","kind":"k","summary":"s"}"""))
+        assertNull(decode("""{"type":"approval_request","kind":"k","summary":"s"}"""))
         assertNull(decode("""{"type":"message_update","assistantMessageEvent":{"type":"text_delta"}}"""))
         assertNull(decode("""{"type":"message_update","assistantMessageEvent":{"type":"image_delta","delta":"x"}}"""))
         assertNull(decode("""{"type":"tool_call","name":"shell"}"""))
@@ -164,6 +191,50 @@ class RemoteEventMappingTest {
         val finalAssistant = messages[2] as AssistantMessage
         assertEquals("Found a.txt.", finalAssistant.text())
         assertEquals(StopReason.Stop, finalAssistant.stopReason)
+    }
+
+    @Test
+    fun decodesLiveSyncFieldsOnAgentStartUserMessageAndQueueUpdate() {
+        val imageJson = """[{"data":"YWJj","mimeType":"image/png"}]"""
+        val expectedImage = io.github.whywood.superpi.runtime.ImagePart(data = "YWJj", mimeType = "image/png")
+
+        val agentStart = decode(
+            """{"type":"agent_start","sessionId":"s-1","title":"Hello","originRouteId":"r-1","userMessage":{"text":"hi","images":$imageJson}}""",
+        )
+        assertEquals(
+            RemoteBotEvent.AgentStart(
+                sessionId = "s-1",
+                title = "Hello",
+                userMessage = RemoteUserMessage(text = "hi", images = listOf(expectedImage)),
+                originRouteId = "r-1",
+            ),
+            agentStart,
+        )
+
+        val userMessage = decode(
+            """{"type":"user_message","sessionId":"s-1","text":"hi","images":$imageJson}""",
+        )
+        assertEquals(
+            RemoteBotEvent.UserMessage(
+                text = "hi",
+                images = listOf(expectedImage),
+                sessionId = "s-1",
+            ),
+            userMessage,
+        )
+
+        val queueUpdate = decode(
+            """{"type":"queue_update","sessionId":"s-1","steering":["s1"],"followUp":["f1"],"userMessage":{"text":"steer","images":$imageJson}}""",
+        )
+        assertEquals(
+            RemoteBotEvent.QueueUpdate(
+                steering = listOf("s1"),
+                followUp = listOf("f1"),
+                sessionId = "s-1",
+                userMessage = RemoteUserMessage(text = "steer", images = listOf(expectedImage)),
+            ),
+            queueUpdate,
+        )
     }
 
     private fun decode(json: String): RemoteBotEvent? =

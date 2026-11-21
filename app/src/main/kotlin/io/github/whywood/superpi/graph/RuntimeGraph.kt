@@ -16,6 +16,7 @@ import io.github.whywood.superpi.runtime.GoalPhase
 import io.github.whywood.superpi.runtime.JobStatus
 import io.github.whywood.superpi.runtime.MiniappAgentService
 import io.github.whywood.superpi.remote.RemoteSessionEngine
+import io.github.whywood.superpi.remote.RemoteSessionRegistry
 import io.github.whywood.superpi.runtime.PiSessionEngine
 import io.github.whywood.superpi.runtime.SessionEngine
 import io.github.whywood.superpi.runtime.SessionCloseReason
@@ -225,6 +226,8 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
                 target = remote,
                 transport = deps.remoteTransport,
                 scope = deps.scope,
+                questionCenter = deps.questionCenter,
+                onPassiveRuntimeEvent = { event -> conversationStore.ingestRemoteEvent(event) },
             )
         } else {
             localEngine(cwd)
@@ -317,7 +320,8 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
                     deps.jobRegistry().jobs.value.any { job ->
                         job.sessionId == sessionId && job.status == JobStatus.RUNNING
                     } ||
-                    deps.questionCenter.pending.value.any { question -> question.sessionId == sessionId }
+                    deps.questionCenter.pending.value.any { question -> question.sessionId == sessionId } ||
+                    RemoteSessionRegistry.isWatching(sessionId)
             },
         )
     }

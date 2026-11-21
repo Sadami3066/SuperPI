@@ -147,18 +147,18 @@ class TimersStateHolderTest {
         val source = FakeTimersSource()
         source.conversations = listOf(
             conversation("local-session", "/work"),
-            conversation("remote-session", "/remote/desktop/pi"),
+            conversation("remote-session", "/remote/phone-b/home"),
         )
         source.workspaces = listOf(
             RuntimeWorkspace(id = "ws-1", name = "Work", cwd = "/work"),
             RuntimeWorkspace(
-                id = "remote:desktop:pi",
+                id = "remote:phone-b:home",
                 name = "PI",
-                cwd = "/remote/desktop/pi",
+                cwd = "/remote/phone-b/home",
                 remote = RemoteBotRef(
-                    deviceId = "desktop",
-                    deviceName = "Mac",
-                    botId = "pi",
+                    deviceId = "phone-b",
+                    deviceName = "Backup Phone",
+                    botId = "home",
                     botName = "PI",
                     online = true,
                 ),

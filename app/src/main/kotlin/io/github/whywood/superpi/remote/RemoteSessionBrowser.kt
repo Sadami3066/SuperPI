@@ -31,7 +31,7 @@ internal object RemoteSessionBrowser {
                 }
                 if (upToDate) return if (skipIfUnchanged) null else existing
             }
-            if (existing.id in runtime.busySessionIds.value) {
+            if (existing.id in runtime.busySessionIds.value || RemoteSessionRegistry.isPassiveStreaming(existing.id)) {
                 return if (skipIfUnchanged) null else existing
             }
             preservePinned = existing.pinned
@@ -95,6 +95,10 @@ internal object RemoteSessionBrowser {
         digest.update(history.sessionId.toByteArray(Charsets.UTF_8))
         digest.update(0)
         digest.update((history.title ?: "").toByteArray(Charsets.UTF_8))
+        digest.update(0)
+        digest.update(history.busy.toString().toByteArray(Charsets.UTF_8))
+        digest.update(0)
+        digest.update((history.seq?.toString() ?: "").toByteArray(Charsets.UTF_8))
         digest.update(0)
         for (item in history.messages) {
             digest.update(item.toString().toByteArray(Charsets.UTF_8))

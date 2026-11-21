@@ -21,7 +21,9 @@
     <string name="agents_doc_delete">删除</string>
     <string name="agents_doc_cancel">取消</string>
     <string name="agents_doc_too_large">内容超过 64 KB 上限。</string>
+    <string name="agents_doc_load_failed">无法读取设定，请重试</string>
     <string name="agents_doc_save_failed">保存失败，请重试。</string>
+    <string name="agents_doc_remote_saved">已保存设定</string>
     <string name="agents_doc_delete_title">删除设定？</string>
     <string name="agents_doc_delete_message">将删除当前 Bot 的设定。</string>
     <string name="agents_doc_delete_confirm">删除</string>

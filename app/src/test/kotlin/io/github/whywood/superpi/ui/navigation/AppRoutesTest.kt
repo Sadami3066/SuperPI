@@ -99,4 +99,17 @@ class AppRoutesTest {
         assertTrue(deepLinkStack("bogus/route").isEmpty())
         assertNotNull(routeSpec(AppDestination.Chat.routeKey))
     }
+
+    @Test
+    fun remoteFilesRouteRoundTripsWithSpecialCharactersAndRejectsMalformedKeys() {
+        val destination = AppDestination.RemoteFiles(
+            deviceId = "dev-1",
+            deviceName = "MacBook / Pro",
+            botId = "pi",
+            botName = "Super PI",
+        )
+        assertEquals(destination, AppDestination.fromRouteKey(destination.routeKey))
+        assertNull(AppDestination.fromRouteKey("remote-files/only-one"))
+        assertNull(AppDestination.fromRouteKey("remote-files/a/b/c"))
+    }
 }

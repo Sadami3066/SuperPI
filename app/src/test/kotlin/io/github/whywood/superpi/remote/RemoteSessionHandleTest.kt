@@ -4,7 +4,11 @@ import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.data.relay.RemoteCallError
+import io.github.whywood.superpi.runtime.BackgroundTurnStarted
+import io.github.whywood.superpi.runtime.RunStatus
+import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SessionHandle
+import io.github.whywood.superpi.runtime.SessionRuntimeEvent
 import io.github.whywood.superpi.sdk.agent.AgentEvent
 import io.github.whywood.superpi.sdk.agent.asLlmMessage
 import io.github.whywood.superpi.sdk.ai.AssistantMessage
@@ -28,6 +32,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -568,6 +573,282 @@ class RemoteSessionHandleTest {
         assertEquals("Desktop Thread", mirror.name())
         assertEquals(2, mirror.messages().size)
         mirror.close()
+    }
+
+    @Test
+    fun attachesToBusyRemoteTurnRoutesQuestionsToQuestionCenterAndCancelsOnResolved() = runTest {
+        val transport = FakeRemoteTransport()
+        val questionCenter = io.github.whywood.superpi.runtime.QuestionCenter(persistScope = backgroundScope)
+        val mirror = RemoteMirrorSession.create(cwd, agentDir)
+        mirror.appendRemoteMapping("device-1", "pi", "peer-busy-1", historySeq = 2L)
+        mirror.appendUserMessage("Ask me", emptyList())
+        val mirrorPath = mirror.sessionFile!!
+        mirror.close()
+
+        val passiveEvents = mutableListOf<SessionRuntimeEvent>()
+        val engine = RemoteSessionEngine(
+            cwd,
+            agentDir,
+            target(transport),
+            transport,
+            backgroundScope,
+            questionCenter,
+            onPassiveRuntimeEvent = { passiveEvents += it },
+        )
+        val handle = engine.create(mirrorPath, ModelConfig())
+        runCurrent()
+        val resumeCall = transport.calls.single()
+        assertEquals("bot.resume", resumeCall.method)
+        assertEquals(2L, resumeCall.params.getValue("afterSeq").jsonPrimitive.content.toLong())
+
+        transport.emit(
+            resumeCall.routeId,
+            2,
+            buildJsonObject { put("type", "message_update"); put("assistantMessageEvent", buildJsonObject { put("type", "text_delta"); put("delta", "stale") }) },
+        )
+        transport.emit(
+            resumeCall.routeId,
+            3,
+            buildJsonObject {
+                put("type", "approval_request")
+                put("approvalId", "ask:c1")
+                put("kind", "question")
+                put("toolCallId", "c1")
+                put("summary", "Pick one")
+                put(
+                    "questions",
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("id", "q1")
+                                put("question", "Pick one")
+                                put(
+                                    "options",
+                                    kotlinx.serialization.json.buildJsonArray {
+                                        add(buildJsonObject { put("label", "Option A") })
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            },
+        )
+        runCurrent()
+        assertEquals(1, questionCenter.pending.value.size)
+        val pendingId = questionCenter.pending.value.single().requestId
+
+        questionCenter.answer(
+            pendingId,
+            listOf(io.github.whywood.superpi.runtime.QuestionAnswer(questionId = "q1", selected = listOf("Option A"))),
+        )
+        runCurrent()
+
+        val approvalCall = transport.calls.last()
+        assertEquals("bot.approval", approvalCall.method)
+        assertEquals("ask:c1", approvalCall.params.getValue("approvalId").jsonPrimitive.content)
+
+        transport.emit(
+            resumeCall.routeId,
+            4,
+            buildJsonObject {
+                put("type", "approval_request")
+                put("approvalId", "ask:c2")
+                put("kind", "confirm")
+                put("title", "Continue?")
+                put("message", "Continue?")
+            },
+        )
+        runCurrent()
+        assertEquals(1, questionCenter.pending.value.size)
+
+        transport.emit(
+            resumeCall.routeId,
+            5,
+            buildJsonObject {
+                put("type", "approval_request")
+                put("approvalId", "ask:c2")
+                put("kind", "resolved")
+                put("summary", "resolved")
+                put("resolved", true)
+            },
+        )
+        runCurrent()
+        assertTrue(questionCenter.pending.value.isEmpty())
+
+        transport.emit(resumeCall.routeId, 6, FakeEvents.textDelta("Done"))
+        transport.emit(resumeCall.routeId, 7, FakeEvents.settled())
+        runCurrent()
+        assertFalse(handle.isBusy)
+        assertTrue(passiveEvents.any { it.event is BackgroundTurnStarted })
+        val deltas = passiveEvents.map { it.event }
+            .filterIsInstance<RuntimeEvent.TextDelta>()
+            .map { it.text }
+        assertEquals(listOf("Done"), deltas)
+        val finished = passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.RunFinished>().single()
+        assertEquals(RunStatus.DONE, finished.status)
+        assertEquals("Done", finished.text)
+    }
+
+    @Test
+    fun passiveWatchStreamsMultipleHostInitiatedLocalTurnsAndPreemptsOnLocalPrompt() = runTest {
+        val transport = FakeRemoteTransport()
+        val mirror = RemoteMirrorSession.create(cwd, agentDir)
+        mirror.appendRemoteMapping("device-1", "pi", "peer-idle-1")
+        mirror.appendUserMessage("Initial", emptyList())
+        val mirrorPath = mirror.sessionFile!!
+        mirror.close()
+
+        val passiveEvents = mutableListOf<SessionRuntimeEvent>()
+        val engine = RemoteSessionEngine(
+            cwd,
+            agentDir,
+            target(transport),
+            transport,
+            backgroundScope,
+            onPassiveRuntimeEvent = { passiveEvents += it },
+        )
+        val handle = engine.create(mirrorPath, ModelConfig())
+        runCurrent()
+
+        val watchCall = transport.calls.single()
+        assertEquals("bot.resume", watchCall.method)
+        assertEquals("peer-idle-1", watchCall.params.getValue("sessionId").jsonPrimitive.content)
+        assertEquals(true, watchCall.params.getValue("tail").jsonPrimitive.boolean)
+        assertNull(watchCall.params["afterSeq"])
+
+        transport.emit(
+            watchCall.routeId,
+            0,
+            buildJsonObject {
+                put("type", "agent_start")
+                put("sessionId", "peer-idle-1")
+                put("userMessage", buildJsonObject { put("text", "desktop turn 1") })
+            },
+        )
+        transport.emit(watchCall.routeId, 1, FakeEvents.textDelta("reply 1"))
+        transport.emit(watchCall.routeId, 2, FakeEvents.agentEnd("done"))
+        transport.emit(watchCall.routeId, 3, FakeEvents.settled())
+        runCurrent()
+
+        val turn1Started = passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.RunStarted>().single()
+        assertEquals("desktop turn 1", turn1Started.prompt)
+        assertEquals(
+            listOf("reply 1"),
+            passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.TextDelta>().map { it.text },
+        )
+        assertEquals(1, passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.RunFinished>().size)
+
+        transport.emit(
+            watchCall.routeId,
+            4,
+            buildJsonObject {
+                put("type", "agent_start")
+                put("sessionId", "peer-idle-1")
+                put("userMessage", buildJsonObject { put("text", "desktop turn 2") })
+            },
+        )
+        transport.emit(watchCall.routeId, 5, FakeEvents.textDelta("reply 2"))
+        transport.emit(watchCall.routeId, 6, FakeEvents.agentEnd("done"))
+        transport.emit(watchCall.routeId, 7, FakeEvents.settled())
+        runCurrent()
+
+        assertEquals(1, transport.calls.count { it.method == "bot.resume" })
+        val starts = passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.RunStarted>()
+        assertEquals(listOf("desktop turn 1", "desktop turn 2"), starts.map { it.prompt })
+        assertEquals(
+            listOf("reply 1", "reply 2"),
+            passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.TextDelta>().map { it.text },
+        )
+        assertEquals(2, passiveEvents.map { it.event }.filterIsInstance<RuntimeEvent.RunFinished>().size)
+
+        val localTurn = launch { handle.prompt("phone turn 3") }
+        runCurrent()
+        val promptCall = transport.calls.last()
+        assertEquals("bot.prompt", promptCall.method)
+        assertEquals("peer-idle-1", promptCall.params.getValue("sessionId").jsonPrimitive.content)
+        assertEquals("phone turn 3", promptCall.params.getValue("text").jsonPrimitive.content)
+
+        transport.emit(promptCall.routeId, 8, FakeEvents.agentStart())
+        transport.emit(promptCall.routeId, 9, FakeEvents.textDelta("reply 3"))
+        transport.emit(promptCall.routeId, 10, FakeEvents.settled())
+        runCurrent()
+        assertTrue(localTurn.isCompleted)
+
+        val resumedAfterPrompt = transport.calls.last()
+        assertEquals("bot.resume", resumedAfterPrompt.method)
+        assertEquals(10L, resumedAfterPrompt.params.getValue("afterSeq").jsonPrimitive.content.toLong())
+    }
+
+    @Test
+    fun retriesCompactsAndTracksRemoteUsage() = runTest {
+        val transport = FakeRemoteTransport()
+        transport.result = { call ->
+            when (call.method) {
+                "bot.prompt" -> buildJsonObject { put("sessionId", FakeRemoteTransport.PEER_SESSION_ID) }
+                "bot.state" -> buildJsonObject {
+                    put("sessionId", FakeRemoteTransport.PEER_SESSION_ID)
+                    put("busy", false)
+                    put(
+                        "usage",
+                        buildJsonObject {
+                            put("contextTokens", 500L)
+                            put("contextWindow", 100_000L)
+                            put("inputTokens", 350L)
+                            put("outputTokens", 150L)
+                            put("cacheReadTokens", 0L)
+                            put("cacheWriteTokens", 0L)
+                            put("cost", 0.03)
+                        },
+                    )
+                }
+                "session.compact" -> buildJsonObject {
+                    put("sessionId", FakeRemoteTransport.PEER_SESSION_ID)
+                    put("compacted", true)
+                    put("tokensBefore", 900L)
+                    put("tokensAfter", 300L)
+                    put(
+                        "usage",
+                        buildJsonObject {
+                            put("contextTokens", 500L)
+                            put("contextWindow", 100_000L)
+                            put("inputTokens", 350L)
+                            put("outputTokens", 150L)
+                            put("cacheReadTokens", 0L)
+                            put("cacheWriteTokens", 0L)
+                            put("cost", 0.03)
+                        },
+                    )
+                }
+                "session.retry" -> buildJsonObject {
+                    put("sessionId", FakeRemoteTransport.PEER_SESSION_ID)
+                    put("retried", true)
+                }
+                else -> buildJsonObject {}
+            }
+        }
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+
+        assertFalse(handle.canRetryLastAssistant())
+        finishPrompt(this, transport, handle, "explain this", "partial")
+        runCurrent()
+
+        assertTrue(handle.canRetryLastAssistant())
+
+        val retryJob = launch { handle.retryLastAssistant() }
+        runCurrent()
+        val retryCall = transport.calls.last { it.method == "session.retry" }
+        assertEquals(FakeRemoteTransport.PEER_SESSION_ID, retryCall.params.getValue("sessionId").jsonPrimitive.content)
+        transport.emit(retryCall.routeId, 2, FakeEvents.textDelta("complete"))
+        transport.emit(retryCall.routeId, 3, FakeEvents.settled())
+        runCurrent()
+        assertTrue(retryJob.isCompleted)
+
+        val compacted = handle.compact()
+        assertEquals(900L, compacted?.tokensBefore)
+        assertEquals(300L, compacted?.estimatedTokensAfter)
+        assertEquals(500L, handle.usage()?.contextTokens)
     }
 
     private fun engine(transport: FakeRemoteTransport, scope: CoroutineScope): RemoteSessionEngine =

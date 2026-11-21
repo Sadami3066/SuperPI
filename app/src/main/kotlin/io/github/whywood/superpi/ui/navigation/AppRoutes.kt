@@ -20,6 +20,7 @@ import io.github.whywood.superpi.ui.navigation.routes.CustomProviderEditorRoute
 import io.github.whywood.superpi.ui.navigation.routes.ProviderDetailRoute
 import io.github.whywood.superpi.ui.navigation.routes.ProvidersRoute
 import io.github.whywood.superpi.ui.navigation.routes.RelayRoute
+import io.github.whywood.superpi.ui.navigation.routes.RemoteFilesRoute
 import io.github.whywood.superpi.ui.navigation.routes.ScanSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.SearchRoute
 import io.github.whywood.superpi.ui.navigation.routes.SettingsRoute
@@ -72,6 +73,12 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
         is AppDestination.Files -> FilesRoute(
             rootPath = destination.rootPath,
             onOpenFile = host.onOpenFile,
+            onBack = onBack,
+        )
+
+        is AppDestination.RemoteFiles -> RemoteFilesRoute(
+            destination = destination,
+            dependencies = dependencies,
             onBack = onBack,
         )
 

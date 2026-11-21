@@ -175,6 +175,27 @@ class AppGraph(context: Context) : AppDependencies {
             host = host,
             memorySync = dataGraph.relayMemorySync,
             appVersion = BuildConfig.VERSION_NAME,
+            questionCenter = dataGraph.questionCenter,
+            avatarStorageDir = File(appContext.filesDir, "bot-avatars"),
+            providerCatalog = { dataGraph.providerCatalog },
+            configuredProviderIds = ::configuredProviderIds,
+            agentDocStore = { dataGraph.agentDocStore },
+            slashCommands = { cwd ->
+                val resolvedCwd = cwd.ifBlank { dataGraph.workspacesDir.absolutePath }
+                val skills = runCatching { dataGraph.skillCatalog.list(resolvedCwd) }.getOrDefault(emptyList())
+                buildList {
+                    add(io.github.whywood.superpi.data.relay.RemoteCommandSpec("compact", "Compact conversation", "builtin"))
+                    for (skill in skills) {
+                        add(
+                            io.github.whywood.superpi.data.relay.RemoteCommandSpec(
+                                name = "skill:${skill.name}",
+                                description = skill.description,
+                                source = "skill",
+                            ),
+                        )
+                    }
+                }
+            },
         ).also { live ->
             scope.launch {
                 live.remoteBots.collect { bots -> remoteBots.value = bots }
@@ -209,7 +230,7 @@ class AppGraph(context: Context) : AppDependencies {
         io.github.whywood.superpi.data.relay.RelayAgentTransport(relayLive, scope)
     }
 
-    private val remoteTransport: io.github.whywood.superpi.remote.RemoteAgentTransport =
+    override val remoteTransport: io.github.whywood.superpi.remote.RemoteAgentTransport =
         object : io.github.whywood.superpi.remote.RemoteAgentTransport {
             override val remoteEvents
                 get() = relayTransport.remoteEvents
@@ -217,7 +238,39 @@ class AppGraph(context: Context) : AppDependencies {
             override val onlineDevices
                 get() = relayTransport.onlineDevices
 
+            override val syncEvents
+                get() = relayTransport.syncEvents
+
+            override val devices
+                get() = relayTransport.devices
+
+            override val isRelayOnline
+                get() = relayTransport.isRelayOnline
+
             override fun lastCallError() = relayTransport.lastCallError()
+
+            override fun supportsPeerCapability(deviceId: String, capability: String): Boolean =
+                relayTransport.supportsPeerCapability(deviceId, capability)
+
+            override fun emitSyncEvent(
+                kind: String,
+                botId: String,
+                sessionId: String?,
+                busy: Boolean?,
+                pendingApprovals: Int?,
+                provider: String?,
+                modelId: String?,
+                thinkingLevel: String?,
+            ) = relayTransport.emitSyncEvent(
+                kind = kind,
+                botId = botId,
+                sessionId = sessionId,
+                busy = busy,
+                pendingApprovals = pendingApprovals,
+                provider = provider,
+                modelId = modelId,
+                thinkingLevel = thinkingLevel,
+            )
 
             override suspend fun call(
                 to: String,
@@ -236,6 +289,18 @@ class AppGraph(context: Context) : AppDependencies {
                 onRouteId: (String) -> Unit,
             ) = relayTransport.callWithOutcome(to, method, params, timeoutMillis, onRouteId)
         }
+
+    override val remoteBotAdminClient: io.github.whywood.superpi.remote.RemoteBotAdminClient by lazy {
+        io.github.whywood.superpi.remote.RemoteBotAdminClient(remoteTransport)
+    }
+
+    override val remoteBotControlClient: io.github.whywood.superpi.remote.RemoteBotControlClient by lazy {
+        io.github.whywood.superpi.remote.RemoteBotControlClient(remoteTransport)
+    }
+
+    override val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient by lazy {
+        io.github.whywood.superpi.remote.RemoteFileClient(remoteTransport)
+    }
 
     private val updateInstaller: AndroidUpdateInstaller by lazy { AndroidUpdateInstaller(appContext) }
 

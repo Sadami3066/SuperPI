@@ -120,6 +120,8 @@ data class ChatComposerState(
     val modelsOpen: Boolean,
     val inputEnabled: Boolean = true,
     val modelControlsVisible: Boolean = true,
+    val manageProvidersVisible: Boolean = true,
+    val modelsLoading: Boolean = false,
     val blockedReason: String? = null,
 )
 
@@ -152,7 +154,13 @@ internal fun ChatComposer(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val value = state.value
-    val label = state.modelLabel.ifBlank { stringResource(R.string.assistant_model_unconfigured) }
+    val label = state.modelLabel.ifBlank {
+        if (state.modelsLoading) {
+            stringResource(R.string.assistant_loading)
+        } else {
+            stringResource(R.string.assistant_model_unconfigured)
+        }
+    }
     val placeholder = when {
         !state.configured -> stringResource(R.string.assistant_configure_input)
         else -> stringResource(R.string.assistant_hint)
@@ -356,7 +364,7 @@ internal fun ChatComposer(
                 }
             }
         }
-        if (state.providers.isEmpty() && state.modelControlsVisible) {
+        if (state.providers.isEmpty() && state.modelControlsVisible && state.manageProvidersVisible) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 Row(
                     modifier = Modifier
@@ -394,6 +402,8 @@ internal fun ChatComposer(
             onModelChange = actions.onModelChange,
             onThinkingLevelChange = actions.onThinkingLevelChange,
             onManageProviders = actions.onManageProviders,
+            manageProvidersVisible = state.manageProvidersVisible,
+            loading = state.modelsLoading,
         )
     }
 }

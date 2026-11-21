@@ -81,9 +81,9 @@ internal fun ConversationState.onToolStarted(event: RuntimeEvent.ToolStarted, no
                 val trace = (steps[index] as AssistantStep.Tool).trace
                 steps[index] = AssistantStep.Tool(
                     trace.copy(
-                        name = event.name,
-                        arguments = event.arguments,
-                        rawArguments = event.rawArguments,
+                        name = event.name.ifBlank { trace.name },
+                        arguments = event.arguments.ifEmpty { trace.arguments },
+                        rawArguments = event.rawArguments?.takeIf { it.isNotEmpty() } ?: trace.rawArguments,
                         startedAt = trace.startedAt.takeIf { it > 0 } ?: event.startedAt,
                     ),
                 )

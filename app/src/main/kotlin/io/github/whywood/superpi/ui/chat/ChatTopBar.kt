@@ -46,6 +46,8 @@ data class ChatTopBarState(
     val reloading: Boolean,
     val usage: SessionUsage?,
     val jobCount: Int,
+    val remoteFilesVisible: Boolean = false,
+    val reloadVisible: Boolean = true,
 )
 
 data class ChatTopBarActions(
@@ -196,7 +198,7 @@ internal fun ChatTopBar(
                             onDismissRequest = { menuOpen = false },
                             menuWidth = 148.dp,
                         ) {
-                            if (activeBot?.remote == null) {
+                            if (activeBot?.remote == null || state.remoteFilesVisible) {
                                 DdMenuItem(
                                     text = stringResource(R.string.files_menu),
                                     icon = DdIcons.Folder,
@@ -216,15 +218,17 @@ internal fun ChatTopBar(
                                 },
                                 testTag = "chat_export",
                             )
-                            DdMenuItem(
-                                text = stringResource(R.string.assistant_reload),
-                                icon = DdIcons.Refresh,
-                                onClick = {
-                                    menuOpen = false
-                                    actions.onReload()
-                                },
-                                testTag = "assistant_reload",
-                            )
+                            if (state.reloadVisible) {
+                                DdMenuItem(
+                                    text = stringResource(R.string.assistant_reload),
+                                    icon = DdIcons.Refresh,
+                                    onClick = {
+                                        menuOpen = false
+                                        actions.onReload()
+                                    },
+                                    testTag = "assistant_reload",
+                                )
+                            }
                         }
                     }
                 }
