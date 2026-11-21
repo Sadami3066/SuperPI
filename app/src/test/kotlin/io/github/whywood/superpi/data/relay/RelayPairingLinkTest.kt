@@ -41,6 +41,8 @@ class RelayPairingLinkTest {
         assertNull(RelayPairingLink.parse("   "))
         assertNull(RelayPairingLink.parse("ftp://relay.test"))
         assertNull(RelayPairingLink.parse("https://"))
+        assertNull(RelayPairingLink.parse("https://relay.test:0"))
+        assertNull(RelayPairingLink.parse("https://relay.test:70000"))
     }
 
     @Test

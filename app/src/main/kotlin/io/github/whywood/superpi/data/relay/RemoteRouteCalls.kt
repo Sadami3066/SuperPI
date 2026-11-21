@@ -15,13 +15,13 @@ data class RemoteCallError(
     val message: String,
 )
 
-internal sealed interface RemoteCallOutcome {
+sealed interface RemoteCallOutcome {
     data class Ok(val result: JsonObject?) : RemoteCallOutcome
 
     data class Failed(val error: RemoteCallError) : RemoteCallOutcome
 }
 
-internal object RemoteCallCodes {
+object RemoteCallCodes {
     const val NOT_CONNECTED = "not_connected"
     const val DISCONNECTED = "disconnected"
     const val TIMEOUT = "timeout"

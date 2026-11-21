@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
+import io.github.whywood.superpi.data.relay.RemoteSessionSummaryDto
 import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
@@ -90,6 +91,23 @@ import io.github.whywood.superpi.ui.sessions.RenameSessionDialog
 import io.github.whywood.superpi.ui.sessions.SessionAction
 import io.github.whywood.superpi.ui.sessions.SessionActionMenu
 
+sealed interface RemoteDrawerStatus {
+    data object Loading : RemoteDrawerStatus
+
+    data object Offline : RemoteDrawerStatus
+
+    data object RelayUpgradeRequired : RemoteDrawerStatus
+
+    data object PeerUpgradeRequired : RemoteDrawerStatus
+
+    data class Error(val message: String? = null) : RemoteDrawerStatus
+}
+
+data class RemoteDrawerState(
+    val sessions: List<RemoteSessionSummaryDto> = emptyList(),
+    val status: RemoteDrawerStatus? = null,
+)
+
 internal sealed interface DrawerEntry {
     val key: String
 
@@ -103,6 +121,21 @@ internal sealed interface DrawerEntry {
 
     data class WorkspaceEmpty(val workspaceId: String) : DrawerEntry {
         override val key: String = "workspace_empty_$workspaceId"
+    }
+
+    data class RemoteLoading(val workspaceId: String) : DrawerEntry {
+        override val key: String = "remote_loading_$workspaceId"
+    }
+
+    data class RemoteNotice(val workspace: RuntimeWorkspace, val status: RemoteDrawerStatus) : DrawerEntry {
+        override val key: String = "remote_notice_${workspace.id}"
+    }
+
+    data class RemoteSession(
+        val workspace: RuntimeWorkspace,
+        val session: RemoteSessionSummaryDto,
+    ) : DrawerEntry {
+        override val key: String = "remote_session_${workspace.id}_${session.id}"
     }
 
     data class Session(val conversation: ConversationSummary, val workspaceId: String) : DrawerEntry {
@@ -123,12 +156,73 @@ internal fun buildDrawerEntries(
     sessionsByCwd: Map<String, List<ConversationSummary>>,
     expandedWorkspaceIds: Set<String>,
     expandedSessionWorkspaceIds: Set<String>,
+    remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
+    relayOnline: Boolean = true,
     collapsedCount: Int = 5,
 ): List<DrawerEntry> = buildList {
     add(DrawerEntry.WorkspacesHeader)
     workspaces.forEachIndexed { index, workspace ->
         add(DrawerEntry.WorkspaceEntry(workspace, index == 0))
         if (workspace.id !in expandedWorkspaceIds) return@forEachIndexed
+        val remote = workspace.remote
+        if (remote != null) {
+            val remoteState = remoteDrawerStates[workspace.id]
+            val localFallback = sessionsByCwd[workspace.cwd].orEmpty()
+                .filterNot { it.archived }
+                .sortedWith(
+                    compareByDescending<ConversationSummary> { it.pinned }
+                        .thenByDescending { it.updatedAt },
+                )
+            if (remote.online) {
+                val remoteSessions = remoteState?.sessions.orEmpty().distinctBy { it.id }
+                if (remoteSessions.isNotEmpty()) {
+                    if (remoteSessions.size <= collapsedCount) {
+                        remoteSessions.forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
+                    } else if (workspace.id in expandedSessionWorkspaceIds) {
+                        remoteSessions.forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
+                        add(DrawerEntry.SessionLess(workspace.id))
+                    } else {
+                        remoteSessions.take(collapsedCount).forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
+                        add(DrawerEntry.SessionMore(workspace.id, remoteSessions.size - collapsedCount))
+                    }
+                    return@forEachIndexed
+                }
+                when (val status = remoteState?.status) {
+                    null -> if (remoteState == null) {
+                        if (relayOnline) {
+                            add(DrawerEntry.RemoteLoading(workspace.id))
+                        } else {
+                            add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
+                        }
+                    } else {
+                        add(DrawerEntry.WorkspaceEmpty(workspace.id))
+                    }
+
+                    RemoteDrawerStatus.Loading -> if (relayOnline) {
+                        add(DrawerEntry.RemoteLoading(workspace.id))
+                    } else {
+                        add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
+                    }
+
+                    else -> add(DrawerEntry.RemoteNotice(workspace, status))
+                }
+                return@forEachIndexed
+            }
+            if (localFallback.isNotEmpty()) {
+                if (localFallback.size <= collapsedCount) {
+                    localFallback.forEach { add(DrawerEntry.Session(it, workspace.id)) }
+                } else if (workspace.id in expandedSessionWorkspaceIds) {
+                    localFallback.forEach { add(DrawerEntry.Session(it, workspace.id)) }
+                    add(DrawerEntry.SessionLess(workspace.id))
+                } else {
+                    localFallback.take(collapsedCount).forEach { add(DrawerEntry.Session(it, workspace.id)) }
+                    add(DrawerEntry.SessionMore(workspace.id, localFallback.size - collapsedCount))
+                }
+            } else {
+                add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
+            }
+            return@forEachIndexed
+        }
         val workspaceSessions = sessionsByCwd[workspace.cwd].orEmpty()
             .filterNot { it.archived }
             .sortedWith(
@@ -188,6 +282,10 @@ fun SuperPIDrawer(
     onDelete: (String) -> Unit,
     onSettings: () -> Unit,
     hasUpdate: Boolean = false,
+    remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
+    relayOnline: Boolean = true,
+    onOpenRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
+    onRetryRemoteSessions: (RuntimeWorkspace) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
@@ -214,13 +312,18 @@ fun SuperPIDrawer(
     val entries = remember(
         orderedWorkspaces,
         sessionsByCwd,
-        expandedWorkspaceIds to expandedSessionWorkspaceIds,
+        expandedWorkspaceIds,
+        expandedSessionWorkspaceIds,
+        remoteDrawerStates,
+        relayOnline,
     ) {
         buildDrawerEntries(
             workspaces = orderedWorkspaces,
             sessionsByCwd = sessionsByCwd,
             expandedWorkspaceIds = expandedWorkspaceIds,
             expandedSessionWorkspaceIds = expandedSessionWorkspaceIds,
+            remoteDrawerStates = remoteDrawerStates,
+            relayOnline = relayOnline,
         )
     }
     Column(
@@ -377,6 +480,23 @@ fun SuperPIDrawer(
                     )
 
                     is DrawerEntry.WorkspaceEmpty -> DrawerWorkspaceEmptyRow(
+                        modifier = Modifier.animateItem(),
+                    )
+
+                    is DrawerEntry.RemoteLoading -> DrawerRemoteLoadingRow(
+                        modifier = Modifier.animateItem(),
+                    )
+
+                    is DrawerEntry.RemoteNotice -> DrawerRemoteNoticeRow(
+                        status = entry.status,
+                        onRetry = { onRetryRemoteSessions(entry.workspace) },
+                        modifier = Modifier.animateItem(),
+                    )
+
+                    is DrawerEntry.RemoteSession -> DrawerRemoteSessionRow(
+                        session = entry.session,
+                        onClick = { onOpenRemoteSession(entry.workspace, entry.session) },
+                        testTag = "drawer_remote_session_${entry.workspace.id}_${entry.session.id}",
                         modifier = Modifier.animateItem(),
                     )
 
@@ -728,6 +848,128 @@ private fun DrawerWorkspaceEmptyRow(modifier: Modifier = Modifier) {
         color = colors.inkTertiary,
         maxLines = 1,
     )
+}
+
+@Composable
+private fun DrawerRemoteLoadingRow(modifier: Modifier = Modifier) {
+    val colors = superPiColors()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 34.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DdSpinner(
+            color = colors.inkTertiary,
+            size = 13.dp,
+            strokeWidth = 1.5.dp,
+        )
+        Text(
+            text = stringResource(R.string.drawer_remote_loading),
+            style = DdType.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp),
+            color = colors.inkTertiary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun DrawerRemoteNoticeRow(
+    status: RemoteDrawerStatus,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    val text = when (status) {
+        RemoteDrawerStatus.Loading -> stringResource(R.string.drawer_remote_loading)
+        RemoteDrawerStatus.Offline -> stringResource(R.string.drawer_remote_device_offline)
+        RemoteDrawerStatus.RelayUpgradeRequired -> stringResource(R.string.drawer_remote_relay_upgrade)
+        RemoteDrawerStatus.PeerUpgradeRequired -> stringResource(R.string.drawer_remote_peer_upgrade)
+        is RemoteDrawerStatus.Error -> status.message?.takeIf { it.isNotBlank() }
+            ?: stringResource(R.string.drawer_remote_load_failed)
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .padding(start = 34.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            style = DdType.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 17.sp),
+            color = colors.inkTertiary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (status is RemoteDrawerStatus.Error) {
+            DdPressable(
+                onClick = onRetry,
+                modifier = Modifier.heightIn(min = 44.dp),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.drawer_remote_retry),
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    style = DdType.label.copy(fontSize = 12.5.sp),
+                    color = colors.accent,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrawerRemoteSessionRow(
+    session: RemoteSessionSummaryDto,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    val relativeTime = remember(session.updatedAt) { session.updatedAt }.let { updatedAt ->
+        if (updatedAt > 0L) rememberRelativeTime(updatedAt) else ""
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .clip(DdShapes.Medium)
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+            .padding(start = 34.dp, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val displayTitle = session.title.trim().let { title ->
+            if (title.isEmpty() || title == "Untitled") {
+                stringResource(R.string.drawer_new_chat)
+            } else {
+                title
+            }
+        }
+        Text(
+            text = displayTitle,
+            modifier = Modifier.weight(1f),
+            style = DdType.bodySmall.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
+            color = colors.inkSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (relativeTime.isNotEmpty()) {
+            Spacer(Modifier.width(DdSpacing.Sm))
+            Text(
+                text = relativeTime,
+                style = DdType.bodySmall.copy(fontSize = 10.5.sp),
+                color = colors.inkTertiary,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 @Composable

@@ -75,6 +75,9 @@ interface RuntimeDependencies {
 interface StorageDependencies {
     val homeDir: File
 
+    val agentDir: File
+        get() = File(homeDir.parentFile ?: homeDir, "agent")
+
     val attachmentStore: AttachmentStore
 
     val hostFiles: HostFiles

@@ -5,6 +5,7 @@ import io.github.whywood.superpi.runtime.RunStatus
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
@@ -111,15 +112,75 @@ class RelayFramesTest {
 
         val parsed = RelayFrames.parse(
             """
-            {"type":"hello_ok","accountId":"acct","memoryVersion":1,"devices":[
-              {"deviceId":"dev-1","name":"Phone","platform":"android","online":true,"lastSeen":5,
+            {"type":"hello_ok","accountId":"acct","memoryVersion":1,"capabilities":["remote-bot","bot-sessions"],"devices":[
+              {"deviceId":"dev-1","name":"Phone","platform":"android","online":true,"lastSeen":5,"capabilities":["remote-bot","bot-sessions"],
                "bots":[{"id":"bot-a","name":"Bot A","avatar":"$dataUrl"},{"id":"bot-b","name":"Bot B","avatar":""}]}
             ]}
             """.trimIndent(),
         ) as RelayServerFrame.HelloOk
+        assertEquals(listOf("remote-bot", "bot-sessions"), parsed.capabilities)
+        assertEquals(listOf("remote-bot", "bot-sessions"), parsed.devices.single().capabilities)
         val bots = parsed.devices.single().bots
         assertEquals(dataUrl, bots[0].avatar)
         assertEquals(null, bots[1].avatar)
+    }
+
+    @Test
+    fun encodesCapabilitiesAndParsesSessionHistoryAndImages() {
+        val hello = RelayFrames.hello(
+            deviceId = "dev-1",
+            platform = "android",
+            appVersion = "2.0.1",
+            bots = emptyList(),
+        )
+        val caps = hello.getValue("capabilities").jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(RELAY_CAPABILITIES, caps)
+
+        val sessions = RelayFrames.parseRemoteSessions(
+            buildJsonObject {
+                put(
+                    "sessions",
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("id", "s-1")
+                                put("title", "Remote Chat")
+                                put("updatedAt", 123L)
+                                put("messageCount", 4)
+                            },
+                        )
+                    },
+                )
+            },
+        )
+        assertEquals(1, sessions.size)
+        assertEquals("Remote Chat", sessions.single().title)
+        assertEquals(4, sessions.single().messageCount)
+
+        val history = RelayFrames.parseRemoteHistory(
+            buildJsonObject {
+                put("sessionId", "s-1")
+                put("title", "Remote Chat")
+                put("busy", true)
+                put("seq", 9L)
+                put("messages", kotlinx.serialization.json.buildJsonArray {})
+            },
+        )
+        assertEquals(9L, history?.seq)
+        assertEquals(true, history?.busy)
+
+        val images = RelayFrames.parseImages(
+            buildJsonObject {
+                put(
+                    "images",
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(buildJsonObject { put("data", "YWJj"); put("mimeType", "image/png") })
+                        add(buildJsonObject { put("data", "eHl6"); put("mimeType", "image/svg+xml") })
+                    },
+                )
+            },
+        )
+        assertEquals(listOf(RouteImagePart("YWJj", "image/png")), images)
     }
 }
 

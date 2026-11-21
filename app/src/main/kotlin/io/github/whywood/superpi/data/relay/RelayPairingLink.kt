@@ -19,7 +19,9 @@ object RelayPairingLink {
         val scheme = uri.scheme?.lowercase() ?: return null
         if (scheme != "http" && scheme != "https") return null
         val host = uri.host ?: return null
-        val origin = if (uri.port >= 0) "$scheme://$host:${uri.port}" else "$scheme://$host"
+        val port = uri.port
+        if (port != -1 && port !in 1..65535) return null
+        val origin = if (port > 0) "$scheme://$host:$port" else "$scheme://$host"
         val params = parseParams(uri.rawFragment) + parseParams(uri.rawQuery)
         val pairCode = params["code"]?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
         return RelayPairingInfo(

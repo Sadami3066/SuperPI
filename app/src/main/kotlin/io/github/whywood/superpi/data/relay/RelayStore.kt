@@ -8,6 +8,7 @@ import io.github.whywood.superpi.runtime.EncryptedSecretStore
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -26,12 +27,14 @@ class RelayStore(context: Context) : RelayAccountStore {
         .catch { error ->
             if (error is IOException) emit(null) else throw error
         }
+        .distinctUntilChanged()
 
     val allowRemote: Flow<Boolean> = store.data
         .map { values -> values[allowRemoteKey] == "true" }
         .catch { error ->
             if (error is IOException) emit(false) else throw error
         }
+        .distinctUntilChanged()
 
     override suspend fun read(): RelayAccount? = account.first()
 
@@ -67,6 +70,7 @@ class RelayStore(context: Context) : RelayAccountStore {
         secrets.save(TOKEN_PREFIX, TOKEN_ID, null)
         store.edit { values ->
             values.remove(accountKey)
+            values.remove(devicesKey)
         }
     }
 

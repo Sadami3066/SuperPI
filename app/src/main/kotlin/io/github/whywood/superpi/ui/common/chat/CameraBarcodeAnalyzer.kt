@@ -24,40 +24,48 @@ internal class CameraBarcodeAnalyzer(
             .build(),
     )
     private val busy = AtomicBoolean(false)
+    @Volatile
+    private var closed = false
     private var lastScanAt = 0L
 
     @ExperimentalGetImage
     override fun analyze(image: ImageProxy) {
         val now = SystemClock.elapsedRealtime()
         val media = image.image
-        if (busy.get() || media == null || now - lastScanAt < SCAN_INTERVAL_MS) {
+        if (closed || media == null || now - lastScanAt < SCAN_INTERVAL_MS || !busy.compareAndSet(false, true)) {
             image.close()
             return
         }
-        busy.set(true)
         lastScanAt = now
-        val input = InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees)
-        scanner.process(input)
-            .addOnSuccessListener { barcodes ->
-                val codes = barcodes
-                    .mapNotNull { barcode ->
-                        val value = barcode.rawValue?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                        val box = barcode.boundingBox
-                        DetectedCode(value, if (box == null) 0L else box.width().toLong() * box.height())
-                    }
-                    .groupBy { it.raw }
-                    .map { (_, same) -> same.maxBy { it.area } }
-                    .sortedByDescending { it.area }
-                onCodes(codes)
-            }
-            .addOnCompleteListener {
-                busy.set(false)
-                image.close()
-            }
+        try {
+            val input = InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees)
+            scanner.process(input)
+                .addOnSuccessListener { barcodes ->
+                    if (closed) return@addOnSuccessListener
+                    val codes = barcodes
+                        .mapNotNull { barcode ->
+                            val value = barcode.rawValue?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                            val box = barcode.boundingBox
+                            DetectedCode(value, if (box == null) 0L else box.width().toLong() * box.height())
+                        }
+                        .groupBy { it.raw }
+                        .map { (_, same) -> same.maxBy { it.area } }
+                        .sortedByDescending { it.area }
+                    onCodes(codes)
+                }
+                .addOnCompleteListener {
+                    busy.set(false)
+                    image.close()
+                }
+        } catch (_: Exception) {
+            busy.set(false)
+            image.close()
+        }
     }
 
     fun close() {
-        scanner.close()
+        closed = true
+        runCatching { scanner.close() }
     }
 
     private companion object {

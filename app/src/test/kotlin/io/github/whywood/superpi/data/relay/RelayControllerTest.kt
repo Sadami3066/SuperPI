@@ -182,6 +182,25 @@ class RelayControllerTest {
         assertEquals(true, store.cleared)
     }
 
+    @Test
+    fun clearsLocalStateOnSignOutEvenWhenRevokeFailsAndResetsSigningInOnUnexpectedError() = runTest {
+        val store = FakeStore(account("tok-1"), initialToken = "tok-1")
+        val enroller = FakeEnroller(caPem = "PEM", fingerprint = "ab".repeat(32))
+        val controller = controller(store, enroller)
+        enroller.failure = IOException("offline")
+
+        controller.signOut()
+        testScheduler.advanceUntilIdle()
+        assertTrue(store.cleared)
+        assertNull(controller.state.value.account)
+
+        enroller.failure = IllegalStateException("unexpected boom")
+        controller.signIn(link, loginSecret = null, deviceName = "Pixel")
+        testScheduler.advanceUntilIdle()
+        assertEquals(false, controller.state.value.signingIn)
+        assertEquals(RelayError.BadResponse, controller.state.value.error)
+    }
+
     private class FakeStore(initial: RelayAccount? = null, initialToken: String? = null) : RelayAccountStore {
         private val values = MutableStateFlow(initial)
         var savedToken: String? = initialToken

@@ -1,6 +1,10 @@
 package io.github.whywood.superpi.remote
 
+import io.github.whywood.superpi.data.relay.RelayFrames
+import io.github.whywood.superpi.data.relay.RemoteCallError
+import io.github.whywood.superpi.data.relay.RemoteCallOutcome
 import io.github.whywood.superpi.data.relay.RemoteEvent
+import io.github.whywood.superpi.data.relay.RouteImagePart
 import io.github.whywood.superpi.runtime.AssistantMessage as HistoryAssistantMessage
 import io.github.whywood.superpi.runtime.CapabilitySnapshot
 import io.github.whywood.superpi.runtime.HistoryMapper
@@ -15,6 +19,9 @@ import io.github.whywood.superpi.sdk.agent.StandardAgentMessage
 import io.github.whywood.superpi.sdk.agent.asAgentMessage
 import io.github.whywood.superpi.sdk.agent.asLlmMessage
 import io.github.whywood.superpi.sdk.ai.AssistantMessage as PiAssistantMessage
+import io.github.whywood.superpi.sdk.ai.BlockContent
+import io.github.whywood.superpi.sdk.ai.Content
+import io.github.whywood.superpi.sdk.ai.ImageContent
 import io.github.whywood.superpi.sdk.ai.Model
 import io.github.whywood.superpi.sdk.ai.ModelCost
 import io.github.whywood.superpi.sdk.ai.ModelInputModality
@@ -87,10 +94,11 @@ class RemoteSessionHandle internal constructor(
 
     override suspend fun prompt(text: String, images: List<ImagePart>?, behavior: QueueBehavior?) {
         if (closed) return
+        val safeImages = images.orEmpty().filter { it.data.isNotBlank() && it.mimeType.isNotBlank() }
         when (behavior) {
-            QueueBehavior.Steer -> queueInput(BOT_STEER, text)
-            QueueBehavior.FollowUp -> queueInput(BOT_FOLLOW_UP, text)
-            null -> runPrompt(text)
+            QueueBehavior.Steer -> queueInput(BOT_STEER, text, safeImages)
+            QueueBehavior.FollowUp -> queueInput(BOT_FOLLOW_UP, text, safeImages)
+            null -> runPrompt(text, safeImages)
         }
     }
 
@@ -179,7 +187,7 @@ class RemoteSessionHandle internal constructor(
 
     override fun deferredMcpToolCount(): Int = 0
 
-    private suspend fun runPrompt(text: String) {
+    private suspend fun runPrompt(text: String, images: List<ImagePart>) {
         if (!target.isOnline()) {
             emit(SessionEvent.SessionError(offlineMessage()))
             return
@@ -187,7 +195,7 @@ class RemoteSessionHandle internal constructor(
         val turn = RemoteTurn(target.botName)
         activeTurn = turn
         try {
-            mirror.appendUserMessage(text)
+            mirror.appendUserMessage(text, images)
             coroutineScope {
                 val eventCollector: Job = launch(start = CoroutineStart.UNDISPATCHED) {
                     transport.remoteEvents.collect { event -> onRemoteEvent(turn, event) }
@@ -196,7 +204,7 @@ class RemoteSessionHandle internal constructor(
                     transport.onlineDevices.collect { devices -> onDevicesChanged(this, turn, devices) }
                 }
                 try {
-                    deliverPrompt(turn, text)
+                    deliverPrompt(turn, text, images)
                     if (turn.failure == null && turn.aborted) {
                         peerSessionId?.let { sessionId -> abortRemote(sessionId) }
                     } else if (turn.failure == null) {
@@ -215,30 +223,45 @@ class RemoteSessionHandle internal constructor(
         }
     }
 
-    private suspend fun deliverPrompt(turn: RemoteTurn, text: String) {
+    private suspend fun deliverPrompt(turn: RemoteTurn, text: String, images: List<ImagePart>) {
         val sessionId = peerSessionId
-        val result = callPrompt(turn, text, sessionId)
-        if (result != null) {
-            rememberPeerSession(result)
-            if (peerSessionId == null) turn.failure = NO_SESSION_MESSAGE
-            return
-        }
-        if (sessionId != null && isSessionNotFound()) {
-            clearPeerSession()
-            val retried = callPrompt(turn, text, null)
-            if (retried != null) {
-                rememberPeerSession(retried)
+        when (val outcome = callPrompt(turn, text, images, sessionId)) {
+            is RemoteCallOutcome.Ok -> {
+                rememberPeerSession(outcome.result)
                 if (peerSessionId == null) turn.failure = NO_SESSION_MESSAGE
                 return
             }
+
+            is RemoteCallOutcome.Failed -> {
+                if (sessionId != null && outcome.error.code == SESSION_NOT_FOUND) {
+                    clearPeerSession()
+                    when (val retryOutcome = callPrompt(turn, text, images, null)) {
+                        is RemoteCallOutcome.Ok -> {
+                            rememberPeerSession(retryOutcome.result)
+                            if (peerSessionId == null) turn.failure = NO_SESSION_MESSAGE
+                            return
+                        }
+
+                        is RemoteCallOutcome.Failed -> {
+                            turn.failure = outcomeMessage(retryOutcome.error)
+                            return
+                        }
+                    }
+                }
+                turn.failure = outcomeMessage(outcome.error)
+            }
         }
-        turn.failure = NO_ANSWER_MESSAGE
     }
 
-    private suspend fun callPrompt(turn: RemoteTurn, text: String, sessionId: String?): JsonObject? = transport.call(
+    private suspend fun callPrompt(
+        turn: RemoteTurn,
+        text: String,
+        images: List<ImagePart>,
+        sessionId: String?,
+    ): RemoteCallOutcome = transport.callWithOutcome(
         to = target.deviceId,
         method = BOT_PROMPT,
-        params = promptParams(text, sessionId),
+        params = promptParams(text, images, sessionId),
         onRouteId = { route -> turn.setRoute(route) },
     )
 
@@ -267,7 +290,7 @@ class RemoteSessionHandle internal constructor(
 
     private suspend fun resumeTurn(turn: RemoteTurn, sessionId: String) {
         if (turn.settled.isCompleted || turn.aborted) return
-        val result = transport.call(
+        val outcome = transport.callWithOutcome(
             to = target.deviceId,
             method = BOT_RESUME,
             params = buildJsonObject {
@@ -278,20 +301,23 @@ class RemoteSessionHandle internal constructor(
             onRouteId = { route -> turn.switchRoute(route) },
         )
         if (turn.settled.isCompleted || turn.aborted) return
-        if (result == null) {
-            if (isSessionNotFound()) clearPeerSession()
-            turn.connectionLost = true
-            turn.settled.complete(Unit)
-            return
+        val result = when (outcome) {
+            is RemoteCallOutcome.Ok -> outcome.result
+            is RemoteCallOutcome.Failed -> {
+                if (outcome.error.code == SESSION_NOT_FOUND) clearPeerSession()
+                turn.connectionLost = true
+                turn.settled.complete(Unit)
+                return
+            }
         }
-        val busy = (result["busy"] as? JsonPrimitive)?.booleanOrNull
+        val busy = (result?.get("busy") as? JsonPrimitive)?.booleanOrNull
         if (busy == false && !turn.settled.isCompleted) {
             withTimeoutOrNull(RESUME_IDLE_DRAIN_MILLIS) { turn.settled.await() }
             if (!turn.settled.isCompleted) turn.settled.complete(Unit)
         }
     }
 
-    private suspend fun queueInput(method: String, text: String) {
+    private suspend fun queueInput(method: String, text: String, images: List<ImagePart>) {
         if (!target.isOnline()) {
             emit(SessionEvent.SessionError(offlineMessage()))
             return
@@ -301,17 +327,23 @@ class RemoteSessionHandle internal constructor(
             emit(SessionEvent.SessionError(NO_SESSION_MESSAGE))
             return
         }
-        val result = transport.call(
+        val outcome = transport.callWithOutcome(
             to = target.deviceId,
             method = method,
             params = buildJsonObject {
                 put("botId", target.botId)
                 put("sessionId", sessionId)
                 put("text", text)
+                if (images.isNotEmpty()) {
+                    put(
+                        "images",
+                        RelayFrames.imagesArray(images.map { RouteImagePart(it.data, it.mimeType) }),
+                    )
+                }
             },
         )
-        if (result == null) {
-            if (isSessionNotFound()) {
+        if (outcome is RemoteCallOutcome.Failed) {
+            if (outcome.error.code == SESSION_NOT_FOUND) {
                 clearPeerSession()
                 val turn = activeTurn
                 if (turn != null) {
@@ -322,20 +354,31 @@ class RemoteSessionHandle internal constructor(
                 }
                 return
             }
-            emit(SessionEvent.SessionError(NO_ANSWER_MESSAGE))
+            emit(SessionEvent.SessionError(outcomeMessage(outcome.error)))
             return
         }
         val turn = activeTurn
         if (turn != null) {
-            turn.queuedTexts.add(text)
-            emitAgent(AgentEvent.MessageStart(userAgentMessage(text)))
+            turn.queuedMessages.add(QueuedUserMessage(text, images))
+            emitAgent(AgentEvent.MessageStart(userAgentMessage(text, images)))
         } else {
-            mirror.appendUserMessage(text)
+            mirror.appendUserMessage(text, images)
         }
     }
 
-    private fun userAgentMessage(text: String): AgentMessage =
-        StandardAgentMessage(UserMessage(content = PlainTextContent(text), timestamp = System.currentTimeMillis()))
+    private fun userAgentMessage(text: String, images: List<ImagePart>): AgentMessage {
+        val content = if (images.isEmpty()) {
+            PlainTextContent(text)
+        } else {
+            BlockContent(
+                buildList<Content> {
+                    if (text.isNotEmpty()) add(TextContent(text))
+                    images.forEach { image -> add(ImageContent(image.data, image.mimeType)) }
+                },
+            )
+        }
+        return StandardAgentMessage(UserMessage(content = content, timestamp = System.currentTimeMillis()))
+    }
 
     private suspend fun onRemoteEvent(turn: RemoteTurn, event: RemoteEvent) {
         val route = turn.routeId ?: return
@@ -398,7 +441,7 @@ class RemoteSessionHandle internal constructor(
         errorMessage: String?,
     ): List<AgentMessage> {
         val state = turn.state
-        for (queued in turn.queuedTexts) mirror.appendUserMessage(queued)
+        for (queued in turn.queuedMessages) mirror.appendUserMessage(queued.text, queued.images)
         val messages = state.turnMessages(stopReason, errorMessage)
         if (messages.isEmpty()) return emptyList()
         val persisted = mutableListOf<AgentMessage>()
@@ -420,8 +463,8 @@ class RemoteSessionHandle internal constructor(
         return persisted
     }
 
-    private suspend fun rememberPeerSession(result: JsonObject) {
-        val returned = (result["sessionId"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return
+    private suspend fun rememberPeerSession(result: JsonObject?) {
+        val returned = (result?.get("sessionId") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return
         if (returned == peerSessionId) return
         peerSessionId = returned
         mirror.appendRemoteMapping(target.deviceId, target.botId, returned)
@@ -433,18 +476,18 @@ class RemoteSessionHandle internal constructor(
         mirror.clearRemoteMapping(target.deviceId, target.botId)
     }
 
-    private fun isSessionNotFound(): Boolean = transport.lastCallError()?.code == SESSION_NOT_FOUND
-
     private fun abortRemote(sessionId: String) {
         if (closed) return
         scope.launch {
-            val result = runCatching {
-                transport.call(target.deviceId, BOT_ABORT, buildJsonObject {
+            val outcome = runCatching {
+                transport.callWithOutcome(target.deviceId, BOT_ABORT, buildJsonObject {
                     put("botId", target.botId)
                     put("sessionId", sessionId)
                 })
             }.getOrNull()
-            if (result == null && isSessionNotFound()) clearPeerSession()
+            if (outcome is RemoteCallOutcome.Failed && outcome.error.code == SESSION_NOT_FOUND) {
+                clearPeerSession()
+            }
         }
     }
 
@@ -459,11 +502,20 @@ class RemoteSessionHandle internal constructor(
         }
     }
 
-    private fun promptParams(text: String, sessionId: String?): JsonObject = buildJsonObject {
+    private fun promptParams(text: String, images: List<ImagePart>, sessionId: String?): JsonObject = buildJsonObject {
         put("botId", target.botId)
         if (sessionId != null) put("sessionId", sessionId)
         put("text", text)
+        if (images.isNotEmpty()) {
+            put(
+                "images",
+                RelayFrames.imagesArray(images.map { RouteImagePart(it.data, it.mimeType) }),
+            )
+        }
     }
+
+    private fun outcomeMessage(error: RemoteCallError): String =
+        error.message.takeIf { it.isNotBlank() } ?: NO_ANSWER_MESSAGE
 
     private fun offlineMessage(): String =
         "Remote bot ${target.botName} on ${target.deviceName} is offline."
@@ -471,10 +523,15 @@ class RemoteSessionHandle internal constructor(
     private fun connectionLostMessage(): String =
         "Lost connection to ${target.deviceName}; the turn may have been interrupted. Retry when the device is back online."
 
+    private data class QueuedUserMessage(
+        val text: String,
+        val images: List<ImagePart>,
+    )
+
     private class RemoteTurn(modelName: String) {
         val state = RemoteTurnState(modelName)
         val settled = CompletableDeferred<Unit>()
-        val queuedTexts = CopyOnWriteArrayList<String>()
+        val queuedMessages = CopyOnWriteArrayList<QueuedUserMessage>()
 
         @Volatile
         var routeId: String? = null
@@ -578,7 +635,7 @@ private fun buildRemoteModel(target: RemoteSessionTarget): Model = Model(
     api = "",
     provider = RemoteTurnState.REMOTE_PROVIDER,
     baseUrl = "",
-    input = listOf(ModelInputModality.Text),
+    input = listOf(ModelInputModality.Text, ModelInputModality.Image),
     cost = ModelCost(input = 0.0, output = 0.0, cacheRead = 0.0, cacheWrite = 0.0),
     reasoning = false,
     contextWindow = 0L,

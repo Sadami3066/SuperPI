@@ -1,12 +1,16 @@
 package io.github.whywood.superpi.data.relay
 
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class RelayError {
     InvalidLink,
@@ -36,6 +40,7 @@ class RelayController(
 ) {
     private val _state = MutableStateFlow(RelayUiState())
     val state: StateFlow<RelayUiState> = _state.asStateFlow()
+    private val accountGeneration = AtomicLong(0L)
 
     init {
         scope.launch {
@@ -61,6 +66,7 @@ class RelayController(
             fail(RelayError.MissingFingerprint)
             return
         }
+        val attemptGeneration = accountGeneration.incrementAndGet()
         _state.update { state -> state.copy(signingIn = true, error = null) }
         scope.launch {
             try {
@@ -86,20 +92,30 @@ class RelayController(
                     accountId = enrollment.accountId,
                     enrolledAt = clock(),
                 )
+                if (accountGeneration.get() != attemptGeneration) {
+                    _state.update { state -> state.copy(signingIn = false) }
+                    return@launch
+                }
                 store.save(account, enrollment.token)
                 _state.update { state ->
                     state.copy(account = account, signingIn = false, error = null)
                 }
+            } catch (cancelled: CancellationException) {
+                _state.update { state -> state.copy(signingIn = false) }
+                throw cancelled
             } catch (error: RelayException) {
                 fail(error.failure.toRelayError())
-            } catch (error: IOException) {
+            } catch (_: IOException) {
                 fail(RelayError.Unreachable)
+            } catch (_: Exception) {
+                fail(RelayError.BadResponse)
             }
         }
     }
 
     fun signOut() {
         val current = _state.value.account
+        val signOutGeneration = accountGeneration.incrementAndGet()
         _state.update { state ->
             state.copy(
                 account = null,
@@ -111,13 +127,15 @@ class RelayController(
             )
         }
         scope.launch {
-            if (current != null) {
-                val token = runCatching { store.token() }.getOrNull()
-                if (!token.isNullOrBlank()) {
-                    runCatching { enroller.revokeDevice(current, token, current.deviceId) }
+            val token = runCatching { store.token() }.getOrNull()
+            withContext(NonCancellable) {
+                if (accountGeneration.get() == signOutGeneration) {
+                    store.clear()
                 }
             }
-            store.clear()
+            if (current != null && !token.isNullOrBlank()) {
+                runCatching { enroller.revokeDevice(current, token, current.deviceId) }
+            }
         }
     }
 
@@ -148,6 +166,9 @@ class RelayController(
                         error = null,
                     )
                 }
+            } catch (cancelled: CancellationException) {
+                _state.update { state -> state.copy(generatingPairCode = false) }
+                throw cancelled
             } catch (error: RelayException) {
                 _state.update { state ->
                     state.copy(generatingPairCode = false, error = error.failure.toRelayError())
@@ -155,6 +176,10 @@ class RelayController(
             } catch (_: IOException) {
                 _state.update { state ->
                     state.copy(generatingPairCode = false, error = RelayError.Unreachable)
+                }
+            } catch (_: Exception) {
+                _state.update { state ->
+                    state.copy(generatingPairCode = false, error = RelayError.BadResponse)
                 }
             }
         }
@@ -174,6 +199,9 @@ class RelayController(
                 enroller.revokeDevice(current, token, deviceId)
                 onRevoked(deviceId)
                 _state.update { state -> state.copy(revokingDeviceId = null, error = null) }
+            } catch (cancelled: CancellationException) {
+                _state.update { state -> state.copy(revokingDeviceId = null) }
+                throw cancelled
             } catch (error: RelayException) {
                 _state.update { state ->
                     state.copy(revokingDeviceId = null, error = error.failure.toRelayError())
@@ -181,6 +209,10 @@ class RelayController(
             } catch (_: IOException) {
                 _state.update { state ->
                     state.copy(revokingDeviceId = null, error = RelayError.Unreachable)
+                }
+            } catch (_: Exception) {
+                _state.update { state ->
+                    state.copy(revokingDeviceId = null, error = RelayError.BadResponse)
                 }
             }
         }

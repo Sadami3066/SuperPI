@@ -83,4 +83,12 @@
     <string name="bot_tools_screen_permission">需要系统访问的 ADB 或 Root 档</string>
     <string name="bot_instructions">设定</string>
     <string name="bot_created_toast">已创建，能力默认关闭，可在 Bot 设置里打开。</string>
+    <string name="drawer_remote_loading">正在加载会话…</string>
+    <string name="drawer_remote_relay_upgrade">当前服务器版本较旧，升级后可查看远程会话</string>
+    <string name="drawer_remote_peer_upgrade">对方设备版本较旧，升级后可查看远程会话</string>
+    <string name="drawer_remote_load_failed">暂时无法获取会话列表</string>
+    <string name="drawer_remote_retry">重试</string>
+    <string name="drawer_remote_open_failed">暂时无法打开这个远程会话，请重试</string>
+    <string name="drawer_remote_device_offline">对方设备当前离线</string>
+    <string name="drawer_remote_timeout">对方设备没有回应，请稍后重试</string>
 </resources>

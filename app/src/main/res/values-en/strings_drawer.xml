@@ -83,4 +83,12 @@
     <string name="bot_tools_screen_permission">Requires ADB or Root access</string>
     <string name="bot_instructions">Instructions</string>
     <string name="bot_created_toast">Created. Capabilities are off by default; turn them on in Bot settings.</string>
+    <string name="drawer_remote_loading">Loading chats…</string>
+    <string name="drawer_remote_relay_upgrade">This server needs an update to list remote chats</string>
+    <string name="drawer_remote_peer_upgrade">Update the other device to view its chats</string>
+    <string name="drawer_remote_load_failed">Could not load chats</string>
+    <string name="drawer_remote_retry">Retry</string>
+    <string name="drawer_remote_open_failed">Could not open this remote chat. Try again.</string>
+    <string name="drawer_remote_device_offline">This device is offline</string>
+    <string name="drawer_remote_timeout">The other device did not answer. Try again.</string>
 </resources>

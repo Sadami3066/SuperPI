@@ -45,6 +45,14 @@ internal sealed interface RemoteBotEvent {
     data object Settled : RemoteBotEvent
 
     data class QueueUpdate(val steering: List<String>, val followUp: List<String>) : RemoteBotEvent
+
+    data class ApprovalRequest(
+        val requestId: String,
+        val method: String?,
+        val title: String?,
+        val message: String,
+        val options: List<String> = emptyList(),
+    ) : RemoteBotEvent
 }
 
 internal object RemoteEventMapping {
@@ -60,8 +68,20 @@ internal object RemoteEventMapping {
             steering = event.strings("steering"),
             followUp = event.strings("followUp"),
         )
+        "approval_request" -> decodeApprovalRequest(event)
 
         else -> null
+    }
+
+    private fun decodeApprovalRequest(event: JsonObject): RemoteBotEvent.ApprovalRequest? {
+        val requestId = event.string("requestId") ?: return null
+        return RemoteBotEvent.ApprovalRequest(
+            requestId = requestId,
+            method = event.string("method"),
+            title = event.string("title"),
+            message = event.string("message").orEmpty(),
+            options = event.strings("options"),
+        )
     }
 
     private fun decodeMessageUpdate(event: JsonObject): RemoteBotEvent? {
@@ -259,6 +279,7 @@ internal class RemoteTurnState(
 
         RemoteBotEvent.Settled -> emptyList()
         is RemoteBotEvent.QueueUpdate -> emptyList()
+        is RemoteBotEvent.ApprovalRequest -> emptyList()
     }
 
     private fun rollStepIfNeededLocked() {

@@ -29,6 +29,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.After
@@ -514,6 +515,59 @@ class RemoteSessionHandleTest {
         transport.emit(transport.calls.last().routeId, 0, FakeEvents.settled())
         runCurrent()
         assertTrue(next.isCompleted)
+    }
+
+    @Test
+    fun promptForwardsImagesAndHydratesRemoteHistoryIntoMirror() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+        val image = io.github.whywood.superpi.runtime.ImagePart(data = "YWJj", mimeType = "image/png")
+
+        val job = launch { handle.prompt("see image", images = listOf(image)) }
+        runCurrent()
+        val call = transport.calls.single()
+        val sentImages = call.params["images"] as kotlinx.serialization.json.JsonArray
+        assertEquals(1, sentImages.size)
+        assertEquals("image/png", sentImages[0].jsonObject.getValue("mimeType").jsonPrimitive.content)
+        transport.emit(call.routeId, 0, FakeEvents.settled())
+        runCurrent()
+        assertTrue(job.isCompleted)
+
+        val mirror = RemoteMirrorSession.create(cwd, agentDir)
+        val dto = io.github.whywood.superpi.data.relay.RemoteHistoryDto(
+            sessionId = "peer-history-1",
+            title = "Desktop Thread",
+            busy = false,
+            seq = null,
+            messages = listOf(
+                buildJsonObject {
+                    put("role", "user")
+                    put(
+                        "content",
+                        kotlinx.serialization.json.buildJsonArray {
+                            add(buildJsonObject { put("type", "text"); put("text", "Describe image") })
+                            add(buildJsonObject { put("type", "image"); put("data", "YWJj"); put("mimeType", "image/jpeg") })
+                        },
+                    )
+                },
+                buildJsonObject {
+                    put("role", "assistant")
+                    put(
+                        "content",
+                        kotlinx.serialization.json.buildJsonArray {
+                            add(buildJsonObject { put("type", "thinking"); put("thinking", "Inspecting") })
+                            add(buildJsonObject { put("type", "text"); put("text", "Looks clean") })
+                        },
+                    )
+                },
+            ),
+        )
+        mirror.hydrateRemoteHistory("device-1", "pi", dto)
+        assertEquals("peer-history-1", mirror.peerSessionId)
+        assertEquals("Desktop Thread", mirror.name())
+        assertEquals(2, mirror.messages().size)
+        mirror.close()
     }
 
     private fun engine(transport: FakeRemoteTransport, scope: CoroutineScope): RemoteSessionEngine =

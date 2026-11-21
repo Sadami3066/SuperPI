@@ -33,6 +33,10 @@ import io.github.whywood.superpi.data.LanguagePreferences
 import io.github.whywood.superpi.data.PersonalizationUi
 import io.github.whywood.superpi.data.ProfileAvatarStore
 import io.github.whywood.superpi.data.SharePayload
+import io.github.whywood.superpi.data.relay.RelayLiveState
+import io.github.whywood.superpi.data.relay.RemoteCallCodes
+import io.github.whywood.superpi.data.relay.RemoteHistoryOutcome
+import io.github.whywood.superpi.data.relay.RemoteSessionsOutcome
 import io.github.whywood.superpi.data.session.SessionExporter
 import io.github.whywood.superpi.data.UiPreferences
 import io.github.whywood.superpi.data.exportShareIntent
@@ -41,15 +45,20 @@ import io.github.whywood.superpi.design.DdFontStyle
 import io.github.whywood.superpi.design.DdFonts
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.host.services.PluginUiBridge
+import io.github.whywood.superpi.remote.RemoteSessionBrowser
 import io.github.whywood.superpi.runtime.AgentRuntimeHost
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.JobStatus
 import io.github.whywood.superpi.runtime.ModelConfig
+import io.github.whywood.superpi.ui.RemoteDrawerState
+import io.github.whywood.superpi.ui.RemoteDrawerStatus
 import io.github.whywood.superpi.ui.chat.ChatScreen
 import io.github.whywood.superpi.ui.chat.ChatScreenActions
 import io.github.whywood.superpi.ui.chat.ChatScreenOverlay
 import io.github.whywood.superpi.ui.chat.ChatViewModel
 import io.github.whywood.superpi.ui.chat.CommandItem
+import io.github.whywood.superpi.ui.chat.RemoteHistoryPoll
+import io.github.whywood.superpi.ui.chat.RemoteSessionOpenResult
 import io.github.whywood.superpi.ui.common.LocalHapticsEnabled
 import io.github.whywood.superpi.ui.common.ProfileAvatarCache
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
@@ -147,6 +156,8 @@ internal fun AppShell(
     }
     val timers by graph.timerService.timers.collectAsStateWithLifecycle()
     val remoteBots by graph.relayLive.remoteBots.collectAsStateWithLifecycle()
+    val relayState by graph.relayLive.state.collectAsStateWithLifecycle()
+    val relayCapabilities by graph.relayLive.relayCapabilities.collectAsStateWithLifecycle()
     LaunchedEffect(remoteBots) { chatViewModel.refreshWorkspaces() }
     val linuxState by graph.linuxEnvironment.state.collectAsStateWithLifecycle()
     val linuxEnabled by graph.linuxSettings.enabled.collectAsStateWithLifecycle(initialValue = false)
@@ -250,6 +261,67 @@ internal fun AppShell(
     }
     var expandedWorkspaceIds by rememberSaveable(stateSaver = expandedWorkspacesSaver) {
         mutableStateOf(emptySet<String>())
+    }
+    var remoteDrawerStates by remember {
+        mutableStateOf<Map<String, RemoteDrawerState>>(emptyMap())
+    }
+    var remoteRefreshEpoch by remember { mutableStateOf(0) }
+    val remoteRelayUpgradeMessage = stringResource(R.string.drawer_remote_relay_upgrade)
+    val remotePeerUpgradeMessage = stringResource(R.string.drawer_remote_peer_upgrade)
+    val remoteOpenFailedMessage = stringResource(R.string.drawer_remote_open_failed)
+    val remoteLoadFailedMessage = stringResource(R.string.drawer_remote_load_failed)
+    val remoteOfflineMessage = stringResource(R.string.drawer_remote_device_offline)
+    val remoteTimeoutMessage = stringResource(R.string.drawer_remote_timeout)
+    fun localizeRemoteError(code: String, fallback: String): String = when (code) {
+        RemoteCallCodes.NOT_CONNECTED,
+        RemoteCallCodes.DISCONNECTED,
+        "device_offline",
+        -> remoteOfflineMessage
+
+        RemoteCallCodes.TIMEOUT -> remoteTimeoutMessage
+        else -> fallback
+    }
+    LaunchedEffect(drawerOpen, expandedWorkspaceIds, remoteBots, state.workspaces, relayState, relayCapabilities, remoteRefreshEpoch) {
+        if (!drawerOpen) return@LaunchedEffect
+        val expandedRemote = state.workspaces.filter { workspace ->
+            workspace.id in expandedWorkspaceIds && workspace.remote?.online == true
+        }
+        if (relayState != RelayLiveState.Online) {
+            if (expandedRemote.isNotEmpty()) {
+                var next = remoteDrawerStates
+                expandedRemote.forEach { ws ->
+                    next = next + (ws.id to RemoteDrawerState(status = RemoteDrawerStatus.Offline))
+                }
+                remoteDrawerStates = next
+            }
+            return@LaunchedEffect
+        }
+        expandedRemote.forEach { workspace ->
+            val remote = workspace.remote ?: return@forEach
+            val existing = remoteDrawerStates[workspace.id]
+            if (existing == null || existing.sessions.isEmpty()) {
+                remoteDrawerStates = remoteDrawerStates + (
+                    workspace.id to RemoteDrawerState(status = RemoteDrawerStatus.Loading)
+                )
+            }
+            launch {
+                val nextState = when (val outcome = graph.relayLive.listRemoteSessions(remote.deviceId, remote.botId)) {
+                    is RemoteSessionsOutcome.Ok -> RemoteDrawerState(sessions = outcome.sessions, status = null)
+                    RemoteSessionsOutcome.RelayUpgradeRequired ->
+                        RemoteDrawerState(status = RemoteDrawerStatus.RelayUpgradeRequired)
+
+                    RemoteSessionsOutcome.PeerUpgradeRequired ->
+                        RemoteDrawerState(status = RemoteDrawerStatus.PeerUpgradeRequired)
+
+                    is RemoteSessionsOutcome.Failed -> RemoteDrawerState(
+                        status = RemoteDrawerStatus.Error(
+                            localizeRemoteError(outcome.error.code, remoteLoadFailedMessage),
+                        ),
+                    )
+                }
+                remoteDrawerStates = remoteDrawerStates + (workspace.id to nextState)
+            }
+        }
     }
     val appResources = LocalResources.current
     val intakeChat = ShellIntakeChatState(
@@ -652,6 +724,8 @@ internal fun AppShell(
             nickname,
             avatarBitmap,
             updateUi.hasUpdate,
+            remoteDrawerStates,
+            relayState == RelayLiveState.Online,
         )
         val drawerActions = ShellDrawerActions(
             onNavigate = { destination -> drawerOpen = false; navigator.push(destination) },
@@ -683,6 +757,71 @@ internal fun AppShell(
             onSetArchived = chatViewModel::setSessionArchived,
             onDelete = chatViewModel::deleteSession,
             onSettings = ::openSettings,
+            onOpenRemoteSession = { workspace, remoteSession ->
+                val remote = workspace.remote
+                if (remote != null) {
+                    drawerOpen = false
+                    chatViewModel.openRemoteMirrorSession(
+                        workspace = workspace,
+                        sessionTitle = remoteSession.title,
+                        errorFallback = remoteOpenFailedMessage,
+                        loadSession = {
+                            when (val outcome = graph.relayLive.getRemoteHistory(remote.deviceId, remote.botId, remoteSession.id)) {
+                                is RemoteHistoryOutcome.Ok -> {
+                                    val summary = RemoteSessionBrowser.materializeHistory(
+                                        runtime = graph.host,
+                                        agentDir = graph.agentDir,
+                                        workspace = workspace,
+                                        history = outcome.history,
+                                        skipIfUnchanged = false,
+                                    ) ?: return@openRemoteMirrorSession RemoteSessionOpenResult.Failure(remoteOpenFailedMessage)
+                                    RemoteSessionOpenResult.Success(summary = summary, busy = outcome.history.busy)
+                                }
+
+                                RemoteHistoryOutcome.RelayUpgradeRequired ->
+                                    RemoteSessionOpenResult.Failure(remoteRelayUpgradeMessage)
+
+                                RemoteHistoryOutcome.PeerUpgradeRequired ->
+                                    RemoteSessionOpenResult.Failure(remotePeerUpgradeMessage)
+
+                                is RemoteHistoryOutcome.Failed ->
+                                    RemoteSessionOpenResult.Failure(
+                                        localizeRemoteError(outcome.error.code, remoteOpenFailedMessage),
+                                    )
+                            }
+                        },
+                        pollUpdates = {
+                            when (val outcome = graph.relayLive.getRemoteHistory(remote.deviceId, remote.botId, remoteSession.id)) {
+                                is RemoteHistoryOutcome.Ok -> {
+                                    val summary = RemoteSessionBrowser.materializeHistory(
+                                        runtime = graph.host,
+                                        agentDir = graph.agentDir,
+                                        workspace = workspace,
+                                        history = outcome.history,
+                                        skipIfUnchanged = true,
+                                    )
+                                    RemoteHistoryPoll(busy = outcome.history.busy, summary = summary)
+                                }
+
+                                else -> RemoteHistoryPoll(busy = false, summary = null)
+                            }
+                        },
+                    )
+                }
+            },
+            onRetryRemoteSessions = { workspace ->
+                if (relayState != RelayLiveState.Online) {
+                    graph.relayLive.reconnectNow()
+                    remoteDrawerStates = remoteDrawerStates + (
+                        workspace.id to RemoteDrawerState(status = RemoteDrawerStatus.Offline)
+                    )
+                } else {
+                    remoteDrawerStates = remoteDrawerStates + (
+                        workspace.id to RemoteDrawerState(status = RemoteDrawerStatus.Loading)
+                    )
+                    remoteRefreshEpoch += 1
+                }
+            },
         )
         AppOverlays(
             graph = graph,

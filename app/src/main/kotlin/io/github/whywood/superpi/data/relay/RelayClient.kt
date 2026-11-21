@@ -1,10 +1,10 @@
 package io.github.whywood.superpi.data.relay
 
 import java.io.IOException
-import java.net.URLEncoder
 import javax.net.ssl.SSLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -108,9 +108,15 @@ class RelayClient(
         withContext(Dispatchers.IO) {
             val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
             val client = RelayTls.client(pin = pin, remote = true)
-            val encodedId = URLEncoder.encode(deviceId, Charsets.UTF_8.name())
+            val url = account.origin.toHttpUrlOrNull()
+                ?.newBuilder()
+                ?.addPathSegment("v1")
+                ?.addPathSegment("devices")
+                ?.addPathSegment(deviceId)
+                ?.build()
+                ?: throw RelayException(RelayFailure.BadResponse)
             val request = Request.Builder()
-                .url("${account.origin}/v1/devices/$encodedId")
+                .url(url)
                 .header("authorization", "Bearer $token")
                 .delete()
                 .build()

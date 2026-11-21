@@ -7,6 +7,7 @@ import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,7 @@ class RelayMemorySync(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : MemoryBackend {
+    private val syncMutex = Mutex()
     private val mutex = Mutex()
     private val prefsFile = File(filesDir, PREFS)
     private val outboxFile = File(filesDir, OUTBOX)
@@ -81,21 +83,44 @@ class RelayMemorySync(
         loadQueue()
         scope.launch {
             accounts.account.collect { value ->
-                val previous = account
-                account = value
-                if (value == null) {
-                    token = null
-                    versions = emptyMap()
-                    _state.update { it.copy(active = false, version = 0, lastSyncedAt = null) }
-                } else {
-                    token = accounts.token()
-                    _state.update { it.copy(active = true) }
-                    if (previous?.accountId != value.accountId) {
-                        runCatching { refreshNow(value) }.onFailure(::recordError)
+                syncMutex.withLock {
+                    val previous = account
+                    account = value
+                    if (value == null) {
+                        clearOnSignOutLocked()
+                    } else {
+                        token = accounts.token()
+                        _state.update { it.copy(active = true) }
+                        if (previous?.accountId != value.accountId) {
+                            try {
+                                refreshNowLocked(value)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                recordError(error)
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    private suspend fun clearOnSignOutLocked() {
+        withContext(io) {
+            mutex.withLock {
+                token = null
+                versions = emptyMap()
+                reconciledAccount = null
+                syncedAt = 0L
+                lastAttemptAt = 0L
+                lastFailureAt = 0L
+                queue.clear()
+                runCatching { prefsFile.delete() }
+                runCatching { outboxFile.delete() }
+            }
+        }
+        _state.value = RelayMemoryState()
     }
 
     override suspend fun append(path: String, section: String?, text: String): MemoryWriteOutcome =
@@ -119,18 +144,23 @@ class RelayMemorySync(
             baseVersion = versionOf(path),
         )
 
-    override suspend fun refreshIfStale(maxAgeMillis: Long): Boolean {
-        val current = account ?: return false
+    override suspend fun refreshIfStale(maxAgeMillis: Long): Boolean = syncMutex.withLock {
+        val current = account ?: return@withLock false
         val reconciled = reconciledAccount == current.accountId
         val now = clock()
-        if (now - lastFailureAt < FAILURE_BACKOFF_MILLIS) return false
-        if (!reconciled && now - lastAttemptAt < RECONCILE_RETRY_MILLIS) return false
+        if (now - lastFailureAt < FAILURE_BACKOFF_MILLIS) return@withLock false
+        if (!reconciled && now - lastAttemptAt < RECONCILE_RETRY_MILLIS) return@withLock false
         val pending = mutex.withLock { queue.isNotEmpty() }
-        if (reconciled && pending.not() && now - syncedAt < maxAgeMillis) return false
+        if (reconciled && pending.not() && now - syncedAt < maxAgeMillis) return@withLock false
         lastAttemptAt = now
-        return runCatching { refreshNow(current) }
-            .onFailure(::recordError)
-            .getOrDefault(false)
+        try {
+            refreshNowLocked(current)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            recordError(error)
+            false
+        }
     }
 
     fun clearNotice() {
@@ -141,7 +171,7 @@ class RelayMemorySync(
         _state.update { it.copy(error = null) }
     }
 
-    private suspend fun refreshNow(current: RelayAccount): Boolean = withContext(io) {
+    private suspend fun refreshNowLocked(current: RelayAccount): Boolean = withContext(io) {
         val secret = token ?: accounts.token() ?: return@withContext false
         token = secret
         try {
@@ -259,9 +289,9 @@ class RelayMemorySync(
         section: String?,
         text: String,
         baseVersion: Long?,
-    ): MemoryWriteOutcome {
-        val current = account ?: return MemoryWriteOutcome.Inactive
-        val secret = token ?: accounts.token() ?: return MemoryWriteOutcome.Inactive
+    ): MemoryWriteOutcome = syncMutex.withLock {
+        val current = account ?: return@withLock MemoryWriteOutcome.Inactive
+        val secret = token ?: accounts.token() ?: return@withLock MemoryWriteOutcome.Inactive
         token = secret
         val entry = QueuedWrite(
             op = op,
@@ -272,7 +302,7 @@ class RelayMemorySync(
             idempotencyKey = idempotencyKey(current),
             createdAt = clock(),
         )
-        return withContext(io) {
+        withContext(io) {
             when (val outcome = submit(current, secret, entry)) {
                 is SubmitOutcome.Applied -> {
                     runCatching { pull(current, secret) }.onFailure(::recordError)

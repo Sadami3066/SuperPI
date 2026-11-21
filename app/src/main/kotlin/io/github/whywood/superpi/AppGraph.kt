@@ -119,7 +119,7 @@ class AppGraph(context: Context) : AppDependencies {
 
     override val homeDir: File get() = dataGraph.homeDir
     val workspacesDir: File get() = dataGraph.workspacesDir
-    val agentDir: File get() = dataGraph.agentDir
+    override val agentDir: File get() = dataGraph.agentDir
 
     fun linuxBinds(): () -> List<Pair<File, String>> = platformGraph.linuxBinds()
 
@@ -227,6 +227,14 @@ class AppGraph(context: Context) : AppDependencies {
                 onRouteId: (String) -> Unit,
             ): kotlinx.serialization.json.JsonObject? =
                 relayTransport.call(to, method, params, timeoutMillis, onRouteId)
+
+            override suspend fun callWithOutcome(
+                to: String,
+                method: String,
+                params: kotlinx.serialization.json.JsonObject,
+                timeoutMillis: Long,
+                onRouteId: (String) -> Unit,
+            ) = relayTransport.callWithOutcome(to, method, params, timeoutMillis, onRouteId)
         }
 
     private val updateInstaller: AndroidUpdateInstaller by lazy { AndroidUpdateInstaller(appContext) }

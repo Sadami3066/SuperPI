@@ -175,4 +175,76 @@ class RemoteAgentServerTest {
         assertEquals("route_ok", ok.getValue("type").jsonPrimitive.content)
         assertEquals("s-stored", ok.getValue("result").jsonObject.getValue("sessionId").jsonPrimitive.content)
     }
+
+    @Test
+    fun rejectsCrossBotHistoryAccessAcceptsImagesOnPromptAndReportsUnsupportedApproval() = runTest {
+        val bots = listOf(RelayBot("home", "PI"), RelayBot("work", "Work"))
+        val host = FakeAgentRuntime().apply {
+            sessions = listOf(
+                ConversationSummary("s-home", "Home", 10L, "/home.jsonl", "/home"),
+            )
+            histories = mapOf(
+                "s-home" to listOf(AssistantMessage(id = 1L, role = AssistantRole.USER, text = "hi")),
+            )
+        }
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(host, { bots }, { sent.add(it); true }, backgroundScope)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-owner",
+                from = "dev-2",
+                method = "bot.history",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("sessionId", "s-home")
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-cross",
+                from = "dev-2",
+                method = "bot.history",
+                params = buildJsonObject {
+                    put("botId", "work")
+                    put("sessionId", "s-home")
+                },
+            ),
+        )
+        assertEquals("route_error", sent.last().getValue("type").jsonPrimitive.content)
+        assertEquals("session_not_found", sent.last().getValue("code").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-img",
+                from = "dev-2",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("text", "")
+                    put(
+                        "images",
+                        kotlinx.serialization.json.buildJsonArray {
+                            add(buildJsonObject { put("data", "YWJj"); put("mimeType", "image/png") })
+                        },
+                    )
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        assertEquals(1, host.sentImages.size)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-app",
+                from = "dev-2",
+                method = "bot.approval",
+                params = buildJsonObject { put("requestId", "req-1") },
+            ),
+        )
+        assertEquals("unsupported", sent.last().getValue("code").jsonPrimitive.content)
+    }
 }

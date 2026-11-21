@@ -6,6 +6,7 @@ import io.github.whywood.superpi.runtime.AgentRuntime
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 enum class RelayLiveState {
     Disabled,
@@ -33,6 +36,26 @@ enum class RelayLiveState {
     Online,
     Offline,
     Unauthorized,
+}
+
+sealed interface RemoteSessionsOutcome {
+    data class Ok(val sessions: List<RemoteSessionSummaryDto>) : RemoteSessionsOutcome
+
+    data object RelayUpgradeRequired : RemoteSessionsOutcome
+
+    data object PeerUpgradeRequired : RemoteSessionsOutcome
+
+    data class Failed(val error: RemoteCallError) : RemoteSessionsOutcome
+}
+
+sealed interface RemoteHistoryOutcome {
+    data class Ok(val history: RemoteHistoryDto) : RemoteHistoryOutcome
+
+    data object RelayUpgradeRequired : RemoteHistoryOutcome
+
+    data object PeerUpgradeRequired : RemoteHistoryOutcome
+
+    data class Failed(val error: RemoteCallError) : RemoteHistoryOutcome
 }
 
 class RelayLive(
@@ -46,13 +69,22 @@ class RelayLive(
     private val socket = RelaySocket(scope, io)
     private val server = RemoteAgentServer(host, ::bots, ::send, scope)
     private val mutex = Mutex()
+    private val devicesMutex = Mutex()
     private val calls = RemoteCallTracker()
+    private val avatarCacheLock = Any()
+    private val avatarCache = object : LinkedHashMap<String, String>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+            size > MAX_AVATAR_CACHE
+    }
 
     private val _state = MutableStateFlow(RelayLiveState.Disabled)
     val state: StateFlow<RelayLiveState> = _state.asStateFlow()
 
     private val _devices = MutableStateFlow<List<RelayDevice>>(emptyList())
     val devices: StateFlow<List<RelayDevice>> = _devices.asStateFlow()
+
+    private val _relayCapabilities = MutableStateFlow<List<String>>(emptyList())
+    val relayCapabilities: StateFlow<List<String>> = _relayCapabilities.asStateFlow()
 
     val remoteBots: StateFlow<List<RemoteBot>> = combine(_devices, _state) { devices, state ->
         val linked = state == RelayLiveState.Online
@@ -65,6 +97,7 @@ class RelayLive(
                     botName = bot.name,
                     online = linked && device.online,
                     avatar = bot.avatar,
+                    capabilities = device.capabilities,
                 )
             }
         }
@@ -83,6 +116,14 @@ class RelayLive(
     private var started = false
 
     @Volatile
+    private var pendingOnline = false
+
+    @Volatile
+    private var helloApplied = false
+
+    private val runEpoch = AtomicLong(0L)
+
+    @Volatile
     private var account: RelayAccount? = null
 
     private var collectorJob: Job? = null
@@ -91,12 +132,20 @@ class RelayLive(
         synchronized(this) {
             if (started) return
             started = true
+            runEpoch.incrementAndGet()
+            pendingOnline = false
+            helloApplied = false
             collectorJob?.cancel()
             val parent = SupervisorJob(scope.coroutineContext[Job])
             collectorJob = parent
             val collectorScope = CoroutineScope(scope.coroutineContext + parent)
             collectorScope.launch {
-                runCatching { _devices.value = accounts.readDevices() }
+                val cached = runCatching { accounts.readDevices() }.getOrDefault(emptyList())
+                devicesMutex.withLock {
+                    if (_devices.value.isEmpty() && cached.isNotEmpty() && started && account != null) {
+                        _devices.value = cached
+                    }
+                }
                 launchCollectors(collectorScope)
             }
         }
@@ -108,7 +157,9 @@ class RelayLive(
                 val previous = account
                 account = value
                 if (value == null && previous != null) {
-                    _devices.value = emptyList()
+                    devicesMutex.withLock {
+                        _devices.value = emptyList()
+                    }
                     runCatching { accounts.saveDevices(emptyList()) }
                 }
                 reconcile()
@@ -122,12 +173,16 @@ class RelayLive(
     fun stop() {
         synchronized(this) {
             started = false
+            runEpoch.incrementAndGet()
+            pendingOnline = false
+            helloApplied = false
             collectorJob?.cancel()
             collectorJob = null
         }
         socket.stop()
         server.reset()
         calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay stopped"))
+        _relayCapabilities.value = emptyList()
         _devices.value = emptyList()
         _state.value = RelayLiveState.Disabled
     }
@@ -143,10 +198,14 @@ class RelayLive(
     }
 
     fun removeDevice(deviceId: String) {
-        val updated = _devices.value.filterNot { it.deviceId == deviceId }
-        if (updated.size == _devices.value.size) return
-        _devices.value = updated
-        persistDevices()
+        scope.launch {
+            devicesMutex.withLock {
+                val updated = _devices.value.filterNot { it.deviceId == deviceId }
+                if (updated.size == _devices.value.size) return@withLock
+                _devices.value = updated
+                persistDevicesLocked(updated)
+            }
+        }
     }
 
     fun setAllowRemote(enabled: Boolean) {
@@ -156,6 +215,62 @@ class RelayLive(
     fun sendRoute(to: String, method: String, params: JsonObject): Boolean =
         send(RelayFrames.route(routeId(), to, method, params))
 
+    fun supportsCapability(deviceId: String, capability: String): Boolean {
+        if (!_relayCapabilities.value.contains(capability)) return false
+        val peer = _devices.value.firstOrNull { it.deviceId == deviceId } ?: return true
+        return peer.capabilities.isEmpty() || peer.capabilities.contains(capability)
+    }
+
+    suspend fun listRemoteSessions(deviceId: String, botId: String): RemoteSessionsOutcome {
+        when (val check = checkSessionBrowseSupport(deviceId)) {
+            SessionBrowseCheck.Ok -> Unit
+            SessionBrowseCheck.RelayUpgrade -> return RemoteSessionsOutcome.RelayUpgradeRequired
+            SessionBrowseCheck.PeerUpgrade -> return RemoteSessionsOutcome.PeerUpgradeRequired
+            is SessionBrowseCheck.Failed -> return RemoteSessionsOutcome.Failed(check.error)
+        }
+        return when (val outcome = callWithOutcome(deviceId, BOT_SESSIONS, buildJsonObject { put("botId", botId) })) {
+            is RemoteCallOutcome.Ok -> RemoteSessionsOutcome.Ok(RelayFrames.parseRemoteSessions(outcome.result))
+            is RemoteCallOutcome.Failed -> {
+                if (isUnsupportedMethodError(outcome.error)) {
+                    RemoteSessionsOutcome.PeerUpgradeRequired
+                } else {
+                    RemoteSessionsOutcome.Failed(outcome.error)
+                }
+            }
+        }
+    }
+
+    suspend fun getRemoteHistory(deviceId: String, botId: String, sessionId: String): RemoteHistoryOutcome {
+        when (val check = checkSessionBrowseSupport(deviceId)) {
+            SessionBrowseCheck.Ok -> Unit
+            SessionBrowseCheck.RelayUpgrade -> return RemoteHistoryOutcome.RelayUpgradeRequired
+            SessionBrowseCheck.PeerUpgrade -> return RemoteHistoryOutcome.PeerUpgradeRequired
+            is SessionBrowseCheck.Failed -> return RemoteHistoryOutcome.Failed(check.error)
+        }
+        val params = buildJsonObject {
+            put("botId", botId)
+            put("sessionId", sessionId)
+        }
+        return when (val outcome = callWithOutcome(deviceId, BOT_HISTORY, params)) {
+            is RemoteCallOutcome.Ok -> {
+                val parsed = RelayFrames.parseRemoteHistory(outcome.result)
+                if (parsed != null) {
+                    RemoteHistoryOutcome.Ok(parsed)
+                } else {
+                    RemoteHistoryOutcome.Failed(RemoteCallError("bad_response", "invalid session history response"))
+                }
+            }
+
+            is RemoteCallOutcome.Failed -> {
+                if (isUnsupportedMethodError(outcome.error)) {
+                    RemoteHistoryOutcome.PeerUpgradeRequired
+                } else {
+                    RemoteHistoryOutcome.Failed(outcome.error)
+                }
+            }
+        }
+    }
+
     suspend fun call(
         to: String,
         method: String,
@@ -163,9 +278,30 @@ class RelayLive(
         timeoutMillis: Long = CALL_TIMEOUT_MILLIS,
         onRouteId: (String) -> Unit = {},
     ): JsonObject? {
+        return when (val outcome = callWithOutcome(to, method, params, timeoutMillis, onRouteId)) {
+            is RemoteCallOutcome.Ok -> {
+                _lastCallError.value = null
+                outcome.result
+            }
+
+            is RemoteCallOutcome.Failed -> {
+                _lastCallError.value = outcome.error
+                null
+            }
+        }
+    }
+
+    suspend fun callWithOutcome(
+        to: String,
+        method: String,
+        params: JsonObject,
+        timeoutMillis: Long = CALL_TIMEOUT_MILLIS,
+        onRouteId: (String) -> Unit = {},
+    ): RemoteCallOutcome {
         if (socket.state.value != RelaySocketState.Online) {
-            _lastCallError.value = RemoteCallError(RemoteCallCodes.NOT_CONNECTED, "relay is not connected")
-            return null
+            val error = RemoteCallError(RemoteCallCodes.NOT_CONNECTED, "relay is not connected")
+            _lastCallError.value = error
+            return RemoteCallOutcome.Failed(error)
         }
         val id = routeId()
         onRouteId(id)
@@ -185,29 +321,53 @@ class RelayLive(
         val outcome = completed
             ?: RemoteCallOutcome.Failed(RemoteCallError(RemoteCallCodes.TIMEOUT, "the device did not answer"))
         calls.settle(id, outcome)
-        return when (outcome) {
-            is RemoteCallOutcome.Ok -> {
-                _lastCallError.value = null
-                outcome.result
-            }
-
-            is RemoteCallOutcome.Failed -> {
-                _lastCallError.value = outcome.error
-                null
-            }
+        when (outcome) {
+            is RemoteCallOutcome.Ok -> _lastCallError.value = null
+            is RemoteCallOutcome.Failed -> _lastCallError.value = outcome.error
         }
+        return outcome
     }
 
-    private fun mergePresence(frame: RelayServerFrame.Presence): List<RelayDevice> {
-        val existing = _devices.value
+    private fun checkSessionBrowseSupport(deviceId: String): SessionBrowseCheck {
+        if (socket.state.value != RelaySocketState.Online) {
+            return SessionBrowseCheck.Failed(RemoteCallError(RemoteCallCodes.NOT_CONNECTED, "relay is not connected"))
+        }
+        if (!_relayCapabilities.value.contains(CAPABILITY_BOT_SESSIONS)) {
+            return SessionBrowseCheck.RelayUpgrade
+        }
+        val peer = _devices.value.firstOrNull { it.deviceId == deviceId }
+        if (peer != null && !peer.online) {
+            return SessionBrowseCheck.Failed(RemoteCallError(RemoteCallCodes.NOT_CONNECTED, "device is offline"))
+        }
+        if (peer != null && peer.capabilities.isNotEmpty() && !peer.capabilities.contains(CAPABILITY_BOT_SESSIONS)) {
+            return SessionBrowseCheck.PeerUpgrade
+        }
+        return SessionBrowseCheck.Ok
+    }
+
+    private fun isUnsupportedMethodError(error: RemoteCallError): Boolean =
+        error.code == "bad_request" && error.message.contains("unknown method", ignoreCase = true)
+
+    private sealed interface SessionBrowseCheck {
+        data object Ok : SessionBrowseCheck
+        data object RelayUpgrade : SessionBrowseCheck
+        data object PeerUpgrade : SessionBrowseCheck
+        data class Failed(val error: RemoteCallError) : SessionBrowseCheck
+    }
+
+    private fun mergePresenceLocked(frame: RelayServerFrame.Presence, existing: List<RelayDevice>): List<RelayDevice> {
         val previous = existing.firstOrNull { it.deviceId == frame.deviceId }
+        if (previous != null && frame.lastSeen > 0L && previous.lastSeen > frame.lastSeen) {
+            return existing
+        }
         val merged = RelayDevice(
             deviceId = frame.deviceId,
             name = previous?.name ?: frame.deviceId,
             platform = previous?.platform.orEmpty(),
             online = frame.online,
             lastSeen = frame.lastSeen,
-            bots = if (frame.online) frame.bots.orEmpty() else previous?.bots.orEmpty(),
+            bots = if (frame.online) frame.bots ?: previous?.bots.orEmpty() else previous?.bots.orEmpty(),
+            capabilities = frame.capabilities ?: previous?.capabilities.orEmpty(),
         )
         return existing.filterNot { it.deviceId == frame.deviceId } + merged
     }
@@ -222,13 +382,22 @@ class RelayLive(
                     name = device.name.takeIf { it != device.deviceId } ?: cached.name,
                     platform = device.platform.ifEmpty { cached.platform },
                     bots = if (device.online) device.bots else cached.bots.ifEmpty { device.bots },
+                    capabilities = if (device.capabilities.isNotEmpty()) device.capabilities else cached.capabilities,
                 )
             }
         }
 
-    private fun persistDevices() {
-        val snapshot = _devices.value
-        scope.launch { runCatching { accounts.saveDevices(snapshot) } }
+    private fun persistDevicesLocked(snapshot: List<RelayDevice>) {
+        val expectedEpoch = runEpoch.get()
+        val expectedAccountId = account?.accountId ?: return
+        scope.launch {
+            devicesMutex.withLock {
+                if (!started || runEpoch.get() != expectedEpoch || account?.accountId != expectedAccountId) {
+                    return@withLock
+                }
+                runCatching { accounts.saveDevices(snapshot) }
+            }
+        }
     }
 
     private suspend fun bots(): List<RelayBot> = runCatching {
@@ -244,6 +413,10 @@ class RelayLive(
         }
         val file = File(raw)
         if (!file.isFile) return null
+        val cacheKey = "${file.absolutePath}:${file.lastModified()}:${file.length()}"
+        synchronized(avatarCacheLock) {
+            avatarCache[cacheKey]?.let { return it }
+        }
         val encoded = runCatching {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
@@ -255,16 +428,22 @@ class RelayLive(
                 options.inSampleSize = sample
             }
             val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return@runCatching null
-            val squareSize = minOf(decoded.width, decoded.height).coerceAtLeast(1)
-            val x = (decoded.width - squareSize) / 2
-            val y = (decoded.height - squareSize) / 2
-            val cropped = if (decoded.width == decoded.height) decoded else Bitmap.createBitmap(decoded, x, y, squareSize, squareSize)
-            val scaled = if (cropped.width > MAX_AVATAR_PX) {
-                Bitmap.createScaledBitmap(cropped, MAX_AVATAR_PX, MAX_AVATAR_PX, true)
-            } else {
-                cropped
-            }
+            var cropped: Bitmap? = null
+            var scaled: Bitmap? = null
             try {
+                val squareSize = minOf(decoded.width, decoded.height).coerceAtLeast(1)
+                val x = (decoded.width - squareSize) / 2
+                val y = (decoded.height - squareSize) / 2
+                cropped = if (decoded.width == decoded.height) {
+                    decoded
+                } else {
+                    Bitmap.createBitmap(decoded, x, y, squareSize, squareSize)
+                }
+                scaled = if (cropped.width > MAX_AVATAR_PX) {
+                    Bitmap.createScaledBitmap(cropped, MAX_AVATAR_PX, MAX_AVATAR_PX, true)
+                } else {
+                    cropped
+                }
                 for (quality in intArrayOf(80, 65)) {
                     val out = ByteArrayOutputStream()
                     scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
@@ -273,19 +452,29 @@ class RelayLive(
                 }
                 null
             } finally {
-                if (scaled !== cropped && scaled !== decoded) scaled.recycle()
-                if (cropped !== decoded) cropped.recycle()
+                if (scaled != null && scaled !== cropped && scaled !== decoded) scaled.recycle()
+                if (cropped != null && cropped !== decoded) cropped.recycle()
                 decoded.recycle()
             }
         }.getOrNull()
-        if (encoded != null) return encoded
-        if (file.length() in 1L..44_000L) {
+        val resolved = encoded ?: if (file.length() in 1L..44_000L) {
             val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
-            val mime = detectImageMime(bytes) ?: return null
-            val fallback = "data:$mime;base64," + Base64.getEncoder().encodeToString(bytes)
-            return fallback.takeIf { it.length <= MAX_AVATAR_DATA_URL_CHARS }
+            val mime = detectImageMime(bytes)
+            if (mime != null && mime != "image/gif") {
+                val fallback = "data:$mime;base64," + Base64.getEncoder().encodeToString(bytes)
+                fallback.takeIf { it.length <= MAX_AVATAR_DATA_URL_CHARS }
+            } else {
+                null
+            }
+        } else {
+            null
         }
-        return null
+        if (resolved != null) {
+            synchronized(avatarCacheLock) {
+                avatarCache[cacheKey] = resolved
+            }
+        }
+        return resolved
     }
 
     private fun detectImageMime(bytes: ByteArray): String? {
@@ -309,18 +498,17 @@ class RelayLive(
     private fun routeId(): String = "pr-${System.currentTimeMillis().toString(36)}-${(0..0xFFFFFF).random().toString(36)}"
 
     private suspend fun reconcile() {
+        val expectedEpoch = runEpoch.get()
         mutex.withLock {
+            if (!started || runEpoch.get() != expectedEpoch) return
             val current = account
             val token = accounts.token()
-            if (current == null) {
+            if (!started || runEpoch.get() != expectedEpoch || current == null || token == null) {
                 socket.stop()
                 server.reset()
-                _state.value = RelayLiveState.Disabled
-                return
-            }
-            if (token == null) {
-                socket.stop()
-                server.reset()
+                _relayCapabilities.value = emptyList()
+                pendingOnline = false
+                helloApplied = false
                 _state.value = RelayLiveState.Disabled
                 return
             }
@@ -346,44 +534,72 @@ class RelayLive(
     }
 
     private fun onSocketState(value: RelaySocketState) {
-        val mapped = when (value) {
-            RelaySocketState.Stopped -> RelayLiveState.Offline
+        if (value == RelaySocketState.Online) {
+            pendingOnline = true
+            if (helloApplied && started && account != null) {
+                _state.value = RelayLiveState.Online
+            }
+            return
+        }
+        pendingOnline = false
+        helloApplied = false
+        _relayCapabilities.value = emptyList()
+        calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay disconnected"))
+        if (value == RelaySocketState.Unauthorized || value == RelaySocketState.Stopped) {
+            server.reset()
+        }
+        _state.value = when (value) {
+            RelaySocketState.Stopped -> if (!started || account == null) {
+                RelayLiveState.Disabled
+            } else {
+                RelayLiveState.Offline
+            }
+
             RelaySocketState.Connecting -> RelayLiveState.Connecting
             RelaySocketState.Online -> RelayLiveState.Online
             RelaySocketState.Offline -> RelayLiveState.Offline
             RelaySocketState.Unauthorized -> RelayLiveState.Unauthorized
         }
-        if (value != RelaySocketState.Online) {
-            calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay disconnected"))
-            if (value == RelaySocketState.Unauthorized || value == RelaySocketState.Stopped) {
-                server.reset()
-            }
-        }
-        _state.value = mapped
     }
 
     private suspend fun onFrame(frame: RelayServerFrame) {
         when (frame) {
             is RelayServerFrame.HelloOk -> {
+                _relayCapabilities.value = frame.capabilities
                 val self = account?.deviceId
-                _devices.value = mergeDevices(
-                    incoming = frame.devices.filter { device -> device.deviceId != self },
-                    previous = _devices.value,
-                )
-                persistDevices()
-                runCatching { memorySync.refreshIfStale(0) }
+                devicesMutex.withLock {
+                    val updated = mergeDevices(
+                        incoming = frame.devices.filter { device -> device.deviceId != self },
+                        previous = _devices.value,
+                    )
+                    _devices.value = updated
+                    persistDevicesLocked(updated)
+                }
+                helloApplied = true
+                if (pendingOnline || socket.state.value == RelaySocketState.Online) {
+                    if (started && account != null) {
+                        _state.value = RelayLiveState.Online
+                    }
+                }
+                scope.launch(io) { runCatching { memorySync.refreshIfStale(0) } }
             }
 
             is RelayServerFrame.Presence -> {
                 val self = account?.deviceId
                 if (frame.deviceId == self) return
-                _devices.value = mergePresence(frame)
-                persistDevices()
+                devicesMutex.withLock {
+                    val existing = _devices.value
+                    val updated = mergePresenceLocked(frame, existing)
+                    if (updated !== existing) {
+                        _devices.value = updated
+                        persistDevicesLocked(updated)
+                    }
+                }
             }
 
-            is RelayServerFrame.MemoryChanged -> runCatching { memorySync.refreshIfStale(0) }
+            is RelayServerFrame.MemoryChanged -> scope.launch(io) { runCatching { memorySync.refreshIfStale(0) } }
             is RelayServerFrame.Route -> if (_allowRemote.value) {
-                server.handle(frame)
+                scope.launch(io) { server.handle(frame) }
             } else {
                 send(RelayFrames.routeError(frame.id, "bot_not_found", "remote use is disabled on this device"))
             }
@@ -409,5 +625,9 @@ class RelayLive(
         private const val REMOTE_EVENT_BUFFER = 2_048
         private const val MAX_AVATAR_PX = 128
         private const val MAX_AVATAR_DATA_URL_CHARS = 60_000
+        private const val MAX_AVATAR_CACHE = 32
+        private const val CAPABILITY_BOT_SESSIONS = "bot-sessions"
+        private const val BOT_SESSIONS = "bot.sessions"
+        private const val BOT_HISTORY = "bot.history"
     }
 }

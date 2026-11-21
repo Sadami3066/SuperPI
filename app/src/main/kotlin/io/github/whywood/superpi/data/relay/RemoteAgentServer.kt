@@ -4,6 +4,8 @@ import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.AssistantStep
+import io.github.whywood.superpi.runtime.ImagePart
+import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SessionRuntimeEvent
 import io.github.whywood.superpi.runtime.ToolActivityStatus
@@ -28,10 +30,11 @@ class RemoteAgentServer(
     private val host: AgentRuntime,
     private val bots: suspend () -> List<RelayBot>,
     private val send: (JsonObject) -> Boolean,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val maxBufferedEvents: Int = MAX_BUFFERED_EVENTS,
 ) {
     private val feeds = ConcurrentHashMap<String, Feed>()
+    private val sessionBots = ConcurrentHashMap<String, String>()
 
     init {
         scope.launch {
@@ -41,6 +44,7 @@ class RemoteAgentServer(
 
     fun reset() {
         feeds.clear()
+        sessionBots.clear()
     }
 
     suspend fun handle(frame: RelayServerFrame.Route) {
@@ -54,6 +58,7 @@ class RemoteAgentServer(
                 "bot.resume" -> resume(frame)
                 "bot.sessions" -> listSessions(frame)
                 "bot.history" -> history(frame)
+                "bot.approval" -> reject(frame, "unsupported", "interactive approvals are not enabled on this host")
                 else -> reject(frame, "bad_request", "unknown method ${frame.method}")
             }
         } catch (cancelled: CancellationException) {
@@ -70,27 +75,52 @@ class RemoteAgentServer(
             return
         }
         val text = frame.params.string("text")
-        if (text.isBlank()) {
-            reject(frame, "bad_request", "text is required")
+        val images = parseImageParts(frame.params)
+        if (text.isBlank() && images.isEmpty()) {
+            reject(frame, "bad_request", "text or images is required")
             return
         }
         val existing = frame.params.string("sessionId").ifBlank { null }
         val sessionId = if (existing != null) {
-            resolveExistingSession(botId, existing)
+            resolveExistingSession(botId, existing) ?: run {
+                reject(frame, "session_not_found", "session $existing was not found")
+                return
+            }
         } else {
-            host.newSession(botId).sessionId
+            host.newSession(botId).sessionId.also { created -> sessionBots[created] = botId }
+        }
+        if (host.busySessionIds.value.contains(sessionId) || feeds[sessionId]?.active == true) {
+            reject(frame, "bad_request", "session $sessionId is busy")
+            return
         }
         val feed = Feed(routeId = frame.id, seq = AtomicLong(0), updatedAt = System.currentTimeMillis())
         feeds[sessionId] = feed
         pruneFinishedFeeds()
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
-        host.send(sessionId, text)
+        try {
+            host.send(sessionId, text, images)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            emitFailureEvents(sessionId, feed, error.message ?: "the bot failed")
+        }
     }
 
-    private suspend fun resolveExistingSession(botId: String, existing: String): String {
+    private suspend fun resolveExistingSession(botId: String, existing: String): String? {
+        val owner = sessionBots[existing]
+        if (owner != null) {
+            if (owner != botId) return null
+        } else if (host.sessions(botId).none { !it.archived && it.id == existing }) {
+            return null
+        }
+        sessionBots[existing] = botId
         if (host.history(existing).isEmpty() && !feeds.containsKey(existing) && !host.busySessionIds.value.contains(existing)) {
             val summary = host.sessions(botId).firstOrNull { !it.archived && it.id == existing }
-            if (summary != null) return host.openSession(summary.filePath, summary.cwd).sessionId
+            if (summary != null) {
+                val reopened = host.openSession(summary.filePath, summary.cwd).sessionId
+                sessionBots[reopened] = botId
+                return reopened
+            }
         }
         return existing
     }
@@ -98,33 +128,120 @@ class RemoteAgentServer(
     private suspend fun steer(frame: RelayServerFrame.Route) {
         val sessionId = frame.params.string("sessionId")
         val text = frame.params.string("text")
-        if (sessionId.isBlank() || text.isBlank()) {
-            reject(frame, "bad_request", "sessionId and text are required")
+        val images = parseImageParts(frame.params)
+        if (sessionId.isBlank() || (text.isBlank() && images.isEmpty())) {
+            reject(frame, "bad_request", "sessionId and text or images are required")
             return
         }
-        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0), System.currentTimeMillis()))
+        val botId = frame.params.string("botId")
+        if (!verifySessionAccess(botId, sessionId, frame)) return
+        val feed = ensureActiveFeed(sessionId, frame.id)
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
-        host.steer(sessionId, text)
+        try {
+            host.steer(sessionId, text, images)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            emitFailureEvents(sessionId, feed, error.message ?: "the bot failed")
+        }
     }
 
     private suspend fun followUp(frame: RelayServerFrame.Route) {
         val sessionId = frame.params.string("sessionId")
         val text = frame.params.string("text")
-        if (sessionId.isBlank() || text.isBlank()) {
-            reject(frame, "bad_request", "sessionId and text are required")
+        val images = parseImageParts(frame.params)
+        if (sessionId.isBlank() || (text.isBlank() && images.isEmpty())) {
+            reject(frame, "bad_request", "sessionId and text or images are required")
             return
         }
-        feeds.putIfAbsent(sessionId, Feed(frame.id, AtomicLong(0), System.currentTimeMillis()))
+        val botId = frame.params.string("botId")
+        if (!verifySessionAccess(botId, sessionId, frame)) return
+        val feed = ensureActiveFeed(sessionId, frame.id)
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
-        host.followUp(sessionId, text)
+        try {
+            host.followUp(sessionId, text, images)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            emitFailureEvents(sessionId, feed, error.message ?: "the bot failed")
+        }
     }
 
-    private fun abort(frame: RelayServerFrame.Route) {
+    private fun ensureActiveFeed(sessionId: String, routeId: String): Feed {
+        return feeds.compute(sessionId) { _, existing ->
+            if (existing != null && existing.active) {
+                existing
+            } else {
+                Feed(routeId, AtomicLong(0), System.currentTimeMillis())
+            }
+        }!!
+    }
+
+    private suspend fun verifySessionAccess(
+        botId: String,
+        sessionId: String,
+        frame: RelayServerFrame.Route,
+    ): Boolean {
+        if (botId.isNotBlank()) {
+            if (bots().none { it.id == botId }) {
+                reject(frame, "bot_not_found", "bot $botId is not available")
+                return false
+            }
+            val owner = sessionBots[sessionId]
+            if (owner != null && owner != botId) {
+                reject(frame, "session_not_found", "session $sessionId was not found")
+                return false
+            }
+            if (owner == null && host.sessions(botId).none { !it.archived && it.id == sessionId }) {
+                reject(frame, "session_not_found", "session $sessionId was not found")
+                return false
+            }
+            sessionBots.putIfAbsent(sessionId, botId)
+        }
+        return true
+    }
+
+    private fun parseImageParts(params: JsonObject): List<ImagePart> =
+        RelayFrames.parseImages(params).map { ImagePart(data = it.data, mimeType = it.mimeType) }
+
+    private fun emitFailureEvents(sessionId: String, feed: Feed, message: String) {
+        val events = listOf(
+            buildJsonObject {
+                put("type", "error")
+                put("message", message)
+            },
+            buildJsonObject { put("type", "agent_settled") },
+        )
+        val toSend = mutableListOf<Pair<String, BufferedEvent>>()
+        synchronized(feed.sendLock) {
+            synchronized(feed) {
+                feed.updatedAt = System.currentTimeMillis()
+                for (event in events) {
+                    val entry = BufferedEvent(feed.seq.getAndIncrement(), event)
+                    feed.buffer.addLast(entry)
+                    while (feed.buffer.size > maxBufferedEvents) {
+                        val removed = feed.buffer.removeFirst()
+                        feed.evictedThroughSeq = removed.seq
+                    }
+                    toSend += feed.routeId to entry
+                }
+                feed.active = false
+            }
+            for ((routeId, entry) in toSend) {
+                if (!send(RelayFrames.routeEvent(routeId, entry.seq, entry.event))) break
+            }
+        }
+        if (feeds[sessionId] === feed) pruneFinishedFeeds()
+    }
+
+    private suspend fun abort(frame: RelayServerFrame.Route) {
         val sessionId = frame.params.string("sessionId")
         if (sessionId.isBlank()) {
             reject(frame, "bad_request", "sessionId is required")
             return
         }
+        val botId = frame.params.string("botId")
+        if (botId.isNotBlank() && !verifySessionAccess(botId, sessionId, frame)) return
         val stopped = host.stop(sessionId)
         respondOk(
             frame.id,
@@ -135,12 +252,14 @@ class RemoteAgentServer(
         )
     }
 
-    private fun state(frame: RelayServerFrame.Route) {
+    private suspend fun state(frame: RelayServerFrame.Route) {
         val sessionId = frame.params.string("sessionId")
         if (sessionId.isBlank()) {
             reject(frame, "bad_request", "sessionId is required")
             return
         }
+        val botId = frame.params.string("botId")
+        if (botId.isNotBlank() && !verifySessionAccess(botId, sessionId, frame)) return
         respondOk(
             frame.id,
             buildJsonObject {
@@ -150,12 +269,14 @@ class RemoteAgentServer(
         )
     }
 
-    private fun resume(frame: RelayServerFrame.Route) {
+    private suspend fun resume(frame: RelayServerFrame.Route) {
         val sessionId = frame.params.string("sessionId")
         if (sessionId.isBlank()) {
             reject(frame, "bad_request", "sessionId is required")
             return
         }
+        val botId = frame.params.string("botId")
+        if (botId.isNotBlank() && !verifySessionAccess(botId, sessionId, frame)) return
         val feed = feeds[sessionId]
         if (feed == null) {
             if (!host.busySessionIds.value.contains(sessionId)) {
@@ -175,26 +296,28 @@ class RemoteAgentServer(
             return
         }
         val afterSeq = frame.params.long("afterSeq") ?: -1L
-        val snapshot: List<BufferedEvent>
-        val gap: Boolean
-        val busy: Boolean
-        synchronized(feed) {
-            feed.routeId = frame.id
-            feed.updatedAt = System.currentTimeMillis()
-            gap = afterSeq >= 0L && feed.evictedThroughSeq > afterSeq
-            snapshot = feed.buffer.filter { entry -> entry.seq > afterSeq }
-            busy = feed.active || host.busySessionIds.value.contains(sessionId)
-        }
-        respondOk(
-            frame.id,
-            buildJsonObject {
-                put("sessionId", sessionId)
-                put("busy", busy)
-                put("gap", gap)
-            },
-        )
-        for (entry in snapshot) {
-            if (!send(RelayFrames.routeEvent(frame.id, entry.seq, entry.event))) break
+        synchronized(feed.sendLock) {
+            val snapshot: List<BufferedEvent>
+            val gap: Boolean
+            val busy: Boolean
+            synchronized(feed) {
+                feed.routeId = frame.id
+                feed.updatedAt = System.currentTimeMillis()
+                gap = afterSeq >= 0L && feed.evictedThroughSeq > afterSeq
+                snapshot = feed.buffer.filter { entry -> entry.seq > afterSeq }
+                busy = feed.active || host.busySessionIds.value.contains(sessionId)
+            }
+            respondOk(
+                frame.id,
+                buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("busy", busy)
+                    put("gap", gap)
+                },
+            )
+            for (entry in snapshot) {
+                if (!send(RelayFrames.routeEvent(frame.id, entry.seq, entry.event))) break
+            }
         }
     }
 
@@ -238,26 +361,37 @@ class RemoteAgentServer(
             reject(frame, "bad_request", "sessionId is required")
             return
         }
+        val owner = sessionBots[sessionId]
+        if (owner != null && owner != botId) {
+            reject(frame, "session_not_found", "session $sessionId was not found")
+            return
+        }
         val summary = host.sessions(botId).firstOrNull { !it.archived && it.id == sessionId }
         var resolvedId = sessionId
-        var messages = host.history(sessionId)
+        var messages = if (summary != null || owner == botId) host.history(sessionId) else emptyList()
         if (messages.isEmpty() && summary != null) {
             val opened = host.openSession(summary.filePath, summary.cwd)
             resolvedId = opened.sessionId
             messages = host.history(resolvedId)
         }
-        val busy = host.busySessionIds.value.contains(resolvedId) || feeds[resolvedId]?.active == true
-        if (summary == null && messages.isEmpty() && !busy && !feeds.containsKey(resolvedId)) {
+        val busy = (summary != null || owner == botId) &&
+            (host.busySessionIds.value.contains(resolvedId) || feeds[resolvedId]?.active == true)
+        if (summary == null && owner != botId) {
             reject(frame, "session_not_found", "session $sessionId was not found")
             return
         }
+        sessionBots.putIfAbsent(resolvedId, botId)
         val serialized = serializeHistory(messages)
+        val activeFeed = if (busy) feeds[resolvedId] else null
         respondOk(
             frame.id,
             buildJsonObject {
                 put("sessionId", resolvedId)
                 summary?.title?.takeIf { it.isNotBlank() }?.let { put("title", it) }
                 put("busy", busy)
+                if (activeFeed != null) {
+                    put("seq", maxOf(-1L, activeFeed.seq.get() - 1L))
+                }
                 put("messages", serialized)
             },
         )
@@ -347,10 +481,11 @@ class RemoteAgentServer(
                             put("text", message.text)
                         }
                     }
-                    if (contentBlocks.isNotEmpty()) {
+                    if (contentBlocks.isNotEmpty() || message.error != null || message.status == MessageStatus.FAILED) {
                         addJsonObject {
                             put("role", "assistant")
                             put("content", JsonArray(contentBlocks))
+                            message.error?.takeIf { it.isNotBlank() }?.let { put("errorMessage", it) }
                         }
                     }
                     for (result in toolResults) {
@@ -367,21 +502,23 @@ class RemoteAgentServer(
         if (events.isEmpty()) return
         val terminal = session.event is RuntimeEvent.RunFinished || session.event is RuntimeEvent.RunFailed
         val toSend = mutableListOf<Pair<String, BufferedEvent>>()
-        synchronized(feed) {
-            feed.updatedAt = System.currentTimeMillis()
-            for (event in events) {
-                val entry = BufferedEvent(feed.seq.getAndIncrement(), event)
-                feed.buffer.addLast(entry)
-                while (feed.buffer.size > maxBufferedEvents) {
-                    val removed = feed.buffer.removeFirst()
-                    feed.evictedThroughSeq = removed.seq
+        synchronized(feed.sendLock) {
+            synchronized(feed) {
+                feed.updatedAt = System.currentTimeMillis()
+                for (event in events) {
+                    val entry = BufferedEvent(feed.seq.getAndIncrement(), event)
+                    feed.buffer.addLast(entry)
+                    while (feed.buffer.size > maxBufferedEvents) {
+                        val removed = feed.buffer.removeFirst()
+                        feed.evictedThroughSeq = removed.seq
+                    }
+                    toSend += feed.routeId to entry
                 }
-                toSend += feed.routeId to entry
+                if (terminal) feed.active = false
             }
-            if (terminal) feed.active = false
-        }
-        for ((routeId, entry) in toSend) {
-            if (!send(RelayFrames.routeEvent(routeId, entry.seq, entry.event))) break
+            for ((routeId, entry) in toSend) {
+                if (!send(RelayFrames.routeEvent(routeId, entry.seq, entry.event))) break
+            }
         }
         if (terminal) pruneFinishedFeeds()
     }
@@ -425,6 +562,7 @@ class RemoteAgentServer(
         @Volatile var active: Boolean = true,
         var evictedThroughSeq: Long = -1L,
         val buffer: ArrayDeque<BufferedEvent> = ArrayDeque(),
+        val sendLock: Any = Any(),
     )
 
     private companion object {

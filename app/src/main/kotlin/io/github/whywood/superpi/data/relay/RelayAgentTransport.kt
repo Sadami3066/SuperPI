@@ -28,4 +28,12 @@ class RelayAgentTransport(
         timeoutMillis: Long,
         onRouteId: (String) -> Unit,
     ): JsonObject? = live.call(to, method, params, timeoutMillis, onRouteId)
+
+    override suspend fun callWithOutcome(
+        to: String,
+        method: String,
+        params: JsonObject,
+        timeoutMillis: Long,
+        onRouteId: (String) -> Unit,
+    ): RemoteCallOutcome = live.callWithOutcome(to, method, params, timeoutMillis, onRouteId)
 }

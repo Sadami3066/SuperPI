@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -13,6 +14,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+
+internal val RELAY_CAPABILITIES = listOf(
+    "remote-bot",
+    "bot-sessions",
+    "bot-images",
+)
 
 data class RelayBot(
     val id: String,
@@ -27,6 +34,27 @@ data class RelayDevice(
     val online: Boolean,
     val lastSeen: Long,
     val bots: List<RelayBot>,
+    val capabilities: List<String> = emptyList(),
+)
+
+data class RouteImagePart(
+    val data: String,
+    val mimeType: String,
+)
+
+data class RemoteSessionSummaryDto(
+    val id: String,
+    val title: String,
+    val updatedAt: Long,
+    val messageCount: Int = 0,
+)
+
+data class RemoteHistoryDto(
+    val sessionId: String,
+    val title: String?,
+    val busy: Boolean,
+    val messages: List<JsonObject>,
+    val seq: Long?,
 )
 
 sealed interface RelayServerFrame {
@@ -34,6 +62,7 @@ sealed interface RelayServerFrame {
         val accountId: String,
         val devices: List<RelayDevice>,
         val memoryVersion: Long,
+        val capabilities: List<String> = emptyList(),
     ) : RelayServerFrame
 
     data class Presence(
@@ -41,6 +70,7 @@ sealed interface RelayServerFrame {
         val online: Boolean,
         val lastSeen: Long,
         val bots: List<RelayBot>?,
+        val capabilities: List<String>? = null,
     ) : RelayServerFrame
 
     data class Route(
@@ -76,12 +106,21 @@ sealed interface RelayServerFrame {
 
 internal object RelayFrames {
     private const val PROTOCOL_VERSION = 1
+    private const val MAX_IMAGES = 4
+    private const val MAX_IMAGE_BASE64_CHARS = 8_000_000
+    private val ALLOWED_IMAGE_MIME_TYPES = setOf(
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    )
 
     fun hello(
         deviceId: String,
         platform: String,
         appVersion: String,
         bots: List<RelayBot>,
+        capabilities: List<String> = RELAY_CAPABILITIES,
     ): JsonObject = buildJsonObject {
         put("type", "hello")
         put("protocolVersion", PROTOCOL_VERSION)
@@ -89,7 +128,7 @@ internal object RelayFrames {
         put("platform", platform)
         put("appVersion", appVersion)
         put("bots", botsArray(bots))
-        put("capabilities", JsonArray(emptyList()))
+        put("capabilities", stringsArray(capabilities))
     }
 
     fun route(id: String, to: String, method: String, params: JsonObject): JsonObject = buildJsonObject {
@@ -131,6 +170,7 @@ internal object RelayFrames {
                 accountId = json.string("accountId").orEmpty(),
                 devices = json["devices"].let(::parseDevices),
                 memoryVersion = json["memoryVersion"]?.jsonPrimitive?.longOrNull ?: 0L,
+                capabilities = parseStrings(json["capabilities"]),
             )
 
             "presence" -> RelayServerFrame.Presence(
@@ -138,6 +178,7 @@ internal object RelayFrames {
                 online = json["online"]?.jsonPrimitive?.booleanOrNull ?: false,
                 lastSeen = json["lastSeen"]?.jsonPrimitive?.longOrNull ?: 0L,
                 bots = json["bots"]?.let(::parseBots),
+                capabilities = json["capabilities"]?.let(::parseStrings),
             )
 
             "route" -> RelayServerFrame.Route(
@@ -185,9 +226,79 @@ internal object RelayFrames {
                 online = json["online"]?.jsonPrimitive?.booleanOrNull ?: false,
                 lastSeen = json["lastSeen"]?.jsonPrimitive?.longOrNull ?: 0L,
                 bots = json["bots"]?.let(::parseBots).orEmpty(),
+                capabilities = parseStrings(json["capabilities"]),
             )
         }
     }
+
+    private fun parseStrings(element: JsonElement?): List<String> {
+        if (element !is JsonArray) return emptyList()
+        return element.mapNotNull { item ->
+            (item as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        }
+    }
+
+    private fun stringsArray(values: List<String>): JsonArray = JsonArray(
+        values.mapNotNull { value -> value.trim().takeIf { it.isNotEmpty() }?.let(::JsonPrimitive) },
+    )
+
+    fun parseRemoteSessions(result: JsonObject?): List<RemoteSessionSummaryDto> {
+        val array = result?.get("sessions") as? JsonArray ?: return emptyList()
+        return array.mapNotNull { item ->
+            val json = item as? JsonObject ?: return@mapNotNull null
+            val id = json.string("id") ?: return@mapNotNull null
+            RemoteSessionSummaryDto(
+                id = id,
+                title = json.string("title") ?: "Untitled",
+                updatedAt = json["updatedAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+                messageCount = json["messageCount"]?.jsonPrimitive?.intOrNull ?: 0,
+            )
+        }
+    }
+
+    fun parseRemoteHistory(result: JsonObject?): RemoteHistoryDto? {
+        val json = result ?: return null
+        val sessionId = json.string("sessionId") ?: return null
+        val messages = (json["messages"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            .orEmpty()
+        return RemoteHistoryDto(
+            sessionId = sessionId,
+            title = json.string("title"),
+            busy = json["busy"]?.jsonPrimitive?.booleanOrNull ?: false,
+            messages = messages,
+            seq = json["seq"]?.jsonPrimitive?.longOrNull,
+        )
+    }
+
+    fun parseImages(params: JsonObject): List<RouteImagePart> {
+        val array = params["images"] as? JsonArray ?: return emptyList()
+        val out = ArrayList<RouteImagePart>(minOf(array.size, MAX_IMAGES))
+        for (item in array) {
+            if (out.size >= MAX_IMAGES) break
+            val json = item as? JsonObject ?: continue
+            val data = json.string("data") ?: continue
+            val mimeType = json.string("mimeType")?.lowercase() ?: continue
+            if (mimeType !in ALLOWED_IMAGE_MIME_TYPES) continue
+            if (data.length > MAX_IMAGE_BASE64_CHARS) continue
+            out += RouteImagePart(data = data, mimeType = mimeType)
+        }
+        return out
+    }
+
+    fun imagesArray(images: List<RouteImagePart>): JsonArray = JsonArray(
+        images.take(MAX_IMAGES).mapNotNull { image ->
+            val data = image.data.trim()
+            val mimeType = image.mimeType.trim().lowercase()
+            if (data.isEmpty() || mimeType !in ALLOWED_IMAGE_MIME_TYPES || data.length > MAX_IMAGE_BASE64_CHARS) {
+                return@mapNotNull null
+            }
+            buildJsonObject {
+                put("data", data)
+                put("mimeType", mimeType)
+            }
+        },
+    )
 
     private fun parseBots(element: JsonElement?): List<RelayBot> {
         if (element !is JsonArray) return emptyList()
@@ -235,6 +346,9 @@ internal object RelayFrames {
                 put("online", device.online)
                 put("lastSeen", device.lastSeen)
                 put("bots", botsArray(device.bots))
+                if (device.capabilities.isNotEmpty()) {
+                    put("capabilities", stringsArray(device.capabilities))
+                }
             }
         },
     )

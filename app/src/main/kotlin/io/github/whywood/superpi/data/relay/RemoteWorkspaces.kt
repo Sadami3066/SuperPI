@@ -11,6 +11,7 @@ data class RemoteBot(
     val botName: String,
     val online: Boolean,
     val avatar: String? = null,
+    val capabilities: List<String> = emptyList(),
 )
 
 object RemoteWorkspaces {

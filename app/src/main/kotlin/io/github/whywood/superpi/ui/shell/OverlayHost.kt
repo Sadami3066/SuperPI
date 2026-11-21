@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.data.AttachmentRef
+import io.github.whywood.superpi.data.relay.RemoteSessionSummaryDto
 import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSpacing
@@ -45,6 +46,7 @@ import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.JobSnapshot
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.runtime.SessionUsage
+import io.github.whywood.superpi.ui.RemoteDrawerState
 import io.github.whywood.superpi.ui.SuperPIDrawer
 import io.github.whywood.superpi.ui.chat.UsageSheet
 import io.github.whywood.superpi.ui.common.chat.AttachmentPreviewDialog
@@ -102,6 +104,8 @@ data class ShellDrawerState(
     val userName: String,
     val avatar: ImageBitmap? = null,
     val hasUpdate: Boolean = false,
+    val remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
+    val relayOnline: Boolean = true,
 )
 data class ShellDrawerActions(
     val onNavigate: (AppDestination) -> Unit, val onDismiss: () -> Unit,
@@ -112,6 +116,8 @@ data class ShellDrawerActions(
     val onRename: (String, String) -> Unit, val onSetPinned: (String, Boolean) -> Unit,
     val onSetArchived: (String, Boolean) -> Unit, val onDelete: (String) -> Unit,
     val onSettings: () -> Unit,
+    val onOpenRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
+    val onRetryRemoteSessions: (RuntimeWorkspace) -> Unit = {},
 )
 fun resolveOverlays(state: ShellOverlayState): List<ShellOverlay> = buildList {
     state.workspaceCreate?.let(::add)
@@ -260,6 +266,8 @@ private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions
                 userName = state.userName,
                 avatar = state.avatar,
                 hasUpdate = state.hasUpdate,
+                remoteDrawerStates = state.remoteDrawerStates,
+                relayOnline = state.relayOnline,
                 onOpenSearch = { actions.onNavigate(AppDestination.Search) },
                 onOpenMiniapp = { actions.onNavigate(AppDestination.Miniapp) },
                 onOpenSkills = { actions.onNavigate(AppDestination.Skills) },
@@ -281,6 +289,8 @@ private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions
                 onSetArchived = actions.onSetArchived,
                 onDelete = actions.onDelete,
                 onSettings = actions.onSettings,
+                onOpenRemoteSession = actions.onOpenRemoteSession,
+                onRetryRemoteSessions = actions.onRetryRemoteSessions,
             )
         }
     }

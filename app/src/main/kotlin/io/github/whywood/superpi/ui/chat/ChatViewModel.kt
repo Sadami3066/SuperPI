@@ -23,6 +23,7 @@ import io.github.whywood.superpi.data.NormalizedImage
 import io.github.whywood.superpi.data.SendWhileRunning
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.CompactionOutcome
+import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.InputQueueKind
 import io.github.whywood.superpi.runtime.QueuedInput
 import io.github.whywood.superpi.runtime.MessageStatus
@@ -30,6 +31,7 @@ import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.ModelSettings
 import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.RuntimeEvent
+import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.runtime.SessionModelSnapshot
 import io.github.whywood.superpi.runtime.SkillExpander
 import io.github.whywood.superpi.runtime.SkillSummary
@@ -49,6 +51,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -159,6 +162,8 @@ class ChatViewModel(
     )
     private var observationJob: Job? = null
     private var observedSessionId: String? = null
+    private var remoteOpenJob: Job? = null
+    private var remoteBusyWatchJob: Job? = null
     private var expanding = false
     private val busyPinned = mutableSetOf<String>()
 
@@ -573,18 +578,136 @@ class ChatViewModel(
     suspend fun reloadSession(): Result<Unit> = sessionOpener.reloadSession()
 
     fun newSession(workspaceId: String, initialInput: String = "") {
+        cancelRemoteSessionSync()
         rememberDraft()
         sessionOpener.newSession(workspaceId, initialInput)
     }
 
     fun openConversationById(id: String) {
+        cancelRemoteSessionSync()
         rememberDraft()
         sessionOpener.openConversationById(id)
     }
 
     fun selectWorkspace(workspaceId: String) {
+        cancelRemoteSessionSync()
         rememberDraft()
         sessionOpener.selectWorkspace(workspaceId)
+    }
+
+    fun openRemoteMirrorSession(
+        workspace: RuntimeWorkspace,
+        sessionTitle: String,
+        errorFallback: String,
+        loadSession: suspend () -> RemoteSessionOpenResult,
+        pollUpdates: suspend () -> RemoteHistoryPoll = { RemoteHistoryPoll(busy = false, summary = null) },
+    ) {
+        cancelRemoteSessionSync()
+        rememberDraft()
+        val previous = mutableState.value
+        mutableState.update {
+            it.copy(
+                currentWorkspaceId = workspace.id,
+                conversationId = null,
+                conversationCwd = workspace.cwd,
+                conversation = ConversationState(title = sessionTitle.ifBlank { uiStrings.newChatTitle }),
+                switchingConversation = true,
+                input = "",
+                quote = null,
+                attachments = emptyList(),
+                error = null,
+                importingAttachment = false,
+            )
+        }
+        remoteOpenJob = viewModelScope.launch {
+            try {
+                when (val result = withContext(ioDispatcher) { loadSession() }) {
+                    is RemoteSessionOpenResult.Success -> {
+                        sessionOpener.switchToSummary(result.summary)
+                        if (result.busy) {
+                            watchRemoteBusySession(result.summary.id, pollUpdates)
+                        }
+                    }
+
+                    is RemoteSessionOpenResult.Failure -> {
+                        mutableState.update {
+                            it.copy(
+                                currentWorkspaceId = previous.currentWorkspaceId,
+                                conversationId = previous.conversationId,
+                                conversationCwd = previous.conversationCwd,
+                                conversation = previous.conversation,
+                                input = previous.input,
+                                quote = previous.quote,
+                                attachments = previous.attachments,
+                                switchingConversation = false,
+                                error = result.message.ifBlank { errorFallback },
+                            )
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                mutableState.update {
+                    it.copy(
+                        currentWorkspaceId = previous.currentWorkspaceId,
+                        conversationId = previous.conversationId,
+                        conversationCwd = previous.conversationCwd,
+                        conversation = previous.conversation,
+                        input = previous.input,
+                        quote = previous.quote,
+                        attachments = previous.attachments,
+                        switchingConversation = false,
+                        error = chatError(uiStrings, error.message ?: errorFallback),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun watchRemoteBusySession(
+        expectedSessionId: String,
+        pollUpdates: suspend () -> RemoteHistoryPoll,
+    ) {
+        remoteBusyWatchJob = viewModelScope.launch {
+            var currentId = expectedSessionId
+            repeat(400) {
+                delay(1_500L)
+                val current = mutableState.value
+                if (current.conversationId != currentId) return@launch
+                if (current.sending) return@launch
+                val poll = try {
+                    withContext(ioDispatcher) { pollUpdates() }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    return@repeat
+                }
+                val updatedSummary = poll.summary
+                if (updatedSummary != null) {
+                    val active = mutableState.value
+                    if (active.conversationId == currentId && !active.sending) {
+                        if (updatedSummary.id != currentId) {
+                            sessionDrafts.remember(currentId, active)
+                            sessionDrafts.reopen(currentId, updatedSummary.id)
+                            currentId = updatedSummary.id
+                            sessionOpener.switchToSummary(updatedSummary)
+                        } else {
+                            val resolved = store.reopen(currentId)
+                            mutableState.update { it.copy(conversation = resolved) }
+                        }
+                    }
+                }
+                if (!poll.busy) return@launch
+            }
+        }
+    }
+
+    private fun cancelRemoteSessionSync() {
+        remoteOpenJob?.cancel()
+        remoteOpenJob = null
+        remoteBusyWatchJob?.cancel()
+        remoteBusyWatchJob = null
     }
 
     fun createWorkspace(
@@ -608,6 +731,7 @@ class ChatViewModel(
     suspend fun loadSearchSessions(): List<SessionSearchHit> = sessionList.search()
 
     fun openConversation(id: String) {
+        cancelRemoteSessionSync()
         rememberDraft()
         sessionOpener.openConversation(id)
     }
@@ -712,6 +836,7 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
+        cancelRemoteSessionSync()
         observationJob?.cancel()
         observedSessionId?.takeIf { it !in busyPinned }?.let(store::unpin)
         observedSessionId = null
@@ -726,7 +851,9 @@ class ChatViewModel(
         observationJob = null
         if (sessionId == null) {
             previous?.takeIf { it !in busyPinned }?.let(store::unpin)
-            mutableState.update { it.copy(conversation = ConversationState()) }
+            mutableState.update { state ->
+                if (state.switchingConversation) state else state.copy(conversation = ConversationState())
+            }
             return
         }
         store.pin(sessionId)
@@ -765,3 +892,17 @@ class ChatViewModel(
 
     private fun applySessionModel(model: SessionModelSnapshot?) = modelController.applySessionModel(model)
 }
+
+sealed interface RemoteSessionOpenResult {
+    data class Success(
+        val summary: ConversationSummary,
+        val busy: Boolean,
+    ) : RemoteSessionOpenResult
+
+    data class Failure(val message: String) : RemoteSessionOpenResult
+}
+
+data class RemoteHistoryPoll(
+    val busy: Boolean,
+    val summary: ConversationSummary? = null,
+)
