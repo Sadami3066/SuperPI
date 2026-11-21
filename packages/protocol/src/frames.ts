@@ -12,6 +12,8 @@ export const RELAY_CAPABILITIES = [
   'sync-events',
   'bot-controls',
   'session-controls',
+  'bot-capabilities',
+  'present-artifacts',
 ] as const
 export type RelayCapability = (typeof RELAY_CAPABILITIES)[number]
 
@@ -54,6 +56,8 @@ export const ROUTE_METHODS = [
   'bot.instructions.get',
   'bot.instructions.set',
   'bot.reload',
+  'bot.capabilities.get',
+  'bot.capabilities.set',
   'session.create',
   'session.rename',
   'session.delete',
@@ -67,6 +71,7 @@ export const ROUTE_METHODS = [
   'file.mkdir',
   'file.rename',
   'file.delete',
+  'artifact.read_chunk',
 ] as const
 
 export type RouteMethod = (typeof ROUTE_METHODS)[number]
@@ -98,7 +103,13 @@ export interface RemoteFileEntry {
   mimeType?: string
 }
 
-export const SYNC_EVENT_KINDS = ['sessions_changed', 'bot_activity', 'approval_changed', 'model_changed'] as const
+export const SYNC_EVENT_KINDS = [
+  'sessions_changed',
+  'bot_activity',
+  'approval_changed',
+  'model_changed',
+  'capabilities_changed',
+] as const
 export type SyncEventKind = (typeof SYNC_EVENT_KINDS)[number]
 
 export interface SyncEventFrame {
@@ -898,8 +909,11 @@ function validateRouteParams(
     case 'bot.delete':
     case 'bot.commands':
     case 'bot.instructions.get':
+    case 'bot.capabilities.get':
       requireRouteBotId(params, routeId)
       return params
+    case 'bot.capabilities.set':
+      return validateBotCapabilitiesSetParams(params, routeId)
     case 'bot.models':
     case 'bot.reload':
       requireRouteBotId(params, routeId)
@@ -1000,9 +1014,61 @@ function validateRouteParams(
         throw new RouteValidationError(routeId, 'recursive must be a boolean')
       }
       return { ...params, path: requireRoutePath(params.path, false, routeId) }
+    case 'artifact.read_chunk':
+      return validateArtifactReadChunkParams(params, routeId)
     default:
       return params
   }
+}
+
+function validateBotCapabilitiesSetParams(
+  params: Record<string, unknown>,
+  routeId: string,
+): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  const policy = params.policy
+  if (!isRecord(policy)) {
+    throw new RouteValidationError(routeId, 'policy must be an object')
+  }
+  if (policy.allCapabilities !== undefined && typeof policy.allCapabilities !== 'boolean') {
+    throw new RouteValidationError(routeId, 'policy.allCapabilities must be a boolean')
+  }
+  for (const field of ['skills', 'plugins', 'mcpServers'] as const) {
+    const arr = policy[field]
+    if (arr !== undefined) {
+      if (!isStringArray(arr) || arr.length > 500 || arr.some((entry) => entry.length > 256)) {
+        throw new RouteValidationError(routeId, `policy.${field} must be a valid string array`)
+      }
+    }
+  }
+  if (policy.screenTools !== undefined && typeof policy.screenTools !== 'boolean') {
+    throw new RouteValidationError(routeId, 'policy.screenTools must be a boolean')
+  }
+  if (policy.miniappTools !== undefined && typeof policy.miniappTools !== 'boolean') {
+    throw new RouteValidationError(routeId, 'policy.miniappTools must be a boolean')
+  }
+  return params
+}
+
+function validateArtifactReadChunkParams(
+  params: Record<string, unknown>,
+  routeId: string,
+): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  const artifactId = params.artifactId
+  if (typeof artifactId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(artifactId)) {
+    throw new RouteValidationError(routeId, 'artifactId must be a safe identifier')
+  }
+  const offset = params.offset
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
+    throw new RouteValidationError(routeId, 'offset must be a non-negative integer')
+  }
+  const length = params.length
+  if (typeof length !== 'number' || !Number.isInteger(length) || length < 1 || length > MAX_FILE_CHUNK_BYTES) {
+    const code = typeof length === 'number' && length > MAX_FILE_CHUNK_BYTES ? 'payload_too_large' : 'bad_request'
+    throw new RouteValidationError(routeId, `length must be an integer between 1 and ${MAX_FILE_CHUNK_BYTES}`, code)
+  }
+  return params
 }
 
 function validateBotCreateParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {

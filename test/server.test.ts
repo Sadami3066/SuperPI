@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { X509Certificate } from 'node:crypto'
 import { PROTOCOL_VERSION, type DeviceListResponse, type EnrollResponse, type HealthResponse, type PairCodeResponse } from '@superpi/protocol'
 import { createRelayServer, type EnrollRateLimitOptions, type RelayServer } from '../src/server/http.ts'
+import { MemoryStore } from '../src/server/memory.ts'
 import { RelayStore } from '../src/server/store.ts'
 import { hashSecret, newAccountId, readFingerprint } from '../src/server/auth.ts'
 import type { RelayConfig } from '../src/server/config.ts'
@@ -32,10 +33,15 @@ afterEach(async () => {
   }
 })
 
-async function startRelay(options?: { now?: () => number; enrollRateLimit?: EnrollRateLimitOptions }): Promise<Harness> {
+async function startRelay(options?: {
+  now?: () => number
+  enrollRateLimit?: EnrollRateLimitOptions
+  withMemory?: boolean
+}): Promise<Harness> {
   const storeDir = mkdtempSync(path.join(tmpdir(), 'superpi-relay-'))
   const store = new RelayStore(storeDir)
   store.createAccount(newAccountId(), hashSecret(LOGIN_SECRET), options?.now?.() ?? Date.now())
+  const memory = options?.withMemory ? new MemoryStore(path.join(storeDir, 'memory'), store.database) : null
   const config: RelayConfig = {
     host: '127.0.0.1',
     port: 0,
@@ -51,6 +57,7 @@ async function startRelay(options?: { now?: () => number; enrollRateLimit?: Enro
     store,
     fingerprint: 'fp-test',
     entries: config.entries,
+    memory,
     now: options?.now,
     enrollRateLimit: options?.enrollRateLimit,
   })
@@ -409,5 +416,107 @@ describe('relay http', () => {
       headers: auth(first.token),
     })
     expect(response.status).toBe(400)
+  })
+
+  it('coordinates shared memory rollup leases across multiple Android devices', async () => {
+    let clock = 100_000
+    const harness = await startRelay({ now: () => clock, withMemory: true })
+    const unauth = await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, { method: 'POST' })
+    expect(unauth.status).toBe(401)
+    const phoneA = (await (
+      await enroll(harness, { loginSecret: LOGIN_SECRET, deviceName: 'Phone A', platform: 'android' })
+    ).json()) as EnrollResponse
+    const phoneB = (await (
+      await enroll(harness, { loginSecret: LOGIN_SECRET, deviceName: 'Phone B', platform: 'android' })
+    ).json()) as EnrollResponse
+
+    const badTtl = await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+      method: 'POST',
+      headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ ttlMs: -5 }),
+    })
+    expect(badTtl.status).toBe(400)
+
+    const leaseA1 = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+        method: 'POST',
+        headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ ttlMs: 60_000 }),
+      })
+    ).json()) as { acquired: boolean; leaseId?: string; holderDeviceId?: string; expiresAt: number }
+    expect(leaseA1.acquired).toBe(true)
+    expect(leaseA1.leaseId).toBeTruthy()
+    expect(leaseA1.expiresAt).toBe(160_000)
+
+    const leaseBBlocked = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+        method: 'POST',
+        headers: auth(phoneB.token),
+      })
+    ).json()) as { acquired: boolean; holderDeviceId?: string; expiresAt: number }
+    expect(leaseBBlocked).toEqual({
+      acquired: false,
+      holderDeviceId: phoneA.deviceId,
+      expiresAt: 160_000,
+    })
+
+    const leaseARenew = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+        method: 'POST',
+        headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ ttlMs: 90_000 }),
+      })
+    ).json()) as { acquired: boolean; leaseId?: string; expiresAt: number }
+    expect(leaseARenew.acquired).toBe(true)
+    expect(leaseARenew.expiresAt).toBe(190_000)
+
+    const wrongRelease = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease?leaseId=${encodeURIComponent(leaseARenew.leaseId!)}`, {
+        method: 'DELETE',
+        headers: auth(phoneB.token),
+      })
+    ).json()) as { released: boolean }
+    expect(wrongRelease.released).toBe(false)
+
+    const okRelease = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease?leaseId=${encodeURIComponent(leaseARenew.leaseId!)}`, {
+        method: 'DELETE',
+        headers: auth(phoneA.token),
+      })
+    ).json()) as { released: boolean }
+    expect(okRelease.released).toBe(true)
+
+    const leaseBNow = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+        method: 'POST',
+        headers: { ...auth(phoneB.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ ttlMs: 30_000 }),
+      })
+    ).json()) as { acquired: boolean; expiresAt: number }
+    expect(leaseBNow.acquired).toBe(true)
+    expect(leaseBNow.expiresAt).toBe(130_000)
+
+    clock = 130_001
+    const leaseATakeover = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+        method: 'POST',
+        headers: auth(phoneA.token),
+      })
+    ).json()) as { acquired: boolean; expiresAt: number }
+    expect(leaseATakeover.acquired).toBe(true)
+
+    const revokeA = await fetch(`${harness.baseUrl}/v1/devices/${phoneA.deviceId}`, {
+      method: 'DELETE',
+      headers: auth(phoneB.token),
+    })
+    expect(revokeA.status).toBe(200)
+
+    const leaseBAfterRevoke = (await (
+      await fetch(`${harness.baseUrl}/v1/memory/rollup-lease`, {
+        method: 'POST',
+        headers: auth(phoneB.token),
+      })
+    ).json()) as { acquired: boolean }
+    expect(leaseBAfterRevoke.acquired).toBe(true)
   })
 })

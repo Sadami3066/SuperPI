@@ -28,6 +28,21 @@ export interface MemoryFileResponse {
   content: string
 }
 
+export interface MemoryRollupLeaseRequest {
+  ttlMs?: number
+}
+
+export interface MemoryRollupLeaseResponse {
+  acquired: boolean
+  leaseId?: string
+  holderDeviceId?: string
+  expiresAt: number
+}
+
+export interface MemoryRollupLeaseReleaseResponse {
+  released: boolean
+}
+
 export const MEMORY_PATHS = ['profile.md', 'context.md', 'cookbook.md', 'summaries.log'] as const
 
 export type MemoryPath = (typeof MEMORY_PATHS)[number] | `daily/${string}.md`

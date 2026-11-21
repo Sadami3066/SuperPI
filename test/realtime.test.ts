@@ -776,5 +776,19 @@ describe('realtime hub', () => {
       modelId: 'gpt-5',
       thinkingLevel: 'high',
     })
+
+    clock += 1_100
+    desktopClient.send({
+      type: 'sync_event',
+      kind: 'capabilities_changed',
+      botId: 'home',
+      ts: clock,
+    })
+    const capRecovered = await nextOf(phoneClient, 'sync_event')
+    expect(capRecovered).toMatchObject({
+      kind: 'capabilities_changed',
+      botId: 'home',
+      deviceId: desktop.deviceId,
+    })
   })
 })

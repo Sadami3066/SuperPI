@@ -670,5 +670,88 @@ describe('protocol validation', () => {
       modelId: 'gpt-5',
       thinkingLevel: 'xhigh',
     })
+
+    expect(RELAY_CAPABILITIES).toContain('bot-capabilities')
+    expect(RELAY_CAPABILITIES).toContain('present-artifacts')
+
+    const capGet = parseClientFrame({
+      type: 'route',
+      id: 'r-cap-get',
+      to: 'dev-phone-2',
+      method: 'bot.capabilities.get',
+      params: { botId: 'home' },
+    })
+    expect(capGet).toMatchObject({ method: 'bot.capabilities.get', params: { botId: 'home' } })
+
+    const capSet = parseClientFrame({
+      type: 'route',
+      id: 'r-cap-set',
+      to: 'dev-phone-2',
+      method: 'bot.capabilities.set',
+      params: {
+        botId: 'home',
+        policy: {
+          allCapabilities: true,
+          skills: ['weather'],
+          plugins: ['amap'],
+          mcpServers: [],
+          screenTools: true,
+          miniappTools: false,
+        },
+      },
+    })
+    expect(capSet).toMatchObject({ method: 'bot.capabilities.set' })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-cap-bad',
+        to: 'dev-phone-2',
+        method: 'bot.capabilities.set',
+        params: { botId: 'home', policy: 'invalid' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    const capSync = parseServerFrame({
+      type: 'sync_event',
+      deviceId: 'dev-phone-2',
+      kind: 'capabilities_changed',
+      botId: 'home',
+      ts: 10001,
+    })
+    expect(capSync).toMatchObject({ type: 'sync_event', kind: 'capabilities_changed', botId: 'home' })
+
+    const artifactRead = parseClientFrame({
+      type: 'route',
+      id: 'r-art-1',
+      to: 'dev-phone-2',
+      method: 'artifact.read_chunk',
+      params: { botId: 'home', artifactId: 'art_abc123', offset: 0, length: 65536 },
+    })
+    expect(artifactRead).toMatchObject({ method: 'artifact.read_chunk', params: { artifactId: 'art_abc123' } })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-art-bad-id',
+        to: 'dev-phone-2',
+        method: 'artifact.read_chunk',
+        params: { botId: 'home', artifactId: '../secret', offset: 0, length: 64 },
+      }),
+    ).toThrow(RouteValidationError)
+
+    try {
+      parseClientFrame({
+        type: 'route',
+        id: 'r-art-too-big',
+        to: 'dev-phone-2',
+        method: 'artifact.read_chunk',
+        params: { botId: 'home', artifactId: 'art_1', offset: 0, length: MAX_FILE_CHUNK_BYTES + 1 },
+      })
+      throw new Error('expected artifact chunk size error')
+    } catch (error) {
+      expect(error).toBeInstanceOf(RouteValidationError)
+      expect((error as RouteValidationError).code).toBe('payload_too_large')
+    }
   })
 })

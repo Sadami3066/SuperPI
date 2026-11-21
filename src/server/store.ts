@@ -51,6 +51,12 @@ export class RelayStore {
         used_at INTEGER,
         attempts INTEGER NOT NULL DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS memory_leases (
+        name TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
     `)
   }
 
@@ -98,7 +104,11 @@ export class RelayStore {
 
   revokeDevice(id: string, now: number): boolean {
     const result = this.db.prepare('UPDATE devices SET revoked = 1, last_seen = ? WHERE id = ?').run(now, id)
-    return Number(result.changes) > 0
+    if (Number(result.changes) > 0) {
+      this.db.prepare('DELETE FROM memory_leases WHERE device_id = ?').run(id)
+      return true
+    }
+    return false
   }
 
   touchDevice(id: string, now: number): void {
@@ -127,6 +137,54 @@ export class RelayStore {
 
   registerPairCodeFailure(code: string): void {
     this.db.prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE code = ?').run(code)
+  }
+
+  acquireLease(
+    name: string,
+    deviceId: string,
+    leaseId: string,
+    now: number,
+    ttlMs: number,
+  ): { acquired: boolean; leaseId?: string; holderDeviceId?: string; expiresAt: number } {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const existing = this.db
+        .prepare('SELECT device_id, expires_at FROM memory_leases WHERE name = ?')
+        .get(name) as { device_id: string; expires_at: number } | undefined
+      if (existing && existing.expires_at > now && existing.device_id !== deviceId) {
+        const holder = this.db
+          .prepare('SELECT revoked FROM devices WHERE id = ?')
+          .get(existing.device_id) as { revoked: number } | undefined
+        if (holder && holder.revoked === 0) {
+          this.db.exec('COMMIT')
+          return {
+            acquired: false,
+            holderDeviceId: existing.device_id,
+            expiresAt: existing.expires_at,
+          }
+        }
+      }
+      const expiresAt = now + ttlMs
+      this.db
+        .prepare('INSERT OR REPLACE INTO memory_leases (name, device_id, lease_id, expires_at) VALUES (?, ?, ?, ?)')
+        .run(name, deviceId, leaseId, expiresAt)
+      this.db.exec('COMMIT')
+      return { acquired: true, leaseId, expiresAt }
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {}
+      throw error
+    }
+  }
+
+  releaseLease(name: string, deviceId: string, leaseId?: string): boolean {
+    const result = leaseId
+      ? this.db
+          .prepare('DELETE FROM memory_leases WHERE name = ? AND device_id = ? AND lease_id = ?')
+          .run(name, deviceId, leaseId)
+      : this.db.prepare('DELETE FROM memory_leases WHERE name = ? AND device_id = ?').run(name, deviceId)
+    return Number(result.changes) > 0
   }
 }
 

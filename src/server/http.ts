@@ -13,6 +13,8 @@ import type {
   ErrorCode,
   HealthResponse,
   MemoryFileResponse,
+  MemoryRollupLeaseReleaseResponse,
+  MemoryRollupLeaseResponse,
   MemorySnapshotResponse,
   MemoryWriteRequest,
   MemoryWriteResponse,
@@ -60,6 +62,9 @@ const DEFAULT_ENROLL_MAX_FAILURES = 10
 const DEFAULT_ENROLL_WINDOW_MS = 15 * 60 * 1000
 const MAX_FAILURE_KEYS = 4_096
 const MAX_DEVICE_NAME_LENGTH = 128
+const DEFAULT_ROLLUP_LEASE_TTL_MS = 10 * 60 * 1000
+const MIN_ROLLUP_LEASE_TTL_MS = 30 * 1000
+const MAX_ROLLUP_LEASE_TTL_MS = 30 * 60 * 1000
 
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const now = options.now ?? (() => Date.now())
@@ -183,6 +188,45 @@ async function handle(
       if (result.applied) options.onMemoryChanged?.(result.version)
       const responseBody: MemoryWriteResponse = { version: result.version }
       sendJson(response, 200, responseBody)
+      return
+    }
+
+    if (method === 'POST' && url.pathname === '/v1/memory/rollup-lease') {
+      const currentNow = now()
+      const device = authenticate(options, currentNow, request, response)
+      if (!device || response.writableEnded) return
+      requireMemory(options)
+      const body = await readJson(request, BODY_LIMIT)
+      if (body !== null && (typeof body !== 'object' || Array.isArray(body))) {
+        throw new HttpError(400, 'bad_request', 'body must be an object')
+      }
+      const requestedTtl = (body as { ttlMs?: unknown } | null)?.ttlMs
+      let ttlMs = DEFAULT_ROLLUP_LEASE_TTL_MS
+      if (requestedTtl !== undefined) {
+        if (typeof requestedTtl !== 'number' || !Number.isFinite(requestedTtl) || requestedTtl <= 0) {
+          throw new HttpError(400, 'bad_request', 'ttlMs must be a positive number')
+        }
+        ttlMs = Math.min(MAX_ROLLUP_LEASE_TTL_MS, Math.max(MIN_ROLLUP_LEASE_TTL_MS, Math.round(requestedTtl)))
+      }
+      const result: MemoryRollupLeaseResponse = options.store.acquireLease(
+        'rollup',
+        device.id,
+        randomToken(),
+        currentNow,
+        ttlMs,
+      )
+      sendJson(response, 200, result)
+      return
+    }
+
+    if (method === 'DELETE' && url.pathname === '/v1/memory/rollup-lease') {
+      const device = authenticate(options, now(), request, response)
+      if (!device || response.writableEnded) return
+      requireMemory(options)
+      const leaseId = url.searchParams.get('leaseId')?.trim() || undefined
+      const released = options.store.releaseLease('rollup', device.id, leaseId)
+      const result: MemoryRollupLeaseReleaseResponse = { released }
+      sendJson(response, 200, result)
       return
     }
 
