@@ -8,4 +8,10 @@
     <string name="present_open_failed">No app can open this file</string>
     <string name="present_share_failed">Could not share this file</string>
     <string name="present_card_unavailable">This card could not be shown</string>
+    <string name="present_remote_loading">Loading…</string>
+    <string name="present_remote_download">Tap to load</string>
+    <string name="present_remote_retry">Tap to retry</string>
+    <string name="present_remote_unavailable">File unavailable</string>
+    <string name="present_remote_upgrade">Update the other device to view</string>
+    <string name="present_remote_miniapp_hint">Runs on %1$s</string>
 </resources>

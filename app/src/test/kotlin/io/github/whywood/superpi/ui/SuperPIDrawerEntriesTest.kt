@@ -128,23 +128,74 @@ class SuperPIDrawerEntriesTest {
             listOf(local.id, remote.id),
             result.filterIsInstance<DrawerEntry.WorkspaceEntry>().map { it.workspace.id },
         )
+        assertEquals(listOf("phone-b"), result.filterIsInstance<DrawerEntry.RemoteDeviceHeader>().map { it.deviceId })
         assertEquals(listOf(local.id), result.filterIsInstance<DrawerEntry.Session>().map { it.workspaceId })
         assertEquals(listOf("remote-s1"), result.filterIsInstance<DrawerEntry.RemoteSession>().map { it.session.id })
         assertEquals(result.size, result.map { it.key }.toSet().size)
     }
 
     @Test
-    fun offlineRemoteWorkspaceStillExpandsSessions() {
+    fun offlineRemoteWorkspaceCollapsesByDefaultAndExpandsSessionsWhenDeviceExpanded() {
         val remote = remoteWorkspace(online = false)
-        val result = buildDrawerEntries(
+        val collapsedResult = buildDrawerEntries(
             workspaces = listOf(remote),
             sessionsByCwd = mapOf(remote.cwd to listOf(session("remote-s1", 1, cwd = remote.cwd))),
             expandedWorkspaceIds = setOf(remote.id),
             expandedSessionWorkspaceIds = emptySet(),
         )
+        val header = collapsedResult.filterIsInstance<DrawerEntry.RemoteDeviceHeader>().single()
+        assertEquals(false, header.online)
+        assertEquals(false, header.expanded)
+        assertTrue(collapsedResult.filterIsInstance<DrawerEntry.WorkspaceEntry>().isEmpty())
 
-        assertEquals(listOf(remote.id), result.filterIsInstance<DrawerEntry.WorkspaceEntry>().map { it.workspace.id })
-        assertEquals(listOf(remote.id), result.filterIsInstance<DrawerEntry.Session>().map { it.workspaceId })
+        val expandedResult = buildDrawerEntries(
+            workspaces = listOf(remote),
+            sessionsByCwd = mapOf(remote.cwd to listOf(session("remote-s1", 1, cwd = remote.cwd))),
+            expandedWorkspaceIds = setOf(remote.id),
+            expandedSessionWorkspaceIds = emptySet(),
+            expandedOfflineRemoteDeviceIds = setOf("phone-b"),
+        )
+
+        assertEquals(listOf(remote.id), expandedResult.filterIsInstance<DrawerEntry.WorkspaceEntry>().map { it.workspace.id })
+        assertEquals(listOf(remote.id), expandedResult.filterIsInstance<DrawerEntry.Session>().map { it.workspaceId })
+    }
+
+    @Test
+    fun groupsThreePhonesOnlineFirstAlphabeticallyWithQuickCreateAndUniqueKeys() {
+        val local = RuntimeWorkspace(id = "home", name = "PI", cwd = "/home", isHome = true)
+        fun phoneBot(deviceId: String, deviceName: String, online: Boolean) = RuntimeWorkspace(
+            id = "remote:$deviceId:home",
+            name = "PI",
+            cwd = "/remote/$deviceId/home",
+            remote = RemoteBotRef(
+                deviceId = deviceId,
+                deviceName = deviceName,
+                botId = "home",
+                botName = "PI",
+                online = online,
+            ),
+        )
+        val offlinePhone = phoneBot("dev-off", "Aaron Tablet", online = false)
+        val zetaPhone = phoneBot("dev-zeta", "Zeta Phone", online = true)
+        val alphaPhone = phoneBot("dev-alpha", "Alpha Phone", online = true)
+        val result = buildDrawerEntries(
+            workspaces = listOf(local, offlinePhone, zetaPhone, alphaPhone),
+            sessionsByCwd = mapOf(local.cwd to listOf(session("s1", 1))),
+            expandedWorkspaceIds = setOf(local.id),
+            expandedSessionWorkspaceIds = emptySet(),
+            collapsedOnlineRemoteDeviceIds = setOf("dev-zeta"),
+            canCreateRemoteBotDeviceIds = setOf("dev-alpha", "dev-zeta", "dev-off"),
+        )
+
+        val headers = result.filterIsInstance<DrawerEntry.RemoteDeviceHeader>()
+        assertEquals(listOf("dev-alpha", "dev-zeta", "dev-off"), headers.map { it.deviceId })
+        assertEquals(listOf(true, false, false), headers.map { it.expanded })
+        assertEquals(listOf(true, true, false), headers.map { it.canCreateBot })
+        assertEquals(
+            listOf("home", "remote:dev-alpha:home"),
+            result.filterIsInstance<DrawerEntry.WorkspaceEntry>().map { it.workspace.id },
+        )
+        assertEquals(result.size, result.map { it.key }.toSet().size)
     }
 
     @Test

@@ -30,4 +30,6 @@
     <string name="agents_doc_discard_title">Discard changes?</string>
     <string name="agents_doc_discard_message">Your edits have not been saved.</string>
     <string name="agents_doc_discard_confirm">Discard</string>
+    <string name="remote_capabilities_load_failed">Could not load capabilities. Try again.</string>
+    <string name="remote_capabilities_save_failed">Save failed. Try again.</string>
 </resources>

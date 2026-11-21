@@ -3,6 +3,7 @@ package io.github.whywood.superpi.data.relay
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import io.github.whywood.superpi.data.AgentDocStore
+import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.QuestionCenter
@@ -74,6 +75,8 @@ class RelayLive(
     configuredProviderIds: () -> Set<String> = { emptySet() },
     agentDocStore: () -> AgentDocStore? = { null },
     slashCommands: suspend (String) -> List<RemoteCommandSpec> = { emptyList() },
+    workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
+    installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
 ) {
     private val socket = RelaySocket(scope, io)
     private val mutex = Mutex()
@@ -97,6 +100,8 @@ class RelayLive(
         configuredProviderIds = configuredProviderIds,
         agentDocStore = agentDocStore,
         slashCommands = slashCommands,
+        workspaceToolPolicies = workspaceToolPolicies,
+        installedCapabilities = installedCapabilities,
     )
 
     private val _state = MutableStateFlow(RelayLiveState.Disabled)
@@ -665,6 +670,9 @@ class RelayLive(
                     frame.method == "bot.commands" ||
                     frame.method == "bot.instructions.get" ||
                     frame.method == "bot.instructions.set" ||
+                    frame.method == "bot.capabilities.get" ||
+                    frame.method == "bot.capabilities.set" ||
+                    frame.method == "artifact.read_chunk" ||
                     frame.method == "bot.reload"
                 ) {
                     "permission_denied"

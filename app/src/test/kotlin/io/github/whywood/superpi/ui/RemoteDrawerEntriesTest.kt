@@ -73,6 +73,7 @@ class RemoteDrawerEntriesTest {
             sessionsByCwd = mapOf(offlineWorkspace.cwd to listOf(cached)),
             expandedWorkspaceIds = setOf(offlineWorkspace.id),
             expandedSessionWorkspaceIds = emptySet(),
+            expandedOfflineRemoteDeviceIds = setOf("dev-1"),
             remoteDrawerStates = mapOf(
                 offlineWorkspace.id to RemoteDrawerState(
                     sessions = listOf(RemoteSessionSummaryDto("stale-1", "Stale", 10L)),

@@ -76,6 +76,7 @@ fun WorkspaceCreateDialog(
     privateDirectory: String,
     remoteTargets: List<RemoteHostTarget> = emptyList(),
     remoteBotNamesByDevice: Map<String, List<String>> = emptyMap(),
+    initialTargetDeviceId: String? = null,
     submitting: Boolean = false,
     remoteError: String? = null,
     onConfirm: (String, String?, Bitmap?, String?) -> Unit,
@@ -86,7 +87,9 @@ fun WorkspaceCreateDialog(
     val context = LocalContext.current
     var name by rememberSaveable { mutableStateOf("") }
     var intro by rememberSaveable { mutableStateOf("") }
-    var selectedDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedDeviceId by rememberSaveable(initialTargetDeviceId) {
+        mutableStateOf(initialTargetDeviceId?.takeIf { id -> remoteTargets.any { it.deviceId == id } })
+    }
     var avatar by remember { mutableStateOf<Bitmap?>(null) }
     var cropSource by rememberSaveable { mutableStateOf<String?>(null) }
     var submitted by remember { mutableStateOf(false) }

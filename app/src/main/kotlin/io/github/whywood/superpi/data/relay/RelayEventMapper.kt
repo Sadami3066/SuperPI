@@ -30,6 +30,7 @@ internal object RelayEventMapper {
                 put("callId", event.callId)
                 put("result", event.result)
                 put("isError", event.isError)
+                event.details?.let { put("details", it) }
             },
         )
 

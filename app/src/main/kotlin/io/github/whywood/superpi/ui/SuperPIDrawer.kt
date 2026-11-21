@@ -115,6 +115,16 @@ internal sealed interface DrawerEntry {
         override val key: String = "workspaces_header"
     }
 
+    data class RemoteDeviceHeader(
+        val deviceId: String,
+        val deviceName: String,
+        val online: Boolean,
+        val expanded: Boolean,
+        val canCreateBot: Boolean,
+    ) : DrawerEntry {
+        override val key: String = "remote_device_$deviceId"
+    }
+
     data class WorkspaceEntry(val workspace: RuntimeWorkspace, val first: Boolean) : DrawerEntry {
         override val key: String = "workspace_${workspace.id}"
     }
@@ -168,102 +178,207 @@ internal fun buildDrawerEntries(
     collapsedCount: Int = 5,
     remoteSessionManageWorkspaceIds: Set<String> = emptySet(),
     remoteShowArchivedWorkspaceIds: Set<String> = emptySet(),
+    collapsedOnlineRemoteDeviceIds: Set<String> = emptySet(),
+    expandedOfflineRemoteDeviceIds: Set<String> = emptySet(),
+    canCreateRemoteBotDeviceIds: Set<String> = emptySet(),
 ): List<DrawerEntry> = buildList {
+    val localWorkspaces = workspaces.filter { it.remote == null }
+    val remoteWorkspaces = workspaces.filter { it.remote != null }
     add(DrawerEntry.WorkspacesHeader)
-    workspaces.forEachIndexed { index, workspace ->
-        add(DrawerEntry.WorkspaceEntry(workspace, index == 0))
-        if (workspace.id !in expandedWorkspaceIds) return@forEachIndexed
-        val remote = workspace.remote
-        if (remote != null) {
-            val remoteState = remoteDrawerStates[workspace.id]
-            val localFallback = sessionsByCwd[workspace.cwd].orEmpty()
-                .filterNot { it.archived }
-                .sortedWith(
-                    compareByDescending<ConversationSummary> { it.pinned }
-                        .thenByDescending { it.updatedAt },
-                )
-            if (remote.online) {
-                val canToggleArchived = workspace.id in remoteSessionManageWorkspaceIds &&
-                    remoteState != null &&
-                    remoteState.status == null
-                val remoteSessions = remoteState?.sessions.orEmpty()
-                    .distinctBy { it.id }
-                    .sortedByDescending { it.pinned }
-                if (remoteSessions.isNotEmpty()) {
-                    if (remoteSessions.size <= collapsedCount) {
-                        remoteSessions.forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
-                    } else if (workspace.id in expandedSessionWorkspaceIds) {
-                        remoteSessions.forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
-                        add(DrawerEntry.SessionLess(workspace.id))
-                    } else {
-                        remoteSessions.take(collapsedCount).forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
-                        add(DrawerEntry.SessionMore(workspace.id, remoteSessions.size - collapsedCount))
-                    }
-                    if (canToggleArchived) {
-                        add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
-                    }
-                    return@forEachIndexed
-                }
-                when (val status = remoteState?.status) {
-                    null -> if (remoteState == null) {
-                        if (relayOnline) {
-                            add(DrawerEntry.RemoteLoading(workspace.id))
-                        } else {
-                            add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
-                        }
-                    } else {
-                        add(DrawerEntry.WorkspaceEmpty(workspace.id))
-                        if (canToggleArchived) {
-                            add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
-                        }
-                    }
-
-                    RemoteDrawerStatus.Loading -> if (relayOnline) {
-                        add(DrawerEntry.RemoteLoading(workspace.id))
-                    } else {
-                        add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
-                    }
-
-                    else -> add(DrawerEntry.RemoteNotice(workspace, status))
-                }
-                return@forEachIndexed
-            }
-            if (localFallback.isNotEmpty()) {
-                if (localFallback.size <= collapsedCount) {
-                    localFallback.forEach { add(DrawerEntry.Session(it, workspace.id)) }
-                } else if (workspace.id in expandedSessionWorkspaceIds) {
-                    localFallback.forEach { add(DrawerEntry.Session(it, workspace.id)) }
-                    add(DrawerEntry.SessionLess(workspace.id))
-                } else {
-                    localFallback.take(collapsedCount).forEach { add(DrawerEntry.Session(it, workspace.id)) }
-                    add(DrawerEntry.SessionMore(workspace.id, localFallback.size - collapsedCount))
-                }
-            } else {
-                add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
-            }
-            return@forEachIndexed
+    localWorkspaces.forEachIndexed { index, workspace ->
+        appendWorkspaceEntries(
+            workspace = workspace,
+            first = index == 0,
+            sessionsByCwd = sessionsByCwd,
+            expandedWorkspaceIds = expandedWorkspaceIds,
+            expandedSessionWorkspaceIds = expandedSessionWorkspaceIds,
+            remoteDrawerStates = remoteDrawerStates,
+            relayOnline = relayOnline,
+            collapsedCount = collapsedCount,
+            remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
+            remoteShowArchivedWorkspaceIds = remoteShowArchivedWorkspaceIds,
+        )
+    }
+    data class RemoteGroup(
+        val deviceId: String,
+        val deviceName: String,
+        val online: Boolean,
+        val bots: List<RuntimeWorkspace>,
+    )
+    val remoteGroups = remoteWorkspaces
+        .groupBy { it.remote!!.deviceId }
+        .entries
+        .map { (deviceId, bots) ->
+            val name = bots.firstNotNullOfOrNull { bot ->
+                bot.remote?.deviceName?.takeIf { it.isNotBlank() }
+            } ?: deviceId
+            val groupOnline = relayOnline && bots.any { it.remote?.online == true }
+            RemoteGroup(
+                deviceId = deviceId,
+                deviceName = name,
+                online = groupOnline,
+                bots = bots,
+            )
         }
-        val workspaceSessions = sessionsByCwd[workspace.cwd].orEmpty()
+        .sortedWith(
+            compareByDescending<RemoteGroup> { it.online }
+                .thenBy { it.deviceName.lowercase() }
+                .thenBy { it.deviceId },
+        )
+    remoteGroups.forEach { group ->
+        val expanded = if (group.online) {
+            group.deviceId !in collapsedOnlineRemoteDeviceIds
+        } else {
+            group.deviceId in expandedOfflineRemoteDeviceIds
+        }
+        val canCreateBot = group.online && group.deviceId in canCreateRemoteBotDeviceIds
+        add(
+            DrawerEntry.RemoteDeviceHeader(
+                deviceId = group.deviceId,
+                deviceName = group.deviceName,
+                online = group.online,
+                expanded = expanded,
+                canCreateBot = canCreateBot,
+            ),
+        )
+        if (!expanded) return@forEach
+        group.bots.forEachIndexed { index, workspace ->
+            appendWorkspaceEntries(
+                workspace = workspace,
+                first = index == 0,
+                sessionsByCwd = sessionsByCwd,
+                expandedWorkspaceIds = expandedWorkspaceIds,
+                expandedSessionWorkspaceIds = expandedSessionWorkspaceIds,
+                remoteDrawerStates = remoteDrawerStates,
+                relayOnline = relayOnline,
+                collapsedCount = collapsedCount,
+                remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
+                remoteShowArchivedWorkspaceIds = remoteShowArchivedWorkspaceIds,
+            )
+        }
+    }
+}
+
+private fun MutableList<DrawerEntry>.appendWorkspaceEntries(
+    workspace: RuntimeWorkspace,
+    first: Boolean,
+    sessionsByCwd: Map<String, List<ConversationSummary>>,
+    expandedWorkspaceIds: Set<String>,
+    expandedSessionWorkspaceIds: Set<String>,
+    remoteDrawerStates: Map<String, RemoteDrawerState>,
+    relayOnline: Boolean,
+    collapsedCount: Int,
+    remoteSessionManageWorkspaceIds: Set<String>,
+    remoteShowArchivedWorkspaceIds: Set<String>,
+) {
+    add(DrawerEntry.WorkspaceEntry(workspace, first))
+    if (workspace.id !in expandedWorkspaceIds) return
+    val remote = workspace.remote
+    if (remote != null) {
+        val remoteState = remoteDrawerStates[workspace.id]
+        val localFallback = sessionsByCwd[workspace.cwd].orEmpty()
             .filterNot { it.archived }
             .sortedWith(
                 compareByDescending<ConversationSummary> { it.pinned }
                     .thenByDescending { it.updatedAt },
             )
-        if (workspaceSessions.isEmpty()) {
-            add(DrawerEntry.WorkspaceEmpty(workspace.id))
-            return@forEachIndexed
+        if (remote.online) {
+            val canToggleArchived = workspace.id in remoteSessionManageWorkspaceIds &&
+                remoteState != null &&
+                remoteState.status == null
+            val remoteSessions = remoteState?.sessions.orEmpty()
+                .distinctBy { it.id }
+                .sortedByDescending { it.pinned }
+            if (remoteSessions.isNotEmpty()) {
+                appendSessionSlice(
+                    count = remoteSessions.size,
+                    collapsedCount = collapsedCount,
+                    expanded = workspace.id in expandedSessionWorkspaceIds,
+                    workspaceId = workspace.id,
+                    emit = { limit ->
+                        remoteSessions.take(limit).forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
+                    },
+                )
+                if (canToggleArchived) {
+                    add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
+                }
+                return
+            }
+            when (val status = remoteState?.status) {
+                null -> if (remoteState == null) {
+                    if (relayOnline) {
+                        add(DrawerEntry.RemoteLoading(workspace.id))
+                    } else {
+                        add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
+                    }
+                } else {
+                    add(DrawerEntry.WorkspaceEmpty(workspace.id))
+                    if (canToggleArchived) {
+                        add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
+                    }
+                }
+
+                RemoteDrawerStatus.Loading -> if (relayOnline) {
+                    add(DrawerEntry.RemoteLoading(workspace.id))
+                } else {
+                    add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
+                }
+
+                else -> add(DrawerEntry.RemoteNotice(workspace, status))
+            }
+            return
         }
-        if (workspaceSessions.size <= collapsedCount) {
-            workspaceSessions.forEach { add(DrawerEntry.Session(it, workspace.id)) }
-            return@forEachIndexed
-        }
-        if (workspace.id in expandedSessionWorkspaceIds) {
-            workspaceSessions.forEach { add(DrawerEntry.Session(it, workspace.id)) }
-            add(DrawerEntry.SessionLess(workspace.id))
+        if (localFallback.isNotEmpty()) {
+            appendSessionSlice(
+                count = localFallback.size,
+                collapsedCount = collapsedCount,
+                expanded = workspace.id in expandedSessionWorkspaceIds,
+                workspaceId = workspace.id,
+                emit = { limit ->
+                    localFallback.take(limit).forEach { add(DrawerEntry.Session(it, workspace.id)) }
+                },
+            )
         } else {
-            workspaceSessions.take(collapsedCount).forEach { add(DrawerEntry.Session(it, workspace.id)) }
-            add(DrawerEntry.SessionMore(workspace.id, workspaceSessions.size - collapsedCount))
+            add(DrawerEntry.RemoteNotice(workspace, RemoteDrawerStatus.Offline))
         }
+        return
+    }
+    val workspaceSessions = sessionsByCwd[workspace.cwd].orEmpty()
+        .filterNot { it.archived }
+        .sortedWith(
+            compareByDescending<ConversationSummary> { it.pinned }
+                .thenByDescending { it.updatedAt },
+        )
+    if (workspaceSessions.isEmpty()) {
+        add(DrawerEntry.WorkspaceEmpty(workspace.id))
+        return
+    }
+    appendSessionSlice(
+        count = workspaceSessions.size,
+        collapsedCount = collapsedCount,
+        expanded = workspace.id in expandedSessionWorkspaceIds,
+        workspaceId = workspace.id,
+        emit = { limit ->
+            workspaceSessions.take(limit).forEach { add(DrawerEntry.Session(it, workspace.id)) }
+        },
+    )
+}
+
+private inline fun MutableList<DrawerEntry>.appendSessionSlice(
+    count: Int,
+    collapsedCount: Int,
+    expanded: Boolean,
+    workspaceId: String,
+    emit: (limit: Int) -> Unit,
+) {
+    if (count <= collapsedCount) {
+        emit(count)
+    } else if (expanded) {
+        emit(count)
+        add(DrawerEntry.SessionLess(workspaceId))
+    } else {
+        emit(collapsedCount)
+        add(DrawerEntry.SessionMore(workspaceId, count - collapsedCount))
     }
 }
 
@@ -289,6 +404,7 @@ fun SuperPIDrawer(
     onOpenMemory: () -> Unit,
     onOpenRelay: () -> Unit,
     onCreateWorkspace: () -> Unit,
+    onCreateWorkspaceForDevice: (String) -> Unit = {},
     onToggleWorkspaceExpanded: (String) -> Unit,
     onToggleWorkspacePinned: (String) -> Unit,
     onNewSessionInWorkspace: (String) -> Unit,
@@ -308,11 +424,14 @@ fun SuperPIDrawer(
     remoteSessionManageWorkspaceIds: Set<String> = emptySet(),
     remoteFilesWorkspaceIds: Set<String> = emptySet(),
     remoteControlsWorkspaceIds: Set<String> = emptySet(),
+    remoteCapabilitiesWorkspaceIds: Set<String> = emptySet(),
     remoteShowArchivedWorkspaceIds: Set<String> = emptySet(),
+    canCreateRemoteBotDeviceIds: Set<String> = emptySet(),
     onOpenRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
     onRetryRemoteSessions: (RuntimeWorkspace) -> Unit = {},
     onOpenRemoteFiles: (RuntimeWorkspace) -> Unit = {},
     onOpenRemoteInstructions: (RuntimeWorkspace) -> Unit = {},
+    onOpenRemoteCapabilities: (RuntimeWorkspace) -> Unit = {},
     onEditRemoteBot: (RuntimeWorkspace) -> Unit = {},
     onToggleRemoteShowArchived: (RuntimeWorkspace) -> Unit = {},
     onRenameRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto, String) -> Unit = { _, _, _ -> },
@@ -345,6 +464,12 @@ fun SuperPIDrawer(
     var expandedSessionWorkspaceIds by rememberSaveable(stateSaver = expandedSessionsSaver) {
         mutableStateOf(emptySet<String>())
     }
+    var collapsedOnlineRemoteDeviceIds by rememberSaveable(stateSaver = expandedSessionsSaver) {
+        mutableStateOf(emptySet<String>())
+    }
+    var expandedOfflineRemoteDeviceIds by rememberSaveable(stateSaver = expandedSessionsSaver) {
+        mutableStateOf(emptySet<String>())
+    }
     var moreExpanded by rememberSaveable { mutableStateOf(false) }
     val entries = remember(
         orderedWorkspaces,
@@ -355,6 +480,9 @@ fun SuperPIDrawer(
         relayOnline,
         remoteSessionManageWorkspaceIds,
         remoteShowArchivedWorkspaceIds,
+        collapsedOnlineRemoteDeviceIds,
+        expandedOfflineRemoteDeviceIds,
+        canCreateRemoteBotDeviceIds,
     ) {
         buildDrawerEntries(
             workspaces = orderedWorkspaces,
@@ -365,6 +493,9 @@ fun SuperPIDrawer(
             relayOnline = relayOnline,
             remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
             remoteShowArchivedWorkspaceIds = remoteShowArchivedWorkspaceIds,
+            collapsedOnlineRemoteDeviceIds = collapsedOnlineRemoteDeviceIds,
+            expandedOfflineRemoteDeviceIds = expandedOfflineRemoteDeviceIds,
+            canCreateRemoteBotDeviceIds = canCreateRemoteBotDeviceIds,
         )
     }
     Column(
@@ -500,6 +631,27 @@ fun SuperPIDrawer(
                         modifier = Modifier.animateItem(),
                     )
 
+                    is DrawerEntry.RemoteDeviceHeader -> DrawerRemoteDeviceHeaderRow(
+                        entry = entry,
+                        onToggle = {
+                            if (entry.online) {
+                                collapsedOnlineRemoteDeviceIds = if (entry.deviceId in collapsedOnlineRemoteDeviceIds) {
+                                    collapsedOnlineRemoteDeviceIds - entry.deviceId
+                                } else {
+                                    collapsedOnlineRemoteDeviceIds + entry.deviceId
+                                }
+                            } else {
+                                expandedOfflineRemoteDeviceIds = if (entry.deviceId in expandedOfflineRemoteDeviceIds) {
+                                    expandedOfflineRemoteDeviceIds - entry.deviceId
+                                } else {
+                                    expandedOfflineRemoteDeviceIds + entry.deviceId
+                                }
+                            }
+                        },
+                        onCreateBot = { onCreateWorkspaceForDevice(entry.deviceId) },
+                        modifier = Modifier.animateItem(),
+                    )
+
                     is DrawerEntry.WorkspaceEntry -> DrawerWorkspaceRow(
                         workspace = entry.workspace,
                         meta = workspaceRowMeta(entry.workspace),
@@ -509,6 +661,7 @@ fun SuperPIDrawer(
                         supportsBotManage = entry.workspace.id in remoteBotManageWorkspaceIds,
                         supportsWorkspaceFiles = entry.workspace.id in remoteFilesWorkspaceIds,
                         supportsBotControls = entry.workspace.id in remoteControlsWorkspaceIds,
+                        supportsBotCapabilities = entry.workspace.id in remoteCapabilitiesWorkspaceIds,
                         modifier = Modifier.animateItem(),
                         onToggleExpanded = {
                             if (entry.workspace.id in expandedWorkspaceIds) {
@@ -520,6 +673,7 @@ fun SuperPIDrawer(
                         onNewSession = { onNewSessionInWorkspace(entry.workspace.id) },
                         onFiles = { onOpenRemoteFiles(entry.workspace) },
                         onRemoteInstructions = { onOpenRemoteInstructions(entry.workspace) },
+                        onRemoteCapabilities = { onOpenRemoteCapabilities(entry.workspace) },
                         onEditRemote = { onEditRemoteBot(entry.workspace) },
                         onSettings = { onWorkspaceSettings(entry.workspace.id) },
                         onRename = { onRenameWorkspace(entry.workspace.id) },
@@ -724,6 +878,68 @@ private fun DrawerWorkspacesHeader(
 }
 
 @Composable
+private fun DrawerRemoteDeviceHeaderRow(
+    entry: DrawerEntry.RemoteDeviceHeader,
+    onToggle: () -> Unit,
+    onCreateBot: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = DdSpacing.Sm)
+            .heightIn(min = 44.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(
+                onClickLabel = stringResource(R.string.drawer_remote_device_toggle, entry.deviceName),
+                onClick = onToggle,
+            )
+            .testTag("drawer_remote_device_${entry.deviceId}")
+            .padding(start = 10.dp, end = DdSpacing.Xxs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DdIcon(
+            icon = if (entry.expanded) DdIcons.ChevronDown else DdIcons.ChevronRight,
+            tint = colors.inkTertiary,
+            size = 13.dp,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = entry.deviceName,
+            modifier = Modifier.weight(1f),
+            style = DdType.chip,
+            color = if (entry.online) colors.inkSecondary else colors.inkTertiary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (!entry.online) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.drawer_remote_device_offline_badge),
+                modifier = Modifier
+                    .clip(DdShapes.Small)
+                    .background(colors.wash)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                color = colors.inkTertiary,
+                maxLines = 1,
+            )
+        } else if (entry.canCreateBot) {
+            DdIconButton(
+                icon = DdIcons.Plus,
+                onClick = onCreateBot,
+                contentDescription = stringResource(R.string.drawer_remote_device_add_bot, entry.deviceName),
+                modifier = Modifier.testTag("drawer_remote_device_add_${entry.deviceId}"),
+                size = 44.dp,
+                iconSize = 15.dp,
+                tint = colors.inkTertiary,
+            )
+        }
+    }
+}
+
+@Composable
 private fun DrawerNewChatButton(onClick: () -> Unit) {
     val colors = superPiColors()
     Row(
@@ -758,11 +974,13 @@ private fun DrawerWorkspaceRow(
     supportsBotManage: Boolean,
     supportsWorkspaceFiles: Boolean,
     supportsBotControls: Boolean,
+    supportsBotCapabilities: Boolean,
     onToggleExpanded: () -> Unit,
     onTogglePinned: () -> Unit,
     onNewSession: () -> Unit,
     onFiles: () -> Unit,
     onRemoteInstructions: () -> Unit,
+    onRemoteCapabilities: () -> Unit,
     onEditRemote: () -> Unit,
     onSettings: () -> Unit,
     onRename: () -> Unit,
@@ -783,6 +1001,7 @@ private fun DrawerWorkspaceRow(
         supportsBotManage = supportsBotManage,
         supportsWorkspaceFiles = supportsWorkspaceFiles,
         supportsBotControls = supportsBotControls,
+        supportsBotCapabilities = supportsBotCapabilities,
     )
     Box(modifier.fillMaxWidth().padding(top = if (first) DdSpacing.None else 6.dp)) {
         Row(
@@ -886,6 +1105,16 @@ private fun DrawerWorkspaceRow(
                         onClick = {
                             menuOpen = false
                             onRemoteInstructions()
+                        },
+                    )
+
+                    WorkspaceMenuAction.CAPABILITIES -> DdMenuItem(
+                        text = stringResource(R.string.bot_capabilities),
+                        icon = DdIcons.Puzzle,
+                        testTag = "workspace_menu_capabilities_${workspace.id}",
+                        onClick = {
+                            menuOpen = false
+                            onRemoteCapabilities()
                         },
                     )
 

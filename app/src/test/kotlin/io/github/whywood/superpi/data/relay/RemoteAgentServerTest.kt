@@ -1,6 +1,8 @@
 package io.github.whywood.superpi.data.relay
 
 import io.github.whywood.superpi.data.AgentDocStore
+import io.github.whywood.superpi.data.WorkspaceToolPolicy
+import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.AssistantRole
@@ -906,5 +908,216 @@ class RemoteAgentServerTest {
 
         server.handle(RelayServerFrame.Route("unk-1", "dev-2", "bot.unknown_method", buildJsonObject { put("botId", botId) }))
         assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun getsSetsBotCapabilitiesAndEmitsSyncEvent() = runTest {
+        val ws = temp.newFolder("cap-ws")
+        val policyFile = temp.newFile("policies.json")
+        val policyStore = WorkspaceToolPolicyStore(policyFile)
+        val delegate = FakeAgentRuntime()
+        val created = delegate.createWorkspace("CapBot", ws.absolutePath)
+        val botId = created.id
+        val sent = mutableListOf<JsonObject>()
+        val syncEvents = mutableListOf<RelaySyncEvent>()
+        val server = RemoteAgentServer(
+            host = delegate,
+            bots = { listOf(RelayBot("home", "PI"), RelayBot(botId, "CapBot")) },
+            send = { sent.add(it); true },
+            scope = backgroundScope,
+            onSyncEvent = { syncEvents += it },
+            workspaceToolPolicies = { policyStore },
+            installedCapabilities = {
+                RemoteCapabilitiesInventory(
+                    skills = listOf("git", "pdf"),
+                    plugins = listOf(RemoteCapabilityPluginInfo("p1", "Notes")),
+                    mcpServers = listOf("github"),
+                    screenToolsReady = true,
+                )
+            },
+        )
+        runCurrent()
+
+        server.handle(RelayServerFrame.Route("cg-1", "dev-2", "bot.capabilities.get", buildJsonObject { put("botId", botId) }))
+        val getRes = sent.last().getValue("result").jsonObject
+        assertEquals(false, getRes.getValue("isHome").jsonPrimitive.boolean)
+        assertEquals(false, getRes.getValue("policy").jsonObject.getValue("allCapabilities").jsonPrimitive.boolean)
+        assertEquals(2, getRes.getValue("available").jsonObject.getValue("skills").jsonArray.size)
+        assertEquals(true, getRes.getValue("available").jsonObject.getValue("screenToolsReady").jsonPrimitive.boolean)
+
+        server.handle(
+            RelayServerFrame.Route(
+                "cs-1",
+                "dev-2",
+                "bot.capabilities.set",
+                buildJsonObject {
+                    put("botId", botId)
+                    put(
+                        "policy",
+                        buildJsonObject {
+                            put("allCapabilities", false)
+                            put("skills", kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive("pdf")) })
+                            put("plugins", kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive("p1")) })
+                            put("mcpServers", kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive("github")) })
+                            put("screenTools", true)
+                            put("miniappTools", true)
+                        },
+                    )
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        val stored = policyStore.policyForCwd(ws.absolutePath)
+        assertEquals(setOf("pdf"), stored.skills)
+        assertEquals(setOf("p1"), stored.plugins)
+        assertEquals(setOf("github"), stored.mcpServers)
+        assertEquals(true, stored.screenTools)
+        assertEquals(true, stored.miniappTools)
+        assertEquals("capabilities_changed", syncEvents.last().kind)
+        assertEquals(botId, syncEvents.last().botId)
+
+        server.handle(
+            RelayServerFrame.Route(
+                "cs-miss",
+                "dev-2",
+                "bot.capabilities.get",
+                buildJsonObject { put("botId", "missing-bot") },
+            ),
+        )
+        assertEquals("bot_not_found", sent.last().getValue("code").jsonPrimitive.content)
+    }
+
+    @Test
+    fun enrichesPresentLiveEventsAndHistoryAndServesAllowlistedArtifactChunks() = runTest {
+        val ws = temp.newFolder("present-ws")
+        val img = File(ws, "chart.png").apply { writeBytes(ByteArray(12) { (it + 1).toByte() }) }
+        val histFile = File(ws, "notes.txt").apply { writeText("hello remote") }
+        val host = FakeAgentRuntime()
+        val created = host.createWorkspace("ArtBot", ws.absolutePath)
+        val botId = created.id
+        host.sessions = listOf(ConversationSummary("s-hist", "Past", 10L, "/s-hist.jsonl", ws.absolutePath))
+        host.histories = mapOf(
+            "s-hist" to listOf(
+                AssistantMessage(id = 1L, role = AssistantRole.USER, text = "show"),
+                AssistantMessage(
+                    id = 2L,
+                    role = AssistantRole.ASSISTANT,
+                    text = "",
+                    steps = listOf(
+                        AssistantStep.Tool(
+                            ToolTrace(
+                                id = 10L,
+                                name = "present",
+                                arguments = emptyMap(),
+                                status = ToolActivityStatus.DONE,
+                                output = """{"items":[{"type":"file","path":"${histFile.name}","name":"notes.txt","mime":"text/plain"}]}""",
+                                toolCallId = "call-hist",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(
+            host = host,
+            bots = { listOf(RelayBot("home", "PI"), RelayBot(botId, "ArtBot")) },
+            send = { sent.add(it); true },
+            scope = backgroundScope,
+        )
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                "p-live",
+                "dev-2",
+                "bot.prompt",
+                buildJsonObject { put("botId", botId); put("text", "draw") },
+            ),
+        )
+        val liveSid = sent.last().getValue("result").jsonObject.getValue("sessionId").jsonPrimitive.content
+        host.emitFor(
+            liveSid,
+            RuntimeEvent.ToolFinished(
+                runId = "run-live",
+                callId = "call-live",
+                name = "present",
+                result = """{"items":[{"type":"image","path":"${img.absolutePath}","name":"chart.png","mime":"image/png"}]}""",
+                isError = false,
+                durationMs = 5L,
+            ),
+        )
+        runCurrent()
+        val liveEvent = sent.last { it["type"]?.jsonPrimitive?.content == "route_event" }.getValue("event").jsonObject
+        val liveItem = kotlinx.serialization.json.Json.parseToJsonElement(
+            liveEvent.getValue("result").jsonPrimitive.content,
+        ).jsonObject.getValue("items").jsonArray.single().jsonObject
+        val liveArtifactId = liveItem.getValue("artifactId").jsonPrimitive.content
+        assertEquals(12L, liveItem.getValue("artifactSize").jsonPrimitive.long)
+
+        server.handle(
+            RelayServerFrame.Route(
+                "art-1",
+                "dev-2",
+                "artifact.read_chunk",
+                buildJsonObject {
+                    put("botId", botId)
+                    put("artifactId", liveArtifactId)
+                    put("offset", 0L)
+                    put("length", 64)
+                },
+            ),
+        )
+        val chunkOk = sent.last().getValue("result").jsonObject
+        assertEquals(true, chunkOk.getValue("eof").jsonPrimitive.boolean)
+        val decoded = Base64.getDecoder().decode(chunkOk.getValue("dataBase64").jsonPrimitive.content)
+        assertEquals(12, decoded.size)
+        assertEquals(1, decoded[0].toInt())
+
+        server.handle(
+            RelayServerFrame.Route(
+                "art-deny",
+                "dev-2",
+                "artifact.read_chunk",
+                buildJsonObject {
+                    put("botId", botId)
+                    put("artifactId", "unregistered_secret")
+                    put("offset", 0L)
+                    put("length", 64)
+                },
+            ),
+        )
+        assertEquals("not_found", sent.last().getValue("code").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                "hist-1",
+                "dev-2",
+                "bot.history",
+                buildJsonObject { put("botId", botId); put("sessionId", "s-hist") },
+            ),
+        )
+        val histMessages = sent.last().getValue("result").jsonObject.getValue("messages").jsonArray
+        val toolResultText = histMessages[2].jsonObject.getValue("content").jsonArray[0].jsonObject.getValue("text").jsonPrimitive.content
+        val histItem = kotlinx.serialization.json.Json.parseToJsonElement(toolResultText)
+            .jsonObject.getValue("items").jsonArray.single().jsonObject
+        val histArtifactId = histItem.getValue("artifactId").jsonPrimitive.content
+        assertEquals(12L, histItem.getValue("artifactSize").jsonPrimitive.long)
+
+        server.handle(
+            RelayServerFrame.Route(
+                "art-2",
+                "dev-2",
+                "artifact.read_chunk",
+                buildJsonObject {
+                    put("botId", botId)
+                    put("artifactId", histArtifactId)
+                    put("offset", 0L)
+                    put("length", 64)
+                },
+            ),
+        )
+        val histBytes = Base64.getDecoder().decode(sent.last().getValue("result").jsonObject.getValue("dataBase64").jsonPrimitive.content)
+        assertEquals("hello remote", String(histBytes, Charsets.UTF_8))
     }
 }

@@ -110,6 +110,7 @@ class WorkspaceRowMetaTest {
                 WorkspaceMenuAction.NEW_SESSION,
                 WorkspaceMenuAction.FILES,
                 WorkspaceMenuAction.INSTRUCTIONS,
+                WorkspaceMenuAction.CAPABILITIES,
                 WorkspaceMenuAction.EDIT_REMOTE,
                 WorkspaceMenuAction.PIN,
                 WorkspaceMenuAction.DELETE,
@@ -119,6 +120,7 @@ class WorkspaceRowMetaTest {
                 supportsBotManage = true,
                 supportsWorkspaceFiles = true,
                 supportsBotControls = true,
+                supportsBotCapabilities = true,
             ),
         )
         assertEquals(
@@ -128,6 +130,7 @@ class WorkspaceRowMetaTest {
                 supportsBotManage = true,
                 supportsWorkspaceFiles = true,
                 supportsBotControls = true,
+                supportsBotCapabilities = true,
             ),
         )
     }

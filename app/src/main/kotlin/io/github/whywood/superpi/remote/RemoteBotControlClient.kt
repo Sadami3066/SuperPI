@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.remote
 
+import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.relay.RemoteCallCodes
 import io.github.whywood.superpi.data.relay.RemoteCallOutcome
 import io.github.whywood.superpi.runtime.ModelOption
@@ -10,6 +11,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -69,6 +72,21 @@ data class RemoteReloadResult(
     val reloaded: Boolean,
     val botId: String,
     val sessionId: String? = null,
+)
+
+data class RemoteCapabilityPlugin(
+    val id: String,
+    val name: String,
+)
+
+data class RemoteBotCapabilitiesSnapshot(
+    val botId: String,
+    val isHome: Boolean,
+    val policy: WorkspaceToolPolicy,
+    val skills: List<String> = emptyList(),
+    val plugins: List<RemoteCapabilityPlugin> = emptyList(),
+    val mcpServers: List<String> = emptyList(),
+    val screenToolsReady: Boolean = false,
 )
 
 class RemoteBotControlClient(
@@ -319,6 +337,93 @@ class RemoteBotControlClient(
         }
     }
 
+    suspend fun getCapabilities(
+        deviceId: String,
+        botId: String,
+    ): RemoteControlResult<RemoteBotCapabilitiesSnapshot> {
+        checkCapability(deviceId, CAP_BOT_CAPABILITIES)?.let { return it }
+        val params = buildJsonObject { put("botId", botId) }
+        return when (val outcome = transport.callWithOutcome(deviceId, "bot.capabilities.get", params)) {
+            is RemoteCallOutcome.Ok -> {
+                val json = outcome.result
+                    ?: return RemoteControlResult.Error("bad_response", "invalid capabilities response")
+                val parsed = parseCapabilitiesSnapshot(json, botId)
+                    ?: return RemoteControlResult.Error("bad_response", "invalid capabilities response")
+                RemoteControlResult.Ok(parsed)
+            }
+            is RemoteCallOutcome.Failed -> RemoteControlResult.Error(outcome.error.code, outcome.error.message)
+        }
+    }
+
+    suspend fun setCapabilities(
+        deviceId: String,
+        botId: String,
+        policy: WorkspaceToolPolicy,
+    ): RemoteControlResult<RemoteBotCapabilitiesSnapshot> {
+        checkCapability(deviceId, CAP_BOT_CAPABILITIES)?.let { return it }
+        val params = buildJsonObject {
+            put("botId", botId)
+            put(
+                "policy",
+                buildJsonObject {
+                    put("allCapabilities", policy.allCapabilities)
+                    put("skills", buildJsonArray { policy.skills.sorted().forEach { add(JsonPrimitive(it)) } })
+                    put("plugins", buildJsonArray { policy.plugins.sorted().forEach { add(JsonPrimitive(it)) } })
+                    put("mcpServers", buildJsonArray { policy.mcpServers.sorted().forEach { add(JsonPrimitive(it)) } })
+                    put("screenTools", policy.screenTools)
+                    put("miniappTools", policy.miniappTools)
+                },
+            )
+        }
+        return when (val outcome = transport.callWithOutcome(deviceId, "bot.capabilities.set", params)) {
+            is RemoteCallOutcome.Ok -> {
+                val json = outcome.result
+                    ?: return RemoteControlResult.Error("bad_response", "invalid capabilities response")
+                val parsed = parseCapabilitiesSnapshot(json, botId)
+                    ?: return RemoteControlResult.Error("bad_response", "invalid capabilities response")
+                RemoteControlResult.Ok(parsed)
+            }
+            is RemoteCallOutcome.Failed -> RemoteControlResult.Error(outcome.error.code, outcome.error.message)
+        }
+    }
+
+    private fun parseCapabilitiesSnapshot(json: JsonObject, fallbackBotId: String): RemoteBotCapabilitiesSnapshot? {
+        val policyObj = json["policy"] as? JsonObject ?: return null
+        val availableObj = json["available"] as? JsonObject ?: buildJsonObject {}
+        val isHome = json.bool("isHome") ?: false
+        val policy = WorkspaceToolPolicy(
+            allCapabilities = policyObj.bool("allCapabilities") ?: isHome,
+            skills = parseStringSet(policyObj["skills"]),
+            plugins = parseStringSet(policyObj["plugins"]),
+            mcpServers = parseStringSet(policyObj["mcpServers"]),
+            screenTools = policyObj.bool("screenTools") ?: false,
+            miniappTools = policyObj.bool("miniappTools") ?: false,
+        )
+        val plugins = (availableObj["plugins"] as? JsonArray).orEmpty().mapNotNull { item ->
+            val obj = item as? JsonObject ?: return@mapNotNull null
+            val id = obj.str("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val name = obj.str("name")?.takeIf { it.isNotBlank() } ?: id
+            RemoteCapabilityPlugin(id = id, name = name)
+        }
+        return RemoteBotCapabilitiesSnapshot(
+            botId = json.str("botId")?.takeIf { it.isNotBlank() } ?: fallbackBotId,
+            isHome = isHome,
+            policy = policy,
+            skills = parseStringList(availableObj["skills"]),
+            plugins = plugins,
+            mcpServers = parseStringList(availableObj["mcpServers"]),
+            screenToolsReady = availableObj.bool("screenToolsReady") ?: false,
+        )
+    }
+
+    private fun parseStringList(element: kotlinx.serialization.json.JsonElement?): List<String> =
+        (element as? JsonArray).orEmpty().mapNotNull { item ->
+            (item as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+
+    private fun parseStringSet(element: kotlinx.serialization.json.JsonElement?): Set<String> =
+        parseStringList(element).toCollection(LinkedHashSet())
+
     private fun checkConnected(deviceId: String): RemoteControlResult.Error? {
         if (!transport.isRelayOnline.value) {
             return RemoteControlResult.Error(RemoteCallCodes.NOT_CONNECTED, "relay is not connected")
@@ -418,6 +523,7 @@ class RemoteBotControlClient(
     companion object {
         const val CAP_BOT_CONTROLS = "bot-controls"
         const val CAP_SESSION_CONTROLS = "session-controls"
+        const val CAP_BOT_CAPABILITIES = "bot-capabilities"
         const val CAPABILITY_UNAVAILABLE = "capability_unavailable"
         const val MAX_INSTRUCTIONS_BYTES = 64 * 1024
         private const val RELOAD_TIMEOUT_MILLIS = 30_000L

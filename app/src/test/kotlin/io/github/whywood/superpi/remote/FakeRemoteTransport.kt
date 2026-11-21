@@ -20,7 +20,10 @@ internal data class FakeCall(
     val routeId: String,
 )
 
-internal class FakeRemoteTransport(online: Boolean = true) : RemoteAgentTransport {
+internal class FakeRemoteTransport(
+    online: Boolean = true,
+    capabilities: List<String> = DEFAULT_CAPABILITIES,
+) : RemoteAgentTransport {
     private val events = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = 128)
     private val syncEventsFlow = MutableSharedFlow<RemoteSyncEvent>(extraBufferCapacity = 64)
     private val onlineState = MutableStateFlow(if (online) setOf(DEVICE_ID) else emptySet())
@@ -32,16 +35,7 @@ internal class FakeRemoteTransport(online: Boolean = true) : RemoteAgentTranspor
                     name = "Desktop",
                     platform = "desktop",
                     online = true,
-                    capabilities = listOf(
-                        "remote-bot",
-                        "bot-sessions",
-                        "bot-manage",
-                        "session-manage",
-                        "workspace-files",
-                        "bot-controls",
-                        "session-controls",
-                        "sync-events",
-                    ),
+                    capabilities = capabilities,
                 ),
             )
         } else {
@@ -120,6 +114,18 @@ internal class FakeRemoteTransport(online: Boolean = true) : RemoteAgentTranspor
     companion object {
         const val DEVICE_ID = "device-1"
         const val PEER_SESSION_ID = "peer-1"
+        val DEFAULT_CAPABILITIES = listOf(
+            "remote-bot",
+            "bot-sessions",
+            "bot-manage",
+            "session-manage",
+            "workspace-files",
+            "bot-controls",
+            "session-controls",
+            "sync-events",
+            "bot-capabilities",
+            "present-artifacts",
+        )
     }
 }
 

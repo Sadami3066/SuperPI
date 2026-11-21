@@ -45,6 +45,7 @@ import io.github.whywood.superpi.graph.ServiceGraph
 import io.github.whywood.superpi.graph.ServiceGraphDeps
 import io.github.whywood.superpi.plugin.manager.PluginHostManager
 import io.github.whywood.superpi.runtime.AgentRuntimeHost
+import io.github.whywood.superpi.runtime.host.HostAccess
 import io.github.whywood.superpi.runtime.host.HostAccessController
 import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
 import io.github.whywood.superpi.runtime.AssistantMessage
@@ -180,6 +181,27 @@ class AppGraph(context: Context) : AppDependencies {
             providerCatalog = { dataGraph.providerCatalog },
             configuredProviderIds = ::configuredProviderIds,
             agentDocStore = { dataGraph.agentDocStore },
+            workspaceToolPolicies = { dataGraph.workspaceToolPolicies },
+            installedCapabilities = { _ ->
+                val skills = dataGraph.skillRepository.list().getOrNull().orEmpty().map { it.name }.sorted()
+                val plugins = pluginManager.state.value.plugins
+                    .filter { it.enabled }
+                    .map {
+                        io.github.whywood.superpi.data.relay.RemoteCapabilityPluginInfo(
+                            id = it.id,
+                            name = it.name.ifBlank { it.id },
+                        )
+                    }
+                val mcpServers = runCatching { dataGraph.mcpConfigStore.load().servers.keys.sorted() }
+                    .getOrDefault(emptyList())
+                val screenReady = hostAccess.state.value.effective.let { it == HostAccess.ADB || it == HostAccess.ROOT }
+                io.github.whywood.superpi.data.relay.RemoteCapabilitiesInventory(
+                    skills = skills,
+                    plugins = plugins,
+                    mcpServers = mcpServers,
+                    screenToolsReady = screenReady,
+                )
+            },
             slashCommands = { cwd ->
                 val resolvedCwd = cwd.ifBlank { dataGraph.workspacesDir.absolutePath }
                 val skills = runCatching { dataGraph.skillCatalog.list(resolvedCwd) }.getOrDefault(emptyList())
@@ -300,6 +322,13 @@ class AppGraph(context: Context) : AppDependencies {
 
     override val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient by lazy {
         io.github.whywood.superpi.remote.RemoteFileClient(remoteTransport)
+    }
+
+    override val remoteArtifactClient: io.github.whywood.superpi.remote.RemoteArtifactClient by lazy {
+        io.github.whywood.superpi.remote.RemoteArtifactClient(
+            transport = remoteTransport,
+            cacheRootForEviction = remoteWorkspaceRoot,
+        )
     }
 
     private val updateInstaller: AndroidUpdateInstaller by lazy { AndroidUpdateInstaller(appContext) }
@@ -498,6 +527,8 @@ class AppGraph(context: Context) : AppDependencies {
         },
         screenTools = { platformGraph.screenToolset.tools() },
         virtualScreenTools = { platformGraph.virtualScreenFeature.tools() },
+        acquireMemoryRollupLease = { dataGraph.relayMemorySync.acquireRollupLease().allowed },
+        refreshMemoryForRollup = { dataGraph.relayMemorySync.refreshIfStale(0L) },
     )
 
     private fun serviceGraphDeps(): ServiceGraphDeps = ServiceGraphDeps(

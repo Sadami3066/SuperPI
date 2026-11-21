@@ -101,4 +101,7 @@
     <string name="drawer_remote_hide_archived">Hide archived</string>
     <string name="drawer_remote_archived_badge">Archived</string>
     <string name="drawer_remote_action_failed">Could not complete action. Try again.</string>
+    <string name="drawer_remote_device_offline_badge">Offline</string>
+    <string name="drawer_remote_device_add_bot">New bot on %1$s</string>
+    <string name="drawer_remote_device_toggle">Toggle %1$s</string>
 </resources>

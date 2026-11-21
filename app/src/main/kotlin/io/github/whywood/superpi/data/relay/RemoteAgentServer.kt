@@ -2,6 +2,8 @@ package io.github.whywood.superpi.data.relay
 
 import io.github.whywood.superpi.data.AGENT_DOC_MAX_BYTES
 import io.github.whywood.superpi.data.AgentDocStore
+import io.github.whywood.superpi.data.WorkspaceToolPolicy
+import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.remote.RemoteMirrorRegistry
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.AssistantMessage
@@ -34,6 +36,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -44,6 +47,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -52,6 +56,18 @@ data class RemoteCommandSpec(
     val name: String,
     val description: String,
     val source: String,
+)
+
+data class RemoteCapabilityPluginInfo(
+    val id: String,
+    val name: String,
+)
+
+data class RemoteCapabilitiesInventory(
+    val skills: List<String> = emptyList(),
+    val plugins: List<RemoteCapabilityPluginInfo> = emptyList(),
+    val mcpServers: List<String> = emptyList(),
+    val screenToolsReady: Boolean = false,
 )
 
 class RemoteAgentServer(
@@ -69,6 +85,8 @@ class RemoteAgentServer(
     private val configuredProviderIds: () -> Set<String> = { emptySet() },
     private val agentDocStore: () -> AgentDocStore? = { null },
     private val slashCommands: suspend (String) -> List<RemoteCommandSpec> = { emptyList() },
+    private val workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
+    private val installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
 ) {
     private val feeds = ConcurrentHashMap<String, Feed>()
     private val botWatchers = ConcurrentHashMap<String, BotWatcher>()
@@ -77,6 +95,7 @@ class RemoteAgentServer(
     private val sessionBots = ConcurrentHashMap<String, String>()
     private val activeQuestions = ConcurrentHashMap<String, PendingQuestion>()
     private val suppressedSessionSync = ConcurrentHashMap<String, Long>()
+    private val presentedArtifacts = PresentedArtifactRegistry()
     private val questionMutex = Mutex()
 
     init {
@@ -92,6 +111,7 @@ class RemoteAgentServer(
 
     fun reset() {
         fileHandler.dispose()
+        presentedArtifacts.clear()
         for ((_, feed) in feeds) {
             synchronized(feed) {
                 feed.active = false
@@ -121,6 +141,8 @@ class RemoteAgentServer(
                 "bot.commands" -> commands(frame)
                 "bot.instructions.get" -> getInstructions(frame)
                 "bot.instructions.set" -> setInstructions(frame)
+                "bot.capabilities.get" -> getCapabilities(frame)
+                "bot.capabilities.set" -> setCapabilities(frame)
                 "bot.reload" -> reloadBot(frame)
                 "bot.resume" -> resume(frame)
                 "bot.sessions" -> listSessions(frame)
@@ -142,6 +164,7 @@ class RemoteAgentServer(
                 "file.mkdir" -> fileMkdir(frame)
                 "file.rename" -> fileRename(frame)
                 "file.delete" -> fileDelete(frame)
+                "artifact.read_chunk" -> readArtifactChunk(frame)
                 else -> reject(frame, "bad_request", "unknown method ${frame.method}")
             }
         } catch (cancelled: CancellationException) {
@@ -786,6 +809,127 @@ class RemoteAgentServer(
             buildJsonObject {
                 put("content", content)
                 put("saved", true)
+            },
+        )
+    }
+
+    private suspend fun getCapabilities(frame: RelayServerFrame.Route) {
+        val botId = requireAvailableBotId(frame) ?: return
+        val workspace = localWorkspaceById(botId) ?: run {
+            reject(frame, "bot_not_found", "bot $botId is not available")
+            return
+        }
+        val store = workspaceToolPolicies() ?: run {
+            reject(frame, "permission_denied", "Bot capabilities are not available on this device")
+            return
+        }
+        val stored = store.policyForCwd(workspace.cwd)
+        val policy = if (workspace.isHome) stored.copy(allCapabilities = true) else stored
+        val inventory = installedCapabilities(workspace.cwd)
+        respondOk(frame.id, serializeCapabilitiesSnapshot(workspace, policy, inventory))
+    }
+
+    private suspend fun setCapabilities(frame: RelayServerFrame.Route) {
+        val botId = requireAvailableBotId(frame) ?: return
+        val workspace = localWorkspaceById(botId) ?: run {
+            reject(frame, "bot_not_found", "bot $botId is not available")
+            return
+        }
+        val store = workspaceToolPolicies() ?: run {
+            reject(frame, "permission_denied", "Bot capabilities are not available on this device")
+            return
+        }
+        val policyObj = frame.params["policy"] as? JsonObject ?: run {
+            reject(frame, "bad_request", "policy must be an object")
+            return
+        }
+        val currentStored = store.policyForCwd(workspace.cwd)
+        val current = if (workspace.isHome) currentStored.copy(allCapabilities = true) else currentStored
+        val next = parseCapabilityPolicy(policyObj, current, isHome = workspace.isHome) ?: run {
+            reject(frame, "bad_request", "invalid capability policy")
+            return
+        }
+        store.update(workspace.cwd, next)
+        onSyncEvent(RelaySyncEvent(kind = "capabilities_changed", botId = workspace.id))
+        val inventory = installedCapabilities(workspace.cwd)
+        respondOk(frame.id, serializeCapabilitiesSnapshot(workspace, next, inventory))
+    }
+
+    private fun parseCapabilityPolicy(
+        json: JsonObject,
+        fallback: WorkspaceToolPolicy,
+        isHome: Boolean,
+    ): WorkspaceToolPolicy? {
+        fun parseBool(key: String, default: Boolean): Boolean? {
+            val elem = json[key] ?: return default
+            val prim = elem as? JsonPrimitive ?: return null
+            return prim.booleanOrNull
+        }
+        fun parseStringSet(key: String, default: Set<String>): Set<String>? {
+            val elem = json[key] ?: return default
+            val arr = elem as? JsonArray ?: return null
+            if (arr.size > 500) return null
+            val out = LinkedHashSet<String>(arr.size)
+            for (item in arr) {
+                val prim = item as? JsonPrimitive ?: return null
+                if (!prim.isString) return null
+                val s = prim.content.trim()
+                if (s.length > 256) return null
+                if (s.isNotEmpty()) out += s
+            }
+            return out
+        }
+        val requestedAll = parseBool("allCapabilities", fallback.allCapabilities) ?: return null
+        val skills = parseStringSet("skills", fallback.skills) ?: return null
+        val plugins = parseStringSet("plugins", fallback.plugins) ?: return null
+        val mcpServers = parseStringSet("mcpServers", fallback.mcpServers) ?: return null
+        val screenTools = parseBool("screenTools", fallback.screenTools) ?: return null
+        val miniappTools = parseBool("miniappTools", fallback.miniappTools) ?: return null
+        return WorkspaceToolPolicy(
+            allCapabilities = if (isHome) true else requestedAll,
+            skills = skills,
+            plugins = plugins,
+            mcpServers = mcpServers,
+            screenTools = screenTools,
+            miniappTools = miniappTools,
+        )
+    }
+
+    private fun serializeCapabilitiesSnapshot(
+        workspace: RuntimeWorkspace,
+        policy: WorkspaceToolPolicy,
+        inventory: RemoteCapabilitiesInventory,
+    ): JsonObject = buildJsonObject {
+        put("botId", workspace.id)
+        put("isHome", workspace.isHome)
+        put(
+            "policy",
+            buildJsonObject {
+                put("allCapabilities", policy.allCapabilities)
+                put("skills", buildJsonArray { policy.skills.sorted().forEach { add(JsonPrimitive(it)) } })
+                put("plugins", buildJsonArray { policy.plugins.sorted().forEach { add(JsonPrimitive(it)) } })
+                put("mcpServers", buildJsonArray { policy.mcpServers.sorted().forEach { add(JsonPrimitive(it)) } })
+                put("screenTools", policy.screenTools)
+                put("miniappTools", policy.miniappTools)
+            },
+        )
+        put(
+            "available",
+            buildJsonObject {
+                put("skills", buildJsonArray { inventory.skills.forEach { add(JsonPrimitive(it)) } })
+                put(
+                    "plugins",
+                    buildJsonArray {
+                        inventory.plugins.forEach { plugin ->
+                            addJsonObject {
+                                put("id", plugin.id)
+                                put("name", plugin.name)
+                            }
+                        }
+                    },
+                )
+                put("mcpServers", buildJsonArray { inventory.mcpServers.forEach { add(JsonPrimitive(it)) } })
+                put("screenToolsReady", inventory.screenToolsReady)
             },
         )
     }
@@ -1485,6 +1629,34 @@ class RemoteAgentServer(
         )
     }
 
+    private suspend fun readArtifactChunk(frame: RelayServerFrame.Route) {
+        val botId = requireAvailableBotId(frame) ?: return
+        val artifactId = (frame.params["artifactId"] as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.contentOrNull
+            ?.trim()
+            .orEmpty()
+        val offset = frame.params.long("offset")
+        val length = frame.params.intOrNull("length")
+        if (artifactId.isEmpty() || offset == null || length == null) {
+            reject(frame, "bad_request", "artifactId, offset, and length are required")
+            return
+        }
+        when (val chunk = presentedArtifacts.readChunk(botId, artifactId, offset, length)) {
+            is ArtifactChunkOutcome.Ok -> respondOk(
+                frame.id,
+                buildJsonObject {
+                    put("dataBase64", chunk.dataBase64)
+                    put("size", chunk.size)
+                    put("eof", chunk.eof)
+                    chunk.mime?.let { put("mime", it) }
+                    put("name", chunk.name)
+                },
+            )
+            is ArtifactChunkOutcome.Error -> reject(frame, chunk.code, chunk.message)
+        }
+    }
+
     private suspend fun fileWriteChunk(frame: RelayServerFrame.Route) {
         val cwd = requireWorkspaceCwd(frame) ?: return
         val relPath = (frame.params["path"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull.orEmpty()
@@ -1603,7 +1775,12 @@ class RemoteAgentServer(
         } else {
             emptyList<BufferedEvent>() to -1L
         }
-        val serialized = serializeHistory(messages, bufferedEvents)
+        val serialized = serializeHistory(
+            botId = botId,
+            cwd = localWorkspaceById(botId)?.cwd,
+            messages = messages,
+            bufferedEvents = bufferedEvents,
+        )
         respondOk(
             frame.id,
             buildJsonObject {
@@ -1619,6 +1796,8 @@ class RemoteAgentServer(
     }
 
     private fun serializeHistory(
+        botId: String,
+        cwd: String?,
         messages: List<AssistantMessage>,
         bufferedEvents: List<BufferedEvent> = emptyList(),
     ): JsonArray = buildJsonArray {
@@ -1682,6 +1861,16 @@ class RemoteAgentServer(
                                     }
                                     if (trace.status != ToolActivityStatus.RUNNING || trace.output != null || trace.error != null) {
                                         committedToolResultIds += callId
+                                        val resultText = if (
+                                            trace.error == null &&
+                                            trace.name == "present" &&
+                                            trace.status != ToolActivityStatus.FAILED &&
+                                            !trace.output.isNullOrBlank()
+                                        ) {
+                                            enrichPresentedOutput(botId, cwd, trace.output.orEmpty())
+                                        } else {
+                                            trace.error ?: trace.output.orEmpty()
+                                        }
                                         toolResults += buildJsonObject {
                                             put("role", "toolResult")
                                             put("toolCallId", callId)
@@ -1692,7 +1881,7 @@ class RemoteAgentServer(
                                                 buildJsonArray {
                                                     addJsonObject {
                                                         put("type", "text")
-                                                        put("text", trace.error ?: trace.output.orEmpty())
+                                                        put("text", resultText)
                                                     }
                                                 },
                                             )
@@ -1910,8 +2099,9 @@ class RemoteAgentServer(
             return
         }
         val feed = feeds[session.sessionId] ?: return
-        val events = RelayEventMapper.map(session.event)
-        if (events.isEmpty()) return
+        val rawEvents = RelayEventMapper.map(session.event)
+        if (rawEvents.isEmpty()) return
+        val events = enrichLiveToolEvents(session.sessionId, session.event, rawEvents)
         val terminal = session.event is RuntimeEvent.RunFinished || session.event is RuntimeEvent.RunFailed
         emitFeedEvents(feed, events, terminal = terminal)
         if (terminal) {
@@ -1934,6 +2124,95 @@ class RemoteAgentServer(
                     ),
                 )
             }
+        }
+    }
+
+    private suspend fun enrichLiveToolEvents(
+        sessionId: String,
+        runtimeEvent: RuntimeEvent,
+        events: List<JsonObject>,
+    ): List<JsonObject> {
+        val toolFinished = runtimeEvent as? RuntimeEvent.ToolFinished ?: return events
+        if (toolFinished.name != "present" || toolFinished.isError || toolFinished.result.isBlank()) {
+            return events
+        }
+        val ownerBotId = sessionBots[sessionId] ?: resolveSessionBotId(sessionId) ?: return events
+        val cwd = localWorkspaceById(ownerBotId)?.cwd
+        val enriched = enrichPresentedOutput(ownerBotId, cwd, toolFinished.result)
+        if (enriched == toolFinished.result) return events
+        return events.map { event ->
+            val type = (event["type"] as? JsonPrimitive)?.contentOrNull
+            if (type == "tool_result") {
+                buildJsonObject {
+                    for ((k, v) in event) {
+                        if (k == "result") put("result", enriched) else put(k, v)
+                    }
+                }
+            } else {
+                event
+            }
+        }
+    }
+
+    private fun enrichPresentedOutput(
+        botId: String,
+        cwd: String?,
+        rawOutput: String,
+    ): String {
+        val root = runCatching { Json.parseToJsonElement(rawOutput).jsonObject }.getOrNull() ?: return rawOutput
+        val items = root["items"] as? JsonArray ?: return rawOutput
+        var changed = false
+        val updatedItems = buildJsonArray {
+            for (element in items) {
+                val obj = element as? JsonObject
+                if (obj == null) {
+                    add(element)
+                    continue
+                }
+                val type = (obj["type"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.lowercase()
+                val rawPath = (obj["path"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()
+                if (type !in PRESENT_ARTIFACT_TYPES || rawPath.isNullOrEmpty()) {
+                    add(obj)
+                    continue
+                }
+                val mime = (obj["mime"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+                val name = (obj["name"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+                val file = resolvePresentedLocalFile(rawPath, cwd)
+                val registered = file?.let { presentedArtifacts.register(botId, it, mime, name) }
+                if (registered == null) {
+                    add(obj)
+                    continue
+                }
+                changed = true
+                add(
+                    buildJsonObject {
+                        for ((k, v) in obj) put(k, v)
+                        put("artifactId", registered.artifactId)
+                        put("artifactSize", registered.size)
+                    },
+                )
+            }
+        }
+        if (!changed) return rawOutput
+        return buildJsonObject {
+            for ((k, v) in root) {
+                if (k == "items") put("items", updatedItems) else put(k, v)
+            }
+        }.toString()
+    }
+
+    private fun resolvePresentedLocalFile(rawPath: String, cwd: String?): File? {
+        val clean = if (rawPath.startsWith("file://")) {
+            runCatching { java.net.URI(rawPath).path }.getOrNull() ?: return null
+        } else {
+            rawPath
+        }
+        return when {
+            clean.startsWith("/workspace/") && !cwd.isNullOrBlank() ->
+                File(cwd, clean.removePrefix("/workspace/"))
+            clean.startsWith("/") -> File(clean)
+            !cwd.isNullOrBlank() -> File(cwd, clean.removePrefix("workspace/"))
+            else -> File(clean)
         }
     }
 
@@ -2226,6 +2505,7 @@ class RemoteAgentServer(
         private const val MAX_SESSION_TITLE_LENGTH = 128
         private const val MAX_DECODED_AVATAR_BYTES = 50_000
         private const val SUPPRESS_SYNC_WINDOW_MS = 2_000L
+        private val PRESENT_ARTIFACT_TYPES = setOf("file", "image", "video", "html")
         private val DATA_IMAGE_URL_REGEX = Regex("^data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$", RegexOption.IGNORE_CASE)
     }
 }

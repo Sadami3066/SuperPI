@@ -74,6 +74,8 @@ internal class FakeAppDependencies(
 
     override val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient get() = unavailable("remoteFileClient")
 
+    override val remoteArtifactClient: io.github.whywood.superpi.remote.RemoteArtifactClient get() = unavailable("remoteArtifactClient")
+
     override val updateManager: UpdateManager get() = unavailable("updateManager")
 
     override suspend fun prepare() {

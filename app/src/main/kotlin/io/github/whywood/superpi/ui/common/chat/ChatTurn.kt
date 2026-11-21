@@ -123,6 +123,7 @@ internal fun ChatTurn(
     onOpenMiniapp: (String) -> Unit = {},
     presentedCards: Map<String, PresentedCardRef> = emptyMap(),
     retryAttempt: Int? = null,
+    remotePresentContext: RemotePresentContext? = null,
 ) {
     val notice = message.notice
     if (notice != null) {
@@ -182,6 +183,7 @@ internal fun ChatTurn(
             onOpenMiniapp = onOpenMiniapp,
             presentedCards = presentedCards,
             retryAttempt = retryAttempt,
+            remotePresentContext = remotePresentContext,
         )
     }
 }
@@ -531,6 +533,7 @@ private fun AssistantTurn(
     onOpenMiniapp: (String) -> Unit,
     presentedCards: Map<String, PresentedCardRef>,
     retryAttempt: Int?,
+    remotePresentContext: RemotePresentContext?,
 ) {
     val colors = superPiColors()
     val blocks = remember(message.steps, pendingQuestions) {
@@ -580,6 +583,7 @@ private fun AssistantTurn(
                                 onSharePresentFile = onSharePresentFile,
                                 onOpenMiniapp = onOpenMiniapp,
                                 resolvePresentedCard = { id -> presentedCards[id] },
+                                remotePresentContext = remotePresentContext,
                             )
                         }
 
@@ -663,6 +667,7 @@ private fun AnswerCardBlock(
     onSharePresentFile: (String) -> Unit,
     onOpenMiniapp: (String) -> Unit,
     resolvePresentedCard: (String) -> PresentedCardRef?,
+    remotePresentContext: RemotePresentContext?,
 ) {
     when (source) {
         is AnswerCardSource.Custom -> CustomCardBlock(messageId = message.id, step = source.step)
@@ -674,6 +679,7 @@ private fun AnswerCardBlock(
                 onShareFile = onSharePresentFile,
                 onOpenMiniapp = onOpenMiniapp,
                 resolveCard = resolvePresentedCard,
+                remoteContext = remotePresentContext,
             )
 
             is HostAnswerCard.Miniapp -> MiniappChatCard(app = card.app, onOpen = onOpenMiniapp)

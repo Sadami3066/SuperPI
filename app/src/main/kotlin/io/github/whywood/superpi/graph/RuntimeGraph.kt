@@ -75,7 +75,13 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
     private val memoryRollup = MemoryRollup(
         store = memoryStore,
         scope = deps.scope,
-        complete = { prompt -> completeWithCheapModel(deps.providerCatalog, prompt) },
+        complete = { prompt ->
+            if (!deps.acquireMemoryRollupLease()) {
+                null
+            } else {
+                completeWithCheapModel(deps.providerCatalog, prompt)
+            }
+        },
     )
 
     val appToolContext: AppToolContext by lazy {
@@ -331,7 +337,10 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
     val memoryRecapService: MemoryRecap get() = memoryRecap
 
     init {
-        memoryRollup.launchIfDue()
+        deps.scope.launch {
+            runCatching { deps.refreshMemoryForRollup() }
+            memoryRollup.launchIfDue()
+        }
         memoryRecap.launchRetryPending()
     }
 

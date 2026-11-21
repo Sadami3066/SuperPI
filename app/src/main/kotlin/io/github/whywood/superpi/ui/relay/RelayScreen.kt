@@ -21,6 +21,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.viewfinder.core.ImplementationMode
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -88,6 +91,7 @@ import io.github.whywood.superpi.design.DdNoticeTone
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
@@ -191,11 +195,38 @@ internal fun RelayScreen(
 
     val activePairLink = state.pairLink
     if (activePairLink != null) {
+        val qrBitmap = remember(activePairLink) {
+            runCatching { QrCodeMatrix.encode(activePairLink)?.toBitmap(modulePx = 8)?.asImageBitmap() }.getOrNull()
+        }
         DdDialog(
             onDismissRequest = onDismissPairCode,
             title = stringResource(R.string.relay_pair_dialog_title),
             content = {
                 Column(verticalArrangement = Arrangement.spacedBy(DdSpacing.Md)) {
+                    if (qrBitmap != null) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(DdShapes.Medium)
+                                    .background(Color.White)
+                                    .border(1.dp, colors.hairline, DdShapes.Medium)
+                                    .padding(DdSpacing.Md),
+                            ) {
+                                Image(
+                                    bitmap = qrBitmap,
+                                    contentDescription = stringResource(R.string.relay_pair_dialog_title),
+                                    modifier = Modifier
+                                        .size(200.dp)
+                                        .testTag("relay_pair_qr"),
+                                    filterQuality = FilterQuality.None,
+                                    contentScale = ContentScale.Fit,
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = stringResource(R.string.relay_pair_dialog_hint),
                         style = DdType.bodySmall,

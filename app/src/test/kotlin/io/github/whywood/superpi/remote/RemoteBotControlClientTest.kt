@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.remote
 
+import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.relay.RemoteCallError
 import io.github.whywood.superpi.runtime.ThinkingLevel
 import kotlinx.coroutines.test.runTest
@@ -116,5 +117,70 @@ class RemoteBotControlClientTest {
         transport.failNext = RemoteCallError("conflict", "busy")
         val err = client.setThinkingLevel(FakeRemoteTransport.DEVICE_ID, "pi", ThinkingLevel.HIGH)
         assertEquals("conflict", (err as RemoteControlResult.Error).code)
+    }
+
+    @Test
+    fun getsSetsAndGatesRemoteBotCapabilities() = runTest {
+        val transport = FakeRemoteTransport(online = true)
+        val client = RemoteBotControlClient(transport)
+        transport.result = { call ->
+            when (call.method) {
+                "bot.capabilities.get",
+                "bot.capabilities.set", -> buildJsonObject {
+                    put("botId", "research")
+                    put("isHome", false)
+                    put(
+                        "policy",
+                        call.params["policy"] ?: buildJsonObject {
+                            put("allCapabilities", false)
+                            put("skills", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("pdf")) })
+                            put("plugins", buildJsonArray {})
+                            put("mcpServers", buildJsonArray {})
+                            put("screenTools", true)
+                            put("miniappTools", false)
+                        },
+                    )
+                    put(
+                        "available",
+                        buildJsonObject {
+                            put("skills", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("pdf")) })
+                            put(
+                                "plugins",
+                                buildJsonArray {
+                                    add(buildJsonObject { put("id", "plg-1"); put("name", "Notes") })
+                                },
+                            )
+                            put("mcpServers", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("github")) })
+                            put("screenToolsReady", true)
+                        },
+                    )
+                }
+                else -> buildJsonObject {}
+            }
+        }
+
+        val initial = (client.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research") as RemoteControlResult.Ok).value
+        assertEquals(setOf("pdf"), initial.policy.skills)
+        assertEquals(true, initial.policy.screenTools)
+        assertEquals("Notes", initial.plugins.single().name)
+        assertEquals(listOf("github"), initial.mcpServers)
+        assertEquals(true, initial.screenToolsReady)
+
+        val nextPolicy = WorkspaceToolPolicy(
+            allCapabilities = false,
+            skills = setOf("pdf"),
+            plugins = setOf("plg-1"),
+            mcpServers = setOf("github"),
+            screenTools = false,
+            miniappTools = true,
+        )
+        val updated = (client.setCapabilities(FakeRemoteTransport.DEVICE_ID, "research", nextPolicy) as RemoteControlResult.Ok).value
+        assertEquals(nextPolicy, updated.policy)
+
+        val legacyClient = RemoteBotControlClient(
+            FakeRemoteTransport(online = true, capabilities = listOf("remote-bot", "bot-controls")),
+        )
+        val unsupported = legacyClient.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research")
+        assertEquals(RemoteBotControlClient.CAPABILITY_UNAVAILABLE, (unsupported as RemoteControlResult.Error).code)
     }
 }

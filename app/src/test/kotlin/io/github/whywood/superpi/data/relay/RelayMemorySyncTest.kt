@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -144,7 +145,59 @@ class RelayMemorySyncTest {
         assertNull(env.sync.state.value.lastSyncedAt)
     }
 
-    private fun TestScope.environment(): Environment {
+    @Test
+    fun rollupLeaseHandlesLocalAcquiredReuseBusyUnsupportedDeferredAndSignOut() = runTest {
+        var now = 1_000_000L
+        val env = environment(clock = { now })
+
+        assertEquals(RollupLeaseStatus.LOCAL, env.sync.acquireRollupLease())
+        assertTrue(RollupLeaseStatus.LOCAL.allowed)
+
+        env.login()
+        env.server.leaseResponse = RelayMemoryRollupLease(
+            acquired = true,
+            leaseId = "lease-1",
+            holderDeviceId = "dev",
+            expiresAt = now + 300_000L,
+        )
+        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
+        assertEquals(1, env.server.acquireLeaseCalls)
+        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
+        assertEquals(1, env.server.acquireLeaseCalls)
+
+        env.sync.releaseRollupLease()
+        assertEquals(listOf("lease-1"), env.server.releasedLeaseIds)
+
+        env.server.leaseResponse = RelayMemoryRollupLease(
+            acquired = false,
+            holderDeviceId = "other-phone",
+            expiresAt = now + 300_000L,
+        )
+        assertEquals(RollupLeaseStatus.BUSY, env.sync.acquireRollupLease())
+        assertFalse(RollupLeaseStatus.BUSY.allowed)
+
+        env.server.leaseResponse = null
+        assertEquals(RollupLeaseStatus.UNSUPPORTED, env.sync.acquireRollupLease())
+        assertTrue(RollupLeaseStatus.UNSUPPORTED.allowed)
+
+        env.server.offline = true
+        assertEquals(RollupLeaseStatus.DEFERRED, env.sync.acquireRollupLease())
+        assertFalse(RollupLeaseStatus.DEFERRED.allowed)
+
+        env.server.offline = false
+        env.server.leaseResponse = RelayMemoryRollupLease(
+            acquired = true,
+            leaseId = "lease-2",
+            holderDeviceId = "dev",
+            expiresAt = now + 300_000L,
+        )
+        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
+        env.accounts.value.value = null
+        testScheduler.advanceUntilIdle()
+        assertTrue("lease-2" in env.server.releasedLeaseIds)
+    }
+
+    private fun TestScope.environment(clock: () -> Long = System::currentTimeMillis): Environment {
         val base = File.createTempFile("relay-memory", "")
         base.delete()
         base.mkdirs()
@@ -160,6 +213,7 @@ class RelayMemorySyncTest {
             client = server,
             scope = scope,
             io = UnconfinedTestDispatcher(testScheduler),
+            clock = clock,
         )
         return Environment(base, filesDir, root, accounts, server, sync)
     }
@@ -222,6 +276,31 @@ class RelayMemorySyncTest {
 
         @Volatile
         var applyThenOffline = false
+
+        @Volatile
+        var leaseResponse: RelayMemoryRollupLease? = null
+
+        var acquireLeaseCalls = 0
+        val releasedLeaseIds = mutableListOf<String?>()
+
+        override suspend fun acquireRollupLease(
+            account: RelayAccount,
+            token: String,
+            ttlMs: Long,
+        ): RelayMemoryRollupLease? {
+            acquireLeaseCalls += 1
+            if (offline) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
+            return leaseResponse
+        }
+
+        override suspend fun releaseRollupLease(
+            account: RelayAccount,
+            token: String,
+            leaseId: String?,
+        ): Boolean {
+            releasedLeaseIds += leaseId
+            return true
+        }
 
         fun put(path: String, text: String) {
             files[path] = text

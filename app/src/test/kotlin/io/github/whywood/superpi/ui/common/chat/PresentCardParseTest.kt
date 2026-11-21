@@ -148,6 +148,20 @@ class PresentCardParseTest {
         assertEquals("/tmp/abs.png", resolvePresentedPath("/tmp/abs.png", root))
     }
 
+    @Test
+    fun parsesRemoteArtifactMetadata() {
+        val items = requireNotNull(
+            parsePresentedItems(
+                trace(
+                    output = """{"items":[{"type":"image","path":"/data/img.png","name":"img.png","artifactId":"abc123def456","artifactSize":2048}]}""",
+                ),
+            ),
+        )
+        assertEquals(1, items.size)
+        assertEquals("abc123def456", items[0].artifactId)
+        assertEquals(2048L, items[0].artifactSize)
+    }
+
     private fun trace(
         output: String? = """
             {"items":[

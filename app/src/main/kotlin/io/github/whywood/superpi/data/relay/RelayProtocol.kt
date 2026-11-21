@@ -3,6 +3,7 @@ package io.github.whywood.superpi.data.relay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -84,6 +85,27 @@ internal object RelayProtocol {
     fun parseMemoryVersion(body: String): Long? {
         val json = parseObject(body) ?: return null
         return json.long("version")
+    }
+
+    fun memoryRollupLeaseRequest(ttlMs: Long): String = buildJsonObject {
+        put("ttlMs", ttlMs)
+    }.toString()
+
+    fun parseMemoryRollupLease(body: String): RelayMemoryRollupLease? {
+        val json = parseObject(body) ?: return null
+        val acquired = json["acquired"]?.jsonPrimitive?.booleanOrNull ?: return null
+        val expiresAt = json.long("expiresAt") ?: 0L
+        return RelayMemoryRollupLease(
+            acquired = acquired,
+            leaseId = json.string("leaseId"),
+            holderDeviceId = json.string("holderDeviceId"),
+            expiresAt = expiresAt,
+        )
+    }
+
+    fun parseMemoryRollupLeaseRelease(body: String): Boolean {
+        val json = parseObject(body) ?: return false
+        return json["released"]?.jsonPrimitive?.booleanOrNull ?: false
     }
 
     fun parseErrorCode(body: String): String? {

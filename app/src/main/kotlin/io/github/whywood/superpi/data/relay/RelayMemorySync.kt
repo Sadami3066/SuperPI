@@ -11,6 +11,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +44,14 @@ enum class RelayMemoryNotice {
     LocalBackedUp,
 }
 
+enum class RollupLeaseStatus(val allowed: Boolean) {
+    LOCAL(true),
+    ACQUIRED(true),
+    UNSUPPORTED(true),
+    BUSY(false),
+    DEFERRED(false),
+}
+
 class RelayMemorySync(
     filesDir: File,
     private val rootDir: File,
@@ -53,6 +63,7 @@ class RelayMemorySync(
 ) : MemoryBackend {
     private val syncMutex = Mutex()
     private val mutex = Mutex()
+    private val rollupLeaseMutex = Mutex()
     private val prefsFile = File(filesDir, PREFS)
     private val outboxFile = File(filesDir, OUTBOX)
     private val queue = ArrayList<QueuedWrite>()
@@ -71,6 +82,12 @@ class RelayMemorySync(
 
     @Volatile
     private var lastFailureAt = 0L
+
+    private var activeRollupLeaseId: String? = null
+    private var activeRollupLeaseExpiresAt = 0L
+    private var activeRollupLeaseAccount: RelayAccount? = null
+    private var activeRollupLeaseToken: String? = null
+    private var rollupReleaseJob: Job? = null
 
     private var versions: Map<String, Long> = emptyMap()
     private var syncedAt = 0L
@@ -107,6 +124,7 @@ class RelayMemorySync(
     }
 
     private suspend fun clearOnSignOutLocked() {
+        releaseRollupLease()
         withContext(io) {
             mutex.withLock {
                 token = null
@@ -169,6 +187,73 @@ class RelayMemorySync(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    suspend fun acquireRollupLease(ttlMs: Long = DEFAULT_ROLLUP_LEASE_TTL_MILLIS): RollupLeaseStatus =
+        rollupLeaseMutex.withLock {
+            val current = account ?: return@withLock RollupLeaseStatus.LOCAL
+            val secret = token ?: accounts.token() ?: return@withLock RollupLeaseStatus.DEFERRED
+            token = secret
+            val now = clock()
+            val existingId = activeRollupLeaseId
+            if (existingId != null &&
+                activeRollupLeaseAccount?.accountId == current.accountId &&
+                now < activeRollupLeaseExpiresAt - ROLLUP_RENEW_BUFFER_MILLIS
+            ) {
+                scheduleRollupReleaseLocked()
+                return@withLock RollupLeaseStatus.ACQUIRED
+            }
+            val lease = try {
+                withContext(io) { client.acquireRollupLease(current, secret, ttlMs) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return@withLock RollupLeaseStatus.DEFERRED
+            }
+            if (lease == null) {
+                clearRollupLeaseStateLocked()
+                return@withLock RollupLeaseStatus.UNSUPPORTED
+            }
+            if (!lease.acquired || lease.leaseId.isNullOrBlank()) {
+                clearRollupLeaseStateLocked()
+                return@withLock RollupLeaseStatus.BUSY
+            }
+            activeRollupLeaseId = lease.leaseId
+            activeRollupLeaseExpiresAt = lease.expiresAt
+            activeRollupLeaseAccount = current
+            activeRollupLeaseToken = secret
+            scheduleRollupReleaseLocked()
+            RollupLeaseStatus.ACQUIRED
+        }
+
+    suspend fun releaseRollupLease() {
+        val (acct, secret, leaseId) = rollupLeaseMutex.withLock {
+            val id = activeRollupLeaseId
+            val acct = activeRollupLeaseAccount
+            val secret = activeRollupLeaseToken
+            clearRollupLeaseStateLocked()
+            Triple(acct, secret, id)
+        }
+        if (acct != null && secret != null && leaseId != null) {
+            runCatching { withContext(io) { client.releaseRollupLease(acct, secret, leaseId) } }
+        }
+    }
+
+    private fun scheduleRollupReleaseLocked() {
+        rollupReleaseJob?.cancel()
+        rollupReleaseJob = scope.launch {
+            delay(ROLLUP_IDLE_RELEASE_MILLIS)
+            releaseRollupLease()
+        }
+    }
+
+    private fun clearRollupLeaseStateLocked() {
+        rollupReleaseJob?.cancel()
+        rollupReleaseJob = null
+        activeRollupLeaseId = null
+        activeRollupLeaseExpiresAt = 0L
+        activeRollupLeaseAccount = null
+        activeRollupLeaseToken = null
     }
 
     private suspend fun refreshNowLocked(current: RelayAccount): Boolean = withContext(io) {
@@ -353,7 +438,9 @@ class RelayMemorySync(
                 -> SubmitOutcome.Offline
 
                 RelayMemoryFailure.Unauthorized -> SubmitOutcome.Rejected(SIGNED_OUT_MESSAGE)
-                RelayMemoryFailure.Rejected -> SubmitOutcome.Rejected(error.detail ?: WRITE_FAILED_MESSAGE)
+                RelayMemoryFailure.NotFound,
+                RelayMemoryFailure.Rejected,
+                -> SubmitOutcome.Rejected(error.detail ?: WRITE_FAILED_MESSAGE)
             }
         }
     }
@@ -536,6 +623,9 @@ class RelayMemorySync(
         private const val SUMMARY_LOG = "summaries.log"
         private const val RECONCILE_RETRY_MILLIS = 60_000L
         private const val FAILURE_BACKOFF_MILLIS = 30_000L
+        private const val DEFAULT_ROLLUP_LEASE_TTL_MILLIS = 5 * 60_000L
+        private const val ROLLUP_RENEW_BUFFER_MILLIS = 15_000L
+        private const val ROLLUP_IDLE_RELEASE_MILLIS = 30_000L
         private const val CONFLICT_MESSAGE =
             "Memory changed on another device. Read it again, then retry the write."
         private const val SIGNED_OUT_MESSAGE =

@@ -30,4 +30,6 @@
     <string name="agents_doc_discard_title">放弃修改？</string>
     <string name="agents_doc_discard_message">当前编辑内容尚未保存。</string>
     <string name="agents_doc_discard_confirm">放弃</string>
+    <string name="remote_capabilities_load_failed">无法读取能力设置，请重试</string>
+    <string name="remote_capabilities_save_failed">保存失败，请重试</string>
 </resources>

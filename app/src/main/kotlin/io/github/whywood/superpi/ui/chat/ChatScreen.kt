@@ -128,6 +128,7 @@ import io.github.whywood.superpi.ui.common.chat.ChatComposer
 import io.github.whywood.superpi.ui.common.chat.ChatComposerActions
 import io.github.whywood.superpi.ui.common.chat.ChatComposerState
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
+import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
 import io.github.whywood.superpi.ui.common.chat.ScrollAnchor
 import io.github.whywood.superpi.ui.common.chat.rememberChatScrollController
 import io.github.whywood.superpi.ui.common.chat.TodoPanel
@@ -221,6 +222,7 @@ fun ChatScreen(
     reloadVisible: Boolean = true,
     remoteModelsLoading: Boolean = false,
     remoteThinkingLevels: List<ThinkingLevel> = emptyList(),
+    remotePresentContext: RemotePresentContext? = null,
 ) {
     val (
         onInputChange, onSend, onStop, onOpenDrawer, onManageProviders, onReload,
@@ -654,6 +656,7 @@ fun ChatScreen(
                                         onSharePresentFile = onSharePresentFile,
                                         onOpenMiniapp = onOpenMiniapp,
                                         presentedCards = presentedCards,
+                                        remotePresentContext = remotePresentContext,
                                         retryAttempt = if (message.id == retryTargetId) {
                                             retryActivity?.attempt
                                         } else {

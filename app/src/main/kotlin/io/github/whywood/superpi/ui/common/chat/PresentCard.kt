@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -21,10 +22,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +50,7 @@ import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
+import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.SuperPIColors
@@ -58,6 +63,7 @@ import java.io.File
 import java.net.URI
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -66,6 +72,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 
 
 
@@ -81,7 +88,21 @@ data class PresentedItem(
     val id: String? = null,
     val icon: String? = null,
     val version: String? = null,
+    val artifactId: String? = null,
+    val artifactSize: Long? = null,
 )
+
+interface RemotePresentContext {
+    val deviceName: String
+    val supportsArtifacts: Boolean
+    fun cachedFile(artifactId: String, name: String, size: Long?): File?
+    suspend fun fetch(
+        artifactId: String,
+        name: String,
+        size: Long?,
+        onProgress: (Long, Long) -> Unit,
+    ): Result<File>
+}
 
 fun parsePresentedItems(trace: ToolTrace): List<PresentedItem>? {
     if (trace.name != "present") return null
@@ -139,6 +160,8 @@ private fun parsePresentedItem(element: JsonElement): PresentedItem? {
         path = path,
         mime = item.stringOrNull("mime")?.trim()?.takeIf { it.isNotEmpty() },
         title = title,
+        artifactId = item.stringOrNull("artifactId")?.trim()?.takeIf { it.isNotEmpty() },
+        artifactSize = (item["artifactSize"] as? JsonPrimitive)?.longOrNull,
     )
 }
 
@@ -173,6 +196,7 @@ internal fun PresentCard(
     onOpenMiniapp: (String) -> Unit,
     modifier: Modifier = Modifier,
     resolveCard: (String) -> PresentedCardRef? = { null },
+    remoteContext: RemotePresentContext? = null,
 ) {
     val colors = superPiColors()
     Column(
@@ -181,24 +205,401 @@ internal fun PresentCard(
     ) {
         items.forEach { item ->
             when (item.type) {
-                PresentedItemType.IMAGE -> PresentedImageItem(item, attachmentRoot, colors)
-                PresentedItemType.VIDEO -> PresentedVideoItem(
-                    item = item,
-                    root = attachmentRoot,
-                    colors = colors,
-                    onOpen = { onOpenFile(item.path.orEmpty()) },
-                )
+                PresentedItemType.IMAGE -> if (remoteContext != null) {
+                    RemotePresentedImageItem(item, attachmentRoot, colors, remoteContext)
+                } else {
+                    PresentedImageItem(item, attachmentRoot, colors)
+                }
+                PresentedItemType.VIDEO -> if (remoteContext != null) {
+                    RemotePresentedVideoItem(item, attachmentRoot, colors, remoteContext, onOpenFile)
+                } else {
+                    PresentedVideoItem(
+                        item = item,
+                        root = attachmentRoot,
+                        colors = colors,
+                        onOpen = { onOpenFile(item.path.orEmpty()) },
+                    )
+                }
 
-                PresentedItemType.HTML -> PresentedHtmlItem(item, attachmentRoot, colors)
-                PresentedItemType.FILE -> PresentedFileItem(
-                    item = item,
-                    colors = colors,
-                    onOpen = { onOpenFile(item.path.orEmpty()) },
-                    onShare = { onShareFile(item.path.orEmpty()) },
-                )
+                PresentedItemType.HTML -> if (remoteContext != null) {
+                    RemotePresentedHtmlItem(item, attachmentRoot, colors, remoteContext)
+                } else {
+                    PresentedHtmlItem(item, attachmentRoot, colors)
+                }
+                PresentedItemType.FILE -> if (remoteContext != null) {
+                    RemotePresentedFileItem(item, colors, remoteContext, onOpenFile, onShareFile)
+                } else {
+                    PresentedFileItem(
+                        item = item,
+                        colors = colors,
+                        onOpen = { onOpenFile(item.path.orEmpty()) },
+                        onShare = { onShareFile(item.path.orEmpty()) },
+                    )
+                }
 
-                PresentedItemType.MINIAPP -> PresentedMiniappItem(item, onOpenMiniapp)
+                PresentedItemType.MINIAPP -> if (remoteContext != null) {
+                    PresentedRemoteStatusRow(
+                        name = item.title ?: item.name,
+                        status = stringResource(R.string.present_remote_miniapp_hint, remoteContext.deviceName),
+                        icon = DdIcons.Apps,
+                        colors = colors,
+                    )
+                } else {
+                    PresentedMiniappItem(item, onOpenMiniapp)
+                }
                 PresentedItemType.CARD -> PresentedCardItem(item, colors, resolveCard)
+            }
+        }
+    }
+}
+
+private const val AUTO_PULL_IMAGE_MAX_BYTES = 15L * 1024L * 1024L
+private const val AUTO_PULL_HTML_MAX_BYTES = 5L * 1024L * 1024L
+
+private class RemoteArtifactState(
+    val cached: File?,
+    val loading: Boolean,
+    val failed: Boolean,
+    val downloaded: Long,
+    val total: Long,
+    val pull: ((File) -> Unit) -> Unit,
+)
+
+@Composable
+private fun rememberRemoteArtifactState(
+    item: PresentedItem,
+    remoteContext: RemotePresentContext,
+    autoPullMaxBytes: Long?,
+): RemoteArtifactState {
+    val artifactId = item.artifactId
+    val scope = rememberCoroutineScope()
+    var localFile by remember(artifactId, item.name, item.artifactSize, remoteContext) {
+        mutableStateOf(
+            artifactId?.let { remoteContext.cachedFile(it, item.name, item.artifactSize) },
+        )
+    }
+    var loading by remember(artifactId) { mutableStateOf(false) }
+    var failed by remember(artifactId) { mutableStateOf(false) }
+    var downloaded by remember(artifactId) { mutableStateOf(0L) }
+    var total by remember(artifactId) { mutableStateOf(item.artifactSize ?: 0L) }
+    var autoAttempt by remember(artifactId) { mutableIntStateOf(0) }
+
+    fun pullNow(onDone: (File) -> Unit) {
+        val id = artifactId ?: return
+        val existing = remoteContext.cachedFile(id, item.name, item.artifactSize)
+        if (existing != null) {
+            localFile = existing
+            onDone(existing)
+            return
+        }
+        if (loading || !remoteContext.supportsArtifacts) return
+        loading = true
+        failed = false
+        scope.launch {
+            val res = remoteContext.fetch(id, item.name, item.artifactSize) { done, size ->
+                downloaded = done
+                total = size
+            }
+            loading = false
+            res.fold(
+                onSuccess = { file ->
+                    localFile = file
+                    failed = false
+                    onDone(file)
+                },
+                onFailure = {
+                    failed = true
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(artifactId, autoAttempt, remoteContext) {
+        val id = artifactId ?: return@LaunchedEffect
+        val maxBytes = autoPullMaxBytes ?: return@LaunchedEffect
+        if (localFile != null || !remoteContext.supportsArtifacts) return@LaunchedEffect
+        val expectedSize = item.artifactSize ?: 0L
+        if (expectedSize <= maxBytes) {
+            pullNow {}
+        }
+    }
+
+    return RemoteArtifactState(
+        cached = localFile,
+        loading = loading,
+        failed = failed,
+        downloaded = downloaded,
+        total = total,
+        pull = { onDone ->
+            if (artifactId != null && autoPullMaxBytes != null && localFile == null && !loading) {
+                autoAttempt += 1
+            } else {
+                pullNow(onDone)
+            }
+        },
+    )
+}
+
+@Composable
+private fun RemotePresentedImageItem(
+    item: PresentedItem,
+    root: File,
+    colors: SuperPIColors,
+    remoteContext: RemotePresentContext,
+) {
+    val label = item.title ?: item.name
+    val artifactId = item.artifactId
+    if (artifactId == null) {
+        PresentedRemoteStatusRow(label, stringResource(R.string.present_remote_unavailable), DdIcons.Image, colors)
+        return
+    }
+    val state = rememberRemoteArtifactState(item, remoteContext, AUTO_PULL_IMAGE_MAX_BYTES)
+    val cached = state.cached
+    if (cached != null) {
+        PresentedImageItem(item.copy(path = cached.absolutePath), root, colors)
+        return
+    }
+    if (!remoteContext.supportsArtifacts) {
+        PresentedRemoteStatusRow(label, stringResource(R.string.present_remote_upgrade), DdIcons.Image, colors)
+        return
+    }
+    PresentedRemoteActionRow(
+        title = label,
+        subtitle = remoteArtifactSubtitle(item.artifactSize, state),
+        icon = DdIcons.Image,
+        loading = state.loading,
+        colors = colors,
+        onClick = { state.pull {} },
+    )
+}
+
+@Composable
+private fun RemotePresentedHtmlItem(
+    item: PresentedItem,
+    root: File,
+    colors: SuperPIColors,
+    remoteContext: RemotePresentContext,
+) {
+    val label = item.title ?: item.name
+    val artifactId = item.artifactId
+    if (artifactId == null) {
+        PresentedRemoteStatusRow(label, stringResource(R.string.present_remote_unavailable), DdIcons.Globe, colors)
+        return
+    }
+    val state = rememberRemoteArtifactState(item, remoteContext, AUTO_PULL_HTML_MAX_BYTES)
+    val cached = state.cached
+    if (cached != null) {
+        PresentedHtmlItem(item.copy(path = cached.absolutePath), root, colors)
+        return
+    }
+    if (!remoteContext.supportsArtifacts) {
+        PresentedRemoteStatusRow(label, stringResource(R.string.present_remote_upgrade), DdIcons.Globe, colors)
+        return
+    }
+    PresentedRemoteActionRow(
+        title = label,
+        subtitle = remoteArtifactSubtitle(item.artifactSize, state),
+        icon = DdIcons.Globe,
+        loading = state.loading,
+        colors = colors,
+        onClick = { state.pull {} },
+    )
+}
+
+@Composable
+private fun RemotePresentedVideoItem(
+    item: PresentedItem,
+    root: File,
+    colors: SuperPIColors,
+    remoteContext: RemotePresentContext,
+    onOpenFile: (String) -> Unit,
+) {
+    val label = item.title ?: item.name
+    val artifactId = item.artifactId
+    if (artifactId == null) {
+        PresentedRemoteStatusRow(label, stringResource(R.string.present_remote_unavailable), DdIcons.Play, colors)
+        return
+    }
+    val state = rememberRemoteArtifactState(item, remoteContext, autoPullMaxBytes = null)
+    val cached = state.cached
+    if (cached != null) {
+        PresentedVideoItem(
+            item = item.copy(path = cached.absolutePath),
+            root = root,
+            colors = colors,
+            onOpen = { onOpenFile(cached.absolutePath) },
+        )
+        return
+    }
+    if (!remoteContext.supportsArtifacts) {
+        PresentedRemoteStatusRow(label, stringResource(R.string.present_remote_upgrade), DdIcons.Play, colors)
+        return
+    }
+    PresentedRemoteActionRow(
+        title = label,
+        subtitle = remoteArtifactSubtitle(item.artifactSize, state),
+        icon = DdIcons.Play,
+        loading = state.loading,
+        colors = colors,
+        onClick = { state.pull { file -> onOpenFile(file.absolutePath) } },
+    )
+}
+
+@Composable
+private fun RemotePresentedFileItem(
+    item: PresentedItem,
+    colors: SuperPIColors,
+    remoteContext: RemotePresentContext,
+    onOpenFile: (String) -> Unit,
+    onShareFile: (String) -> Unit,
+) {
+    val artifactId = item.artifactId
+    if (artifactId == null) {
+        PresentedRemoteStatusRow(item.name, stringResource(R.string.present_remote_unavailable), DdIcons.File, colors)
+        return
+    }
+    val state = rememberRemoteArtifactState(item, remoteContext, autoPullMaxBytes = null)
+    val cached = state.cached
+    if (cached != null) {
+        PresentedFileItem(
+            item = item.copy(path = cached.absolutePath),
+            colors = colors,
+            onOpen = { onOpenFile(cached.absolutePath) },
+            onShare = { onShareFile(cached.absolutePath) },
+        )
+        return
+    }
+    if (!remoteContext.supportsArtifacts) {
+        PresentedRemoteStatusRow(item.name, stringResource(R.string.present_remote_upgrade), DdIcons.File, colors)
+        return
+    }
+    PresentedRemoteActionRow(
+        title = item.name,
+        subtitle = remoteArtifactSubtitle(item.artifactSize, state),
+        icon = DdIcons.File,
+        loading = state.loading,
+        colors = colors,
+        onClick = { state.pull { file -> onOpenFile(file.absolutePath) } },
+        onShare = { state.pull { file -> onShareFile(file.absolutePath) } },
+    )
+}
+
+@Composable
+private fun remoteArtifactSubtitle(
+    size: Long?,
+    state: RemoteArtifactState,
+): String {
+    val sizeText = size?.takeIf { it > 0L }?.let(::formatArtifactSize)
+    return when {
+        state.loading -> {
+            val pct = if (state.total > 0L) ((state.downloaded * 100L) / state.total).coerceIn(0L, 100L) else null
+            if (pct != null && pct > 0L) "${stringResource(R.string.present_remote_loading)} $pct%" else stringResource(R.string.present_remote_loading)
+        }
+        state.failed -> stringResource(R.string.present_remote_retry)
+        sizeText != null -> "$sizeText · ${stringResource(R.string.present_remote_download)}"
+        else -> stringResource(R.string.present_remote_download)
+    }
+}
+
+private fun formatArtifactSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "${(bytes / 1024L).coerceAtLeast(1L)} KB"
+    else -> "$bytes B"
+}
+
+@Composable
+private fun PresentedRemoteStatusRow(
+    name: String,
+    status: String,
+    icon: DdIcon,
+    colors: SuperPIColors,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(DdShapes.Medium)
+            .background(colors.wash)
+            .padding(horizontal = 14.dp, vertical = DdSpacing.Md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DdIcon(icon = icon, tint = colors.inkTertiary, size = 15.dp)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = name,
+            modifier = Modifier.weight(1f),
+            style = DdType.bodySmall,
+            color = colors.inkSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = status,
+            style = DdType.bodySmall,
+            color = colors.inkTertiary,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun PresentedRemoteActionRow(
+    title: String,
+    subtitle: String,
+    icon: DdIcon,
+    loading: Boolean,
+    colors: SuperPIColors,
+    onClick: () -> Unit,
+    onShare: (() -> Unit)? = null,
+) {
+    val shape = DdShapes.Medium
+    DdPressable(
+        onClick = { if (!loading) onClick() },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("present_remote_action"),
+        shape = shape,
+        background = colors.surface,
+        contentDescription = subtitle,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, colors.hairline.copy(alpha = DdAlpha.Secondary), shape)
+                .padding(start = 14.dp, end = if (onShare != null) 6.dp else 14.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (loading) {
+                DdSpinner(size = 16.dp, strokeWidth = 1.8.dp)
+            } else {
+                DdIcon(icon = icon, tint = colors.inkTertiary, size = 16.dp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = DdType.body,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(DdSpacing.Xxs))
+                Text(
+                    text = subtitle,
+                    style = DdType.bodySmall,
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (onShare != null) {
+                DdIconButton(
+                    icon = DdIcons.Share,
+                    onClick = { if (!loading) onShare() },
+                    contentDescription = stringResource(R.string.present_share),
+                    modifier = Modifier.testTag("present_remote_share"),
+                    size = 36.dp,
+                    iconSize = 15.dp,
+                    tint = colors.inkTertiary,
+                )
             }
         }
     }

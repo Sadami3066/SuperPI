@@ -32,6 +32,8 @@ internal val RELAY_CAPABILITIES = listOf(
     "bot-controls",
     "session-controls",
     "sync-events",
+    "bot-capabilities",
+    "present-artifacts",
 )
 
 internal val RELAY_CAPABILITIES_READONLY = listOf(
@@ -186,7 +188,7 @@ internal object RelayFrames {
     const val MAX_FILE_CHUNK_BASE64_CHARS = 360_000
     const val MAX_FILE_TRANSFER_BYTES = 50L * 1024L * 1024L
     const val MAX_AVATAR_DATA_URL_LENGTH = 65_536
-    val SYNC_EVENT_KINDS = setOf("sessions_changed", "bot_activity", "approval_changed", "model_changed")
+    val SYNC_EVENT_KINDS = setOf("sessions_changed", "bot_activity", "approval_changed", "model_changed", "capabilities_changed")
     private val ALLOWED_IMAGE_MIME_TYPES = setOf(
         "image/jpeg",
         "image/png",

@@ -8,4 +8,10 @@
     <string name="present_open_failed">没有可以打开该文件的应用</string>
     <string name="present_share_failed">无法分享该文件</string>
     <string name="present_card_unavailable">这张卡片暂时无法展示</string>
+    <string name="present_remote_loading">正在加载…</string>
+    <string name="present_remote_download">点按加载</string>
+    <string name="present_remote_retry">点按重试</string>
+    <string name="present_remote_unavailable">文件已不可用</string>
+    <string name="present_remote_upgrade">对方设备版本较旧，升级后可查看</string>
+    <string name="present_remote_miniapp_hint">仅在「%1$s」上运行</string>
 </resources>

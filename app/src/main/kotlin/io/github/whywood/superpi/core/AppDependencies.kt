@@ -149,6 +149,8 @@ interface FeatureDependencies {
 
     val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient
 
+    val remoteArtifactClient: io.github.whywood.superpi.remote.RemoteArtifactClient
+
     val updateManager: UpdateManager
 }
 

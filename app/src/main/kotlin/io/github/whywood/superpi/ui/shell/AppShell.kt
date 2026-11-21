@@ -47,6 +47,8 @@ import io.github.whywood.superpi.design.DdFonts
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.host.services.PluginUiBridge
 import io.github.whywood.superpi.remote.RemoteAdminResult
+import io.github.whywood.superpi.remote.RemoteArtifactClient
+import io.github.whywood.superpi.remote.RemoteArtifactResult
 import io.github.whywood.superpi.remote.RemoteBotAdminClient
 import io.github.whywood.superpi.remote.RemoteBotControlClient
 import io.github.whywood.superpi.remote.RemoteControlResult
@@ -75,6 +77,7 @@ import io.github.whywood.superpi.ui.chat.RemoteSessionOpenResult
 import io.github.whywood.superpi.ui.common.LocalHapticsEnabled
 import io.github.whywood.superpi.ui.common.ProfileAvatarCache
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
+import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
 import io.github.whywood.superpi.ui.common.rememberAvatarBitmap
 import io.github.whywood.superpi.ui.common.shareChooser
 import io.github.whywood.superpi.ui.sessionIdsWithEnabledTimers
@@ -86,6 +89,7 @@ import io.github.whywood.superpi.ui.navigation.AppRouteHost
 import io.github.whywood.superpi.ui.navigation.ChatRouteData
 import io.github.whywood.superpi.ui.navigation.ShellRouteUi
 import io.github.whywood.superpi.ui.navigation.deepLinkStack
+import java.io.File
 import io.github.whywood.superpi.ui.navigation.rememberAppNavigator
 import io.github.whywood.superpi.ui.shell.ShellCommandAction
 import io.github.whywood.superpi.ui.shell.ShellCommandExecutor
@@ -323,6 +327,9 @@ internal fun AppShell(
             .mapNotNull { ws -> ws.remote?.let { it.deviceId to ws.name } }
             .groupBy({ it.first }, { it.second })
     }
+    val canCreateRemoteBotDeviceIds = remember(remoteTargets) {
+        remoteTargets.map { it.deviceId }.toSet()
+    }
     val remoteBotManageWorkspaceIds = remember(state.workspaces, remoteDevices, relayState) {
         if (relayState != RelayLiveState.Online) {
             emptySet()
@@ -364,6 +371,20 @@ internal fun AppShell(
                 val remote = ws.remote ?: return@filter false
                 remote.online &&
                     graph.remoteTransport.supportsPeerCapability(remote.deviceId, RemoteBotControlClient.CAP_BOT_CONTROLS)
+            }.map { it.id }.toSet()
+        }
+    }
+    val remoteCapabilitiesWorkspaceIds = remember(state.workspaces, remoteDevices, relayState) {
+        if (relayState != RelayLiveState.Online) {
+            emptySet()
+        } else {
+            state.workspaces.filter { ws ->
+                val remote = ws.remote ?: return@filter false
+                remote.online &&
+                    graph.remoteTransport.supportsPeerCapability(
+                        remote.deviceId,
+                        RemoteBotControlClient.CAP_BOT_CAPABILITIES,
+                    )
             }.map { it.id }.toSet()
         }
     }
@@ -806,6 +827,44 @@ internal fun AppShell(
                 val canControlRemoteModel = activeWorkspace != null && activeWorkspace.id in remoteControlsWorkspaceIds
                 val remoteFilesVisible = activeWorkspace != null && activeWorkspace.id in remoteFilesWorkspaceIds
                 val reloadVisible = remoteWs == null || canControlRemoteModel
+                val remotePresentContext = remember(remoteWs, attachmentRoot, remoteDevices, relayState) {
+                    val remote = remoteWs ?: return@remember null
+                    val supportsArtifacts = relayState == RelayLiveState.Online &&
+                        remote.online &&
+                        graph.remoteTransport.supportsPeerCapability(
+                            remote.deviceId,
+                            RemoteArtifactClient.CAP_PRESENT_ARTIFACTS,
+                        )
+                    object : RemotePresentContext {
+                        override val deviceName: String = remote.deviceName
+                        override val supportsArtifacts: Boolean = supportsArtifacts
+                        override fun cachedFile(artifactId: String, name: String, size: Long?): File? =
+                            graph.remoteArtifactClient.cachedFile(attachmentRoot, artifactId, name, size)
+
+                        override suspend fun fetch(
+                            artifactId: String,
+                            name: String,
+                            size: Long?,
+                            onProgress: (Long, Long) -> Unit,
+                        ): Result<File> = when (
+                            val res = graph.remoteArtifactClient.fetch(
+                                deviceId = remote.deviceId,
+                                botId = remote.botId,
+                                workspaceRoot = attachmentRoot,
+                                artifactId = artifactId,
+                                name = name,
+                                expectedSize = size,
+                                onProgress = onProgress,
+                            )
+                        ) {
+                            is RemoteArtifactResult.Ok -> Result.success(res.file)
+                            RemoteArtifactResult.PeerUpgradeRequired ->
+                                Result.failure(IllegalStateException(remotePeerUpgradeMessage))
+                            is RemoteArtifactResult.Error ->
+                                Result.failure(IllegalStateException(localizeRemoteError(res.code, remoteActionFailedMessage)))
+                        }
+                    }
+                }
                 val effectiveState = remember(
                     frozenState,
                     configuredProviders,
@@ -850,6 +909,7 @@ internal fun AppShell(
                     reloadVisible = reloadVisible,
                     remoteModelsLoading = remoteModelsLoading,
                     remoteThinkingLevels = remoteModelsSnapshot?.thinkingLevels.orEmpty(),
+                    remotePresentContext = remotePresentContext,
                     actions = ChatScreenActions(
                         onInputChange = chatViewModel::onInputChange,
                         onSend = ::submitChatInput,
@@ -1252,7 +1312,9 @@ internal fun AppShell(
             remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
             remoteFilesWorkspaceIds = remoteFilesWorkspaceIds,
             remoteControlsWorkspaceIds = remoteControlsWorkspaceIds,
+            remoteCapabilitiesWorkspaceIds = remoteCapabilitiesWorkspaceIds,
             remoteShowArchivedWorkspaceIds = showArchivedRemoteWorkspaces,
+            canCreateRemoteBotDeviceIds = canCreateRemoteBotDeviceIds,
         )
         val drawerActions = ShellDrawerActions(
             onNavigate = { destination -> drawerOpen = false; navigator.push(destination) },
@@ -1261,6 +1323,14 @@ internal fun AppShell(
                 drawerOpen = false
                 overlays.remoteOpSubmitting = false
                 overlays.remoteOpError = null
+                overlays.workspaceCreateDeviceId = null
+                overlays.workspaceCreateOpen = true
+            },
+            onCreateWorkspaceForDevice = { deviceId ->
+                drawerOpen = false
+                overlays.remoteOpSubmitting = false
+                overlays.remoteOpError = null
+                overlays.workspaceCreateDeviceId = deviceId
                 overlays.workspaceCreateOpen = true
             },
             onToggleWorkspaceExpanded = { id ->
@@ -1355,6 +1425,12 @@ internal fun AppShell(
                 if (workspace.remote != null) {
                     drawerOpen = false
                     overlays.remoteAgentsDocTarget = workspace
+                }
+            },
+            onOpenRemoteCapabilities = { workspace ->
+                if (workspace.remote != null) {
+                    drawerOpen = false
+                    overlays.remoteCapabilitiesTarget = workspace
                 }
             },
             onEditRemoteBot = { workspace ->

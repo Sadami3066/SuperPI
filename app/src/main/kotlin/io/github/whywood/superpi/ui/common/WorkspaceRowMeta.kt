@@ -6,6 +6,7 @@ internal enum class WorkspaceMenuAction {
     NEW_SESSION,
     FILES,
     INSTRUCTIONS,
+    CAPABILITIES,
     EDIT_REMOTE,
     RENAME,
     PIN,
@@ -37,6 +38,7 @@ internal fun workspaceMenuActions(
     supportsBotManage: Boolean = false,
     supportsWorkspaceFiles: Boolean = false,
     supportsBotControls: Boolean = false,
+    supportsBotCapabilities: Boolean = false,
 ): List<WorkspaceMenuAction> {
     val meta = workspaceRowMeta(workspace)
     val remote = workspace.remote
@@ -48,6 +50,9 @@ internal fun workspaceMenuActions(
         }
         if (remote != null && remote.online && supportsBotControls) {
             add(WorkspaceMenuAction.INSTRUCTIONS)
+        }
+        if (remote != null && remote.online && supportsBotCapabilities) {
+            add(WorkspaceMenuAction.CAPABILITIES)
         }
         if (remote != null && remote.online && supportsBotManage) {
             add(WorkspaceMenuAction.EDIT_REMOTE)

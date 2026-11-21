@@ -35,6 +35,7 @@ import io.github.whywood.superpi.ui.common.chat.rememberAttachmentPickers
 import io.github.whywood.superpi.ui.common.encodeAvatarBitmapDataUrl
 import io.github.whywood.superpi.ui.common.shareChooser
 import io.github.whywood.superpi.ui.workspaces.RemoteAgentsDocSheet
+import io.github.whywood.superpi.ui.workspaces.RemoteBotCapabilitiesSheet
 import io.github.whywood.superpi.ui.workspaces.RemoteHostTarget
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -55,9 +56,11 @@ internal class AppOverlaysState {
     var selectedJobId by mutableStateOf<String?>(null)
     var jobOutput by mutableStateOf<String?>(null)
     var workspaceCreateOpen by mutableStateOf(false)
+    var workspaceCreateDeviceId by mutableStateOf<String?>(null)
     var workspaceRenameId by mutableStateOf<String?>(null)
     var remoteBotEditTarget by mutableStateOf<RuntimeWorkspace?>(null)
     var remoteAgentsDocTarget by mutableStateOf<RuntimeWorkspace?>(null)
+    var remoteCapabilitiesTarget by mutableStateOf<RuntimeWorkspace?>(null)
     var workspaceDeleteTarget by mutableStateOf<RuntimeWorkspace?>(null)
     var workspaceDeleteCount by mutableIntStateOf(0)
     var remoteOpSubmitting by mutableStateOf(false)
@@ -141,6 +144,7 @@ internal fun AppOverlays(
                 privateDirectory = privateWorkspacesDir,
                 remoteTargets = remoteTargets,
                 remoteBotNamesByDevice = remoteBotNamesByDevice,
+                initialTargetDeviceId = overlays.workspaceCreateDeviceId,
                 submitting = overlays.remoteOpSubmitting,
                 remoteError = overlays.remoteOpError,
             ).takeIf { overlays.workspaceCreateOpen },
@@ -190,6 +194,7 @@ internal fun AppOverlays(
             onDismissPluginPage = { overlays.pluginPage = null },
             onConfirmWorkspaceCreate = { name, directory, avatar, intro ->
                 overlays.workspaceCreateOpen = false
+                overlays.workspaceCreateDeviceId = null
                 scope.launch {
                     val avatarPath = avatar?.let { botAvatarStore.save(it) }
                     chatViewModel.createWorkspace(name, directory, avatarPath, intro) {
@@ -199,6 +204,7 @@ internal fun AppOverlays(
             },
             onDismissWorkspaceCreate = {
                 overlays.workspaceCreateOpen = false
+                overlays.workspaceCreateDeviceId = null
                 overlays.remoteOpSubmitting = false
                 overlays.remoteOpError = null
             },
@@ -212,6 +218,7 @@ internal fun AppOverlays(
                             overlays.remoteOpSubmitting = false
                             overlays.remoteOpError = null
                             overlays.workspaceCreateOpen = false
+                            overlays.workspaceCreateDeviceId = null
                             Toast.makeText(context, R.string.bot_created_toast, Toast.LENGTH_SHORT).show()
                         }
                         is RemoteAdminResult.Error -> {
@@ -389,6 +396,33 @@ internal fun AppOverlays(
                     }
                 },
                 onDismiss = { overlays.remoteAgentsDocTarget = null },
+            )
+        }
+    }
+    overlays.remoteCapabilitiesTarget?.let { target ->
+        val remote = target.remote
+        if (remote != null) {
+            RemoteBotCapabilitiesSheet(
+                deviceId = remote.deviceId,
+                botId = remote.botId,
+                botName = remote.botName,
+                deviceName = remote.deviceName,
+                syncEvents = graph.remoteTransport.syncEvents,
+                loadCapabilities = {
+                    when (val res = graph.remoteBotControlClient.getCapabilities(remote.deviceId, remote.botId)) {
+                        is RemoteControlResult.Ok -> Result.success(res.value)
+                        is RemoteControlResult.Error ->
+                            Result.failure(IllegalStateException(localizeAdminError(res.code, res.message)))
+                    }
+                },
+                saveCapabilities = { nextPolicy ->
+                    when (val res = graph.remoteBotControlClient.setCapabilities(remote.deviceId, remote.botId, nextPolicy)) {
+                        is RemoteControlResult.Ok -> Result.success(res.value)
+                        is RemoteControlResult.Error ->
+                            Result.failure(IllegalStateException(localizeAdminError(res.code, res.message)))
+                    }
+                },
+                onDismiss = { overlays.remoteCapabilitiesTarget = null },
             )
         }
     }
