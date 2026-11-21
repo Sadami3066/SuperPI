@@ -85,6 +85,16 @@ internal fun rememberAppIcon(context: Context): ImageBitmap? {
 private suspend fun loadAvatarFile(path: String?): ImageBitmap? {
     val file = path?.takeIf { it.isNotBlank() } ?: return null
     return withContext(Dispatchers.IO) {
-        runCatching { BitmapFactory.decodeFile(file)?.asImageBitmap() }.getOrNull()
+        runCatching {
+            if (file.startsWith("data:image/")) {
+                val base64Marker = ";base64,"
+                val markerIndex = file.indexOf(base64Marker)
+                if (markerIndex <= 0) return@runCatching null
+                val bytes = java.util.Base64.getDecoder().decode(file.substring(markerIndex + base64Marker.length))
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } else {
+                BitmapFactory.decodeFile(file)?.asImageBitmap()
+            }
+        }.getOrNull()
     }
 }

@@ -17,6 +17,7 @@ import kotlinx.serialization.json.put
 data class RelayBot(
     val id: String,
     val name: String,
+    val avatar: String? = null,
 )
 
 data class RelayDevice(
@@ -193,7 +194,11 @@ internal object RelayFrames {
         return element.mapNotNull { item ->
             val json = item as? JsonObject ?: return@mapNotNull null
             val id = json.string("id") ?: return@mapNotNull null
-            RelayBot(id = id, name = json.string("name") ?: id)
+            RelayBot(
+                id = id,
+                name = json.string("name") ?: id,
+                avatar = json.string("avatar")?.takeIf { it.isNotBlank() },
+            )
         }
     }
 
@@ -202,6 +207,7 @@ internal object RelayFrames {
             buildJsonObject {
                 put("id", bot.id)
                 put("name", bot.name)
+                bot.avatar?.takeIf { it.isNotBlank() }?.let { put("avatar", it) }
             }
         },
     )

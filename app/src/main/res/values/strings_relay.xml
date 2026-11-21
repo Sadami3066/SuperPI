@@ -51,4 +51,7 @@
     <string name="relay_device_remove_title">移除设备</string>
     <string name="relay_device_remove_message">移除「%1$s」后，该设备会立即断开连接，需要重新配对才能访问。</string>
     <string name="relay_device_remove_confirm">移除</string>
+    <string name="relay_scan_qr">扫码连接</string>
+    <string name="relay_scan_hint">将手机对准另一台设备上的配对二维码</string>
+    <string name="relay_scan_permission_hint">需要相机权限才能扫描配对二维码</string>
 </resources>

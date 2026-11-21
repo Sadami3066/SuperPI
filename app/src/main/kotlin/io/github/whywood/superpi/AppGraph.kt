@@ -179,6 +179,9 @@ class AppGraph(context: Context) : AppDependencies {
             scope.launch {
                 live.remoteBots.collect { bots -> remoteBots.value = bots }
             }
+            scope.launch {
+                dataGraph.workspaceStore.workspaces.drop(1).collect { live.refreshBots() }
+            }
         }
     }
 

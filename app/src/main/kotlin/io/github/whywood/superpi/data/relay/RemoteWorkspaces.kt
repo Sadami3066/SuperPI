@@ -10,6 +10,7 @@ data class RemoteBot(
     val botId: String,
     val botName: String,
     val online: Boolean,
+    val avatar: String? = null,
 )
 
 object RemoteWorkspaces {
@@ -24,6 +25,7 @@ object RemoteWorkspaces {
         id = workspaceId(bot),
         name = bot.botName,
         cwd = directory(root, bot).absolutePath,
+        avatar = bot.avatar,
         remote = RemoteBotRef(
             deviceId = bot.deviceId,
             deviceName = bot.deviceName,

@@ -53,4 +53,12 @@ class RemoteWorkspacesTest {
 
         assertEquals(listOf("PI", "Work"), workspaces.map { it.name })
     }
+
+    @Test
+    fun propagatesOptionalRemoteAvatarToWorkspace() {
+        val dataUrl = "data:image/jpeg;base64,/9j/4AAQ"
+        val workspace = RemoteWorkspaces.workspace(File("/root"), bot.copy(avatar = dataUrl))
+
+        assertEquals(dataUrl, workspace.avatar)
+    }
 }

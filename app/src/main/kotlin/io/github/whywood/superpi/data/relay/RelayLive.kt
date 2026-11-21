@@ -1,6 +1,11 @@
 package io.github.whywood.superpi.data.relay
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import io.github.whywood.superpi.runtime.AgentRuntime
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +64,7 @@ class RelayLive(
                     botId = bot.id,
                     botName = bot.name,
                     online = linked && device.online,
+                    avatar = bot.avatar,
                 )
             }
         }
@@ -129,6 +135,11 @@ class RelayLive(
     fun reconnectNow() {
         if (!started || account == null) return
         socket.reconnectNow()
+    }
+
+    fun refreshBots() {
+        if (!started || account == null) return
+        scope.launch { reconcile() }
     }
 
     fun removeDevice(deviceId: String) {
@@ -223,8 +234,75 @@ class RelayLive(
     private suspend fun bots(): List<RelayBot> = runCatching {
         host.workspaces()
             .filter { workspace -> workspace.remote == null }
-            .map { workspace -> RelayBot(workspace.id, workspace.name) }
+            .map { workspace -> RelayBot(workspace.id, workspace.name, avatar = encodeBotAvatar(workspace.avatar)) }
     }.getOrDefault(emptyList())
+
+    private fun encodeBotAvatar(path: String?): String? {
+        val raw = path?.takeIf { it.isNotBlank() } ?: return null
+        if (raw.startsWith("data:image/") && raw.contains(";base64,")) {
+            return raw.takeIf { it.length <= MAX_AVATAR_DATA_URL_CHARS }
+        }
+        val file = File(raw)
+        if (!file.isFile) return null
+        val encoded = runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+            val options = BitmapFactory.Options()
+            if (maxDim > MAX_AVATAR_PX * 2) {
+                var sample = 1
+                while (maxDim / (sample * 2) >= MAX_AVATAR_PX) sample *= 2
+                options.inSampleSize = sample
+            }
+            val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return@runCatching null
+            val squareSize = minOf(decoded.width, decoded.height).coerceAtLeast(1)
+            val x = (decoded.width - squareSize) / 2
+            val y = (decoded.height - squareSize) / 2
+            val cropped = if (decoded.width == decoded.height) decoded else Bitmap.createBitmap(decoded, x, y, squareSize, squareSize)
+            val scaled = if (cropped.width > MAX_AVATAR_PX) {
+                Bitmap.createScaledBitmap(cropped, MAX_AVATAR_PX, MAX_AVATAR_PX, true)
+            } else {
+                cropped
+            }
+            try {
+                for (quality in intArrayOf(80, 65)) {
+                    val out = ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+                    val candidate = "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(out.toByteArray())
+                    if (candidate.length <= MAX_AVATAR_DATA_URL_CHARS) return@runCatching candidate
+                }
+                null
+            } finally {
+                if (scaled !== cropped && scaled !== decoded) scaled.recycle()
+                if (cropped !== decoded) cropped.recycle()
+                decoded.recycle()
+            }
+        }.getOrNull()
+        if (encoded != null) return encoded
+        if (file.length() in 1L..44_000L) {
+            val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
+            val mime = detectImageMime(bytes) ?: return null
+            val fallback = "data:$mime;base64," + Base64.getEncoder().encodeToString(bytes)
+            return fallback.takeIf { it.length <= MAX_AVATAR_DATA_URL_CHARS }
+        }
+        return null
+    }
+
+    private fun detectImageMime(bytes: ByteArray): String? {
+        if (bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) {
+            return "image/jpeg"
+        }
+        if (bytes.size >= 8 && bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()) {
+            return "image/png"
+        }
+        if (bytes.size >= 12 &&
+            bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() && bytes[2] == 0x46.toByte() && bytes[3] == 0x46.toByte() &&
+            bytes[8] == 0x57.toByte() && bytes[9] == 0x45.toByte() && bytes[10] == 0x42.toByte() && bytes[11] == 0x50.toByte()
+        ) {
+            return "image/webp"
+        }
+        return null
+    }
 
     private fun send(frame: JsonObject): Boolean = socket.send(frame.toString())
 
@@ -329,5 +407,7 @@ class RelayLive(
     private companion object {
         private const val CALL_TIMEOUT_MILLIS = 15_000L
         private const val REMOTE_EVENT_BUFFER = 2_048
+        private const val MAX_AVATAR_PX = 128
+        private const val MAX_AVATAR_DATA_URL_CHARS = 60_000
     }
 }

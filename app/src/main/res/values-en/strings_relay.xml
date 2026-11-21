@@ -51,4 +51,7 @@
     <string name="relay_device_remove_title">Remove device</string>
     <string name="relay_device_remove_message">Removing “%1$s” disconnects it immediately. It must be paired again to reconnect.</string>
     <string name="relay_device_remove_confirm">Remove</string>
+    <string name="relay_scan_qr">Scan QR</string>
+    <string name="relay_scan_hint">Point the camera at the pairing QR code on another device</string>
+    <string name="relay_scan_permission_hint">Camera permission is needed to scan a pairing QR code</string>
 </resources>

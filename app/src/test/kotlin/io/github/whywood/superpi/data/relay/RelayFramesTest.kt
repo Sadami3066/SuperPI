@@ -92,6 +92,35 @@ class RelayFramesTest {
         assertEquals("bot.prompt", route.getValue("method").jsonPrimitive.content)
         assertEquals("r1", route.getValue("id").jsonPrimitive.content)
     }
+
+    @Test
+    fun roundTripsOptionalBotAvatar() {
+        val dataUrl = "data:image/jpeg;base64,/9j/4AAQ"
+        val hello = RelayFrames.hello(
+            deviceId = "dev-1",
+            platform = "android",
+            appVersion = "2.0.1",
+            bots = listOf(
+                RelayBot("bot-a", "Bot A", avatar = dataUrl),
+                RelayBot("bot-b", "Bot B"),
+            ),
+        )
+        val encodedBots = hello.getValue("bots").let { it as kotlinx.serialization.json.JsonArray }
+        assertEquals(dataUrl, encodedBots[0].jsonObject.getValue("avatar").jsonPrimitive.content)
+        assertTrue(!encodedBots[1].jsonObject.containsKey("avatar"))
+
+        val parsed = RelayFrames.parse(
+            """
+            {"type":"hello_ok","accountId":"acct","memoryVersion":1,"devices":[
+              {"deviceId":"dev-1","name":"Phone","platform":"android","online":true,"lastSeen":5,
+               "bots":[{"id":"bot-a","name":"Bot A","avatar":"$dataUrl"},{"id":"bot-b","name":"Bot B","avatar":""}]}
+            ]}
+            """.trimIndent(),
+        ) as RelayServerFrame.HelloOk
+        val bots = parsed.devices.single().bots
+        assertEquals(dataUrl, bots[0].avatar)
+        assertEquals(null, bots[1].avatar)
+    }
 }
 
 class RelayEventMapperTest {

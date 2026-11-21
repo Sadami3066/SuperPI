@@ -1,15 +1,23 @@
 package io.github.whywood.superpi.data.relay
 
 import io.github.whywood.superpi.runtime.AgentRuntime
+import io.github.whywood.superpi.runtime.AssistantMessage
+import io.github.whywood.superpi.runtime.AssistantRole
+import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SessionRuntimeEvent
+import io.github.whywood.superpi.runtime.ToolActivityStatus
+import io.github.whywood.superpi.runtime.invocationKey
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -44,6 +52,8 @@ class RemoteAgentServer(
                 "bot.abort" -> abort(frame)
                 "bot.state" -> state(frame)
                 "bot.resume" -> resume(frame)
+                "bot.sessions" -> listSessions(frame)
+                "bot.history" -> history(frame)
                 else -> reject(frame, "bad_request", "unknown method ${frame.method}")
             }
         } catch (cancelled: CancellationException) {
@@ -55,8 +65,8 @@ class RemoteAgentServer(
 
     private suspend fun prompt(frame: RelayServerFrame.Route) {
         val botId = frame.params.string("botId")
-        if (botId.isBlank()) {
-            reject(frame, "bot_not_found", "botId is required")
+        if (botId.isBlank() || bots().none { bot -> bot.id == botId }) {
+            reject(frame, "bot_not_found", if (botId.isBlank()) "botId is required" else "bot $botId is not available")
             return
         }
         val text = frame.params.string("text")
@@ -65,11 +75,9 @@ class RemoteAgentServer(
             return
         }
         val existing = frame.params.string("sessionId").ifBlank { null }
-        val sessionId = existing ?: run {
-            if (bots().none { bot -> bot.id == botId }) {
-                reject(frame, "bot_not_found", "bot $botId is not available")
-                return
-            }
+        val sessionId = if (existing != null) {
+            resolveExistingSession(botId, existing)
+        } else {
             host.newSession(botId).sessionId
         }
         val feed = Feed(routeId = frame.id, seq = AtomicLong(0), updatedAt = System.currentTimeMillis())
@@ -77,6 +85,14 @@ class RemoteAgentServer(
         pruneFinishedFeeds()
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
         host.send(sessionId, text)
+    }
+
+    private suspend fun resolveExistingSession(botId: String, existing: String): String {
+        if (host.history(existing).isEmpty() && !feeds.containsKey(existing) && !host.busySessionIds.value.contains(existing)) {
+            val summary = host.sessions(botId).firstOrNull { !it.archived && it.id == existing }
+            if (summary != null) return host.openSession(summary.filePath, summary.cwd).sessionId
+        }
+        return existing
     }
 
     private suspend fun steer(frame: RelayServerFrame.Route) {
@@ -179,6 +195,169 @@ class RemoteAgentServer(
         )
         for (entry in snapshot) {
             if (!send(RelayFrames.routeEvent(frame.id, entry.seq, entry.event))) break
+        }
+    }
+
+    private suspend fun listSessions(frame: RelayServerFrame.Route) {
+        val botId = frame.params.string("botId")
+        if (botId.isBlank() || bots().none { bot -> bot.id == botId }) {
+            reject(frame, "bot_not_found", if (botId.isBlank()) "botId is required" else "bot $botId is not available")
+            return
+        }
+        val ordered = host.sessions(botId)
+            .filter { !it.archived }
+            .sortedWith(compareByDescending<io.github.whywood.superpi.runtime.ConversationSummary> { it.pinned }.thenByDescending { it.updatedAt })
+        respondOk(
+            frame.id,
+            buildJsonObject {
+                put(
+                    "sessions",
+                    buildJsonArray {
+                        for (session in ordered) {
+                            addJsonObject {
+                                put("id", session.id)
+                                put("title", session.title.ifBlank { "Untitled" })
+                                put("updatedAt", session.updatedAt)
+                                if (session.pinned) put("pinned", true)
+                            }
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    private suspend fun history(frame: RelayServerFrame.Route) {
+        val botId = frame.params.string("botId")
+        if (botId.isBlank() || bots().none { bot -> bot.id == botId }) {
+            reject(frame, "bot_not_found", if (botId.isBlank()) "botId is required" else "bot $botId is not available")
+            return
+        }
+        val sessionId = frame.params.string("sessionId")
+        if (sessionId.isBlank()) {
+            reject(frame, "bad_request", "sessionId is required")
+            return
+        }
+        val summary = host.sessions(botId).firstOrNull { !it.archived && it.id == sessionId }
+        var resolvedId = sessionId
+        var messages = host.history(sessionId)
+        if (messages.isEmpty() && summary != null) {
+            val opened = host.openSession(summary.filePath, summary.cwd)
+            resolvedId = opened.sessionId
+            messages = host.history(resolvedId)
+        }
+        val busy = host.busySessionIds.value.contains(resolvedId) || feeds[resolvedId]?.active == true
+        if (summary == null && messages.isEmpty() && !busy && !feeds.containsKey(resolvedId)) {
+            reject(frame, "session_not_found", "session $sessionId was not found")
+            return
+        }
+        val serialized = serializeHistory(messages)
+        respondOk(
+            frame.id,
+            buildJsonObject {
+                put("sessionId", resolvedId)
+                summary?.title?.takeIf { it.isNotBlank() }?.let { put("title", it) }
+                put("busy", busy)
+                put("messages", serialized)
+            },
+        )
+    }
+
+    private fun serializeHistory(messages: List<AssistantMessage>): JsonArray = buildJsonArray {
+        for (message in messages) {
+            when (message.role) {
+                AssistantRole.USER -> {
+                    if (message.text.isNotBlank()) {
+                        addJsonObject {
+                            put("role", "user")
+                            put(
+                                "content",
+                                buildJsonArray {
+                                    addJsonObject {
+                                        put("type", "text")
+                                        put("text", message.text)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+
+                AssistantRole.ASSISTANT -> {
+                    val contentBlocks = mutableListOf<JsonObject>()
+                    val toolResults = mutableListOf<JsonObject>()
+                    if (message.steps.isNotEmpty()) {
+                        for (step in message.steps) {
+                            when (step) {
+                                is AssistantStep.Reasoning -> {
+                                    if (step.text.isNotBlank()) {
+                                        contentBlocks += buildJsonObject {
+                                            put("type", "thinking")
+                                            put("thinking", step.text)
+                                        }
+                                    }
+                                }
+
+                                is AssistantStep.Text -> {
+                                    if (step.text.isNotBlank()) {
+                                        contentBlocks += buildJsonObject {
+                                            put("type", "text")
+                                            put("text", step.text)
+                                        }
+                                    }
+                                }
+
+                                is AssistantStep.Tool -> {
+                                    val trace = step.trace
+                                    val callId = trace.invocationKey
+                                    val args = trace.rawArguments ?: JsonObject(
+                                        trace.arguments.mapValues { (_, v) -> JsonPrimitive(v) },
+                                    )
+                                    contentBlocks += buildJsonObject {
+                                        put("type", "toolCall")
+                                        put("id", callId)
+                                        put("name", trace.name)
+                                        put("arguments", args)
+                                    }
+                                    if (trace.status != ToolActivityStatus.RUNNING || trace.output != null || trace.error != null) {
+                                        toolResults += buildJsonObject {
+                                            put("role", "toolResult")
+                                            put("toolCallId", callId)
+                                            put("toolName", trace.name)
+                                            put("isError", trace.status == ToolActivityStatus.FAILED)
+                                            put(
+                                                "content",
+                                                buildJsonArray {
+                                                    addJsonObject {
+                                                        put("type", "text")
+                                                        put("text", trace.error ?: trace.output.orEmpty())
+                                                    }
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+
+                                else -> Unit
+                            }
+                        }
+                    } else if (message.text.isNotBlank()) {
+                        contentBlocks += buildJsonObject {
+                            put("type", "text")
+                            put("text", message.text)
+                        }
+                    }
+                    if (contentBlocks.isNotEmpty()) {
+                        addJsonObject {
+                            put("role", "assistant")
+                            put("content", JsonArray(contentBlocks))
+                        }
+                    }
+                    for (result in toolResults) {
+                        add(result)
+                    }
+                }
+            }
         }
     }
 

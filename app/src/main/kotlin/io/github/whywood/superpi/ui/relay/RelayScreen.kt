@@ -1,27 +1,54 @@
 package io.github.whywood.superpi.ui.relay
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import android.util.Size
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.compose.CameraXViewfinder
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceRequest
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.viewfinder.core.ImplementationMode
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,13 +56,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.relay.RelayAccount
 import io.github.whywood.superpi.data.relay.RelayDevice
@@ -43,26 +76,37 @@ import io.github.whywood.superpi.data.relay.RelayError
 import io.github.whywood.superpi.data.relay.RelayLiveState
 import io.github.whywood.superpi.data.relay.RelayPairingLink
 import io.github.whywood.superpi.data.relay.RelayUiState
+import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
+import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdNoticeBar
 import io.github.whywood.superpi.design.DdNoticeTone
 import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSpacing
+import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdText
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdTextField
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.ui.common.chat.CameraBarcodeAnalyzer
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 @Composable
 internal fun RelayScreen(
@@ -86,6 +130,7 @@ internal fun RelayScreen(
     var secret by rememberSaveable { mutableStateOf("") }
     var deviceName by rememberSaveable { mutableStateOf(defaultDeviceName) }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
+    var scanningQr by rememberSaveable { mutableStateOf(false) }
     var confirmRevokeDevice by remember { mutableStateOf<RelayDevice?>(null) }
     var pairCopied by remember(state.pairLink) { mutableStateOf(false) }
     val fingerprint = remember(link) { RelayPairingLink.parse(link)?.fingerprint }
@@ -122,6 +167,7 @@ internal fun RelayScreen(
                 fingerprint = fingerprint,
                 signingIn = state.signingIn,
                 error = state.error,
+                onScanQr = { scanningQr = true },
                 onConnect = connect,
                 onDismissError = onDismissError,
             )
@@ -242,6 +288,16 @@ internal fun RelayScreen(
             },
         )
     }
+
+    if (scanningQr) {
+        RelayQrScanSheet(
+            onDismiss = { scanningQr = false },
+            onScanned = { scanned ->
+                link = scanned
+                scanningQr = false
+            },
+        )
+    }
 }
 
 @Composable
@@ -255,6 +311,7 @@ private fun ColumnScope.ConnectForm(
     fingerprint: String?,
     signingIn: Boolean,
     error: RelayError?,
+    onScanQr: () -> Unit,
     onConnect: () -> Unit,
     onDismissError: () -> Unit,
 ) {
@@ -272,7 +329,42 @@ private fun ColumnScope.ConnectForm(
             color = colors.inkSecondary,
         )
         Spacer(Modifier.height(DdSpacing.Xxl))
-        FieldLabel(stringResource(R.string.relay_link_label))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.relay_link_label),
+                modifier = Modifier.weight(1f),
+                style = DdType.label,
+                color = colors.inkSecondary,
+            )
+            DdPressable(
+                onClick = onScanQr,
+                modifier = Modifier.heightIn(min = 44.dp),
+                shape = RoundedCornerShape(8.dp),
+                contentDescription = stringResource(R.string.relay_scan_qr),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = DdSpacing.Sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
+                ) {
+                    DdIcon(
+                        icon = DdIcons.Scan,
+                        tint = colors.accent,
+                        size = 16.dp,
+                    )
+                    Text(
+                        text = stringResource(R.string.relay_scan_qr),
+                        style = DdType.label,
+                        color = colors.accent,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(DdSpacing.Xs))
         DdTextField(
             value = link,
             onValueChange = onLinkChange,
@@ -534,3 +626,248 @@ private fun formatDate(epochMillis: Long): String {
     val formatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
     return Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(formatter)
 }
+
+@Composable
+private fun RelayQrScanSheet(
+    onDismiss: () -> Unit,
+    onScanned: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    var granted by remember { mutableStateOf(context.hasCameraPermission()) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted = it }
+    val settingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { granted = context.hasCameraPermission() }
+    LaunchedEffect(Unit) {
+        if (!context.hasCameraPermission()) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+    DdSheet(
+        onDismiss = onDismiss,
+        fullBleed = true,
+        containerColor = Color.Black,
+    ) {
+        if (granted) {
+            RelayQrScannerBody(onDismiss = onDismiss, onScanned = onScanned)
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(3f / 4f),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = DdSpacing.Xxxl),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = stringResource(R.string.relay_scan_permission_hint),
+                        style = DdType.body,
+                        color = Color.White.copy(alpha = 0.85f),
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(DdSpacing.Lg))
+                    DdPrimaryButton(
+                        text = stringResource(R.string.camera_open_settings),
+                        onClick = {
+                            settingsLauncher.launch(
+                                Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", context.packageName, null),
+                                ),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                DdIconButton(
+                    icon = DdIcons.Close,
+                    onClick = onDismiss,
+                    contentDescription = stringResource(R.string.camera_close),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(DdSpacing.Xs),
+                    tint = Color.White,
+                    iconSize = 20.dp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RelayQrScannerBody(
+    onDismiss: () -> Unit,
+    onScanned: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    var surfaceRequest by remember { mutableStateOf<SurfaceRequest?>(null) }
+    var unavailable by remember { mutableStateOf(false) }
+    val handled = remember { AtomicBoolean(false) }
+    val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
+    val analyzer = remember(mainExecutor, onScanned) {
+        CameraBarcodeAnalyzer { codes ->
+            if (handled.get()) return@CameraBarcodeAnalyzer
+            val matched = codes.firstOrNull { RelayPairingLink.parse(it.raw) != null }?.raw ?: return@CameraBarcodeAnalyzer
+            if (handled.compareAndSet(false, true)) {
+                mainExecutor.execute { onScanned(matched) }
+            }
+        }
+    }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            surfaceRequest = null
+            provider?.unbindAll()
+            analysisExecutor.shutdown()
+            analyzer.close()
+        }
+    }
+    LaunchedEffect(lifecycleOwner) {
+        val cameraProvider = try {
+            awaitRelayCameraProvider(context)
+        } catch (_: Exception) {
+            unavailable = true
+            return@LaunchedEffect
+        }
+        provider = cameraProvider
+        val lens = if (cameraProvider.hasLens(CameraSelector.LENS_FACING_BACK)) {
+            CameraSelector.LENS_FACING_BACK
+        } else {
+            CameraSelector.LENS_FACING_FRONT
+        }
+        try {
+            cameraProvider.unbindAll()
+            surfaceRequest = null
+            val preview = Preview.Builder().build().apply {
+                setSurfaceProvider { request -> surfaceRequest = request }
+            }
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                Size(1280, 960),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                            ),
+                        )
+                        .build(),
+                )
+                .build()
+                .apply { setAnalyzer(analysisExecutor, analyzer) }
+            val selector = CameraSelector.Builder().requireLensFacing(lens).build()
+            cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, analysis)
+            unavailable = false
+        } catch (_: Exception) {
+            unavailable = true
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(3f / 4f),
+    ) {
+        val request = surfaceRequest
+        when {
+            unavailable -> Text(
+                text = stringResource(R.string.camera_unavailable),
+                style = DdType.body,
+                color = Color.White.copy(alpha = 0.85f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = DdSpacing.Xxxl),
+            )
+
+            request != null -> CameraXViewfinder(
+                surfaceRequest = request,
+                modifier = Modifier.fillMaxSize(),
+                implementationMode = ImplementationMode.EMBEDDED,
+                contentScale = ContentScale.Crop,
+            )
+
+            else -> DdSpinner(
+                modifier = Modifier.align(Alignment.Center),
+                color = Color.White,
+            )
+        }
+        if (!unavailable && request != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(220.dp)
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(16.dp),
+                    ),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(104.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = DdAlpha.Border)),
+                    ),
+                ),
+        )
+        Text(
+            text = stringResource(R.string.relay_scan_hint),
+            style = DdType.bodySmall,
+            color = Color.White.copy(alpha = 0.9f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(start = DdSpacing.Xl, end = DdSpacing.Xl, bottom = DdSpacing.Lg),
+        )
+        DdIconButton(
+            icon = DdIcons.Close,
+            onClick = onDismiss,
+            contentDescription = stringResource(R.string.camera_close),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(DdSpacing.Xs),
+            tint = Color.White,
+            iconSize = 20.dp,
+        )
+    }
+}
+
+private fun Context.hasCameraPermission(): Boolean =
+    ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+        PackageManager.PERMISSION_GRANTED
+
+private suspend fun awaitRelayCameraProvider(context: Context): ProcessCameraProvider =
+    suspendCancellableCoroutine { continuation ->
+        val future = ProcessCameraProvider.getInstance(context)
+        future.addListener(
+            {
+                if (continuation.isActive) {
+                    try {
+                        continuation.resume(future.get())
+                    } catch (exception: Exception) {
+                        continuation.resumeWithException(exception)
+                    }
+                }
+            },
+            ContextCompat.getMainExecutor(context),
+        )
+        continuation.invokeOnCancellation { future.cancel(false) }
+    }
+
+private fun ProcessCameraProvider.hasLens(lensFacing: Int): Boolean = runCatching {
+    hasCamera(CameraSelector.Builder().requireLensFacing(lensFacing).build())
+}.getOrDefault(false)
