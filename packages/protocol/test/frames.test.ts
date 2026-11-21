@@ -91,4 +91,57 @@ describe('protocol validation', () => {
   it('throws on non-JSON lines', () => {
     expect(() => decodeFrameLine('client', '{oops')).toThrow(ProtocolError)
   })
+
+  it('round-trips optional bot avatars and rejects invalid avatar payloads', () => {
+    const avatar = 'data:image/jpeg;base64,AAECAw=='
+    const helloFrame = parseClientFrame({
+      ...(readVector('client-hello.json') as Record<string, unknown>),
+      bots: [{ id: 'pi', name: 'PI', avatar }],
+    })
+    expect(helloFrame).toMatchObject({ type: 'hello', bots: [{ id: 'pi', name: 'PI', avatar }] })
+    expect(decodeFrameLine('client', encodeFrame(helloFrame).trimEnd())).toEqual(helloFrame)
+
+    const presenceFrame = parseServerFrame({
+      type: 'presence',
+      deviceId: 'dev-phone',
+      online: true,
+      lastSeen: 123,
+      bots: [{ id: 'pi', name: 'PI', avatar }],
+    })
+    expect(presenceFrame).toMatchObject({ bots: [{ id: 'pi', name: 'PI', avatar }] })
+
+    expect(() =>
+      parseClientFrame({
+        ...(readVector('client-hello.json') as Record<string, unknown>),
+        bots: [{ id: 'pi', name: 'PI', avatar: 'https://example.com/a.png' }],
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        ...(readVector('client-hello.json') as Record<string, unknown>),
+        bots: [{ id: 'pi', name: 'PI', avatar: `data:image/jpeg;base64,${'A'.repeat(70_000)}` }],
+      }),
+    ).toThrow(ProtocolError)
+  })
+
+  it('accepts bot.sessions and bot.history route frames', () => {
+    const sessionsRoute = parseClientFrame({
+      type: 'route',
+      id: 'req-s',
+      to: 'dev-phone',
+      method: 'bot.sessions',
+      params: { botId: 'pi' },
+    })
+    expect(sessionsRoute).toMatchObject({ method: 'bot.sessions' })
+
+    const historyRoute = parseClientFrame({
+      type: 'route',
+      id: 'req-h',
+      to: 'dev-phone',
+      method: 'bot.history',
+      params: { botId: 'pi', sessionId: 'sess-1' },
+    })
+    expect(historyRoute).toMatchObject({ method: 'bot.history' })
+  })
 })

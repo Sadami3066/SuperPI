@@ -5,6 +5,7 @@ import path from 'node:path'
 import WebSocket from 'ws'
 import {
   PROTOCOL_VERSION,
+  type BotInfo,
   type ClientFrame,
   type DeviceListResponse,
   type EnrollResponse,
@@ -165,7 +166,7 @@ async function nextOf<T extends ServerFrame['type']>(client: Client, type: T): P
   }
 }
 
-function hello(deviceId: string, bots: Array<{ id: string; name: string }> = []): ClientFrame {
+function hello(deviceId: string, bots: BotInfo[] = []): ClientFrame {
   return {
     type: 'hello',
     protocolVersion: PROTOCOL_VERSION,
@@ -506,5 +507,76 @@ describe('realtime hub', () => {
     expect(harness.hub.isOnline(staleDevice.deviceId)).toBe(false)
     expect(harness.hub.isOnline(healthyDevice.deviceId)).toBe(true)
     expect(healthyClient.socket.readyState).toBe(WebSocket.OPEN)
+  })
+
+  it('propagates bot avatars via hello_ok and presence and routes bot.sessions and bot.history cleanly', async () => {
+    const harness = await startRelay()
+    const desktop = await enrollDevice(harness, 'Desktop', 'desktop')
+    const phone = await enrollDevice(harness, 'Phone', 'android')
+    const avatar = 'data:image/jpeg;base64,AQIDBA=='
+
+    const phoneClient = await Client.open(harness.wsBase, phone.token)
+    phoneClient.send(hello(phone.deviceId, [{ id: 'pi', name: 'Phone PI', avatar }]))
+    await nextOf(phoneClient, 'hello_ok')
+
+    const desktopClient = await Client.open(harness.wsBase, desktop.token)
+    desktopClient.send(hello(desktop.deviceId, [{ id: 'pi', name: 'Desktop PI' }]))
+    const desktopHello = await nextOf(desktopClient, 'hello_ok')
+    expect(desktopHello.devices.find((d) => d.deviceId === phone.deviceId)?.bots).toEqual([
+      { id: 'pi', name: 'Phone PI', avatar },
+    ])
+
+    const phonePresence = await nextOf(phoneClient, 'presence')
+    expect(phonePresence.deviceId).toBe(desktop.deviceId)
+
+    const updatedAvatar = 'data:image/png;base64,iVBORw0K'
+    phoneClient.send(hello(phone.deviceId, [{ id: 'pi', name: 'Phone PI', avatar: updatedAvatar }]))
+    await nextOf(phoneClient, 'hello_ok')
+    const updatedPresence = await nextOf(desktopClient, 'presence')
+    expect(updatedPresence.bots).toEqual([{ id: 'pi', name: 'Phone PI', avatar: updatedAvatar }])
+
+    desktopClient.send({
+      type: 'route',
+      id: 'req-sessions',
+      to: phone.deviceId,
+      method: 'bot.sessions',
+      params: { botId: 'pi' },
+    })
+    const inboundSessions = await nextOf(phoneClient, 'route')
+    expect(inboundSessions).toMatchObject({ id: 'req-sessions', method: 'bot.sessions', params: { botId: 'pi' } })
+    phoneClient.send({
+      type: 'route_ok',
+      id: 'req-sessions',
+      result: { sessions: [{ id: 's1', title: 'Morning sync', updatedAt: 1000 }] },
+    })
+    const sessionsOk = await nextOf(desktopClient, 'route_ok')
+    expect(sessionsOk).toMatchObject({
+      id: 'req-sessions',
+      result: { sessions: [{ id: 's1', title: 'Morning sync', updatedAt: 1000 }] },
+    })
+
+    desktopClient.send({
+      type: 'route',
+      id: 'req-history',
+      to: phone.deviceId,
+      method: 'bot.history',
+      params: { botId: 'pi', sessionId: 's1' },
+    })
+    const inboundHistory = await nextOf(phoneClient, 'route')
+    expect(inboundHistory).toMatchObject({
+      id: 'req-history',
+      method: 'bot.history',
+      params: { botId: 'pi', sessionId: 's1' },
+    })
+    phoneClient.send({
+      type: 'route_ok',
+      id: 'req-history',
+      result: { sessionId: 's1', busy: false, messages: [] },
+    })
+    const historyOk = await nextOf(desktopClient, 'route_ok')
+    expect(historyOk).toMatchObject({
+      id: 'req-history',
+      result: { sessionId: 's1', busy: false, messages: [] },
+    })
   })
 })

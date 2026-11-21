@@ -23,6 +23,8 @@ export const ROUTE_METHODS = [
   'bot.state',
   'bot.resume',
   'bot.approval',
+  'bot.sessions',
+  'bot.history',
 ] as const
 
 export type RouteMethod = (typeof ROUTE_METHODS)[number]
@@ -32,6 +34,15 @@ export type DevicePlatform = 'android' | 'desktop' | 'cli' | 'unknown'
 export interface BotInfo {
   id: string
   name: string
+  avatar?: string
+}
+
+export interface RemoteSessionSummary {
+  id: string
+  title: string
+  updatedAt: number
+  messageCount?: number
+  pinned?: boolean
 }
 
 export interface DeviceInfo {
@@ -315,11 +326,25 @@ function requireDevices(value: unknown): DeviceInfo[] {
   })
 }
 
+const MAX_BOT_AVATAR_LENGTH = 65_536
+const BOT_AVATAR_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/
+
 function requireBots(value: unknown): BotInfo[] {
   if (!Array.isArray(value)) throw new ProtocolError('bots must be an array')
   return value.map((entry) => {
     if (!isRecord(entry)) throw new ProtocolError('bot must be an object')
-    return { id: requireString(entry, 'id'), name: requireString(entry, 'name') }
+    const bot: BotInfo = { id: requireString(entry, 'id'), name: requireString(entry, 'name') }
+    if (entry.avatar !== undefined && entry.avatar !== null) {
+      if (
+        typeof entry.avatar !== 'string' ||
+        entry.avatar.length > MAX_BOT_AVATAR_LENGTH ||
+        !BOT_AVATAR_PATTERN.test(entry.avatar)
+      ) {
+        throw new ProtocolError('bot.avatar is invalid')
+      }
+      bot.avatar = entry.avatar
+    }
+    return bot
   })
 }
 
