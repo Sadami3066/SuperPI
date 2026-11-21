@@ -1,5 +1,8 @@
 export const PROTOCOL_VERSION = 1
 
+export const RELAY_CAPABILITIES = ['remote-bot', 'bot-sessions', 'bot-images', 'bot-approval'] as const
+export type RelayCapability = (typeof RELAY_CAPABILITIES)[number]
+
 export const ERROR_CODES = [
   'unauthorized',
   'protocol_mismatch',
@@ -45,6 +48,12 @@ export interface RemoteSessionSummary {
   pinned?: boolean
 }
 
+export interface RouteImagePart {
+  data: string
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+  name?: string
+}
+
 export interface DeviceInfo {
   deviceId: string
   name: string
@@ -52,6 +61,7 @@ export interface DeviceInfo {
   online: boolean
   lastSeen: number
   bots: BotInfo[]
+  capabilities?: string[]
 }
 
 export interface TextDeltaEvent {
@@ -64,7 +74,17 @@ export type BotEvent =
   | { type: 'message_update'; assistantMessageEvent: TextDeltaEvent }
   | { type: 'tool_call'; callId: string; name: string; args?: unknown }
   | { type: 'tool_result'; callId: string; result?: string; isError?: boolean; details?: unknown }
-  | { type: 'approval_request'; approvalId: string; kind: string; summary: string }
+  | {
+      type: 'approval_request'
+      approvalId: string
+      kind: string
+      summary: string
+      title?: string
+      message?: string
+      options?: string[]
+      placeholder?: string
+      prefill?: string
+    }
   | { type: 'queue_update'; steering: string[]; followUp: string[] }
   | { type: 'agent_end'; status?: string }
   | { type: 'agent_settled' }
@@ -119,6 +139,7 @@ export interface HelloOkFrame {
   accountId: string
   devices: DeviceInfo[]
   memoryVersion: number
+  capabilities?: string[]
 }
 
 export interface PresenceFrame {
@@ -127,6 +148,7 @@ export interface PresenceFrame {
   online: boolean
   lastSeen: number
   bots?: BotInfo[]
+  capabilities?: string[]
 }
 
 export interface InboundRouteFrame extends RouteFrame {
@@ -159,6 +181,30 @@ export class ProtocolError extends Error {
   }
 }
 
+export class UnknownRouteMethodError extends ProtocolError {
+  readonly routeId: string
+  readonly method: string
+
+  constructor(routeId: string, method: string) {
+    super(`method must be a known route method: ${method.slice(0, 48)}`)
+    this.name = 'UnknownRouteMethodError'
+    this.routeId = routeId
+    this.method = method
+  }
+}
+
+export class RouteValidationError extends ProtocolError {
+  readonly routeId: string
+  readonly code: ErrorCode
+
+  constructor(routeId: string, message: string, code: ErrorCode = 'bad_request') {
+    super(message)
+    this.name = 'RouteValidationError'
+    this.routeId = routeId
+    this.code = code
+  }
+}
+
 export type FrameDirection = 'client' | 'server'
 
 export function isBotEvent(value: unknown): value is BotEvent {
@@ -176,7 +222,16 @@ export function isBotEvent(value: unknown): value is BotEvent {
     case 'tool_result':
       return typeof value.callId === 'string'
     case 'approval_request':
-      return typeof value.approvalId === 'string' && typeof value.kind === 'string' && typeof value.summary === 'string'
+      return (
+        typeof value.approvalId === 'string' &&
+        typeof value.kind === 'string' &&
+        typeof value.summary === 'string' &&
+        (value.title === undefined || typeof value.title === 'string') &&
+        (value.message === undefined || typeof value.message === 'string') &&
+        (value.options === undefined || isStringArray(value.options)) &&
+        (value.placeholder === undefined || typeof value.placeholder === 'string') &&
+        (value.prefill === undefined || typeof value.prefill === 'string')
+      )
     case 'queue_update':
       return isStringArray(value.steering) && isStringArray(value.followUp)
     case 'agent_end':
@@ -198,54 +253,60 @@ export function parseClientFrame(value: unknown): ClientFrame {
     case 'route':
       return parseRoute(value, false) as RouteFrame
     case 'route_ok':
-      return { type: 'route_ok', id: requireString(value, 'id'), result: value.result }
+      return { type: 'route_ok', id: requireIdentifier(value, 'id'), result: value.result }
     case 'route_error':
       return {
         type: 'route_error',
-        id: requireString(value, 'id'),
+        id: requireIdentifier(value, 'id'),
         code: requireErrorCode(value, 'code'),
-        message: requireString(value, 'message'),
+        message: requireString(value, 'message').slice(0, 2048),
       }
     case 'route_event':
       return parseRouteEvent(value)
     case 'ping':
       return { type: 'ping' }
     default:
-      throw new ProtocolError(`unknown client frame type: ${String(value.type)}`)
+      throw new ProtocolError('unknown client frame type')
   }
 }
 
 export function parseServerFrame(value: unknown): ServerFrame {
   if (!isRecord(value)) throw new ProtocolError('frame must be an object')
   switch (value.type) {
-    case 'hello_ok':
-      return {
+    case 'hello_ok': {
+      const capabilities = optionalCapabilities(value.capabilities)
+      const frame: HelloOkFrame = {
         type: 'hello_ok',
         accountId: requireString(value, 'accountId'),
-        devices: requireDevices(value.devices),
+        devices: requireDevices(value.devices, true),
         memoryVersion: requireNumber(value, 'memoryVersion'),
       }
+      if (capabilities) frame.capabilities = capabilities
+      return frame
+    }
     case 'presence': {
-      const bots = value.bots === undefined ? undefined : requireBots(value.bots)
+      const bots = value.bots === undefined ? undefined : requireBots(value.bots, true)
+      const capabilities = optionalCapabilities(value.capabilities)
       const frame: PresenceFrame = {
         type: 'presence',
-        deviceId: requireString(value, 'deviceId'),
+        deviceId: requireIdentifier(value, 'deviceId'),
         online: requireBoolean(value, 'online'),
         lastSeen: requireNumber(value, 'lastSeen'),
       }
       if (bots) frame.bots = bots
+      if (capabilities) frame.capabilities = capabilities
       return frame
     }
     case 'route':
       return parseRoute(value, true) as InboundRouteFrame
     case 'route_ok':
-      return { type: 'route_ok', id: requireString(value, 'id'), result: value.result }
+      return { type: 'route_ok', id: requireIdentifier(value, 'id'), result: value.result }
     case 'route_error':
       return {
         type: 'route_error',
-        id: requireString(value, 'id'),
+        id: requireIdentifier(value, 'id'),
         code: requireErrorCode(value, 'code'),
-        message: requireString(value, 'message'),
+        message: requireString(value, 'message').slice(0, 2048),
       }
     case 'route_event':
       return parseRouteEvent(value)
@@ -254,7 +315,7 @@ export function parseServerFrame(value: unknown): ServerFrame {
     case 'pong':
       return { type: 'pong' }
     default:
-      throw new ProtocolError(`unknown server frame type: ${String(value.type)}`)
+      throw new ProtocolError('unknown server frame type')
   }
 }
 
@@ -275,29 +336,37 @@ export function decodeFrameLine(direction: FrameDirection, line: string): unknow
 function parseHello(value: Record<string, unknown>): HelloFrame {
   const protocolVersion = requireNumber(value, 'protocolVersion')
   if (protocolVersion !== PROTOCOL_VERSION) {
-    throw new ProtocolError(`protocol version mismatch: expected ${PROTOCOL_VERSION}, got ${protocolVersion}`)
+    throw new ProtocolError(`protocol version mismatch: expected ${PROTOCOL_VERSION}`)
   }
   return {
     type: 'hello',
     protocolVersion,
-    deviceId: requireString(value, 'deviceId'),
+    deviceId: requireIdentifier(value, 'deviceId'),
     platform: requirePlatform(value, 'platform'),
-    appVersion: requireString(value, 'appVersion'),
-    bots: requireBots(value.bots),
-    capabilities: requireStringArray(value, 'capabilities'),
+    appVersion: requireBoundedString(value, 'appVersion', 64),
+    bots: requireBots(value.bots, false),
+    capabilities: requireCapabilities(value, 'capabilities'),
   }
 }
 
 function parseRoute(value: Record<string, unknown>, inbound: boolean): RouteFrame | InboundRouteFrame {
-  const base: RouteFrame = {
-    type: 'route',
-    id: requireString(value, 'id'),
-    to: requireString(value, 'to'),
-    method: requireRouteMethod(value, 'method'),
-    params: requireRecord(value, 'params'),
+  const id = requireIdentifier(value, 'id')
+  const to = requireIdentifier(value, 'to')
+  const from = inbound ? requireIdentifier(value, 'from') : undefined
+  const params = requireRecord(value, 'params')
+  const method = requireRouteMethod(value, 'method', id)
+  let nextParams = params
+  if (params.images !== undefined) {
+    try {
+      const sanitized = validateRouteImages(params.images)
+      nextParams = { ...params, images: sanitized }
+    } catch (error) {
+      throw new RouteValidationError(id, error instanceof Error ? error.message : 'invalid route images')
+    }
   }
+  const base: RouteFrame = { type: 'route', id, to, method, params: nextParams }
   if (!inbound) return base
-  return { ...base, from: requireString(value, 'from') }
+  return { ...base, from: from as string }
 }
 
 function parseRouteEvent(value: Record<string, unknown>): RouteEventFrame {
@@ -305,47 +374,179 @@ function parseRouteEvent(value: Record<string, unknown>): RouteEventFrame {
   if (!isBotEvent(event)) throw new ProtocolError('route_event.event is not a valid bot event')
   return {
     type: 'route_event',
-    id: requireString(value, 'id'),
+    id: requireIdentifier(value, 'id'),
     seq: requireNumber(value, 'seq'),
     event,
   }
 }
 
-function requireDevices(value: unknown): DeviceInfo[] {
+function requireDevices(value: unknown, tolerantAvatars: boolean): DeviceInfo[] {
   if (!Array.isArray(value)) throw new ProtocolError('devices must be an array')
   return value.map((entry) => {
     if (!isRecord(entry)) throw new ProtocolError('device must be an object')
-    return {
-      deviceId: requireString(entry, 'deviceId'),
-      name: requireString(entry, 'name'),
+    const capabilities = optionalCapabilities(entry.capabilities)
+    const device: DeviceInfo = {
+      deviceId: requireIdentifier(entry, 'deviceId'),
+      name: requireBoundedString(entry, 'name', 128),
       platform: requirePlatform(entry, 'platform'),
       online: requireBoolean(entry, 'online'),
       lastSeen: requireNumber(entry, 'lastSeen'),
-      bots: requireBots(entry.bots),
+      bots: requireBots(entry.bots, tolerantAvatars),
     }
+    if (capabilities) device.capabilities = capabilities
+    return device
   })
 }
 
+const MAX_BOTS_PER_DEVICE = 64
+const MAX_BOT_ID_LENGTH = 128
+const MAX_BOT_NAME_LENGTH = 128
 const MAX_BOT_AVATAR_LENGTH = 65_536
-const BOT_AVATAR_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/
+const MAX_TOTAL_AVATAR_CHARS_PER_DEVICE = 512 * 1024
+const MAX_CAPABILITIES = 32
+const MAX_CAPABILITY_LENGTH = 64
+const MAX_IDENTIFIER_LENGTH = 128
+const MAX_ROUTE_IMAGES = 4
+const MAX_ROUTE_IMAGE_BASE64_LENGTH = 2_000_000
+const MAX_ROUTE_IMAGES_TOTAL_LENGTH = 3_000_000
+const STRICT_BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
 
-function requireBots(value: unknown): BotInfo[] {
+function decodeAndCheckImageMagic(
+  subtype: string,
+  payload: string,
+): 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | null {
+  if (!payload || payload.length % 4 !== 0 || !STRICT_BASE64_PATTERN.test(payload)) return null
+  let binary: string
+  try {
+    binary = atob(payload.slice(0, 16))
+  } catch {
+    return null
+  }
+  if (subtype === 'jpeg' || subtype === 'jpg') {
+    if (binary.length < 3) return null
+    if (binary.charCodeAt(0) !== 0xff || binary.charCodeAt(1) !== 0xd8 || binary.charCodeAt(2) !== 0xff) return null
+    return 'image/jpeg'
+  }
+  if (subtype === 'png') {
+    const pngSig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    if (binary.length < pngSig.length) return null
+    for (let i = 0; i < pngSig.length; i += 1) {
+      if (binary.charCodeAt(i) !== pngSig[i]) return null
+    }
+    return 'image/png'
+  }
+  if (subtype === 'webp') {
+    if (binary.length < 12) return null
+    const ok =
+      binary.charCodeAt(0) === 0x52 &&
+      binary.charCodeAt(1) === 0x49 &&
+      binary.charCodeAt(2) === 0x46 &&
+      binary.charCodeAt(3) === 0x46 &&
+      binary.charCodeAt(8) === 0x57 &&
+      binary.charCodeAt(9) === 0x45 &&
+      binary.charCodeAt(10) === 0x42 &&
+      binary.charCodeAt(11) === 0x50
+    return ok ? 'image/webp' : null
+  }
+  if (subtype === 'gif') {
+    if (binary.length < 6) return null
+    const sig = binary.slice(0, 6)
+    return sig === 'GIF87a' || sig === 'GIF89a' ? 'image/gif' : null
+  }
+  return null
+}
+
+function normalizeBotAvatar(raw: string): string | null {
+  if (raw.length > MAX_BOT_AVATAR_LENGTH) return null
+  const match = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(raw)
+  if (!match) return null
+  const subtype = match[1]
+  const payload = match[2]
+  if (!subtype || !payload) return null
+  const mime = decodeAndCheckImageMagic(subtype, payload)
+  return mime && mime !== 'image/gif' ? `data:${mime};base64,${payload}` : null
+}
+
+export function validateRouteImages(raw: unknown): RouteImagePart[] {
+  if (!Array.isArray(raw)) throw new ProtocolError('images must be an array')
+  if (raw.length > MAX_ROUTE_IMAGES) throw new ProtocolError('too many images')
+  let totalChars = 0
+  return raw.map((item) => {
+    if (!isRecord(item)) throw new ProtocolError('image must be an object')
+    const data = requireString(item, 'data')
+    const mimeRaw = requireString(item, 'mimeType')
+    if (data.length === 0 || data.length > MAX_ROUTE_IMAGE_BASE64_LENGTH) {
+      throw new ProtocolError('image payload is invalid or too large')
+    }
+    totalChars += data.length
+    if (totalChars > MAX_ROUTE_IMAGES_TOTAL_LENGTH) {
+      throw new ProtocolError('total image payload exceeds limit')
+    }
+    const subtypeMatch = /^image\/(jpeg|jpg|png|webp|gif)$/.exec(mimeRaw.toLowerCase())
+    const mime = subtypeMatch?.[1] ? decodeAndCheckImageMagic(subtypeMatch[1], data) : null
+    if (!mime) throw new ProtocolError('image format or data is invalid')
+    const part: RouteImagePart = { data, mimeType: mime }
+    if (typeof item.name === 'string' && item.name.trim() !== '') {
+      part.name = item.name.trim().slice(0, 128)
+    }
+    return part
+  })
+}
+
+function requireBots(value: unknown, tolerantAvatars: boolean): BotInfo[] {
   if (!Array.isArray(value)) throw new ProtocolError('bots must be an array')
-  return value.map((entry) => {
+  let totalAvatarChars = 0
+  return value.slice(0, MAX_BOTS_PER_DEVICE).map((entry) => {
     if (!isRecord(entry)) throw new ProtocolError('bot must be an object')
-    const bot: BotInfo = { id: requireString(entry, 'id'), name: requireString(entry, 'name') }
-    if (entry.avatar !== undefined && entry.avatar !== null) {
-      if (
-        typeof entry.avatar !== 'string' ||
-        entry.avatar.length > MAX_BOT_AVATAR_LENGTH ||
-        !BOT_AVATAR_PATTERN.test(entry.avatar)
-      ) {
-        throw new ProtocolError('bot.avatar is invalid')
+    const bot: BotInfo = {
+      id: requireBoundedString(entry, 'id', MAX_BOT_ID_LENGTH, true),
+      name: requireBoundedString(entry, 'name', MAX_BOT_NAME_LENGTH, true),
+    }
+    if (typeof entry.avatar === 'string' && entry.avatar !== '') {
+      const normalized = normalizeBotAvatar(entry.avatar)
+      if (!normalized) {
+        if (!tolerantAvatars) throw new ProtocolError('bot.avatar is invalid')
+      } else if (totalAvatarChars + normalized.length <= MAX_TOTAL_AVATAR_CHARS_PER_DEVICE) {
+        totalAvatarChars += normalized.length
+        bot.avatar = normalized
       }
-      bot.avatar = entry.avatar
+    } else if (entry.avatar !== undefined && entry.avatar !== null && entry.avatar !== '' && !tolerantAvatars) {
+      throw new ProtocolError('bot.avatar is invalid')
     }
     return bot
   })
+}
+
+function requireIdentifier(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  if (typeof value !== 'string' || value.trim() === '' || value.length > MAX_IDENTIFIER_LENGTH) {
+    throw new ProtocolError(`${key} must be a non-empty identifier`)
+  }
+  return value
+}
+
+function requireBoundedString(record: Record<string, unknown>, key: string, maxLength: number, nonEmpty = false): string {
+  const value = record[key]
+  if (typeof value !== 'string') throw new ProtocolError(`${key} must be a string`)
+  if (nonEmpty && value.trim() === '') throw new ProtocolError(`${key} must not be empty`)
+  return value.slice(0, maxLength)
+}
+
+function requireCapabilities(record: Record<string, unknown>, key: string): string[] {
+  const arr = requireStringArray(record, key)
+  return arr
+    .filter((entry) => entry.trim() !== '')
+    .slice(0, MAX_CAPABILITIES)
+    .map((entry) => entry.slice(0, MAX_CAPABILITY_LENGTH))
+}
+
+function optionalCapabilities(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!isStringArray(value)) return undefined
+  return value
+    .filter((entry) => entry.trim() !== '')
+    .slice(0, MAX_CAPABILITIES)
+    .map((entry) => entry.slice(0, MAX_CAPABILITY_LENGTH))
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -394,9 +595,12 @@ function requireErrorCode(record: Record<string, unknown>, key: string): ErrorCo
   return value as ErrorCode
 }
 
-function requireRouteMethod(record: Record<string, unknown>, key: string): RouteMethod {
+function requireRouteMethod(record: Record<string, unknown>, key: string, routeId?: string): RouteMethod {
   const value = record[key]
   if (typeof value !== 'string' || !(ROUTE_METHODS as readonly string[]).includes(value)) {
+    if (routeId) {
+      throw new UnknownRouteMethodError(routeId, typeof value === 'string' ? value : 'invalid')
+    }
     throw new ProtocolError(`${key} must be a known route method`)
   }
   return value as RouteMethod

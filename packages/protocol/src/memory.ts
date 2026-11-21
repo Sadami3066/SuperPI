@@ -32,9 +32,12 @@ export const MEMORY_PATHS = ['profile.md', 'context.md', 'cookbook.md', 'summari
 
 export type MemoryPath = (typeof MEMORY_PATHS)[number] | `daily/${string}.md`
 
+const DAILY_PATH_PATTERN = /^daily\/(?:[A-Za-z0-9_-]+\/){0,5}[A-Za-z0-9_-]+\.md$/
+const MAX_DAILY_PATH_LENGTH = 128
+
 export function isMemoryPath(path: string): path is MemoryPath {
   if (path.startsWith('daily/')) {
-    return path.endsWith('.md') && !path.includes('..') && !path.startsWith('/')
+    return path.length <= MAX_DAILY_PATH_LENGTH && DAILY_PATH_PATTERN.test(path)
   }
   return (MEMORY_PATHS as readonly string[]).includes(path)
 }

@@ -33,11 +33,14 @@ const relay = createRelayServer({
   onDeviceRevoked: (id) => hub.disconnectDevice(id),
   online: (deviceId) => hub.isOnline(deviceId),
   botsOf: (deviceId) => hub.botsOf(deviceId),
+  capabilitiesOf: (deviceId) => hub.capabilitiesOf(deviceId),
 })
 hub.attach(relay.server)
 const address = await relay.listen()
 console.log(`superpi-relay ${config.version} listening on ${address.host}:${address.port}`)
-if (!config.certPath) console.log('no certificate configured; clients must pair over plain HTTP for now')
+if (!(config.certPath && config.keyPath)) {
+  console.log('no TLS certificate/key pair configured; listening over plain HTTP')
+}
 
 let shuttingDown = false
 async function shutdown(signal: string): Promise<void> {
@@ -45,7 +48,13 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true
   console.log(`shutting down on ${signal}`)
   await hub.close()
+  relay.server.closeIdleConnections?.()
+  const closeTimer = setTimeout(() => {
+    relay.server.closeAllConnections?.()
+  }, 500)
+  closeTimer.unref?.()
   await relay.close()
+  clearTimeout(closeTimer)
   store.close()
   process.exit(0)
 }

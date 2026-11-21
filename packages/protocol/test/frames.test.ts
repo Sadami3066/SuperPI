@@ -92,8 +92,8 @@ describe('protocol validation', () => {
     expect(() => decodeFrameLine('client', '{oops')).toThrow(ProtocolError)
   })
 
-  it('round-trips optional bot avatars and rejects invalid avatar payloads', () => {
-    const avatar = 'data:image/jpeg;base64,AAECAw=='
+  it('round-trips optional bot avatars and validates image headers safely', () => {
+    const avatar = 'data:image/jpeg;base64,/9j/4AAQ'
     const helloFrame = parseClientFrame({
       ...(readVector('client-hello.json') as Record<string, unknown>),
       bots: [{ id: 'pi', name: 'PI', avatar }],
@@ -106,14 +106,26 @@ describe('protocol validation', () => {
       deviceId: 'dev-phone',
       online: true,
       lastSeen: 123,
-      bots: [{ id: 'pi', name: 'PI', avatar }],
+      bots: [
+        { id: 'pi', name: 'PI', avatar },
+        { id: 'other', name: 'Other', avatar: 'data:image/gif;base64,R0lGOD==' },
+      ],
     })
-    expect(presenceFrame).toMatchObject({ bots: [{ id: 'pi', name: 'PI', avatar }] })
+    expect(presenceFrame).toMatchObject({
+      bots: [{ id: 'pi', name: 'PI', avatar }, { id: 'other', name: 'Other' }],
+    })
 
     expect(() =>
       parseClientFrame({
         ...(readVector('client-hello.json') as Record<string, unknown>),
         bots: [{ id: 'pi', name: 'PI', avatar: 'https://example.com/a.png' }],
+      }),
+    ).toThrow(ProtocolError)
+
+    expect(() =>
+      parseClientFrame({
+        ...(readVector('client-hello.json') as Record<string, unknown>),
+        bots: [{ id: 'pi', name: 'PI', avatar: 'data:image/jpeg;base64,AAECAw==' }],
       }),
     ).toThrow(ProtocolError)
 
@@ -143,5 +155,47 @@ describe('protocol validation', () => {
       params: { botId: 'pi', sessionId: 'sess-1' },
     })
     expect(historyRoute).toMatchObject({ method: 'bot.history' })
+  })
+
+  it('normalizes image/jpg, supports image/gif, and throws RouteValidationError on invalid route images', () => {
+    const gifData = 'R0lGODdhAQABAIAAAP///////ywAAAAAAQABAAACAkQBADs='
+    const jpgData = '/9j/4AAQ'
+    const parsed = parseClientFrame({
+      type: 'route',
+      id: 'req-img',
+      to: 'dev-phone',
+      method: 'bot.prompt',
+      params: {
+        botId: 'pi',
+        text: 'look',
+        images: [
+          { data: jpgData, mimeType: 'image/jpg', name: '  photo.jpg  ' },
+          { data: gifData, mimeType: 'image/gif' },
+        ],
+      },
+    })
+    expect(parsed).toMatchObject({
+      type: 'route',
+      params: {
+        images: [
+          { data: jpgData, mimeType: 'image/jpeg', name: 'photo.jpg' },
+          { data: gifData, mimeType: 'image/gif' },
+        ],
+      },
+    })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'req-bad-img',
+        to: 'dev-phone',
+        method: 'bot.prompt',
+        params: {
+          botId: 'pi',
+          text: 'look',
+          images: [{ data: 'AAECAw==', mimeType: 'image/png' }],
+        },
+      }),
+    ).toThrow(/image format/i)
   })
 })

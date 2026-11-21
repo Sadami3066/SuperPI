@@ -5,6 +5,7 @@ export interface HealthResponse {
   version: string
   protocolVersion: number
   fingerprint: string | null
+  capabilities?: string[]
 }
 
 export interface EnrollRequest {

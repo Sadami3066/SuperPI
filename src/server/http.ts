@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
-import { PROTOCOL_VERSION } from '@superpi/protocol'
+import { PROTOCOL_VERSION, RELAY_CAPABILITIES } from '@superpi/protocol'
 import type {
   ApiErrorBody,
   BotInfo,
@@ -43,6 +43,7 @@ export interface RelayServerOptions {
   now?: () => number
   online?: (deviceId: string) => boolean
   botsOf?: (deviceId: string) => BotInfo[]
+  capabilitiesOf?: (deviceId: string) => string[] | undefined
 }
 
 export interface RelayServer {
@@ -54,8 +55,11 @@ export interface RelayServer {
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000
 const BODY_LIMIT = 64 * 1024
 const MEMORY_BODY_LIMIT = 2 * 1024 * 1024
+const ENROLL_BODY_TIMEOUT_MS = 15_000
 const DEFAULT_ENROLL_MAX_FAILURES = 10
 const DEFAULT_ENROLL_WINDOW_MS = 15 * 60 * 1000
+const MAX_FAILURE_KEYS = 4_096
+const MAX_DEVICE_NAME_LENGTH = 128
 
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const now = options.now ?? (() => Date.now())
@@ -111,7 +115,12 @@ async function handle(
   response: ServerResponse,
 ): Promise<void> {
   try {
-    const url = new URL(request.url ?? '/', 'http://relay.local')
+    let url: URL
+    try {
+      url = new URL(request.url ?? '/', 'http://relay.local')
+    } catch {
+      throw new HttpError(400, 'bad_request', 'malformed request url')
+    }
     const method = request.method ?? 'GET'
 
     if (method === 'GET' && url.pathname === '/v1/health') {
@@ -120,6 +129,7 @@ async function handle(
         version: options.config.version,
         protocolVersion: PROTOCOL_VERSION,
         fingerprint: options.fingerprint,
+        capabilities: [...RELAY_CAPABILITIES],
       }
       sendJson(response, 200, body)
       return
@@ -162,8 +172,14 @@ async function handle(
       if (!device || response.writableEnded) return
       const memory = requireMemory(options)
       const body = await readJson(request, MEMORY_BODY_LIMIT)
+      const currentDevice = options.store.deviceByTokenHash(device.tokenHash)
+      if (!currentDevice || currentDevice.revoked) {
+        throw new HttpError(401, 'unauthorized', 'unknown or revoked device')
+      }
       if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
-      const result = memory.write({ deviceId: device.id, deviceName: device.name }, body as MemoryWriteRequest, now())
+      const writeNow = now()
+      options.store.touchDevice(currentDevice.id, writeNow)
+      const result = memory.write({ deviceId: currentDevice.id, deviceName: currentDevice.name }, body as MemoryWriteRequest, writeNow)
       if (result.applied) options.onMemoryChanged?.(result.version)
       const responseBody: MemoryWriteResponse = { version: result.version }
       sendJson(response, 200, responseBody)
@@ -171,7 +187,7 @@ async function handle(
     }
 
     if (method === 'POST' && url.pathname === '/v1/pair/enroll') {
-      const body = await enroll(options, now(), rateLimiter, request)
+      const body = await enroll(options, now, rateLimiter, request)
       sendJson(response, 200, body)
       return
     }
@@ -207,8 +223,15 @@ async function handle(
     if (method === 'DELETE' && url.pathname.startsWith('/v1/devices/')) {
       authenticate(options, now(), request, response)
       if (response.writableEnded) return
-      const id = decodeURIComponent(url.pathname.slice('/v1/devices/'.length))
-      if (id === '') throw new HttpError(400, 'bad_request', 'device id is required')
+      let id: string
+      try {
+        id = decodeURIComponent(url.pathname.slice('/v1/devices/'.length))
+      } catch {
+        throw new HttpError(400, 'bad_request', 'malformed device id')
+      }
+      if (id === '' || id.includes('/') || id.includes('\\') || id === '.' || id === '..') {
+        throw new HttpError(400, 'bad_request', 'invalid device id')
+      }
       if (!options.store.revokeDevice(id, now())) throw new HttpError(404, 'not_found', `unknown device: ${id}`)
       options.onDeviceRevoked?.(id)
       const body: RevokeResponse = { revoked: id }
@@ -218,8 +241,9 @@ async function handle(
 
     sendError(response, 404, 'not_found', `no route for ${method} ${url.pathname}`)
   } catch (error) {
+    if (response.headersSent || response.writableEnded || response.destroyed) return
     if (error instanceof HttpError) {
-      sendError(response, error.status, error.code, error.message)
+      sendError(response, error.status, error.code, error.message, error.closeConnection)
       return
     }
     if (error instanceof MemoryConflictError) {
@@ -241,18 +265,23 @@ async function handle(
 
 async function enroll(
   options: RelayServerOptions,
-  now: number,
+  nowFn: () => number,
   rateLimiter: FailureRateLimiter,
   request: IncomingMessage,
 ): Promise<EnrollResponse> {
   const ip = clientIp(request)
-  if (rateLimiter.isLimited(ip, now)) {
+  if (rateLimiter.isLimited(ip, nowFn())) {
     throw new HttpError(429, 'rate_limited', 'too many failed enrollment attempts')
   }
-  const body = await readJson(request)
+  const body = await readJson(request, BODY_LIMIT, ENROLL_BODY_TIMEOUT_MS)
+  const checkNow = nowFn()
+  if (rateLimiter.isLimited(ip, checkNow)) {
+    throw new HttpError(429, 'rate_limited', 'too many failed enrollment attempts')
+  }
   if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
   const payload = body as Partial<EnrollRequest>
-  if (typeof payload.deviceName !== 'string' || payload.deviceName.trim() === '') {
+  const deviceName = typeof payload.deviceName === 'string' ? sanitizeDeviceName(payload.deviceName) : ''
+  if (deviceName === '') {
     throw new HttpError(400, 'bad_request', 'deviceName is required')
   }
   if (!isPlatform(payload.platform)) throw new HttpError(400, 'bad_request', 'platform is required')
@@ -260,18 +289,19 @@ async function enroll(
   const account = options.store.account()
   if (!account) throw new HttpError(500, 'internal', 'account is not initialized')
 
+  const currentNow = nowFn()
   if (typeof payload.loginSecret === 'string' && payload.loginSecret !== '') {
     if (!verifySecret(payload.loginSecret, account.secretHash)) {
-      rateLimiter.recordFailure(ip, now)
+      rateLimiter.recordFailure(ip, currentNow)
       throw new HttpError(401, 'unauthorized', 'invalid login secret')
     }
   } else if (typeof payload.pairCode === 'string' && payload.pairCode.trim() !== '') {
     const code = payload.pairCode.trim().toUpperCase()
-    const status = options.store.consumePairCode(code, now)
+    const status = options.store.consumePairCode(code, currentNow)
     if (status !== 'ok') {
-      options.store.registerPairCodeFailure(code, now)
-      rateLimiter.recordFailure(ip, now)
-      throw new HttpError(401, 'unauthorized', `pair code rejected: ${status}`)
+      options.store.registerPairCodeFailure(code)
+      rateLimiter.recordFailure(ip, currentNow)
+      throw new HttpError(401, 'unauthorized', 'invalid or expired pair code')
     }
   } else {
     throw new HttpError(400, 'bad_request', 'loginSecret or pairCode is required')
@@ -282,13 +312,13 @@ async function enroll(
   options.store.createDevice(
     {
       id: deviceId,
-      name: payload.deviceName.trim(),
+      name: deviceName,
       platform: payload.platform,
       tokenHash: sha256(token),
-      createdAt: now,
-      lastSeen: now,
+      createdAt: currentNow,
+      lastSeen: currentNow,
     },
-    now,
+    currentNow,
   )
 
   return {
@@ -298,6 +328,15 @@ async function enroll(
     entries: options.entries,
     fingerprint: options.fingerprint,
   }
+}
+
+function sanitizeDeviceName(raw: string): string {
+  return raw
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .replaceAll('-->', '-- >')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DEVICE_NAME_LENGTH)
 }
 
 function authenticate(
@@ -331,7 +370,8 @@ function requireMemory(options: RelayServerOptions): MemoryStore {
 }
 
 function toDeviceInfo(device: DeviceRecord, options: RelayServerOptions): DeviceInfo {
-  return {
+  const capabilities = options.capabilitiesOf?.(device.id)
+  const info: DeviceInfo = {
     deviceId: device.id,
     name: device.name,
     platform: device.platform as DevicePlatform,
@@ -339,22 +379,46 @@ function toDeviceInfo(device: DeviceRecord, options: RelayServerOptions): Device
     lastSeen: device.lastSeen,
     bots: options.botsOf?.(device.id) ?? [],
   }
+  if (capabilities) info.capabilities = capabilities
+  return info
 }
 
-function readJson(request: IncomingMessage, limit = BODY_LIMIT): Promise<unknown> {
+function readJson(request: IncomingMessage, limit = BODY_LIMIT, timeoutMs = 0): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
+    let settled = false
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            if (settled) return
+            settled = true
+            request.pause()
+            reject(new HttpError(408, 'bad_request', 'request body timeout', true))
+          }, timeoutMs)
+        : null
+    timer?.unref?.()
+
+    const cleanup = (): void => {
+      if (timer) clearTimeout(timer)
+    }
+
     request.on('data', (chunk: Buffer) => {
+      if (settled) return
       size += chunk.length
       if (size > limit) {
-        request.destroy()
-        reject(new HttpError(413, 'bad_request', 'body too large'))
+        settled = true
+        cleanup()
+        request.pause()
+        reject(new HttpError(413, 'bad_request', 'body too large', true))
         return
       }
       chunks.push(chunk)
     })
     request.on('end', () => {
+      if (settled) return
+      settled = true
+      cleanup()
       if (chunks.length === 0) {
         resolve(null)
         return
@@ -365,7 +429,12 @@ function readJson(request: IncomingMessage, limit = BODY_LIMIT): Promise<unknown
         reject(new HttpError(400, 'bad_request', 'body is not valid JSON'))
       }
     })
-    request.on('error', reject)
+    request.on('error', (error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    })
   })
 }
 
@@ -373,28 +442,41 @@ function isPlatform(value: unknown): value is DevicePlatform {
   return value === 'android' || value === 'desktop' || value === 'cli' || value === 'unknown'
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(response: ServerResponse, status: number, body: unknown, closeConnection = false): void {
+  if (response.headersSent || response.writableEnded || response.destroyed) return
   const payload = JSON.stringify(body)
-  response.writeHead(status, {
+  const headers: Record<string, string | number> = {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
+  }
+  if (closeConnection) headers.connection = 'close'
+  response.writeHead(status, headers)
+  response.end(payload, () => {
+    if (closeConnection) response.socket?.destroy()
   })
-  response.end(payload)
 }
 
-function sendError(response: ServerResponse, status: number, code: ErrorCode, message: string): void {
+function sendError(
+  response: ServerResponse,
+  status: number,
+  code: ErrorCode,
+  message: string,
+  closeConnection = false,
+): void {
   const body: ApiErrorBody = { code, message }
-  sendJson(response, status, body)
+  sendJson(response, status, body, closeConnection)
 }
 
 class HttpError extends Error {
   readonly status: number
   readonly code: ErrorCode
+  readonly closeConnection: boolean
 
-  constructor(status: number, code: ErrorCode, message: string) {
+  constructor(status: number, code: ErrorCode, message: string, closeConnection = false) {
     super(message)
     this.status = status
     this.code = code
+    this.closeConnection = closeConnection
   }
 }
 
@@ -420,9 +502,18 @@ class FailureRateLimiter {
   recordFailure(key: string, now: number): void {
     const timestamps = this.prune(key, now)
     timestamps.push(now)
+    this.failures.delete(key)
     this.failures.set(key, timestamps)
-    if (this.failures.size > 1000) {
-      for (const entryKey of this.failures.keys()) this.prune(entryKey, now)
+    if (this.failures.size > MAX_FAILURE_KEYS) {
+      for (const entryKey of [...this.failures.keys()]) {
+        if (this.failures.size <= MAX_FAILURE_KEYS) break
+        this.prune(entryKey, now)
+      }
+      while (this.failures.size > MAX_FAILURE_KEYS) {
+        const oldestKey = this.failures.keys().next().value
+        if (oldestKey === undefined) break
+        this.failures.delete(oldestKey)
+      }
     }
   }
 

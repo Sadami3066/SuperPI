@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import type { MemoryWriteOp, MemoryWriteRequest } from '@superpi/protocol'
@@ -40,6 +41,9 @@ export class MemoryRequestError extends Error {
 }
 
 const WRITE_OPS: readonly MemoryWriteOp[] = ['append', 'replace_section', 'overwrite']
+const MAX_MEMORY_FILE_BYTES = 512 * 1024
+const MAX_SECTION_LENGTH = 160
+const MAX_BACKUPS_PER_FILE = 20
 
 export class MemoryStore {
   private readonly rootDir: string
@@ -86,39 +90,58 @@ export class MemoryStore {
     if (typeof request.text !== 'string' || request.text.trim() === '') {
       throw new MemoryRequestError('text is required')
     }
+    const section = normalizeSection(request.section)
     const relative = this.normalizePath(request.path)
     const key = typeof request.idempotencyKey === 'string' ? request.idempotencyKey.trim() : ''
-    if (key === '') throw new MemoryRequestError('idempotencyKey is required')
+    if (key === '' || key.length > 128) throw new MemoryRequestError('idempotencyKey is required')
 
-    const previous = this.findWrite(key)
+    const previous = this.findWrite(key, relative, source.deviceId)
     if (previous !== null) return { version: previous, applied: false }
 
     const current = this.read(relative)
     const currentVersion = this.fileVersion(relative)
+    const safeDeviceName = sanitizeCommentName(source.deviceName)
     let next: string
     switch (request.op) {
       case 'append':
-        next = this.appendBlock(current, request.section ?? null, this.stamp(source, request.text, now))
+        next = this.appendBlock(current, section, this.stamp(safeDeviceName, request.text, now))
         break
       case 'replace_section':
-        if (!request.section) throw new MemoryRequestError('section is required for replace_section')
+        if (section === null) throw new MemoryRequestError('section is required for replace_section')
         this.requireVersion(currentVersion, request.baseVersion)
-        next = replaceSection(current, request.section, this.stamp(source, request.text, now))
+        next = replaceSection(current, section, this.stamp(safeDeviceName, request.text, now))
         break
       case 'overwrite':
         this.requireVersion(currentVersion, request.baseVersion)
-        next = `${request.text.trimEnd()}\n\n<!-- updated by ${source.deviceName} ${new Date(now).toISOString()} -->\n`
+        next = `${request.text.trimEnd()}\n\n<!-- updated by ${safeDeviceName} ${new Date(now).toISOString()} -->\n`
         break
       default:
         throw new MemoryRequestError(`unknown memory op: ${request.op}`)
     }
 
-    if (request.op === 'overwrite' && current !== '') {
-      this.backupFile(relative, current, now)
+    if (Buffer.byteLength(next, 'utf8') > MAX_MEMORY_FILE_BYTES) {
+      throw new MemoryRequestError('memory file exceeds size limit')
     }
 
-    this.writeFile(relative, next)
-    const version = this.commitWriteMetadata(key, relative, source.deviceId, now)
+    let backupTarget: string | null = null
+    if (request.op === 'overwrite' && current !== '') {
+      backupTarget = this.backupFile(relative, current, now)
+    }
+
+    let version: number
+    try {
+      version = this.commitAtomicWrite(relative, current, next, key, source.deviceId, now)
+    } catch (error) {
+      if (backupTarget) {
+        try {
+          rmSync(backupTarget, { force: true })
+        } catch {}
+      }
+      throw error
+    }
+    if (backupTarget) {
+      this.pruneBackups(path.dirname(backupTarget), `${path.basename(relative)}.`)
+    }
     return { version, applied: true }
   }
 
@@ -126,8 +149,8 @@ export class MemoryStore {
     return this.readMetaInt('version')
   }
 
-  private stamp(source: MemorySource, text: string, now: number): string {
-    const stamp = `<!-- src: ${source.deviceName} ${new Date(now).toISOString()} -->`
+  private stamp(deviceName: string, text: string, now: number): string {
+    const stamp = `<!-- src: ${deviceName} ${new Date(now).toISOString()} -->`
     return `${text.trimEnd()} ${stamp}`
   }
 
@@ -141,11 +164,15 @@ export class MemoryStore {
 
   private requireVersion(current: number, requested: number | undefined): void {
     if (requested === undefined) throw new MemoryRequestError('baseVersion is required for this operation')
+    if (typeof requested !== 'number' || !Number.isSafeInteger(requested) || requested < 0) {
+      throw new MemoryRequestError('invalid baseVersion')
+    }
     if (requested !== current) throw new MemoryConflictError(current)
   }
 
   private normalizePath(requested: string): string {
     if (typeof requested !== 'string' || requested.trim() === '') throw new MemoryRequestError('path is required')
+    if (/[\x00-\x1f\x7f]/.test(requested)) throw new MemoryRequestError('invalid memory path')
     const normalized = requested.replaceAll('\\', '/').replace(/^\/+/, '')
     if (normalized.includes('..') || normalized.startsWith('/')) throw new MemoryRequestError('invalid memory path')
     if (!isMemoryPath(normalized)) throw new MemoryRequestError(`unsupported memory path: ${normalized}`)
@@ -163,20 +190,43 @@ export class MemoryStore {
     return existsSync(file) ? readFileSync(file, 'utf8') : ''
   }
 
-  private writeFile(relative: string, content: string): void {
-    const file = this.resolve(relative)
-    mkdirSync(path.dirname(file), { recursive: true })
-    const temporary = `${file}.tmp`
-    writeFileSync(temporary, content, 'utf8')
-    renameSync(temporary, file)
+  private backupFile(relative: string, content: string, now: number): string {
+    const backupRoot = path.resolve(this.rootDir, '.backup')
+    const baseTarget = path.resolve(backupRoot, `${relative}.${now}.bak`)
+    if (!baseTarget.startsWith(backupRoot + path.sep)) throw new MemoryRequestError('invalid memory path')
+    mkdirSync(path.dirname(baseTarget), { recursive: true })
+    let target = baseTarget
+    let suffix = 1
+    while (existsSync(target)) {
+      target = path.resolve(backupRoot, `${relative}.${now}.${suffix}.bak`)
+      suffix += 1
+    }
+    writeFileSync(target, content, 'utf8')
+    return target
   }
 
-  private backupFile(relative: string, content: string, now: number): void {
-    const backupRoot = path.resolve(this.rootDir, '.backup')
-    const target = path.resolve(backupRoot, `${relative}.${now}.bak`)
-    if (!target.startsWith(backupRoot + path.sep)) throw new MemoryRequestError('invalid memory path')
-    mkdirSync(path.dirname(target), { recursive: true })
-    writeFileSync(target, content, 'utf8')
+  private pruneBackups(dir: string, prefix: string): void {
+    const backups = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith('.bak'))
+      .map((entry) => {
+        const stem = entry.name.slice(prefix.length, -'.bak'.length)
+        const parts = stem.split('.')
+        const ts = Number(parts[0])
+        const suffix = parts.length > 1 ? Number(parts[1]) : 0
+        return {
+          name: entry.name,
+          ts: Number.isFinite(ts) ? ts : 0,
+          suffix: Number.isFinite(suffix) ? suffix : 0,
+        }
+      })
+      .sort((a, b) => a.ts - b.ts || a.suffix - b.suffix || a.name.localeCompare(b.name))
+    const excess = backups.length - MAX_BACKUPS_PER_FILE
+    if (excess <= 0) return
+    for (const obsolete of backups.slice(0, excess)) {
+      try {
+        rmSync(path.join(dir, obsolete.name), { force: true })
+      } catch {}
+    }
   }
 
   private listFiles(): Record<string, string> {
@@ -193,15 +243,29 @@ export class MemoryStore {
   private walk(dir: string): string[] {
     const result: string[] = []
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue
       if (entry.isDirectory() && entry.name === '.backup') continue
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) result.push(...this.walk(full))
-      else if (statSync(full).isFile()) result.push(full)
+      else if (entry.isFile()) result.push(full)
     }
     return result
   }
 
-  private commitWriteMetadata(key: string, relative: string, deviceId: string, now: number): number {
+  private commitAtomicWrite(
+    relative: string,
+    previousContent: string,
+    nextContent: string,
+    key: string,
+    deviceId: string,
+    now: number,
+  ): number {
+    const file = this.resolve(relative)
+    const existedBefore = existsSync(file)
+    mkdirSync(path.dirname(file), { recursive: true })
+    const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+    writeFileSync(temporary, nextContent, 'utf8')
+    let renamed = false
     this.db.exec('BEGIN IMMEDIATE')
     try {
       const version = this.bumpVersion()
@@ -209,9 +273,21 @@ export class MemoryStore {
       this.db
         .prepare('INSERT INTO memory_writes (idempotency_key, path, source_device, created_at, version) VALUES (?, ?, ?, ?, ?)')
         .run(key, relative, deviceId, now, version)
+      renameSync(temporary, file)
+      renamed = true
       this.db.exec('COMMIT')
       return version
     } catch (error) {
+      if (renamed) {
+        try {
+          if (existedBefore) writeFileSync(file, previousContent, 'utf8')
+          else rmSync(file, { force: true })
+        } catch {}
+      } else {
+        try {
+          rmSync(temporary, { force: true })
+        } catch {}
+      }
       try {
         this.db.exec('ROLLBACK')
       } catch {}
@@ -219,11 +295,15 @@ export class MemoryStore {
     }
   }
 
-  private findWrite(key: string): number | null {
-    const row = this.db.prepare('SELECT version FROM memory_writes WHERE idempotency_key = ?').get(key) as
-      | { version: number }
-      | undefined
-    return row ? Number(row.version) : null
+  private findWrite(key: string, relative: string, deviceId: string): number | null {
+    const row = this.db
+      .prepare('SELECT path, source_device, version FROM memory_writes WHERE idempotency_key = ?')
+      .get(key) as { path: string; source_device: string; version: number } | undefined
+    if (!row) return null
+    if (row.path !== relative || row.source_device !== deviceId) {
+      throw new MemoryRequestError('idempotencyKey was already used for another write')
+    }
+    return Number(row.version)
   }
 
   private fileVersion(relative: string): number {
@@ -290,7 +370,7 @@ function findSectionBounds(lines: string[], section: string): SectionBounds | nu
     const trimmed = line.trim()
     if (headingIndex < 0) {
       if (trimmed === target) headingIndex = index
-    } else if (trimmed.startsWith('## ')) {
+    } else if (/^#{1,2}(?:\s|$)/.test(trimmed)) {
       return { headingIndex, endIndex: index }
     }
   }
@@ -331,5 +411,25 @@ function replaceSection(content: string, section: string, block: string): string
   const tail = tailLines.join('\n')
   const normalizedTail = tail.endsWith('\n') ? tail : `${tail}\n`
   return `${head}\n\n${block}\n\n${normalizedTail}`
+}
+
+function normalizeSection(section: unknown): string | null {
+  if (section === undefined || section === null) return null
+  if (typeof section !== 'string') throw new MemoryRequestError('section must be a string')
+  const trimmed = section.trim()
+  if (trimmed === '' || trimmed.length > MAX_SECTION_LENGTH || /[\r\n]/.test(trimmed)) {
+    throw new MemoryRequestError('section must be a non-empty single-line string')
+  }
+  return trimmed
+}
+
+function sanitizeCommentName(name: string): string {
+  const cleaned = name
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .replaceAll('-->', '-- >')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 128)
+  return cleaned === '' ? 'device' : cleaned
 }
 

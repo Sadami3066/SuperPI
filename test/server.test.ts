@@ -368,7 +368,7 @@ describe('relay http', () => {
     expect(recovered.status).toBe(200)
   })
 
-  it('tracks pair code failures and locks active pair codes after repeated wrong guesses', async () => {
+  it('locks a guessed pair code after repeated attempts without burning other active codes or leaking oracle status', async () => {
     const harness = await startRelay()
     const first = (await (
       await enroll(harness, { loginSecret: LOGIN_SECRET, deviceName: 'Desktop', platform: 'desktop' })
@@ -381,10 +381,33 @@ describe('relay http', () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const wrong = await enroll(harness, { pairCode: `BAD0000${attempt}`, deviceName: 'Phone', platform: 'android' })
       expect(wrong.status).toBe(401)
+      expect(((await wrong.json()) as { message: string }).message).toBe('invalid or expired pair code')
     }
 
-    const locked = await enroll(harness, { pairCode: codeBody.code, deviceName: 'Phone', platform: 'android' })
+    const stillWorks = await enroll(harness, { pairCode: codeBody.code, deviceName: 'Phone', platform: 'android' })
+    expect(stillWorks.status).toBe(200)
+
+    const codeTwo = (await (
+      await fetch(`${harness.baseUrl}/v1/pair/code`, { method: 'POST', headers: auth(first.token) })
+    ).json()) as PairCodeResponse
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      harness.store.registerPairCodeFailure(codeTwo.code)
+    }
+    const locked = await enroll(harness, { pairCode: codeTwo.code, deviceName: 'Phone 2', platform: 'android' })
     expect(locked.status).toBe(401)
-    expect(((await locked.json()) as { message: string }).message).toContain('too_many_attempts')
+    expect(((await locked.json()) as { message: string }).message).toBe('invalid or expired pair code')
+  })
+
+  it('handles malformed device id encodings without 500 errors', async () => {
+    const harness = await startRelay()
+    const first = (await (
+      await enroll(harness, { loginSecret: LOGIN_SECRET, deviceName: 'Desktop', platform: 'desktop' })
+    ).json()) as EnrollResponse
+
+    const response = await fetch(`${harness.baseUrl}/v1/devices/%E0%A4%A`, {
+      method: 'DELETE',
+      headers: auth(first.token),
+    })
+    expect(response.status).toBe(400)
   })
 })

@@ -125,13 +125,8 @@ export class RelayStore {
     return 'ok'
   }
 
-  registerPairCodeFailure(code: string, now = Date.now()): void {
-    const result = this.db.prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE code = ?').run(code)
-    if (Number(result.changes) === 0) {
-      this.db
-        .prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE used_at IS NULL AND expires_at >= ?')
-        .run(now)
-    }
+  registerPairCodeFailure(code: string): void {
+    this.db.prepare('UPDATE pair_codes SET attempts = attempts + 1 WHERE code = ?').run(code)
   }
 }
 

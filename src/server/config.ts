@@ -21,13 +21,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
   if (!Number.isFinite(port) || port < 0 || port > 65535) {
     throw new Error(`invalid SUPERPI_PORT: ${env.SUPERPI_PORT}`)
   }
+  const certPath = env.SUPERPI_CERT?.trim() || null
+  const keyPath = env.SUPERPI_KEY?.trim() || null
+  if (keyPath !== null && certPath === null) {
+    throw new Error('SUPERPI_KEY requires SUPERPI_CERT')
+  }
   return {
     host: env.SUPERPI_HOST ?? '0.0.0.0',
     port,
     dataDir: env.SUPERPI_DATA_DIR ?? fileURLToPath(new URL('../../data/', import.meta.url)),
-    certPath: env.SUPERPI_CERT ?? null,
-    keyPath: env.SUPERPI_KEY ?? null,
-    caPath: env.SUPERPI_CA ?? null,
+    certPath,
+    keyPath,
+    caPath: env.SUPERPI_CA?.trim() || null,
     version,
     entries: readEntries(env),
   }

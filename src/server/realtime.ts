@@ -3,6 +3,9 @@ import type { Duplex } from 'node:stream'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   PROTOCOL_VERSION,
+  RELAY_CAPABILITIES,
+  RouteValidationError,
+  UnknownRouteMethodError,
   decodeFrameLine,
   encodeFrame,
   type BotInfo,
@@ -23,6 +26,7 @@ export interface RealtimeHub {
   close(): Promise<void>
   isOnline(deviceId: string): boolean
   botsOf(deviceId: string): BotInfo[]
+  capabilitiesOf(deviceId: string): string[] | undefined
   broadcastMemoryChanged(version: number): void
   disconnectDevice(deviceId: string): void
 }
@@ -35,21 +39,35 @@ export interface RealtimeHubOptions {
 interface Connection {
   deviceId: string
   bots: BotInfo[]
+  capabilities: string[]
   socket: WebSocket
+  state: 'pending' | 'active' | 'closed'
   lastActivityAt: number
+  lastHelloDigest: string
+  lastHelloBroadcastAt: number
 }
 
 interface PendingRoute {
   from: string
   to: string
   at: number
+  createdAt: number
   streaming: boolean
+  accepted: boolean
 }
 
 const HELLO_TIMEOUT_MS = 10_000
 const ROUTE_TTL_MS = 30 * 60 * 1000
+const MAX_ROUTE_LIFETIME_MS = 2 * 60 * 60 * 1000
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000
+const MAX_WS_PAYLOAD_BYTES = 4 * 1024 * 1024
+const MAX_PENDING_SOCKETS = 256
+const MAX_PENDING_PER_DEVICE = 8
+const MAX_PENDING_ROUTES = 2048
+const MAX_ROUTES_PER_DEVICE = 64
+const MIN_IDENTICAL_HELLO_INTERVAL_MS = 1_000
+const SHUTDOWN_TERMINATE_MS = 300
 
 export function createRealtimeHub(
   store: RelayStore,
@@ -57,7 +75,7 @@ export function createRealtimeHub(
   now: () => number = Date.now,
   options: RealtimeHubOptions = {},
 ): RealtimeHub {
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES })
   const connections = new Map<string, Connection>()
   const pendingSockets = new Map<WebSocket, string>()
   const pendingRoutes = new Map<string, PendingRoute>()
@@ -66,10 +84,13 @@ export function createRealtimeHub(
   const heartbeatDeadlineMs = heartbeatIntervalMs + heartbeatTimeoutMs
 
   const sweeper = setInterval(() => {
-    const cutoff = now() - ROUTE_TTL_MS
+    const current = now()
+    const idleCutoff = current - ROUTE_TTL_MS
+    const hardCutoff = current - MAX_ROUTE_LIFETIME_MS
     for (const [id, pending] of pendingRoutes) {
-      if (pending.at > cutoff) continue
+      if (pending.at > idleCutoff && pending.createdAt > hardCutoff) continue
       pendingRoutes.delete(id)
+      if (pending.streaming && pending.accepted && pending.at <= idleCutoff) continue
       const requester = connections.get(pending.from)
       if (requester) {
         send(requester, { type: 'route_error', id, code: 'internal', message: 'request timed out' })
@@ -82,11 +103,14 @@ export function createRealtimeHub(
     const current = now()
     for (const connection of [...connections.values()]) {
       if (current - connection.lastActivityAt > heartbeatDeadlineMs) {
+        connection.state = 'closed'
         if (connections.get(connection.deviceId) === connection) {
           connections.delete(connection.deviceId)
           dropDevice(connection.deviceId, `device ${connection.deviceId} timed out`)
         }
-        connection.socket.terminate()
+        try {
+          connection.socket.terminate()
+        } catch {}
         continue
       }
       if (connection.socket.readyState === WebSocket.OPEN) {
@@ -104,7 +128,7 @@ export function createRealtimeHub(
       .filter((device) => !device.revoked)
       .map((device) => {
         const connection = connections.get(device.id)
-        return {
+        const info: DeviceInfo = {
           deviceId: device.id,
           name: device.name,
           platform: device.platform as DeviceInfo['platform'],
@@ -112,15 +136,24 @@ export function createRealtimeHub(
           lastSeen: device.lastSeen,
           bots: connection?.bots ?? [],
         }
+        if (connection) info.capabilities = connection.capabilities
+        return info
       })
   }
 
   function send(connection: Connection, frame: ServerFrame): void {
-    if (connection.socket.readyState === WebSocket.OPEN) connection.socket.send(encodeFrame(frame))
+    if (connection.state === 'closed') return
+    if (connection.socket.readyState === WebSocket.OPEN) {
+      connection.socket.send(encodeFrame(frame))
+    }
   }
 
   function dropDevice(deviceId: string, reason: string): void {
-    const offline: PresenceFrame = { type: 'presence', deviceId, online: false, lastSeen: now() }
+    const seenAt = now()
+    try {
+      store.touchDevice(deviceId, seenAt)
+    } catch {}
+    const offline: PresenceFrame = { type: 'presence', deviceId, online: false, lastSeen: seenAt }
     for (const entry of connections.values()) send(entry, offline)
     for (const [id, pending] of pendingRoutes) {
       if (pending.to === deviceId || pending.from === deviceId) {
@@ -138,7 +171,7 @@ export function createRealtimeHub(
     }
   }
 
-  function broadcastPresence(deviceId: string, online: boolean, bots?: BotInfo[]): void {
+  function broadcastPresence(deviceId: string, online: boolean, bots?: BotInfo[], capabilities?: string[]): void {
     const device = store.listDevices().find((entry) => entry.id === deviceId)
     const frame: PresenceFrame = {
       type: 'presence',
@@ -147,46 +180,109 @@ export function createRealtimeHub(
       lastSeen: device?.lastSeen ?? now(),
     }
     if (bots) frame.bots = bots
+    if (capabilities) frame.capabilities = capabilities
     for (const connection of connections.values()) {
       if (connection.deviceId !== deviceId) send(connection, frame)
     }
   }
 
   function handleHello(connection: Connection, frame: HelloFrame): void {
+    if (connection.state === 'closed' || connection.socket.readyState !== WebSocket.OPEN) return
     if (frame.deviceId !== connection.deviceId) {
-      connection.socket.close(1008, 'device mismatch')
+      connection.state = 'closed'
+      safeClose(connection.socket, 1008, 'device mismatch')
       return
     }
     if (frame.protocolVersion !== PROTOCOL_VERSION) {
-      connection.socket.close(1008, 'protocol mismatch')
+      connection.state = 'closed'
+      safeClose(connection.socket, 1008, 'protocol mismatch')
       return
     }
     const record = store.listDevices().find((entry) => entry.id === connection.deviceId)
     if (!record || record.revoked) {
-      connection.socket.close(4001, 'device revoked')
+      connection.state = 'closed'
+      safeClose(connection.socket, 4001, 'device revoked')
       return
     }
+    const seenAt = now()
+    try {
+      store.touchDevice(connection.deviceId, seenAt)
+    } catch {}
     pendingSockets.delete(connection.socket)
     connection.bots = frame.bots
-    connection.lastActivityAt = now()
+    connection.capabilities = frame.capabilities
+    connection.lastActivityAt = seenAt
+    connection.state = 'active'
     const previous = connections.get(connection.deviceId)
     connections.set(connection.deviceId, connection)
     if (previous && previous !== connection) {
-      previous.socket.close(1000, 'replaced by new connection')
+      previous.state = 'closed'
+      safeClose(previous.socket, 1000, 'replaced by new connection')
     }
+    const digest = JSON.stringify({ bots: frame.bots, capabilities: frame.capabilities })
+    const isReplacementOrFirst = previous !== connection
+    const shouldBroadcast =
+      isReplacementOrFirst ||
+      digest !== connection.lastHelloDigest ||
+      seenAt - connection.lastHelloBroadcastAt >= MIN_IDENTICAL_HELLO_INTERVAL_MS
+    connection.lastHelloDigest = digest
+    if (shouldBroadcast) connection.lastHelloBroadcastAt = seenAt
     const body: HelloOkFrame = {
       type: 'hello_ok',
       accountId: store.account()?.id ?? '',
       devices: deviceList(),
       memoryVersion: memoryVersion(),
+      capabilities: [...RELAY_CAPABILITIES],
     }
     send(connection, body)
-    broadcastPresence(connection.deviceId, true, frame.bots)
+    if (shouldBroadcast) {
+      broadcastPresence(connection.deviceId, true, frame.bots, frame.capabilities)
+    }
   }
 
   function handleRoute(connection: Connection, frame: { id: string; to: string; method: string; params: Record<string, unknown> }): void {
+    if (frame.to === connection.deviceId) {
+      send(connection, {
+        type: 'route_error',
+        id: frame.id,
+        code: 'bad_request',
+        message: 'cannot route to self',
+      })
+      return
+    }
+    if (pendingRoutes.has(frame.id)) {
+      send(connection, {
+        type: 'route_error',
+        id: frame.id,
+        code: 'bad_request',
+        message: 'duplicate route id',
+      })
+      return
+    }
+    if (pendingRoutes.size >= MAX_PENDING_ROUTES) {
+      send(connection, {
+        type: 'route_error',
+        id: frame.id,
+        code: 'rate_limited',
+        message: 'relay route capacity exceeded',
+      })
+      return
+    }
+    let senderCount = 0
+    for (const pending of pendingRoutes.values()) {
+      if (pending.from === connection.deviceId) senderCount += 1
+    }
+    if (senderCount >= MAX_ROUTES_PER_DEVICE) {
+      send(connection, {
+        type: 'route_error',
+        id: frame.id,
+        code: 'rate_limited',
+        message: 'too many active requests',
+      })
+      return
+    }
     const target = connections.get(frame.to)
-    if (!target) {
+    if (!target || target.state !== 'active') {
       const error: RouteErrorFrame = {
         type: 'route_error',
         id: frame.id,
@@ -197,7 +293,15 @@ export function createRealtimeHub(
       return
     }
     const streaming = frame.method === 'bot.prompt' || frame.method === 'bot.resume'
-    pendingRoutes.set(frame.id, { from: connection.deviceId, to: frame.to, at: now(), streaming })
+    const current = now()
+    pendingRoutes.set(frame.id, {
+      from: connection.deviceId,
+      to: frame.to,
+      at: current,
+      createdAt: current,
+      streaming,
+      accepted: false,
+    })
     const inbound: InboundRouteFrame = {
       type: 'route',
       id: frame.id,
@@ -234,12 +338,31 @@ export function createRealtimeHub(
     const requester = connections.get(pending.from)
     pending.at = now()
     if (frame.type === 'route_event') {
+      if (!pending.streaming) {
+        send(connection, {
+          type: 'route_error',
+          id: frame.id,
+          code: 'bad_request',
+          message: 'route_event is only valid for streaming routes',
+        })
+        return
+      }
       if (requester) send(requester, frame as unknown as ServerFrame)
       const event = (frame as { event?: { type?: string } }).event
-      if (event?.type === 'agent_settled' || event?.type === 'error') pendingRoutes.delete(frame.id)
+      if (event?.type === 'agent_settled') pendingRoutes.delete(frame.id)
       return
     }
     if (frame.type === 'route_ok') {
+      if (pending.streaming && pending.accepted) {
+        send(connection, {
+          type: 'route_error',
+          id: frame.id,
+          code: 'bad_request',
+          message: 'duplicate route_ok for route',
+        })
+        return
+      }
+      pending.accepted = true
       if (requester) send(requester, { type: 'route_ok', id: frame.id, result: frame.result })
       if (!pending.streaming) pendingRoutes.delete(frame.id)
       return
@@ -255,9 +378,24 @@ export function createRealtimeHub(
   }
 
   function handleConnection(socket: WebSocket, deviceId: string): void {
-    const connection: Connection = { deviceId, bots: [], socket, lastActivityAt: now() }
+    const connection: Connection = {
+      deviceId,
+      bots: [],
+      capabilities: [],
+      socket,
+      state: 'pending',
+      lastActivityAt: now(),
+      lastHelloDigest: '',
+      lastHelloBroadcastAt: 0,
+    }
     pendingSockets.set(socket, deviceId)
-    const helloTimer = setTimeout(() => socket.close(1008, 'hello timeout'), HELLO_TIMEOUT_MS)
+    const helloTimer = setTimeout(() => {
+      connection.state = 'closed'
+      pendingSockets.delete(socket)
+      try {
+        socket.terminate()
+      } catch {}
+    }, HELLO_TIMEOUT_MS)
     helloTimer.unref?.()
 
     socket.on('pong', () => {
@@ -265,12 +403,32 @@ export function createRealtimeHub(
     })
 
     socket.on('message', (raw) => {
+      if (connection.state === 'closed') return
       connection.lastActivityAt = now()
       let frame: ClientFrame
       try {
         frame = decodeFrameLine('client', raw.toString()) as ClientFrame
       } catch (error) {
-        socket.close(1008, error instanceof Error ? error.message : 'protocol error')
+        if (error instanceof UnknownRouteMethodError && connections.get(deviceId) === connection) {
+          send(connection, {
+            type: 'route_error',
+            id: error.routeId,
+            code: 'bad_request',
+            message: `unknown method ${error.method}`,
+          })
+          return
+        }
+        if (error instanceof RouteValidationError && connections.get(deviceId) === connection) {
+          send(connection, {
+            type: 'route_error',
+            id: error.routeId,
+            code: error.code,
+            message: error.message,
+          })
+          return
+        }
+        connection.state = 'closed'
+        safeClose(socket, 1008, 'protocol error')
         return
       }
       if (frame.type === 'hello') {
@@ -294,6 +452,7 @@ export function createRealtimeHub(
 
     socket.on('close', () => {
       clearTimeout(helloTimer)
+      connection.state = 'closed'
       pendingSockets.delete(socket)
       if (connections.get(deviceId) === connection) {
         connections.delete(deviceId)
@@ -302,14 +461,21 @@ export function createRealtimeHub(
     })
 
     socket.on('error', () => {
-      socket.close()
+      connection.state = 'closed'
+      safeClose(socket, 1006, '')
     })
   }
 
   return {
     attach(server: Server) {
       server.on('upgrade', (request, socket, head) => {
-        const pathname = new URL(request.url ?? '/', 'http://relay.local').pathname
+        let pathname: string
+        try {
+          pathname = new URL(request.url ?? '/', 'http://relay.local').pathname
+        } catch {
+          rejectUpgrade(socket, 400, 'bad request')
+          return
+        }
         if (pathname !== '/v1/ws') {
           rejectUpgrade(socket, 404, 'not found')
           return
@@ -317,6 +483,18 @@ export function createRealtimeHub(
         const device = authenticate(store, request.headers.authorization)
         if (!device) {
           rejectUpgrade(socket, 401, 'unauthorized')
+          return
+        }
+        if (pendingSockets.size >= MAX_PENDING_SOCKETS) {
+          rejectUpgrade(socket, 503, 'too many pending connections')
+          return
+        }
+        let pendingForDevice = 0
+        for (const pendingId of pendingSockets.values()) {
+          if (pendingId === device.id) pendingForDevice += 1
+        }
+        if (pendingForDevice >= MAX_PENDING_PER_DEVICE) {
+          rejectUpgrade(socket, 429, 'too many pending connections')
           return
         }
         wss.handleUpgrade(request, socket, head, (ws) => {
@@ -328,17 +506,35 @@ export function createRealtimeHub(
     close() {
       clearInterval(sweeper)
       clearInterval(heartbeat)
-      for (const socket of pendingSockets.keys()) socket.close(1001, 'server shutting down')
+      const allSockets: WebSocket[] = [...pendingSockets.keys(), ...[...connections.values()].map((c) => c.socket)]
+      for (const connection of connections.values()) connection.state = 'closed'
       pendingSockets.clear()
-      for (const connection of connections.values()) connection.socket.close(1001, 'server shutting down')
       connections.clear()
-      return new Promise((resolve) => wss.close(() => resolve()))
+      pendingRoutes.clear()
+      for (const socket of allSockets) safeClose(socket, 1001, 'server shutting down')
+      const terminator = setTimeout(() => {
+        for (const socket of allSockets) {
+          try {
+            if (socket.readyState !== WebSocket.CLOSED) socket.terminate()
+          } catch {}
+        }
+      }, SHUTDOWN_TERMINATE_MS)
+      terminator.unref?.()
+      return new Promise((resolve) =>
+        wss.close(() => {
+          clearTimeout(terminator)
+          resolve()
+        }),
+      )
     },
     isOnline(deviceId: string) {
       return connections.has(deviceId)
     },
     botsOf(deviceId: string) {
       return connections.get(deviceId)?.bots ?? []
+    },
+    capabilitiesOf(deviceId: string) {
+      return connections.get(deviceId)?.capabilities
     },
     broadcastMemoryChanged(version: number) {
       for (const connection of connections.values()) {
@@ -349,15 +545,50 @@ export function createRealtimeHub(
       for (const [socket, pendingDeviceId] of [...pendingSockets.entries()]) {
         if (pendingDeviceId !== deviceId) continue
         pendingSockets.delete(socket)
-        socket.close(4001, 'device revoked')
+        safeClose(socket, 4001, 'device revoked')
       }
       const connection = connections.get(deviceId)
       if (!connection) return
+      connection.state = 'closed'
       connections.delete(deviceId)
-      connection.socket.close(4001, 'device revoked')
+      safeClose(connection.socket, 4001, 'device revoked')
+      const forceTimer = setTimeout(() => {
+        try {
+          if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate()
+        } catch {}
+      }, 250)
+      forceTimer.unref?.()
       dropDevice(deviceId, `device ${deviceId} revoked`)
     },
   }
+}
+
+function safeClose(socket: WebSocket, code: number, reason: string): void {
+  try {
+    if (socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) return
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.terminate()
+      return
+    }
+    const truncated = truncateUtf8(reason, 120)
+    if (code === 1006) {
+      socket.terminate()
+      return
+    }
+    socket.close(code, truncated)
+  } catch {
+    try {
+      socket.terminate()
+    } catch {}
+  }
+}
+
+function truncateUtf8(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, 'utf8')
+  if (buf.byteLength <= maxBytes) return text
+  let end = maxBytes
+  while (end > 0 && (buf[end]! & 0xc0) === 0x80) end -= 1
+  return buf.subarray(0, end).toString('utf8')
 }
 
 function authenticate(store: RelayStore, header: string | undefined): { id: string } | null {

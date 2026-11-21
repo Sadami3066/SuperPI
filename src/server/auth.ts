@@ -1,4 +1,4 @@
-import { createHash, randomBytes, X509Certificate } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual as cryptoTimingSafeEqual, X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
 const PAIR_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -48,10 +48,8 @@ export function readFingerprint(certPath: string | null): string | null {
 }
 
 function timingSafeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) return false
-  let different = 0
-  for (let index = 0; index < left.length; index += 1) {
-    different |= left.charCodeAt(index) ^ right.charCodeAt(index)
-  }
-  return different === 0
+  const leftBuf = Buffer.from(left, 'utf8')
+  const rightBuf = Buffer.from(right, 'utf8')
+  if (leftBuf.length !== rightBuf.length) return false
+  return cryptoTimingSafeEqual(leftBuf, rightBuf)
 }

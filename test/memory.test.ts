@@ -429,5 +429,41 @@ describe('shared memory', () => {
 
     expect(harness.memory.version()).toBe(1)
     expect(harness.memory.file('profile.md').fileVersion).toBe(1)
+    expect(harness.memory.file('profile.md').content).not.toContain('Broken')
+  })
+
+  it('rejects non-canonical daily paths and preserves level-1 headings on replace_section', async () => {
+    const harness = await start()
+    const nonCanonical = await write(harness, {
+      op: 'append',
+      path: 'daily/./2026/a.md',
+      text: 'nope',
+      idempotencyKey: 'nc-1',
+    })
+    expect(nonCanonical.status).toBe(400)
+
+    const seed = '## Intro\n\nOld intro\n\n# Top Heading\n\nKeep me intact.'
+    const seeded = await write(harness, {
+      op: 'overwrite',
+      path: 'context.md',
+      text: seed,
+      baseVersion: 0,
+      idempotencyKey: 'h1-seed',
+    })
+    expect(seeded.status).toBe(200)
+
+    const replaced = await write(harness, {
+      op: 'replace_section',
+      path: 'context.md',
+      section: 'Intro',
+      text: 'New intro',
+      baseVersion: 1,
+      idempotencyKey: 'h1-rep',
+    })
+    expect(replaced.status).toBe(200)
+    const content = harness.memory.file('context.md').content
+    expect(content).toContain('# Top Heading')
+    expect(content).toContain('Keep me intact.')
+    expect(content).toContain('New intro')
   })
 })

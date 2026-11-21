@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { createConnection } from 'node:net'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -75,6 +76,7 @@ async function startRelay(options?: { now?: () => number; hubOptions?: RealtimeH
     onDeviceRevoked: (id) => hub.disconnectDevice(id),
     online: (deviceId) => hub.isOnline(deviceId),
     botsOf: (deviceId) => hub.botsOf(deviceId),
+    capabilitiesOf: (deviceId) => hub.capabilitiesOf(deviceId),
   })
   hub.attach(relay.server)
   const address = await relay.listen()
@@ -513,7 +515,7 @@ describe('realtime hub', () => {
     const harness = await startRelay()
     const desktop = await enrollDevice(harness, 'Desktop', 'desktop')
     const phone = await enrollDevice(harness, 'Phone', 'android')
-    const avatar = 'data:image/jpeg;base64,AQIDBA=='
+    const avatar = 'data:image/jpeg;base64,/9j/4AAQ'
 
     const phoneClient = await Client.open(harness.wsBase, phone.token)
     phoneClient.send(hello(phone.deviceId, [{ id: 'pi', name: 'Phone PI', avatar }]))
@@ -522,6 +524,7 @@ describe('realtime hub', () => {
     const desktopClient = await Client.open(harness.wsBase, desktop.token)
     desktopClient.send(hello(desktop.deviceId, [{ id: 'pi', name: 'Desktop PI' }]))
     const desktopHello = await nextOf(desktopClient, 'hello_ok')
+    expect(desktopHello.capabilities).toContain('bot-sessions')
     expect(desktopHello.devices.find((d) => d.deviceId === phone.deviceId)?.bots).toEqual([
       { id: 'pi', name: 'Phone PI', avatar },
     ])
@@ -529,7 +532,7 @@ describe('realtime hub', () => {
     const phonePresence = await nextOf(phoneClient, 'presence')
     expect(phonePresence.deviceId).toBe(desktop.deviceId)
 
-    const updatedAvatar = 'data:image/png;base64,iVBORw0K'
+    const updatedAvatar = 'data:image/png;base64,iVBORw0KGgo='
     phoneClient.send(hello(phone.deviceId, [{ id: 'pi', name: 'Phone PI', avatar: updatedAvatar }]))
     await nextOf(phoneClient, 'hello_ok')
     const updatedPresence = await nextOf(desktopClient, 'presence')
@@ -578,5 +581,94 @@ describe('realtime hub', () => {
       id: 'req-history',
       result: { sessionId: 's1', busy: false, messages: [] },
     })
+  })
+
+  it('rejects malformed upgrade URLs, long invalid frame types, duplicate route IDs, and keeps streams open through error until agent_settled', async () => {
+    const harness = await startRelay()
+    const port = Number(new URL(harness.httpBase).port)
+    await new Promise<void>((resolve, reject) => {
+      const tcp = createConnection(port, '127.0.0.1', () => {
+        tcp.write('GET //invalid:[ HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+      })
+      tcp.once('data', (chunk) => {
+        expect(chunk.toString('utf8')).toContain('400')
+        tcp.destroy()
+        resolve()
+      })
+      tcp.once('error', reject)
+    })
+
+    const desktop = await enrollDevice(harness, 'Desktop', 'desktop')
+    const phone = await enrollDevice(harness, 'Phone', 'android')
+    const attacker = await enrollDevice(harness, 'Attacker', 'cli')
+
+    const desktopClient = await Client.open(harness.wsBase, desktop.token)
+    desktopClient.send(hello(desktop.deviceId, [{ id: 'pi', name: 'Desktop' }]))
+    await nextOf(desktopClient, 'hello_ok')
+
+    const phoneClient = await Client.open(harness.wsBase, phone.token)
+    phoneClient.send(hello(phone.deviceId, [{ id: 'pi', name: 'Phone' }]))
+    await nextOf(phoneClient, 'hello_ok')
+
+    const attackerClient = await Client.open(harness.wsBase, attacker.token)
+    attackerClient.send(hello(attacker.deviceId, []))
+    await nextOf(attackerClient, 'hello_ok')
+
+    desktopClient.send({
+      type: 'route',
+      id: 'active-turn-1',
+      to: phone.deviceId,
+      method: 'bot.prompt',
+      params: { botId: 'pi', text: 'hi' },
+    })
+    await nextOf(phoneClient, 'route')
+
+    attackerClient.send({
+      type: 'route',
+      id: 'active-turn-1',
+      to: phone.deviceId,
+      method: 'bot.state',
+      params: { sessionId: 'x' },
+    })
+    const collision = await nextOf(attackerClient, 'route_error')
+    expect(collision).toMatchObject({ id: 'active-turn-1', code: 'bad_request' })
+
+    phoneClient.send({ type: 'route_ok', id: 'active-turn-1', result: { sessionId: 's-1' } })
+    expect(await nextOf(desktopClient, 'route_ok')).toMatchObject({ id: 'active-turn-1' })
+
+    phoneClient.send({ type: 'route_event', id: 'active-turn-1', seq: 0, event: { type: 'error', message: 'soft warning' } })
+    phoneClient.send({ type: 'route_event', id: 'active-turn-1', seq: 1, event: { type: 'agent_settled' } })
+    expect((await nextOf(desktopClient, 'route_event')).seq).toBe(0)
+    expect((await nextOf(desktopClient, 'route_event')).seq).toBe(1)
+
+    desktopClient.socket.send(
+      JSON.stringify({ type: 'route', id: 'unknown-m', to: phone.deviceId, method: 'bot.future_v9', params: {} }),
+    )
+    const unsupported = await nextOf(desktopClient, 'route_error')
+    expect(unsupported).toMatchObject({ id: 'unknown-m', code: 'bad_request' })
+
+    desktopClient.socket.send(
+      JSON.stringify({
+        type: 'route',
+        id: 'bad-img-route',
+        to: phone.deviceId,
+        method: 'bot.prompt',
+        params: { botId: 'pi', text: 'hi', images: [{ data: 'AAEC', mimeType: 'image/png' }] },
+      }),
+    )
+    const imgErr = await nextOf(desktopClient, 'route_error')
+    expect(imgErr).toMatchObject({ id: 'bad-img-route', code: 'bad_request' })
+    expect(harness.hub.isOnline(desktop.deviceId)).toBe(true)
+
+    const closed = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('attacker socket did not close')), 2_000)
+      attackerClient.socket.once('close', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
+    attackerClient.socket.send(JSON.stringify({ type: 'X'.repeat(240) }))
+    await closed
+    expect(harness.hub.isOnline(desktop.deviceId)).toBe(true)
   })
 })
