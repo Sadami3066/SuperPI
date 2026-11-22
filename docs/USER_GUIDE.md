@@ -140,12 +140,17 @@ Good for timetables, expense tracking, anniversaries, drawing lots and small uti
 
 ## Remote connection
 
-Link your Android phones through a self-hosted `SuperPI-Remote` relay:
+Link two or more Android phones through a self-hosted `SuperPI-Remote` relay:
 
 1. Start `SuperPI-Remote` on your server or host with HTTPS/WSS enabled.
-2. In the app drawer, open the account / relay entry to sign in with your relay address and secret, or pair via a short-lived `superpi://pair` link, QR scan, or pairing code.
+2. In the app drawer, open the account / relay entry to sign in with your relay address and secret, then tap "Pair another device" to show a QR code and pairing link that your other phones can scan directly.
 3. On first connection the app pins the relay CA certificate fingerprint (`sha256:...`); if the certificate changes, you must pair again.
-4. Once connected, paired phones and their bots appear grouped by device in the drawer, shared memory syncs automatically with optimistic version checks, and you can generate pairing links or revoke devices from the account sheet.
+4. Once connected:
+   - Paired phones appear grouped by device in the drawer (online devices expanded, offline devices collapsed with a quick `+` button to create a bot directly on any online phone).
+   - Tapping a remote bot header opens its settings sheet, where you can rename or delete the bot, edit its instructions, and toggle its remote skills, plugins, connectors, screen tools, and mini app tools.
+   - Attachments sent in a remote chat are streamed to the remote bot's workspace automatically, and rich deliverables (`present` images, audio, and files) stream back on demand with local caching.
+   - Shared memory syncs across all paired phones with optimistic version checks and an automatic server-side rollup lease so only one phone runs daily/weekly memory distillation at a time.
+   - When "Allow remote control of this phone" is enabled, grant unrestricted battery usage on the Relay screen so the phone stays responsive while its screen is off.
 
 ## Data and privacy
 

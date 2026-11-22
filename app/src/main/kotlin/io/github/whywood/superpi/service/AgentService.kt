@@ -8,9 +8,11 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import io.github.whywood.superpi.SuperPIApplication
 import io.github.whywood.superpi.data.FloatingWindowPreferences
+import io.github.whywood.superpi.data.relay.RelayLiveState
 import io.github.whywood.superpi.floating.FloatingWindowController
 import io.github.whywood.superpi.vscreen.VirtualScreenRuntime
 import kotlinx.coroutines.CancellationException
@@ -20,6 +22,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -29,11 +32,19 @@ class AgentService : Service() {
     private val graph by lazy { (application as SuperPIApplication).graph }
     private var floatingWindow: FloatingWindowController? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var turnWakeLock: PowerManager.WakeLock? = null
+    private val wakeLockGuard = Any()
     private val clockReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val action = intent?.action ?: return
-            if (action == Intent.ACTION_TIME_CHANGED || action == Intent.ACTION_TIMEZONE_CHANGED) {
-                scope.launch { graph.timerService.recomputeTargets() }
+            when (action) {
+                Intent.ACTION_TIME_CHANGED,
+                Intent.ACTION_TIMEZONE_CHANGED,
+                -> scope.launch { graph.timerService.recomputeTargets() }
+
+                Intent.ACTION_SCREEN_ON,
+                Intent.ACTION_USER_PRESENT,
+                -> graph.relayLive.reconnectNow()
             }
         }
     }
@@ -47,6 +58,18 @@ class AgentService : Service() {
         registerClockReceiver()
         registerNetworkCallback()
         startFloatingWindow()
+        scope.launch {
+            combine(graph.relayLive.allowRemote, graph.relayLive.state) { allow, state ->
+                allow && state == RelayLiveState.Online
+            }.collect { standby ->
+                graph.notificationCenter.setRemoteStandby(standby)
+            }
+        }
+        scope.launch {
+            graph.host.busySessionIds.collect { busy ->
+                updateTurnWakeLock(busy.isNotEmpty())
+            }
+        }
         scope.launch {
             ProcessExitLog.record(this@AgentService)
             try {
@@ -94,6 +117,7 @@ class AgentService : Service() {
     override fun onDestroy() {
         unregisterNetworkCallback()
         runCatching { unregisterReceiver(clockReceiver) }
+        releaseTurnWakeLock()
         floatingWindow?.stop()
         floatingWindow = null
         graph.timerService.stop()
@@ -123,8 +147,35 @@ class AgentService : Service() {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_TIME_CHANGED)
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
         ContextCompat.registerReceiver(this, clockReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
+    private fun updateTurnWakeLock(active: Boolean) {
+        synchronized(wakeLockGuard) {
+            if (active) {
+                val lock = turnWakeLock ?: getSystemService(PowerManager::class.java)
+                    ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SuperPI:AgentTurn")
+                    ?.apply { setReferenceCounted(false) }
+                    .also { turnWakeLock = it }
+                if (lock != null && !lock.isHeld) {
+                    runCatching { lock.acquire(TURN_WAKELOCK_TIMEOUT_MS) }
+                }
+            } else {
+                releaseTurnWakeLock()
+            }
+        }
+    }
+
+    private fun releaseTurnWakeLock() {
+        synchronized(wakeLockGuard) {
+            val lock = turnWakeLock ?: return
+            if (lock.isHeld) {
+                runCatching { lock.release() }
+            }
+        }
     }
 
     private fun registerNetworkCallback() {
@@ -165,5 +216,6 @@ class AgentService : Service() {
         const val EXTRA_PAIRING_CODE = "io.github.whywood.superpi.extra.PAIRING_CODE"
         private const val NOTIFICATION_ID = 1
         private const val ACCESSIBILITY_CHECK_DELAY_MS = 4_000L
+        private const val TURN_WAKELOCK_TIMEOUT_MS = 10 * 60_000L
     }
 }

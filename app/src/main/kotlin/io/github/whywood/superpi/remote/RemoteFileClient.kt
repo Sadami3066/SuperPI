@@ -10,6 +10,7 @@ import java.util.Base64
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -49,6 +50,7 @@ sealed interface RemoteFileResult<out T> {
 
 class RemoteFileClient(
     private val transport: RemoteAgentTransport,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     suspend fun list(
         deviceId: String,
@@ -127,7 +129,7 @@ class RemoteFileClient(
                         return RemoteFileResult.Error("bad_response", "invalid base64 chunk")
                     }
                     if (bytes.isNotEmpty()) {
-                        withContext(Dispatchers.IO) {
+                        withContext(ioDispatcher) {
                             outputStream.write(bytes)
                         }
                         offset += bytes.size
@@ -157,7 +159,7 @@ class RemoteFileClient(
         val target = File(bucketDir, fileName)
         val tmp = File(bucketDir, ".tmp-${UUID.randomUUID()}.part")
         try {
-            val outcome = withContext(Dispatchers.IO) {
+            val outcome = withContext(ioDispatcher) {
                 tmp.outputStream().use { out ->
                     downloadToStream(deviceId, botId, remotePath, out, onProgress)
                 }
@@ -318,7 +320,7 @@ class RemoteFileClient(
         return null
     }
 
-    private suspend fun readExactOrEof(input: InputStream, maxBytes: Int): ByteArray = withContext(Dispatchers.IO) {
+    private suspend fun readExactOrEof(input: InputStream, maxBytes: Int): ByteArray = withContext(ioDispatcher) {
         val buf = ByteArray(maxBytes)
         var filled = 0
         while (filled < maxBytes) {

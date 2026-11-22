@@ -1,7 +1,7 @@
 <resources>
     <string name="relay_title">Connect devices</string>
     <string name="relay_back">Back</string>
-    <string name="relay_intro">Once connected, this phone and your computer share one memory and can use each other\'s bots.</string>
+    <string name="relay_intro">Once connected, your phones share one memory and can use each other\'s bots.</string>
     <string name="relay_link_label">Pairing link</string>
     <string name="relay_link_placeholder">https://server:8443/#fp=…&amp;code=…</string>
     <string name="relay_fingerprint_label">Server fingerprint</string>
@@ -43,7 +43,7 @@
     <string name="relay_pair_new">Add new device</string>
     <string name="relay_pair_generating">Generating pairing link…</string>
     <string name="relay_pair_dialog_title">Pair a new device</string>
-    <string name="relay_pair_dialog_hint">Valid for 10 minutes and one-time use. Copy this link to another device to connect.</string>
+    <string name="relay_pair_dialog_hint">Valid for 10 minutes and one-time use. Scan the QR code or copy the link on another phone to connect.</string>
     <string name="relay_pair_copy">Copy link</string>
     <string name="relay_pair_copied">Copied</string>
     <string name="relay_pair_close">Close</string>
@@ -54,4 +54,7 @@
     <string name="relay_scan_qr">Scan QR</string>
     <string name="relay_scan_hint">Point the camera at the pairing QR code on another device</string>
     <string name="relay_scan_permission_hint">Camera permission is needed to scan a pairing QR code</string>
+    <string name="relay_battery_keepalive_title">Stay active in background</string>
+    <string name="relay_battery_keepalive_hint">Prevent disconnecting when screen is off</string>
+    <string name="relay_battery_keepalive_action">Allow</string>
 </resources>

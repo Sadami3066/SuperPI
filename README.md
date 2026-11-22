@@ -73,7 +73,7 @@ Installers are available from [GitHub Releases](https://github.com/Sadami3066/Su
 | System access | Settings → System access | Normal, wireless ADB, or root |
 | Linux | Settings → System access → Linux environment | Initialize Alpine; install shell, Node, Python, and toolchains |
 | Android integration | Settings → Android setup | Overlay, system assistant, notifications, and share targets |
-| Multi-device relay | Drawer → Account / Devices | Pair with a self-hosted SuperPI-Remote relay to share memory and invoke bots across your Android phones |
+| Multi-device relay | Drawer → Account / Devices | Pair multiple Android phones via QR code or pairing link through a self-hosted SuperPI-Remote relay to share memory, transfer files and presented artifacts, and create or manage bots across devices |
 | Plugins | Drawer → Plugins | Import signed `.ddp` files; inspect capabilities and runtime state |
 | Memory | Automatic | Distilled when a session ends; searchable and injectable into the current session |
 

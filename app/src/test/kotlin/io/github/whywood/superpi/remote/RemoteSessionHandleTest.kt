@@ -851,6 +851,90 @@ class RemoteSessionHandleTest {
         assertEquals(500L, handle.usage()?.contextTokens)
     }
 
+    @Test
+    fun promptWithLocalAttachmentUploadsToRemoteWorkspaceAndRewritesPromptAndMirrorPath() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+
+        val attachmentDir = File(cwd, "attachments").apply { mkdirs() }
+        val localFile = File(attachmentDir, "a1_notes.txt").apply {
+            writeText("cross-phone attachment payload")
+        }
+        val promptWithAttachment = """
+            summarize the file
+
+            <attachments>
+            - ${localFile.absolutePath} | notes.txt | text/plain | ${localFile.length()}
+            use these absolute paths with file tools to inspect the attachments
+            </attachments>
+        """.trimIndent()
+
+        val job = launch { handle.prompt(promptWithAttachment) }
+        runCurrent()
+
+        val uploadCall = transport.calls.firstOrNull { it.method == "file.write_chunk" }
+        assertTrue(uploadCall != null)
+        assertEquals("pi", uploadCall!!.params.getValue("botId").jsonPrimitive.content)
+        assertEquals("attachments/a1_notes.txt", uploadCall.params.getValue("path").jsonPrimitive.content)
+
+        val promptCall = transport.calls.last { it.method == "bot.prompt" }
+        val sentText = promptCall.params.getValue("text").jsonPrimitive.content
+        assertTrue(sentText.contains("- attachments/a1_notes.txt | notes.txt | text/plain | ${localFile.length()}"))
+        assertFalse(sentText.contains(localFile.absolutePath))
+
+        transport.emit(promptCall.routeId, 0, FakeEvents.textDelta("Summary ready"))
+        transport.emit(promptCall.routeId, 1, FakeEvents.settled())
+        runCurrent()
+        assertTrue(job.isCompleted)
+
+        val mirroredUserText = (handle.messages.first().asLlmMessage() as UserMessage).content.text()
+        assertTrue(mirroredUserText.contains("- attachments/a1_notes.txt | notes.txt | text/plain | ${localFile.length()}"))
+        assertFalse(mirroredUserText.contains(localFile.absolutePath))
+    }
+
+    @Test
+    fun failedInitialAttachmentUploadCanBeRetriedWithoutDuplicatingUserMessage() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+
+        val attachmentDir = File(cwd, "attachments").apply { mkdirs() }
+        val localFile = File(attachmentDir, "b2_report.csv").apply {
+            writeText("id,value\n1,42\n")
+        }
+        val promptWithAttachment = """
+            analyze report
+
+            <attachments>
+            - ${localFile.absolutePath} | report.csv | text/csv | ${localFile.length()}
+            use these absolute paths with file tools to inspect the attachments
+            </attachments>
+        """.trimIndent()
+
+        transport.failNext = RemoteCallError("unreachable", "Upload interrupted")
+        handle.prompt(promptWithAttachment)
+        runCurrent()
+
+        assertTrue(transport.calls.none { it.method == "bot.prompt" })
+        assertTrue(handle.canRetryLastAssistant())
+
+        val retryJob = launch { handle.retryLastAssistant() }
+        runCurrent()
+        val promptCall = transport.calls.last { it.method == "bot.prompt" }
+        assertTrue(
+            promptCall.params.getValue("text").jsonPrimitive.content
+                .contains("- attachments/b2_report.csv | report.csv | text/csv | ${localFile.length()}"),
+        )
+        transport.emit(promptCall.routeId, 0, FakeEvents.textDelta("Report analyzed"))
+        transport.emit(promptCall.routeId, 1, FakeEvents.settled())
+        runCurrent()
+        assertTrue(retryJob.isCompleted)
+
+        val userMessages = handle.messages.mapNotNull { it.asLlmMessage() as? UserMessage }
+        assertEquals(1, userMessages.size)
+    }
+
     private fun engine(transport: FakeRemoteTransport, scope: CoroutineScope): RemoteSessionEngine =
         RemoteSessionEngine(cwd, agentDir, target(transport), transport, scope)
 

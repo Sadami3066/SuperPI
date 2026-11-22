@@ -52,6 +52,8 @@ import io.github.whywood.superpi.sdk.ai.UserMessage
 import io.github.whywood.superpi.sdk.coding.session.QueueBehavior
 import io.github.whywood.superpi.sdk.coding.session.SessionEvent
 import io.github.whywood.superpi.sdk.mcp.config.McpServerConfig
+import java.io.File
+import java.io.FileInputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -95,6 +97,15 @@ class RemoteSessionHandle internal constructor(
     private val remoteModel: Model = buildRemoteModel(target)
     private val passiveWake = Channel<Unit>(Channel.CONFLATED)
     private val recentOwnedRoutes = ConcurrentHashMap.newKeySet<String>()
+    private val fileClient = RemoteFileClient(
+        transport = transport,
+        ioDispatcher = (injectedScope?.coroutineContext?.get(kotlin.coroutines.ContinuationInterceptor) as? kotlinx.coroutines.CoroutineDispatcher)
+            ?: Dispatchers.IO,
+    )
+    private val uploadedAttachments = ConcurrentHashMap<String, String>()
+
+    @Volatile
+    private var pendingFailedPrompt: Pair<String, List<ImagePart>>? = null
 
     @Volatile
     private var activeTurn: RemoteTurn? = null
@@ -233,7 +244,9 @@ class RemoteSessionHandle internal constructor(
     override fun removeQueuedInput(text: String, behavior: QueueBehavior): Boolean = false
 
     override fun canRetryLastAssistant(): Boolean {
-        if (closed || activeTurn != null || passiveTurn != null || peerSessionId == null) return false
+        if (closed || activeTurn != null || passiveTurn != null) return false
+        if (pendingFailedPrompt != null) return true
+        if (peerSessionId == null) return false
         if (!transport.supportsPeerCapability(target.deviceId, RemoteBotControlClient.CAP_SESSION_CONTROLS)) {
             return false
         }
@@ -245,11 +258,17 @@ class RemoteSessionHandle internal constructor(
 
     override suspend fun retryLastAssistant() {
         if (!canRetryLastAssistant()) return
-        val sessionId = peerSessionId ?: return
         if (!target.isOnline()) {
             emit(SessionEvent.SessionError(offlineMessage()))
             return
         }
+        val pending = pendingFailedPrompt
+        if (pending != null) {
+            val turn = RemoteTurn(target.botName)
+            executeTurn(turn) { deliverPrompt(turn, pending.first, pending.second) }
+            return
+        }
+        val sessionId = peerSessionId ?: return
         val turn = RemoteTurn(target.botName)
         executeTurn(turn) {
             val outcome = transport.callWithOutcome(
@@ -360,8 +379,9 @@ class RemoteSessionHandle internal constructor(
             emit(SessionEvent.SessionError(offlineMessage()))
             return
         }
+        pendingFailedPrompt = text to images
         val turn = RemoteTurn(target.botName)
-        mirror.appendUserMessage(text, images)
+        mirror.appendUserMessage(normalizeMirrorAttachmentPaths(text), images)
         executeTurn(turn) { deliverPrompt(turn, text, images) }
     }
 
@@ -410,9 +430,14 @@ class RemoteSessionHandle internal constructor(
     }
 
     private suspend fun deliverPrompt(turn: RemoteTurn, text: String, images: List<ImagePart>) {
+        val preparedText = prepareOutgoingPrompt(text).getOrElse { error ->
+            turn.failure = error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
+            return
+        }
         val sessionId = peerSessionId
-        when (val outcome = callPrompt(turn, text, images, sessionId)) {
+        when (val outcome = callPrompt(turn, preparedText, images, sessionId)) {
             is RemoteCallOutcome.Ok -> {
+                pendingFailedPrompt = null
                 rememberPeerSession(outcome.result)
                 if (peerSessionId == null) turn.failure = NO_SESSION_MESSAGE
                 return
@@ -421,8 +446,9 @@ class RemoteSessionHandle internal constructor(
             is RemoteCallOutcome.Failed -> {
                 if (sessionId != null && outcome.error.code == SESSION_NOT_FOUND) {
                     clearPeerSession()
-                    when (val retryOutcome = callPrompt(turn, text, images, null)) {
+                    when (val retryOutcome = callPrompt(turn, preparedText, images, null)) {
                         is RemoteCallOutcome.Ok -> {
+                            pendingFailedPrompt = null
                             rememberPeerSession(retryOutcome.result)
                             if (peerSessionId == null) turn.failure = NO_SESSION_MESSAGE
                             return
@@ -518,13 +544,18 @@ class RemoteSessionHandle internal constructor(
             emit(SessionEvent.SessionError(NO_SESSION_MESSAGE))
             return
         }
+        val preparedText = prepareOutgoingPrompt(text).getOrElse { error ->
+            emit(SessionEvent.SessionError(error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE))
+            return
+        }
+        val normalizedText = normalizeMirrorAttachmentPaths(text)
         val outcome = transport.callWithOutcome(
             to = target.deviceId,
             method = method,
             params = buildJsonObject {
                 put("botId", target.botId)
                 put("sessionId", sessionId)
-                put("text", text)
+                put("text", preparedText)
                 if (images.isNotEmpty()) {
                     put(
                         "images",
@@ -554,22 +585,22 @@ class RemoteSessionHandle internal constructor(
         }
         val turn = activeTurn
         if (turn != null) {
-            turn.queuedMessages.add(QueuedUserMessage(text, images))
-            emitAgent(AgentEvent.MessageStart(userAgentMessage(text, images)))
+            turn.queuedMessages.add(QueuedUserMessage(normalizedText, images))
+            emitAgent(AgentEvent.MessageStart(userAgentMessage(normalizedText, images)))
             return
         }
         val passive = passiveTurn
         if (passive != null) {
-            passive.queuedMessages.add(QueuedUserMessage(text, images))
+            passive.queuedMessages.add(QueuedUserMessage(normalizedText, images))
             val runId = passiveRunId
-            if (runId != null && text.isNotBlank()) {
-                emitPassiveRuntime(RuntimeEvent.UserInputAdmitted(runId = runId, text = text))
+            if (runId != null && normalizedText.isNotBlank()) {
+                emitPassiveRuntime(RuntimeEvent.UserInputAdmitted(runId = runId, text = normalizedText))
             } else {
-                mirror.appendUserMessage(text, images)
+                mirror.appendUserMessage(normalizedText, images)
             }
             return
         }
-        mirror.appendUserMessage(text, images)
+        mirror.appendUserMessage(normalizedText, images)
     }
 
     private fun userAgentMessage(text: String, images: List<ImagePart>): AgentMessage {
@@ -1257,6 +1288,125 @@ class RemoteSessionHandle internal constructor(
         }
     }
 
+    private suspend fun prepareOutgoingPrompt(rawText: String): Result<String> {
+        if (!rawText.contains(ATTACHMENT_OPEN_TAG) || !rawText.contains(ATTACHMENT_CLOSE_TAG)) {
+            return Result.success(rawText)
+        }
+        var insideBlock = false
+        val rewrittenLines = ArrayList<String>()
+        for (line in rawText.split('\n')) {
+            when {
+                line == ATTACHMENT_OPEN_TAG -> {
+                    insideBlock = true
+                    rewrittenLines += line
+                }
+
+                line == ATTACHMENT_CLOSE_TAG -> {
+                    insideBlock = false
+                    rewrittenLines += line
+                }
+
+                insideBlock && line.startsWith("- ") -> {
+                    val rewritten = uploadAndRewriteAttachmentLine(line).getOrElse { error ->
+                        return Result.failure(error)
+                    }
+                    rewrittenLines += rewritten
+                }
+
+                else -> rewrittenLines += line
+            }
+        }
+        return Result.success(rewrittenLines.joinToString("\n"))
+    }
+
+    private suspend fun uploadAndRewriteAttachmentLine(line: String): Result<String> {
+        val parts = line.removePrefix("- ").split(" | ", limit = 4)
+        if (parts.size != 4) return Result.success(line)
+        val rawPath = parts[0].trim()
+        val displayName = parts[1].trim()
+        val mimeType = parts[2].trim()
+        val sizeField = parts[3].trim()
+        if (!rawPath.startsWith("/")) return Result.success(line)
+        val localFile = File(rawPath)
+        if (!localFile.isFile) return Result.success(line)
+        val safeFileName = sanitizeAttachmentFileName(localFile.name)
+        val remotePath = "$ATTACHMENT_REMOTE_DIR/$safeFileName"
+        val rewrittenLine = "- $remotePath | $displayName | $mimeType | $sizeField"
+        val supportsFiles = transport.supportsPeerCapability(
+            target.deviceId,
+            RemoteFileClient.CAP_WORKSPACE_FILES,
+        )
+        if (!supportsFiles) {
+            return if (mimeType.startsWith("image/")) {
+                Result.success(rewrittenLine)
+            } else {
+                Result.failure(IllegalStateException(UNSUPPORTED_ATTACHMENT_MESSAGE))
+            }
+        }
+        val cacheKey = "${localFile.absolutePath}:${localFile.length()}:${localFile.lastModified()}"
+        if (uploadedAttachments[cacheKey] != remotePath) {
+            val uploadOutcome = try {
+                FileInputStream(localFile).use { input ->
+                    fileClient.uploadFromStream(
+                        deviceId = target.deviceId,
+                        botId = target.botId,
+                        remotePath = remotePath,
+                        inputStream = input,
+                        totalBytes = localFile.length(),
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                return Result.failure(error)
+            }
+            when (uploadOutcome) {
+                is RemoteFileResult.Ok -> uploadedAttachments[cacheKey] = remotePath
+                is RemoteFileResult.Error -> {
+                    val msg = uploadOutcome.message.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
+                    return Result.failure(IllegalStateException(msg))
+                }
+            }
+        }
+        return Result.success(rewrittenLine)
+    }
+
+    private fun normalizeMirrorAttachmentPaths(rawText: String): String {
+        if (!rawText.contains(ATTACHMENT_OPEN_TAG) || !rawText.contains(ATTACHMENT_CLOSE_TAG)) {
+            return rawText
+        }
+        var insideBlock = false
+        return rawText.split('\n').joinToString("\n") { line ->
+            when {
+                line == ATTACHMENT_OPEN_TAG -> {
+                    insideBlock = true
+                    line
+                }
+
+                line == ATTACHMENT_CLOSE_TAG -> {
+                    insideBlock = false
+                    line
+                }
+
+                insideBlock && line.startsWith("- ") -> {
+                    val parts = line.removePrefix("- ").split(" | ", limit = 4)
+                    if (parts.size == 4 && parts[0].trim().startsWith("/")) {
+                        val localFile = File(parts[0].trim())
+                        val safeFileName = sanitizeAttachmentFileName(localFile.name)
+                        "- $ATTACHMENT_REMOTE_DIR/$safeFileName | ${parts[1].trim()} | ${parts[2].trim()} | ${parts[3].trim()}"
+                    } else {
+                        line
+                    }
+                }
+
+                else -> line
+            }
+        }
+    }
+
+    private fun sanitizeAttachmentFileName(raw: String): String =
+        raw.replace(Regex("[^A-Za-z0-9._-]"), "_").trim('_').ifBlank { "attachment" }
+
     private fun outcomeMessage(error: RemoteCallError): String =
         error.message.takeIf { it.isNotBlank() } ?: NO_ANSWER_MESSAGE
 
@@ -1403,6 +1553,11 @@ class RemoteSessionHandle internal constructor(
         private const val FAILED_MESSAGE = "The bot on the remote device failed."
         private const val SESSION_RESTARTED_MESSAGE =
             "The remote session was restarted on the device, so that message could not be delivered. Send again to start a new remote session."
+        private const val ATTACHMENT_OPEN_TAG = "<attachments>"
+        private const val ATTACHMENT_CLOSE_TAG = "</attachments>"
+        private const val ATTACHMENT_REMOTE_DIR = "attachments"
+        private const val UNSUPPORTED_ATTACHMENT_MESSAGE =
+            "The remote device does not support file attachments."
     }
 }
 

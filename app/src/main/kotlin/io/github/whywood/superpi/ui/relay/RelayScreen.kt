@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.relay.RelayAccount
@@ -548,6 +550,17 @@ private fun ShareCard(
     onRequestRevokeDevice: (RelayDevice) -> Unit,
 ) {
     val colors = superPiColors()
+    val context = LocalContext.current
+    var ignoringBatteryOptimizations by remember {
+        mutableStateOf(isIgnoringBatteryOptimizations(context))
+    }
+    LifecycleResumeEffect(Unit) {
+        ignoringBatteryOptimizations = isIgnoringBatteryOptimizations(context)
+        onPauseOrDispose {}
+    }
+    LaunchedEffect(allowRemote) {
+        ignoringBatteryOptimizations = isIgnoringBatteryOptimizations(context)
+    }
     DdGroupCard(
         header = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -577,6 +590,20 @@ private fun ShareCard(
             }
         },
     ) {
+        if (allowRemote && !ignoringBatteryOptimizations) {
+            DdListRow(
+                title = stringResource(R.string.relay_battery_keepalive_title),
+                subtitle = stringResource(R.string.relay_battery_keepalive_hint),
+                modifier = Modifier.testTag("relay_battery_keepalive"),
+                trailing = {
+                    DdTextAction(
+                        text = stringResource(R.string.relay_battery_keepalive_action),
+                        onClick = { requestIgnoreBatteryOptimizations(context) },
+                        color = colors.accent,
+                    )
+                },
+            )
+        }
         if (devices.isEmpty()) {
             DdListRow(
                 title = stringResource(R.string.relay_devices_empty),
@@ -616,6 +643,23 @@ private fun ShareCard(
             }
         }
     }
+}
+
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+    val power = context.getSystemService(PowerManager::class.java) ?: return true
+    return runCatching { power.isIgnoringBatteryOptimizations(context.packageName) }.getOrDefault(true)
+}
+
+@android.annotation.SuppressLint("BatteryLife")
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val direct = Intent(
+        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        Uri.parse("package:${context.packageName}"),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(direct) }.isSuccess) return
+    val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(fallback) }
 }
 
 private fun RelayLiveState.textRes(): Int = when (this) {

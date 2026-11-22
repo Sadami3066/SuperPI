@@ -1086,10 +1086,60 @@ internal fun AppShell(
                         onClearQuote = chatViewModel::clearQuote,
                         onPickAttachment = { overlays.attachmentSheetOpen = true },
                         onRemoveAttachment = chatViewModel::removeAttachment,
-                        onOpenAttachment = {
-                                                overlays.previewRoot = attachmentRoot
-                                                overlays.previewAttachment = it
-                                            },
+                        onOpenAttachment = { attachment ->
+                            val targetFile = graph.attachmentStore.file(attachment, attachmentRoot)
+                            val remote = remoteWs
+                            if (!targetFile.isFile && remote != null && !File(attachment.path).isAbsolute) {
+                                scope.launch {
+                                    val cached = withContext(Dispatchers.IO) {
+                                        targetFile.parentFile?.mkdirs()
+                                        val tmp = File(targetFile.parentFile ?: attachmentRoot, ".tmp-${targetFile.name}.part")
+                                        val outcome = try {
+                                            tmp.outputStream().use { out ->
+                                                graph.remoteFileClient.downloadToStream(
+                                                    deviceId = remote.deviceId,
+                                                    botId = remote.botId,
+                                                    remotePath = attachment.path,
+                                                    outputStream = out,
+                                                )
+                                            }
+                                        } catch (e: Exception) {
+                                            tmp.delete()
+                                            io.github.whywood.superpi.remote.RemoteFileResult.Error("io_error", e.message.orEmpty())
+                                        }
+                                        when (outcome) {
+                                            is io.github.whywood.superpi.remote.RemoteFileResult.Ok -> {
+                                                if (!tmp.renameTo(targetFile)) {
+                                                    tmp.copyTo(targetFile, overwrite = true)
+                                                    tmp.delete()
+                                                }
+                                                outcome
+                                            }
+                                            is io.github.whywood.superpi.remote.RemoteFileResult.Error -> {
+                                                tmp.delete()
+                                                outcome
+                                            }
+                                        }
+                                    }
+                                    when (cached) {
+                                        is io.github.whywood.superpi.remote.RemoteFileResult.Ok -> {
+                                            overlays.previewRoot = attachmentRoot
+                                            overlays.previewAttachment = attachment
+                                        }
+                                        is io.github.whywood.superpi.remote.RemoteFileResult.Error -> {
+                                            Toast.makeText(
+                                                context,
+                                                localizeRemoteError(cached.code, remoteActionFailedMessage),
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                overlays.previewRoot = attachmentRoot
+                                overlays.previewAttachment = attachment
+                            }
+                        },
                         onOpenFile = openWorkspaceFile,
                         onOpenTimers = { navigator.push(AppDestination.Timers) },
                         onRetry = chatViewModel::retry,

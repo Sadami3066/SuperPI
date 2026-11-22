@@ -1,7 +1,7 @@
 <resources>
     <string name="relay_title">连接设备</string>
     <string name="relay_back">返回</string>
-    <string name="relay_intro">连接后，这台手机和电脑共用同一份记忆，也能直接使用其他设备上的 Bot。</string>
+    <string name="relay_intro">连接后，多台手机共用同一份记忆，也能直接使用彼此的 Bot。</string>
     <string name="relay_link_label">配对链接</string>
     <string name="relay_link_placeholder">https://服务器地址:8443/#fp=…&amp;code=…</string>
     <string name="relay_fingerprint_label">服务器指纹</string>
@@ -43,7 +43,7 @@
     <string name="relay_pair_new">添加新设备</string>
     <string name="relay_pair_generating">正在生成配对链接…</string>
     <string name="relay_pair_dialog_title">配对新设备</string>
-    <string name="relay_pair_dialog_hint">10 分钟内有效，仅可使用一次。复制下方链接到另一台设备完成连接。</string>
+    <string name="relay_pair_dialog_hint">10 分钟内有效，仅可使用一次。用另一台手机扫码或复制下方链接完成连接。</string>
     <string name="relay_pair_copy">复制链接</string>
     <string name="relay_pair_copied">已复制</string>
     <string name="relay_pair_close">关闭</string>
@@ -54,4 +54,7 @@
     <string name="relay_scan_qr">扫码连接</string>
     <string name="relay_scan_hint">将手机对准另一台设备上的配对二维码</string>
     <string name="relay_scan_permission_hint">需要相机权限才能扫描配对二维码</string>
+    <string name="relay_battery_keepalive_title">保持后台常驻</string>
+    <string name="relay_battery_keepalive_hint">避免锁屏后断开连接</string>
+    <string name="relay_battery_keepalive_action">去开启</string>
 </resources>

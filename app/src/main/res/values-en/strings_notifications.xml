@@ -7,6 +7,7 @@
     <string name="notification_channel_downloads_desc">Shows developer package install progress</string>
 
     <string name="notification_service_idle">Background service ready</string>
+    <string name="notification_service_remote_standby">Standing by for remote devices</string>
     <string name="notification_sessions_running">%1$d sessions running</string>
     <string name="notification_action_stop">Stop</string>
     <string name="notification_activity_thinking">Thinking…</string>

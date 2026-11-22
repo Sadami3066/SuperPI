@@ -46,6 +46,8 @@ class NotificationCenter(
     private var questionCollector: Job? = null
     @Volatile
     private var foregroundStarted = false
+    @Volatile
+    private var remoteStandbyActive = false
 
     fun start() {
         if (collector != null) return
@@ -72,6 +74,12 @@ class NotificationCenter(
 
     fun onForegroundStarted() {
         foregroundStarted = true
+        updateForeground()
+    }
+
+    fun setRemoteStandby(active: Boolean) {
+        if (remoteStandbyActive == active) return
+        remoteStandbyActive = active
         updateForeground()
     }
 
@@ -139,7 +147,11 @@ class NotificationCenter(
             else -> context.getString(R.string.notification_sessions_running, active.size)
         }
         val content = when {
-            active.isEmpty() -> context.getString(R.string.notification_service_idle)
+            active.isEmpty() -> if (remoteStandbyActive) {
+                context.getString(R.string.notification_service_remote_standby)
+            } else {
+                context.getString(R.string.notification_service_idle)
+            }
             latest == null -> context.getString(R.string.notification_activity_thinking)
             else -> activityText(latest.activity)
         }

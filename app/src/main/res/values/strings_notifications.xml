@@ -7,6 +7,7 @@
     <string name="notification_channel_downloads_desc">显示开发包安装进度</string>
 
     <string name="notification_service_idle">后台服务已就绪</string>
+    <string name="notification_service_remote_standby">正在作为远程设备待命</string>
     <string name="notification_sessions_running">%1$d 个会话正在运行</string>
     <string name="notification_action_stop">停止</string>
     <string name="notification_activity_thinking">正在思考…</string>
