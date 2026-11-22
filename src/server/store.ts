@@ -111,6 +111,17 @@ export class RelayStore {
     return false
   }
 
+  renameDevice(id: string, name: string, now: number): DeviceRecord | null {
+    const result = this.db
+      .prepare('UPDATE devices SET name = ?, last_seen = ? WHERE id = ? AND revoked = 0')
+      .run(name, now, id)
+    if (Number(result.changes) === 0) return null
+    const row = this.db
+      .prepare('SELECT id, name, platform, token_hash, created_at, last_seen, revoked FROM devices WHERE id = ?')
+      .get(id) as DeviceRow | undefined
+    return row ? toDevice(row) : null
+  }
+
   touchDevice(id: string, now: number): void {
     this.db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').run(now, id)
   }

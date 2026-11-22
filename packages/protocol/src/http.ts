@@ -44,6 +44,15 @@ export interface RevokeResponse {
   revoked: string
 }
 
+export interface RenameDeviceRequest {
+  name: string
+}
+
+export interface RenameDeviceResponse {
+  deviceId: string
+  name: string
+}
+
 export interface ApiErrorBody {
   code: ErrorCode
   message: string

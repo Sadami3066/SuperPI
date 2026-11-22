@@ -31,6 +31,7 @@ const relay = createRelayServer({
   memory,
   onMemoryChanged: (version) => hub.broadcastMemoryChanged(version),
   onDeviceRevoked: (id) => hub.disconnectDevice(id),
+  onDeviceRenamed: (id, name) => hub.notifyDeviceRenamed(id, name),
   online: (deviceId) => hub.isOnline(deviceId),
   botsOf: (deviceId) => hub.botsOf(deviceId),
   capabilitiesOf: (deviceId) => hub.capabilitiesOf(deviceId),

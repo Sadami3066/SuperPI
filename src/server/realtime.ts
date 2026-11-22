@@ -30,6 +30,7 @@ export interface RealtimeHub {
   capabilitiesOf(deviceId: string): string[] | undefined
   broadcastMemoryChanged(version: number): void
   disconnectDevice(deviceId: string): void
+  notifyDeviceRenamed(deviceId: string, name: string): void
 }
 
 export interface RealtimeHubOptions {
@@ -625,6 +626,24 @@ export function createRealtimeHub(
       }, 250)
       forceTimer.unref?.()
       dropDevice(deviceId, `device ${deviceId} revoked`)
+    },
+    notifyDeviceRenamed(deviceId: string, name: string) {
+      const device = store.listDevices().find((entry) => entry.id === deviceId && !entry.revoked)
+      const activeConn = connections.get(deviceId)
+      const frame: PresenceFrame = {
+        type: 'presence',
+        deviceId,
+        name,
+        online: activeConn !== undefined,
+        lastSeen: device?.lastSeen ?? now(),
+      }
+      if (activeConn) {
+        frame.bots = activeConn.bots
+        frame.capabilities = activeConn.capabilities
+      }
+      for (const connection of connections.values()) {
+        send(connection, frame)
+      }
     },
   }
 }

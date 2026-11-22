@@ -266,6 +266,7 @@ export interface HelloOkFrame {
 export interface PresenceFrame {
   type: 'presence'
   deviceId: string
+  name?: string
   online: boolean
   lastSeen: number
   bots?: BotInfo[]
@@ -437,6 +438,9 @@ export function parseServerFrame(value: unknown): ServerFrame {
         deviceId: requireIdentifier(value, 'deviceId'),
         online: requireBoolean(value, 'online'),
         lastSeen: requireNumber(value, 'lastSeen'),
+      }
+      if (value.name !== undefined) {
+        frame.name = requireBoundedString(value, 'name', 128, true)
       }
       if (bots) frame.bots = bots
       if (capabilities) frame.capabilities = capabilities

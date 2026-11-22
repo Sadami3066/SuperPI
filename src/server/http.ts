@@ -20,6 +20,7 @@ import type {
   MemoryWriteResponse,
   PairCodeResponse,
   PairEntry,
+  RenameDeviceResponse,
   RevokeResponse,
 } from '@superpi/protocol'
 import type { RelayConfig } from './config.ts'
@@ -41,6 +42,7 @@ export interface RelayServerOptions {
   memory?: MemoryStore | null
   onMemoryChanged?: (version: number) => void
   onDeviceRevoked?: (deviceId: string) => void
+  onDeviceRenamed?: (deviceId: string, name: string) => void
   enrollRateLimit?: EnrollRateLimitOptions
   now?: () => number
   online?: (deviceId: string) => boolean
@@ -279,6 +281,36 @@ async function handle(
       if (!options.store.revokeDevice(id, now())) throw new HttpError(404, 'not_found', `unknown device: ${id}`)
       options.onDeviceRevoked?.(id)
       const body: RevokeResponse = { revoked: id }
+      sendJson(response, 200, body)
+      return
+    }
+
+    if (method === 'PATCH' && url.pathname.startsWith('/v1/devices/')) {
+      const currentNow = now()
+      authenticate(options, currentNow, request, response)
+      if (response.writableEnded) return
+      let id: string
+      try {
+        id = decodeURIComponent(url.pathname.slice('/v1/devices/'.length))
+      } catch {
+        throw new HttpError(400, 'bad_request', 'malformed device id')
+      }
+      if (id === '' || id.includes('/') || id.includes('\\') || id === '.' || id === '..') {
+        throw new HttpError(400, 'bad_request', 'invalid device id')
+      }
+      const payload = await readJson(request, BODY_LIMIT)
+      if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+        throw new HttpError(400, 'bad_request', 'body must be an object')
+      }
+      const rawName = (payload as { name?: unknown }).name
+      if (typeof rawName !== 'string' || rawName.trim() === '' || rawName.trim().length > MAX_DEVICE_NAME_LENGTH) {
+        throw new HttpError(400, 'bad_request', 'name must be a non-empty string up to 128 chars')
+      }
+      const cleanName = rawName.trim()
+      const updated = options.store.renameDevice(id, cleanName, currentNow)
+      if (!updated) throw new HttpError(404, 'not_found', `unknown device: ${id}`)
+      options.onDeviceRenamed?.(id, updated.name)
+      const body: RenameDeviceResponse = { deviceId: id, name: updated.name }
       sendJson(response, 200, body)
       return
     }
