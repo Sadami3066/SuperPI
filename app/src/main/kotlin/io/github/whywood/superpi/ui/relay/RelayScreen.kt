@@ -197,6 +197,16 @@ internal fun RelayScreen(
 
     val activePairLink = state.pairLink
     if (activePairLink != null) {
+        val baselineDeviceIds = remember(activePairLink) { devices.map { it.deviceId }.toSet() }
+        val baselineOnlineIds = remember(activePairLink) { devices.filter { it.online }.map { it.deviceId }.toSet() }
+        LaunchedEffect(activePairLink, devices) {
+            val pairedNewPeer = devices.any { device ->
+                device.deviceId !in baselineDeviceIds || (device.online && device.deviceId !in baselineOnlineIds)
+            }
+            if (pairedNewPeer) {
+                onDismissPairCode()
+            }
+        }
         val qrBitmap = remember(activePairLink) {
             runCatching { QrCodeMatrix.encode(activePairLink)?.toBitmap(modulePx = 8)?.asImageBitmap() }.getOrNull()
         }
@@ -326,8 +336,19 @@ internal fun RelayScreen(
         RelayQrScanSheet(
             onDismiss = { scanningQr = false },
             onScanned = { scanned ->
-                link = scanned
+                val trimmed = scanned.trim()
+                link = trimmed
                 scanningQr = false
+                val parsed = RelayPairingLink.parse(trimmed)
+                val currentName = deviceName.trim()
+                if (!state.signingIn &&
+                    parsed != null &&
+                    parsed.pairCode != null &&
+                    currentName.isNotEmpty() &&
+                    (!parsed.origin.startsWith("https://") || parsed.fingerprint != null)
+                ) {
+                    onConnect(trimmed, secret.trim().ifEmpty { null }, currentName)
+                }
             },
         )
     }

@@ -322,18 +322,21 @@ class ChatViewModel(
             }
             return
         }
-        when (val parsed = parseChatCommand(text)) {
-            is ParsedCommand.Skill -> {
-                expandAndSend(parsed.name, parsed.args)
+        val isRemoteWorkspace = current.workspaces.firstOrNull { it.id == current.currentWorkspaceId }?.remote != null
+        if (!isRemoteWorkspace) {
+            when (val parsed = parseChatCommand(text)) {
+                is ParsedCommand.Skill -> {
+                    expandAndSend(parsed.name, parsed.args)
+                    return
+                }
+
+                else -> Unit
+            }
+            val mentions = extractSkillMentions(text)
+            if (mentions != null) {
+                expandInlineAndSend(mentions)
                 return
             }
-
-            else -> Unit
-        }
-        val mentions = extractSkillMentions(text)
-        if (mentions != null) {
-            expandInlineAndSend(mentions)
-            return
         }
         startTurn(
             prompt = sessionDrafts.buildPrompt(current.quote, current.attachments, text),

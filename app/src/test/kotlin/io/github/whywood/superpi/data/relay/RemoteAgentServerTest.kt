@@ -1120,4 +1120,95 @@ class RemoteAgentServerTest {
         val histBytes = Base64.getDecoder().decode(sent.last().getValue("result").jsonObject.getValue("dataBase64").jsonPrimitive.content)
         assertEquals("hello remote", String(histBytes, Charsets.UTF_8))
     }
+
+    @Test
+    fun expandsRemoteSkillPromptsOnCalleeAndReloadsIdleSessionOnCapabilitiesChange() = runTest {
+        val ws = temp.newFolder("skill-ws")
+        val policyFile = File(temp.newFolder("skill-policy"), "policies.json")
+        val policyStore = WorkspaceToolPolicyStore(policyFile)
+        val delegate = FakeAgentRuntime()
+        val created = delegate.createWorkspace("SkillBot", ws.absolutePath)
+        val botId = created.id
+        val reloadedSessionIds = mutableListOf<String>()
+        val host = object : AgentRuntime by delegate {
+            override suspend fun reloadSession(sessionId: String): String {
+                reloadedSessionIds += sessionId
+                return sessionId
+            }
+        }
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(
+            host = host,
+            bots = { listOf(RelayBot("home", "PI"), RelayBot(botId, "SkillBot")) },
+            send = { sent.add(it); true },
+            scope = backgroundScope,
+            workspaceToolPolicies = { policyStore },
+            expandSkillPrompt = { cwd, rawText ->
+                assertEquals(ws.absolutePath, cwd)
+                if (rawText.startsWith("/skill:missing")) {
+                    throw IllegalArgumentException("Skill not found: missing")
+                }
+                if (rawText.startsWith("/skill:writer ")) {
+                    "<skill name=\"writer\">Write concisely</skill>\n\n" + rawText.removePrefix("/skill:writer ")
+                } else {
+                    rawText
+                }
+            },
+        )
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                "sk-miss",
+                "dev-2",
+                "bot.prompt",
+                buildJsonObject {
+                    put("botId", botId)
+                    put("text", "/skill:missing hello")
+                },
+            ),
+        )
+        assertEquals("route_error", sent.last().getValue("type").jsonPrimitive.content)
+        assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+        assertTrue(delegate.sent.isEmpty())
+
+        server.handle(
+            RelayServerFrame.Route(
+                "sk-ok",
+                "dev-2",
+                "bot.prompt",
+                buildJsonObject {
+                    put("botId", botId)
+                    put("text", "/skill:writer draft memo")
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        val sessionId = sent.last().getValue("result").jsonObject.getValue("sessionId").jsonPrimitive.content
+        assertEquals("<skill name=\"writer\">Write concisely</skill>\n\ndraft memo", delegate.sent.single())
+
+        delegate.emitFor(sessionId, RuntimeEvent.RunFinished("r-1", "done", RunStatus.DONE, 200L))
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                "cap-reload",
+                "dev-2",
+                "bot.capabilities.set",
+                buildJsonObject {
+                    put("botId", botId)
+                    put(
+                        "policy",
+                        buildJsonObject {
+                            put("allCapabilities", true)
+                            put("screenTools", true)
+                            put("miniappTools", false)
+                        },
+                    )
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        assertEquals(listOf(sessionId), reloadedSessionIds)
+    }
 }

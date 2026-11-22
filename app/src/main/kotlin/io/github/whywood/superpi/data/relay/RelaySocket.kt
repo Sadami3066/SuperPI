@@ -66,6 +66,9 @@ class RelaySocket(
     @Volatile
     private var retryWake: CompletableDeferred<Unit>? = null
 
+    @Volatile
+    private var forceImmediateRetry = false
+
     fun start(
         account: RelayAccount,
         token: String,
@@ -115,9 +118,18 @@ class RelaySocket(
         _state.value = RelaySocketState.Stopped
     }
 
-    fun reconnectNow() {
+    fun reconnectNow(forceCycle: Boolean = false) {
         if (!running) return
+        forceImmediateRetry = true
         retryWake?.complete(Unit)
+        val now = System.currentTimeMillis()
+        val staleAfterIdle = lastFrameAt > 0L && (now - lastFrameAt) > STALE_IDLE_MILLIS
+        if (forceCycle || staleAfterIdle) {
+            val activeSocket = synchronized(lifecycleLock) { socket }
+            if (activeSocket != null) {
+                runCatching { activeSocket.cancel() }
+            }
+        }
     }
 
     fun send(frame: String): Boolean = socket?.send(frame) ?: false
@@ -262,6 +274,11 @@ class RelaySocket(
             }
             if (!running) break
             _state.value = RelaySocketState.Offline
+            if (forceImmediateRetry) {
+                forceImmediateRetry = false
+                attempt = 0
+                continue
+            }
             val delayMillis = backoffSchedule[attempt.coerceAtMost(backoffSchedule.size - 1)]
             attempt = (attempt + 1).coerceAtMost(backoffSchedule.size - 1)
             val wake = CompletableDeferred<Unit>()
@@ -289,6 +306,7 @@ class RelaySocket(
         private const val FRAME_BUFFER_CAPACITY = 2_048
         private const val PING_INTERVAL_SECONDS = 20L
         private const val HELLO_TIMEOUT_MILLIS = 20_000L
+        private const val STALE_IDLE_MILLIS = 35_000L
         private val BACKOFF = longArrayOf(1_000, 2_000, 5_000, 10_000, 30_000)
     }
 }

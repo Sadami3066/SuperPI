@@ -452,7 +452,8 @@ internal fun AppShell(
                     }
                 }
 
-                "model_changed" -> {
+                "model_changed",
+                "capabilities_changed" -> {
                     if (matchesActive) {
                         remoteControlRefreshEpoch += 1
                     }

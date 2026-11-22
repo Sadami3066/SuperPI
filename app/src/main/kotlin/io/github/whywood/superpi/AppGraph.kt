@@ -203,8 +203,11 @@ class AppGraph(context: Context) : AppDependencies {
                 )
             },
             slashCommands = { cwd ->
-                val resolvedCwd = cwd.ifBlank { dataGraph.workspacesDir.absolutePath }
-                val skills = runCatching { dataGraph.skillCatalog.list(resolvedCwd) }.getOrDefault(emptyList())
+                val resolvedCwd = cwd.ifBlank { dataGraph.homeDir.absolutePath }
+                val enabledSkills = enabledSkillNamesForCwd(resolvedCwd)
+                val skills = runCatching { dataGraph.skillCatalog.list(resolvedCwd) }
+                    .getOrDefault(emptyList())
+                    .filter { it.name in enabledSkills }
                 buildList {
                     add(io.github.whywood.superpi.data.relay.RemoteCommandSpec("compact", "Compact conversation", "builtin"))
                     for (skill in skills) {
@@ -218,6 +221,7 @@ class AppGraph(context: Context) : AppDependencies {
                     }
                 }
             },
+            expandSkillPrompt = ::expandRemotePromptSkills,
         ).also { live ->
             scope.launch {
                 live.remoteBots.collect { bots -> remoteBots.value = bots }
@@ -230,6 +234,71 @@ class AppGraph(context: Context) : AppDependencies {
 
     private val remoteWorkspaceRoot: File
         get() = io.github.whywood.superpi.data.relay.RemoteWorkspaces.remoteRoot(appContext.filesDir)
+
+    private suspend fun enabledSkillNamesForCwd(cwd: String): Set<String> {
+        val homePath = runCatching { dataGraph.homeDir.canonicalPath }.getOrElse { dataGraph.homeDir.absolutePath }
+        val targetPath = runCatching { File(cwd).canonicalPath }.getOrElse { File(cwd).absolutePath }
+        val stored = dataGraph.workspaceToolPolicies.policyForCwd(cwd)
+        val policy = if (targetPath == homePath) stored.copy(allCapabilities = true) else stored
+        val installedPlugins = pluginManager.state.value.plugins.filter { it.enabled }.mapTo(mutableSetOf()) { it.id }
+        val excludedPlugins = installedPlugins - policy.enabledPlugins(installedPlugins)
+        val skills = dataGraph.skillRepository.list().getOrNull().orEmpty()
+        val allSkillNames = skills.mapTo(mutableSetOf()) { it.name }
+        val nameById = skills.associate { it.id to it.name }
+        val excludedPluginSkills = excludedPlugins.flatMapTo(mutableSetOf()) { pluginId ->
+            pluginManager.skillIds(pluginId).mapTo(mutableSetOf()) { id -> nameById[id] ?: id }
+        }
+        val excludedScreenSkill = if (policy.screenTools) emptySet() else setOf(BundledSkills.SCREEN_OPS_SKILL)
+        return policy.enabledSkills(allSkillNames) - excludedPluginSkills - excludedScreenSkill
+    }
+
+    private suspend fun expandRemotePromptSkills(cwd: String, rawText: String): String {
+        if (!rawText.contains("/skill:") || rawText.contains("<skill ")) return rawText
+        val resolvedCwd = cwd.ifBlank { dataGraph.homeDir.absolutePath }
+        val attachmentTagIndex = rawText.indexOf("\n<attachments>\n")
+        val mainPart = if (attachmentTagIndex >= 0) rawText.substring(0, attachmentTagIndex).trimEnd() else rawText
+        val attachmentSuffix = if (attachmentTagIndex >= 0) "\n\n" + rawText.substring(attachmentTagIndex + 1) else ""
+        val lines = mainPart.lines()
+        val quoteLines = lines.takeWhile { it.startsWith(">") }
+        val quotePrefix = if (quoteLines.isNotEmpty()) quoteLines.joinToString("\n") + "\n\n" else ""
+        val body = if (quoteLines.isNotEmpty()) {
+            lines.drop(quoteLines.size).joinToString("\n").trimStart()
+        } else {
+            mainPart.trim()
+        }
+        val enabled = enabledSkillNamesForCwd(resolvedCwd)
+        when (val parsed = io.github.whywood.superpi.ui.common.chat.parseChatCommand(body)) {
+            is io.github.whywood.superpi.ui.common.chat.ParsedCommand.Skill -> {
+                if (parsed.name !in enabled) {
+                    throw IllegalArgumentException("Skill not found: ${parsed.name}")
+                }
+                val expansion = dataGraph.skillCatalog.expand(resolvedCwd, parsed.name, parsed.args)
+                    ?: throw IllegalArgumentException("Skill not found: ${parsed.name}")
+                return quotePrefix + expansion.prompt + attachmentSuffix
+            }
+            else -> Unit
+        }
+        val mentions = io.github.whywood.superpi.ui.common.chat.extractSkillMentions(body) ?: return rawText
+        val expansions = mentions.names.map { name ->
+            if (name !in enabled) {
+                throw IllegalArgumentException("Skill not found: $name")
+            }
+            dataGraph.skillCatalog.expand(resolvedCwd, name, "")
+                ?: throw IllegalArgumentException("Skill not found: $name")
+        }
+        val expandedBody = buildString {
+            expansions.forEachIndexed { index, expansion ->
+                if (index > 0) append("\n\n")
+                append(expansion.prompt)
+            }
+            val remainder = mentions.text.trim()
+            if (remainder.isNotEmpty()) {
+                if (isNotEmpty()) append("\n\n")
+                append(remainder)
+            }
+        }
+        return quotePrefix + expandedBody + attachmentSuffix
+    }
 
     private fun remoteTargetFor(cwd: String): io.github.whywood.superpi.remote.RemoteSessionTarget? {
         val bot = remoteBots.value.firstOrNull { candidate ->

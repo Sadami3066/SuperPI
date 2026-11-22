@@ -77,6 +77,7 @@ class RelayLive(
     slashCommands: suspend (String) -> List<RemoteCommandSpec> = { emptyList() },
     workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
     installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
+    expandSkillPrompt: suspend (String, String) -> String = { _, text -> text },
 ) {
     private val socket = RelaySocket(scope, io)
     private val mutex = Mutex()
@@ -102,6 +103,7 @@ class RelayLive(
         slashCommands = slashCommands,
         workspaceToolPolicies = workspaceToolPolicies,
         installedCapabilities = installedCapabilities,
+        expandSkillPrompt = expandSkillPrompt,
     )
 
     private val _state = MutableStateFlow(RelayLiveState.Disabled)
@@ -217,9 +219,9 @@ class RelayLive(
         _state.value = RelayLiveState.Disabled
     }
 
-    fun reconnectNow() {
+    fun reconnectNow(forceCycle: Boolean = false) {
         if (!started || account == null) return
-        socket.reconnectNow()
+        socket.reconnectNow(forceCycle = forceCycle)
     }
 
     fun refreshBots() {

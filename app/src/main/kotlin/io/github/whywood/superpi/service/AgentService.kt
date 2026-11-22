@@ -32,6 +32,8 @@ class AgentService : Service() {
     private val graph by lazy { (application as SuperPIApplication).graph }
     private var floatingWindow: FloatingWindowController? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile
+    private var activeNetworkHandle: Long? = null
     private var turnWakeLock: PowerManager.WakeLock? = null
     private val wakeLockGuard = Any()
     private val clockReceiver = object : BroadcastReceiver() {
@@ -182,7 +184,16 @@ class AgentService : Service() {
         val manager = getSystemService(ConnectivityManager::class.java) ?: return
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                graph.relayLive.reconnectNow()
+                val handle = network.networkHandle
+                val previous = activeNetworkHandle
+                activeNetworkHandle = handle
+                graph.relayLive.reconnectNow(forceCycle = previous != null && previous != handle)
+            }
+
+            override fun onLost(network: Network) {
+                if (activeNetworkHandle == network.networkHandle) {
+                    activeNetworkHandle = null
+                }
             }
         }
         runCatching {

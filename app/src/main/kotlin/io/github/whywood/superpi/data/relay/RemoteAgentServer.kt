@@ -87,6 +87,7 @@ class RemoteAgentServer(
     private val slashCommands: suspend (String) -> List<RemoteCommandSpec> = { emptyList() },
     private val workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
     private val installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
+    private val expandSkillPrompt: suspend (String, String) -> String = { _, text -> text },
 ) {
     private val feeds = ConcurrentHashMap<String, Feed>()
     private val botWatchers = ConcurrentHashMap<String, BotWatcher>()
@@ -184,11 +185,23 @@ class RemoteAgentServer(
             reject(frame, "bot_not_found", if (botId.isBlank()) "botId is required" else "bot $botId is not available")
             return
         }
-        val text = frame.params.string("text")
+        val rawText = frame.params.string("text")
         val images = parseImageParts(frame.params)
-        if (text.isBlank() && images.isEmpty()) {
+        if (rawText.isBlank() && images.isEmpty()) {
             reject(frame, "bad_request", "text or images is required")
             return
+        }
+        val text = if (rawText.isNotBlank()) {
+            try {
+                expandSkillPrompt(localWorkspaceById(botId)?.cwd.orEmpty(), rawText)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: IllegalArgumentException) {
+                reject(frame, "bad_request", error.message ?: "invalid skill command")
+                return
+            }
+        } else {
+            rawText
         }
         val existing = frame.params.string("sessionId").ifBlank { null }
         val sessionId = if (existing != null) {
@@ -850,6 +863,14 @@ class RemoteAgentServer(
             return
         }
         store.update(workspace.cwd, next)
+        if (!isBotBusy(botId)) {
+            val activeId = findActiveSessionId(botId) ?: host.sessions(botId).firstOrNull { !it.archived }?.let {
+                resolveExistingSession(botId, it.id)
+            }
+            if (activeId != null) {
+                runCatching { host.reloadSession(activeId).also { sessionBots[it] = botId } }
+            }
+        }
         onSyncEvent(RelaySyncEvent(kind = "capabilities_changed", botId = workspace.id))
         val inventory = installedCapabilities(workspace.cwd)
         respondOk(frame.id, serializeCapabilitiesSnapshot(workspace, next, inventory))
