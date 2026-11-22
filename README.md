@@ -6,10 +6,10 @@ A single self-hosted service that lets multiple SuperPI Android devices act as o
 
 ## What it does
 
-- **Account and devices** — one account per deployment, device tokens with revocation, pairing by short-lived codes.
+- **Account and devices** — one account per deployment, device tokens with revocation, pairing by short-lived codes or QR scan between phones.
 - **Presence** — online state derived from the live connection, never self-reported.
-- **Routing** — a device asks another device to run one of its bots; events stream back over the same channel.
-- **Shared memory** — one authoritative copy of the memory documents, written with source tags and version checks.
+- **Routing** — a device asks another device to run or manage one of its bots, transfer workspace attachments, or stream `present` rich media artifacts; events stream back over the same channel.
+- **Shared memory** — one authoritative copy of the memory documents (`SOUL.md`, `USER.md`, `MEMORY.md`, `logs/YYYY-MM-DD.md`), written with source tags, version checks, and a single-holder rollup lease (`/v1/memory/rollup-lease`) to coordinate multi-phone distillation.
 - **Transport** — HTTPS and WSS under a self-signed CA whose fingerprint is pinned at pairing time.
 
 It does not run models, execute tools, or interpret conversations.
