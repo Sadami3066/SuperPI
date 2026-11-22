@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.remote
 
 import io.github.whywood.superpi.data.relay.RelayFrames
+import io.github.whywood.superpi.data.relay.RelayImageBudget
 import io.github.whywood.superpi.data.relay.RemoteCallError
 import io.github.whywood.superpi.data.relay.RemoteCallOutcome
 import io.github.whywood.superpi.data.relay.RemoteEvent
@@ -59,6 +60,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +75,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -90,6 +93,9 @@ class RemoteSessionHandle internal constructor(
     private val reconnectGraceMillis: Long = RECONNECT_GRACE_MILLIS,
     private val questionCenter: QuestionCenter? = null,
     private val onPassiveRuntimeEvent: (suspend (SessionRuntimeEvent) -> Unit)? = null,
+    private val fitRemoteImages: suspend (List<RouteImagePart>) -> Result<List<RouteImagePart>> = { parts ->
+        RelayImageBudget.fit(parts)
+    },
 ) : SessionHandle {
     private val listeners = CopyOnWriteArrayList<suspend (SessionEvent) -> Unit>()
     private val ownsScope = injectedScope == null
@@ -97,10 +103,12 @@ class RemoteSessionHandle internal constructor(
     private val remoteModel: Model = buildRemoteModel(target)
     private val passiveWake = Channel<Unit>(Channel.CONFLATED)
     private val recentOwnedRoutes = ConcurrentHashMap.newKeySet<String>()
+    private val ioDispatcher: CoroutineDispatcher =
+        (injectedScope?.coroutineContext?.get(kotlin.coroutines.ContinuationInterceptor) as? CoroutineDispatcher)
+            ?: Dispatchers.IO
     private val fileClient = RemoteFileClient(
         transport = transport,
-        ioDispatcher = (injectedScope?.coroutineContext?.get(kotlin.coroutines.ContinuationInterceptor) as? kotlinx.coroutines.CoroutineDispatcher)
-            ?: Dispatchers.IO,
+        ioDispatcher = ioDispatcher,
     )
     private val uploadedAttachments = ConcurrentHashMap<String, String>()
 
@@ -399,7 +407,7 @@ class RemoteSessionHandle internal constructor(
                     transport.remoteEvents.collect { event -> onRemoteEvent(turnScope, turn, event) }
                 }
                 val connectionWatch: Job = launch(start = CoroutineStart.UNDISPATCHED) {
-                    transport.onlineDevices.collect { devices -> onDevicesChanged(this, turn, devices) }
+                    transport.onlineDevices.collect { devices -> onDevicesChanged(turnScope, turn, devices) }
                 }
                 try {
                     driver()
@@ -434,8 +442,12 @@ class RemoteSessionHandle internal constructor(
             turn.failure = error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
             return
         }
+        val preparedImages = prepareOutgoingImages(images).getOrElse { error ->
+            turn.failure = error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
+            return
+        }
         val sessionId = peerSessionId
-        when (val outcome = callPrompt(turn, preparedText, images, sessionId)) {
+        when (val outcome = callPrompt(turn, preparedText, preparedImages, sessionId)) {
             is RemoteCallOutcome.Ok -> {
                 pendingFailedPrompt = null
                 rememberPeerSession(outcome.result)
@@ -446,7 +458,7 @@ class RemoteSessionHandle internal constructor(
             is RemoteCallOutcome.Failed -> {
                 if (sessionId != null && outcome.error.code == SESSION_NOT_FOUND) {
                     clearPeerSession()
-                    when (val retryOutcome = callPrompt(turn, preparedText, images, null)) {
+                    when (val retryOutcome = callPrompt(turn, preparedText, preparedImages, null)) {
                         is RemoteCallOutcome.Ok -> {
                             pendingFailedPrompt = null
                             rememberPeerSession(retryOutcome.result)
@@ -468,7 +480,7 @@ class RemoteSessionHandle internal constructor(
     private suspend fun callPrompt(
         turn: RemoteTurn,
         text: String,
-        images: List<ImagePart>,
+        images: List<RouteImagePart>,
         sessionId: String?,
     ): RemoteCallOutcome = transport.callWithOutcome(
         to = target.deviceId,
@@ -480,11 +492,11 @@ class RemoteSessionHandle internal constructor(
         },
     )
 
-    private fun onDevicesChanged(watchScope: CoroutineScope, turn: RemoteTurn, devices: Set<String>) {
+    private fun onDevicesChanged(turnScope: CoroutineScope, turn: RemoteTurn, devices: Set<String>) {
         if (turn.settled.isCompleted || turn.aborted) return
         if (target.deviceId !in devices) {
             if (!turn.markDisconnected()) return
-            val graceJob = watchScope.launch {
+            val graceJob = turnScope.launch {
                 delay(reconnectGraceMillis)
                 if (turn.isDisconnected() && !turn.settled.isCompleted) {
                     turn.connectionLost = true
@@ -500,25 +512,35 @@ class RemoteSessionHandle internal constructor(
             turn.settled.complete(Unit)
             return
         }
-        watchScope.launch { resumeTurn(turn, sessionId) }
+        turnScope.launch { resumeTurn(turnScope, turn, sessionId) }
     }
 
-    private suspend fun resumeTurn(turn: RemoteTurn, sessionId: String) {
+    private suspend fun resumeTurn(turnScope: CoroutineScope, turn: RemoteTurn, sessionId: String) {
         if (turn.settled.isCompleted || turn.aborted) return
-        val outcome = transport.callWithOutcome(
-            to = target.deviceId,
-            method = BOT_RESUME,
-            params = buildJsonObject {
-                put("botId", target.botId)
-                put("sessionId", sessionId)
-                put("afterSeq", turn.lastAcceptedSeq())
-            },
-            onRouteId = { route -> turn.switchRoute(route) },
-        )
-        if (turn.settled.isCompleted || turn.aborted) return
+        turn.beginResumeBuffer()
+        val outcome = try {
+            transport.callWithOutcome(
+                to = target.deviceId,
+                method = BOT_RESUME,
+                params = buildJsonObject {
+                    put("botId", target.botId)
+                    put("sessionId", sessionId)
+                    put("afterSeq", turn.lastAcceptedSeq())
+                },
+                onRouteId = { route -> turn.switchRoute(route) },
+            )
+        } catch (cancelled: CancellationException) {
+            turn.finishResumeBuffer()
+            throw cancelled
+        }
+        if (turn.settled.isCompleted || turn.aborted) {
+            turn.finishResumeBuffer()
+            return
+        }
         val result = when (outcome) {
             is RemoteCallOutcome.Ok -> outcome.result
             is RemoteCallOutcome.Failed -> {
+                turn.finishResumeBuffer()
                 if (outcome.error.code == SESSION_NOT_FOUND) {
                     clearPeerSession()
                 }
@@ -527,7 +549,15 @@ class RemoteSessionHandle internal constructor(
                 return
             }
         }
+        val serverSeq = (result?.get("seq") as? JsonPrimitive)?.longOrNull
+        val reset = (result?.get("reset") as? JsonPrimitive)?.booleanOrNull == true
         val busy = (result?.get("busy") as? JsonPrimitive)?.booleanOrNull
+        if (reset || (serverSeq != null && serverSeq < turn.lastAcceptedSeq())) {
+            turn.resetAcceptedSeq(if (busy == true) -1L else (serverSeq ?: -1L))
+        }
+        for (buffered in turn.finishResumeBuffer()) {
+            onRemoteEvent(turnScope, turn, buffered)
+        }
         if (busy == false && !turn.settled.isCompleted) {
             withTimeoutOrNull(RESUME_IDLE_DRAIN_MILLIS) { turn.settled.await() }
             if (!turn.settled.isCompleted) turn.settled.complete(Unit)
@@ -548,6 +578,10 @@ class RemoteSessionHandle internal constructor(
             emit(SessionEvent.SessionError(error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE))
             return
         }
+        val preparedImages = prepareOutgoingImages(images).getOrElse { error ->
+            emit(SessionEvent.SessionError(error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE))
+            return
+        }
         val normalizedText = normalizeMirrorAttachmentPaths(text)
         val outcome = transport.callWithOutcome(
             to = target.deviceId,
@@ -556,10 +590,10 @@ class RemoteSessionHandle internal constructor(
                 put("botId", target.botId)
                 put("sessionId", sessionId)
                 put("text", preparedText)
-                if (images.isNotEmpty()) {
+                if (preparedImages.isNotEmpty()) {
                     put(
                         "images",
-                        RelayFrames.imagesArray(images.map { RouteImagePart(it.data, it.mimeType) }),
+                        RelayFrames.imagesArray(preparedImages),
                     )
                 }
             },
@@ -620,6 +654,7 @@ class RemoteSessionHandle internal constructor(
     private suspend fun onRemoteEvent(turnScope: CoroutineScope, turn: RemoteTurn, event: RemoteEvent) {
         val route = turn.routeId ?: return
         if (event.routeId != route) return
+        if (turn.bufferIfResuming(event)) return
         if (!turn.accept(event.seq)) return
         when (val decoded = RemoteEventMapping.decode(event.event)) {
             null -> Unit
@@ -889,8 +924,25 @@ class RemoteSessionHandle internal constructor(
         coroutineScope {
             val epoch = launch {
                 val epochScope = this
+                val eventLock = Any()
+                var resumeHandshakeComplete = false
+                val pendingEvents = ArrayDeque<RemoteEvent>()
                 val eventCollector = launch(start = CoroutineStart.UNDISPATCHED) {
-                    transport.remoteEvents.collect { event -> onPassiveRemoteEvent(epochScope, event) }
+                    transport.remoteEvents.collect { event ->
+                        val deliverNow = synchronized(eventLock) {
+                            if (resumeHandshakeComplete) {
+                                true
+                            } else {
+                                if (event.routeId == passiveWatchRouteId) {
+                                    pendingEvents.addLast(event)
+                                }
+                                false
+                            }
+                        }
+                        if (deliverNow) {
+                            onPassiveRemoteEvent(epochScope, event)
+                        }
+                    }
                 }
                 try {
                     val after = passiveLastSeq
@@ -923,6 +975,23 @@ class RemoteSessionHandle internal constructor(
                         }
 
                         is RemoteCallOutcome.Ok -> {
+                            val serverSeq = (outcome.result?.get("seq") as? JsonPrimitive)?.longOrNull
+                            val reset = (outcome.result?.get("reset") as? JsonPrimitive)?.booleanOrNull == true
+                            val serverBusy = (outcome.result?.get("busy") as? JsonPrimitive)?.booleanOrNull == true
+                            if (reset || (serverSeq != null && serverSeq < passiveLastSeq)) {
+                                passiveLastSeq = if (serverBusy) -1L else (serverSeq ?: -1L)
+                            }
+                            while (true) {
+                                val buffered = synchronized(eventLock) {
+                                    if (pendingEvents.isNotEmpty()) {
+                                        pendingEvents.removeFirst()
+                                    } else {
+                                        resumeHandshakeComplete = true
+                                        null
+                                    }
+                                } ?: break
+                                onPassiveRemoteEvent(epochScope, buffered)
+                            }
                             transport.onlineDevices.first { target.deviceId !in it || closed || activeTurn != null }
                             if (closed || activeTurn != null) {
                                 WatchEpochResult.Preempted
@@ -1276,16 +1345,22 @@ class RemoteSessionHandle internal constructor(
         }
     }
 
-    private fun promptParams(text: String, images: List<ImagePart>, sessionId: String?): JsonObject = buildJsonObject {
+    private fun promptParams(text: String, images: List<RouteImagePart>, sessionId: String?): JsonObject = buildJsonObject {
         put("botId", target.botId)
         if (sessionId != null) put("sessionId", sessionId)
         put("text", text)
         if (images.isNotEmpty()) {
             put(
                 "images",
-                RelayFrames.imagesArray(images.map { RouteImagePart(it.data, it.mimeType) }),
+                RelayFrames.imagesArray(images),
             )
         }
+    }
+
+    private suspend fun prepareOutgoingImages(images: List<ImagePart>): Result<List<RouteImagePart>> {
+        if (images.isEmpty()) return Result.success(emptyList())
+        val parts = images.map { RouteImagePart(it.data, it.mimeType) }
+        return withContext(ioDispatcher) { fitRemoteImages(parts) }
     }
 
     private suspend fun prepareOutgoingPrompt(rawText: String): Result<String> {
@@ -1446,6 +1521,8 @@ class RemoteSessionHandle internal constructor(
         private var acceptedSeq: Long = -1L
         private var disconnected: Boolean = false
         private var disconnectGraceJob: Job? = null
+        private var resumePending: Boolean = false
+        private val resumeBuffer = ArrayDeque<RemoteEvent>()
         private val questionJobs = ConcurrentHashMap<String, Job>()
 
         @Synchronized
@@ -1458,6 +1535,33 @@ class RemoteSessionHandle internal constructor(
         @Synchronized
         fun switchRoute(route: String) {
             routeId = route
+        }
+
+        @Synchronized
+        fun resetAcceptedSeq(seq: Long) {
+            acceptedSeq = seq
+        }
+
+        @Synchronized
+        fun beginResumeBuffer() {
+            resumePending = true
+            resumeBuffer.clear()
+        }
+
+        @Synchronized
+        fun bufferIfResuming(event: RemoteEvent): Boolean {
+            if (!resumePending) return false
+            resumeBuffer.addLast(event)
+            return true
+        }
+
+        @Synchronized
+        fun finishResumeBuffer(): List<RemoteEvent> {
+            resumePending = false
+            if (resumeBuffer.isEmpty()) return emptyList()
+            val items = resumeBuffer.toList()
+            resumeBuffer.clear()
+            return items
         }
 
         @Synchronized

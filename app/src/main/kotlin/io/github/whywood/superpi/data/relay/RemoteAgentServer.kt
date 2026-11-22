@@ -128,6 +128,28 @@ class RemoteAgentServer(
         suppressedSessionSync.clear()
     }
 
+    fun onPeerOffline(deviceId: String) {
+        if (deviceId.isBlank()) return
+        botWatchers.entries.removeIf { it.value.deviceId == deviceId }
+        for (feed in feeds.values) {
+            synchronized(feed) {
+                feed.routeIds.entries.removeIf { it.value == deviceId }
+            }
+        }
+        pruneFinishedFeeds()
+    }
+
+    fun onRouteRejected(routeId: String) {
+        if (routeId.isBlank()) return
+        botWatchers.remove(routeId)
+        for (feed in feeds.values) {
+            synchronized(feed) {
+                feed.routeIds.remove(routeId)
+            }
+        }
+        pruneFinishedFeeds()
+    }
+
     suspend fun handle(frame: RelayServerFrame.Route) {
         try {
             when (frame.method) {
@@ -213,10 +235,8 @@ class RemoteAgentServer(
             host.newSession(botId).sessionId.also { created -> sessionBots[created] = botId }
         }
         val alreadyBusy = host.busySessionIds.value.contains(sessionId) || feeds[sessionId]?.active == true
-        val feed = if (alreadyBusy) {
-            ensureActiveFeed(sessionId, null)
-        } else {
-            ensureActiveFeed(sessionId, frame.id, frame.from).also { pruneFinishedFeeds() }
+        val feed = ensureActiveFeed(sessionId, frame.id, frame.from).also {
+            if (!alreadyBusy) pruneFinishedFeeds()
         }
         respondOk(frame.id, buildJsonObject { put("sessionId", sessionId) })
         if (alreadyBusy) {
@@ -1189,6 +1209,8 @@ class RemoteAgentServer(
             val snapshot: List<BufferedEvent>
             val gap: Boolean
             val busy: Boolean
+            val latestSeq: Long
+            val seqReset: Boolean
             synchronized(feed) {
                 if (frame.from.isNotBlank()) {
                     feed.routeIds.entries.removeIf { it.value == frame.from }
@@ -1196,12 +1218,14 @@ class RemoteAgentServer(
                 busy = feed.active || host.busySessionIds.value.contains(sessionId)
                 feed.routeIds[frame.id] = frame.from
                 feed.updatedAt = System.currentTimeMillis()
-                val afterSeq = if (tail) {
-                    if (busy) feed.turnStartSeq - 1L else feed.seq.get() - 1L
+                latestSeq = feed.seq.get() - 1L
+                seqReset = !tail && requestedAfterSeq > latestSeq
+                val afterSeq = if (tail || seqReset) {
+                    if (busy) feed.turnStartSeq - 1L else latestSeq
                 } else {
                     requestedAfterSeq
                 }
-                gap = afterSeq >= 0L && feed.evictedThroughSeq > afterSeq
+                gap = seqReset || (afterSeq >= 0L && feed.evictedThroughSeq > afterSeq)
                 snapshot = feed.buffer.filter { entry -> entry.seq > afterSeq }
             }
             respondOk(
@@ -1210,6 +1234,8 @@ class RemoteAgentServer(
                     put("sessionId", sessionId)
                     put("busy", busy)
                     put("gap", gap)
+                    put("seq", latestSeq)
+                    if (seqReset) put("reset", true)
                 },
             )
             for (entry in snapshot) {
@@ -1235,7 +1261,7 @@ class RemoteAgentServer(
 
     private suspend fun approval(frame: RelayServerFrame.Route) {
         val center = questionCenter ?: run {
-            reject(frame, "unsupported", "interactive approvals are not enabled on this host")
+            reject(frame, "permission_denied", "interactive approvals are not enabled on this host")
             return
         }
         val sessionId = frame.params.string("sessionId")

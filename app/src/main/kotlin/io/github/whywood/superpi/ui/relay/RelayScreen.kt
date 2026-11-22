@@ -205,11 +205,8 @@ internal fun RelayScreen(
     val activePairLink = state.pairLink
     if (activePairLink != null) {
         val baselineDeviceIds = remember(activePairLink) { devices.map { it.deviceId }.toSet() }
-        val baselineOnlineIds = remember(activePairLink) { devices.filter { it.online }.map { it.deviceId }.toSet() }
         LaunchedEffect(activePairLink, devices) {
-            val pairedNewPeer = devices.any { device ->
-                device.deviceId !in baselineDeviceIds || (device.online && device.deviceId !in baselineOnlineIds)
-            }
+            val pairedNewPeer = devices.any { device -> device.deviceId !in baselineDeviceIds }
             if (pairedNewPeer) {
                 onDismissPairCode()
             }

@@ -10,8 +10,10 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -227,28 +229,41 @@ class RelayMemorySync(
         }
 
     suspend fun releaseRollupLease() {
+        releaseRollupLeaseInternal(fromTimerJob = null)
+    }
+
+    private suspend fun releaseRollupLeaseInternal(fromTimerJob: Job?) {
         val (acct, secret, leaseId) = rollupLeaseMutex.withLock {
+            if (fromTimerJob != null && rollupReleaseJob !== fromTimerJob) {
+                return
+            }
             val id = activeRollupLeaseId
             val acct = activeRollupLeaseAccount
             val secret = activeRollupLeaseToken
-            clearRollupLeaseStateLocked()
+            clearRollupLeaseStateLocked(cancelJob = fromTimerJob == null)
             Triple(acct, secret, id)
         }
         if (acct != null && secret != null && leaseId != null) {
-            runCatching { withContext(io) { client.releaseRollupLease(acct, secret, leaseId) } }
+            withContext(NonCancellable + io) {
+                runCatching { client.releaseRollupLease(acct, secret, leaseId) }
+            }
         }
     }
 
     private fun scheduleRollupReleaseLocked() {
         rollupReleaseJob?.cancel()
-        rollupReleaseJob = scope.launch {
+        var jobRef: Job? = null
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             delay(ROLLUP_IDLE_RELEASE_MILLIS)
-            releaseRollupLease()
+            releaseRollupLeaseInternal(fromTimerJob = jobRef)
         }
+        jobRef = job
+        rollupReleaseJob = job
+        job.start()
     }
 
-    private fun clearRollupLeaseStateLocked() {
-        rollupReleaseJob?.cancel()
+    private fun clearRollupLeaseStateLocked(cancelJob: Boolean = true) {
+        if (cancelJob) rollupReleaseJob?.cancel()
         rollupReleaseJob = null
         activeRollupLeaseId = null
         activeRollupLeaseExpiresAt = 0L

@@ -88,7 +88,7 @@ fun WorkspaceCreateDialog(
     var name by rememberSaveable { mutableStateOf("") }
     var intro by rememberSaveable { mutableStateOf("") }
     var selectedDeviceId by rememberSaveable(initialTargetDeviceId) {
-        mutableStateOf(initialTargetDeviceId?.takeIf { id -> remoteTargets.any { it.deviceId == id } })
+        mutableStateOf(initialTargetDeviceId)
     }
     var avatar by remember { mutableStateOf<Bitmap?>(null) }
     var cropSource by rememberSaveable { mutableStateOf<String?>(null) }
@@ -117,16 +117,22 @@ fun WorkspaceCreateDialog(
         onPauseOrDispose {}
     }
     val selectedTarget = remoteTargets.firstOrNull { it.deviceId == selectedDeviceId }
-    val activeExistingNames = if (selectedTarget == null) {
+    val selectedRemoteOffline = selectedDeviceId != null && selectedTarget == null
+    val activeExistingNames = if (selectedDeviceId == null) {
         existingNames
     } else {
-        remoteBotNamesByDevice[selectedTarget.deviceId].orEmpty()
+        remoteBotNamesByDevice[selectedDeviceId].orEmpty()
     }
     val nameError = workspaceNameError(name, activeExistingNames)
+    val effectiveError = remoteError ?: if (selectedRemoteOffline) {
+        stringResource(R.string.drawer_remote_device_offline)
+    } else {
+        null
+    }
     val submit: () -> Unit = {
         if (!submitting) {
             submitted = true
-            if (nameError == null) {
+            if (nameError == null && !selectedRemoteOffline) {
                 val target = selectedTarget
                 if (target != null && onConfirmRemote != null) {
                     onConfirmRemote(
@@ -135,7 +141,7 @@ fun WorkspaceCreateDialog(
                         avatar,
                         intro.trim().takeIf { it.isNotEmpty() },
                     )
-                } else {
+                } else if (selectedDeviceId == null) {
                     onConfirm(
                         name.trim(),
                         sharedDirectory.takeIf { useSharedStorage },
@@ -177,7 +183,7 @@ fun WorkspaceCreateDialog(
                     placeholder = stringResource(R.string.bot_intro_placeholder),
                     testTag = "bot_intro_input",
                 )
-                if (remoteTargets.isNotEmpty() && onConfirmRemote != null) {
+                if ((remoteTargets.isNotEmpty() || selectedDeviceId != null) && onConfirmRemote != null) {
                     Spacer(Modifier.height(18.dp))
                     DdSectionLabel(stringResource(R.string.workspace_device_label))
                     Spacer(Modifier.height(6.dp))
@@ -185,7 +191,7 @@ fun WorkspaceCreateDialog(
                         title = stringResource(R.string.workspace_device_local),
                         modifier = Modifier.testTag("workspace_device_local"),
                         onClick = { if (!submitting) selectedDeviceId = null },
-                        trailing = if (selectedTarget == null) {
+                        trailing = if (selectedDeviceId == null) {
                             { DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 18.dp) }
                         } else {
                             null
@@ -205,7 +211,7 @@ fun WorkspaceCreateDialog(
                         )
                     }
                 }
-                if (selectedTarget == null) {
+                if (selectedDeviceId == null) {
                     Spacer(Modifier.height(18.dp))
                     DdSectionLabel(stringResource(R.string.workspace_directory_label))
                     Spacer(Modifier.height(6.dp))
@@ -261,9 +267,9 @@ fun WorkspaceCreateDialog(
                         )
                     }
                 }
-                if (remoteError != null) {
+                if (effectiveError != null) {
                     Text(
-                        text = remoteError,
+                        text = effectiveError,
                         modifier = Modifier
                             .padding(start = 2.dp, top = 10.dp)
                             .testTag("workspace_create_remote_error"),
@@ -288,6 +294,7 @@ fun WorkspaceCreateDialog(
                 DdTextAction(
                     text = stringResource(R.string.workspace_create_confirm),
                     onClick = { submit() },
+                    enabled = !selectedRemoteOffline,
                     modifier = Modifier.testTag("workspace_name_confirm"),
                 )
             }

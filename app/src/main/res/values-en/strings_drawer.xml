@@ -96,7 +96,7 @@
     <string name="workspace_device_label">Device</string>
     <string name="workspace_device_local">This phone</string>
     <string name="workspace_edit_title">Edit bot</string>
-    <string name="workspace_delete_remote_message">Remove bot “%1$s” from that device? Its folder and files stay on disk.</string>
+    <string name="workspace_delete_remote_message">Delete bot “%1$s” on the remote device? This permanently removes all of its chats and private workspace files.</string>
     <string name="drawer_remote_show_archived">Show archived</string>
     <string name="drawer_remote_hide_archived">Hide archived</string>
     <string name="drawer_remote_archived_badge">Archived</string>

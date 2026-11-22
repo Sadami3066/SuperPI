@@ -18,6 +18,7 @@ import io.github.whywood.superpi.vscreen.VirtualScreenRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class AgentService : Service() {
@@ -35,6 +37,7 @@ class AgentService : Service() {
     @Volatile
     private var activeNetworkHandle: Long? = null
     private var turnWakeLock: PowerManager.WakeLock? = null
+    private var wakeLockRenewJob: Job? = null
     private val wakeLockGuard = Any()
     private val clockReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -119,6 +122,8 @@ class AgentService : Service() {
     override fun onDestroy() {
         unregisterNetworkCallback()
         runCatching { unregisterReceiver(clockReceiver) }
+        wakeLockRenewJob?.cancel()
+        wakeLockRenewJob = null
         releaseTurnWakeLock()
         floatingWindow?.stop()
         floatingWindow = null
@@ -156,17 +161,33 @@ class AgentService : Service() {
     }
 
     private fun updateTurnWakeLock(active: Boolean) {
-        synchronized(wakeLockGuard) {
-            if (active) {
-                val lock = turnWakeLock ?: getSystemService(PowerManager::class.java)
-                    ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SuperPI:AgentTurn")
-                    ?.apply { setReferenceCounted(false) }
-                    .also { turnWakeLock = it }
-                if (lock != null && !lock.isHeld) {
-                    runCatching { lock.acquire(TURN_WAKELOCK_TIMEOUT_MS) }
+        if (active) {
+            acquireOrRenewTurnWakeLock()
+            if (wakeLockRenewJob?.isActive != true) {
+                wakeLockRenewJob = scope.launch {
+                    while (isActive && graph.host.busySessionIds.value.isNotEmpty()) {
+                        delay(TURN_WAKELOCK_RENEW_INTERVAL_MS)
+                        if (graph.host.busySessionIds.value.isNotEmpty()) {
+                            acquireOrRenewTurnWakeLock()
+                        }
+                    }
                 }
-            } else {
-                releaseTurnWakeLock()
+            }
+        } else {
+            wakeLockRenewJob?.cancel()
+            wakeLockRenewJob = null
+            releaseTurnWakeLock()
+        }
+    }
+
+    private fun acquireOrRenewTurnWakeLock() {
+        synchronized(wakeLockGuard) {
+            val lock = turnWakeLock ?: getSystemService(PowerManager::class.java)
+                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SuperPI:AgentTurn")
+                ?.apply { setReferenceCounted(false) }
+                .also { turnWakeLock = it }
+            if (lock != null) {
+                runCatching { lock.acquire(TURN_WAKELOCK_TIMEOUT_MS) }
             }
         }
     }
@@ -228,5 +249,6 @@ class AgentService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACCESSIBILITY_CHECK_DELAY_MS = 4_000L
         private const val TURN_WAKELOCK_TIMEOUT_MS = 10 * 60_000L
+        private const val TURN_WAKELOCK_RENEW_INTERVAL_MS = 8 * 60_000L
     }
 }

@@ -282,7 +282,6 @@ private fun rememberRemoteArtifactState(
     var failed by remember(artifactId) { mutableStateOf(false) }
     var downloaded by remember(artifactId) { mutableStateOf(0L) }
     var total by remember(artifactId) { mutableStateOf(item.artifactSize ?: 0L) }
-    var autoAttempt by remember(artifactId) { mutableIntStateOf(0) }
 
     fun pullNow(onDone: (File) -> Unit) {
         val id = artifactId ?: return
@@ -314,7 +313,7 @@ private fun rememberRemoteArtifactState(
         }
     }
 
-    LaunchedEffect(artifactId, autoAttempt, remoteContext) {
+    LaunchedEffect(artifactId, remoteContext) {
         val id = artifactId ?: return@LaunchedEffect
         val maxBytes = autoPullMaxBytes ?: return@LaunchedEffect
         if (localFile != null || !remoteContext.supportsArtifacts) return@LaunchedEffect
@@ -330,13 +329,7 @@ private fun rememberRemoteArtifactState(
         failed = failed,
         downloaded = downloaded,
         total = total,
-        pull = { onDone ->
-            if (artifactId != null && autoPullMaxBytes != null && localFile == null && !loading) {
-                autoAttempt += 1
-            } else {
-                pullNow(onDone)
-            }
-        },
+        pull = { onDone -> pullNow(onDone) },
     )
 }
 

@@ -2,8 +2,10 @@ package io.github.whywood.superpi.data.relay
 
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Base64
@@ -367,7 +369,13 @@ class RemoteWorkspaceFileHandler(
                 throw RemoteFileException("bad_request", "Directory is not empty")
             }
             if (recursive) {
-                if (!target.deleteRecursively()) {
+                try {
+                    deleteTreeNoFollow(rootReal, target)
+                } catch (error: RemoteFileException) {
+                    throw error
+                } catch (_: IOException) {
+                    throw RemoteFileException("internal", "Could not delete directory")
+                } catch (_: SecurityException) {
                     throw RemoteFileException("internal", "Could not delete directory")
                 }
             } else if (!target.delete()) {
@@ -385,6 +393,31 @@ class RemoteWorkspaceFileHandler(
     fun dispose() {
         uploads.values.forEach(::cleanupUpload)
         uploads.clear()
+    }
+
+    private fun deleteTreeNoFollow(rootReal: File, dir: File) {
+        val dirPath = dir.toPath()
+        if (Files.isSymbolicLink(dirPath)) {
+            Files.deleteIfExists(dirPath)
+            return
+        }
+        val dirReal = canonicalOrNull(dir)
+        if (dirReal == null || !isInsideRoot(rootReal, dirReal)) {
+            throw RemoteFileException("bad_request", "Path is outside the workspace boundary")
+        }
+        val children = dir.listFiles()
+            ?: throw RemoteFileException("internal", "Could not delete directory")
+        for (child in children) {
+            val childPath = child.toPath()
+            if (Files.isSymbolicLink(childPath)) {
+                Files.deleteIfExists(childPath)
+            } else if (Files.isDirectory(childPath, LinkOption.NOFOLLOW_LINKS)) {
+                deleteTreeNoFollow(rootReal, child)
+            } else {
+                Files.deleteIfExists(childPath)
+            }
+        }
+        Files.deleteIfExists(dirPath)
     }
 
     private fun pruneStaleUploadsLocked() {

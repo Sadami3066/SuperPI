@@ -4,7 +4,9 @@ import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.data.relay.RemoteCallError
+import io.github.whywood.superpi.data.relay.RouteImagePart
 import io.github.whywood.superpi.runtime.BackgroundTurnStarted
+import io.github.whywood.superpi.runtime.ImagePart
 import io.github.whywood.superpi.runtime.RunStatus
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SessionHandle
@@ -34,6 +36,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -933,6 +936,110 @@ class RemoteSessionHandleTest {
 
         val userMessages = handle.messages.mapNotNull { it.asLlmMessage() as? UserMessage }
         assertEquals(1, userMessages.size)
+    }
+
+    @Test
+    fun passiveWatchResetsSeqWhenHostSignalsEpochRestart() = runTest {
+        val transport = FakeRemoteTransport()
+        transport.result = { call ->
+            when (call.method) {
+                "bot.resume" -> buildJsonObject {
+                    put("sessionId", "peer-restarted")
+                    put("busy", false)
+                    put("gap", true)
+                    put("seq", -1L)
+                    put("reset", true)
+                }
+                else -> buildJsonObject {}
+            }
+        }
+        val mirror = RemoteMirrorSession.create(cwd, agentDir)
+        mirror.appendRemoteMapping("device-1", "pi", "peer-restarted", historySeq = 1500L)
+        mirror.appendUserMessage("Old msg", emptyList())
+        val mirrorPath = mirror.sessionFile!!
+        mirror.close()
+
+        val passiveEvents = mutableListOf<SessionRuntimeEvent>()
+        val engine = RemoteSessionEngine(
+            cwd,
+            agentDir,
+            target(transport),
+            transport,
+            backgroundScope,
+            onPassiveRuntimeEvent = { passiveEvents += it },
+        )
+        engine.create(mirrorPath, ModelConfig())
+        runCurrent()
+
+        val resumeCall = transport.calls.single { it.method == "bot.resume" }
+        assertEquals(1500L, resumeCall.params.getValue("afterSeq").jsonPrimitive.content.toLong())
+
+        transport.emit(
+            resumeCall.routeId,
+            0L,
+            buildJsonObject {
+                put("type", "agent_start")
+                put("sessionId", "peer-restarted")
+                put("userMessage", buildJsonObject { put("text", "fresh turn after restart") })
+            },
+        )
+        transport.emit(resumeCall.routeId, 1L, FakeEvents.textDelta("restarted ok"))
+        transport.emit(resumeCall.routeId, 2L, FakeEvents.agentEnd("done"))
+        transport.emit(resumeCall.routeId, 3L, FakeEvents.settled())
+        runCurrent()
+
+        val deltas = passiveEvents.map { it.event }
+            .filterIsInstance<RuntimeEvent.TextDelta>()
+            .map { it.text }
+        assertEquals(listOf("restarted ok"), deltas)
+    }
+
+    @Test
+    fun fitsOversizedImagesBeforePromptAndFailsTurnWhenFittingFails() = runTest {
+        val transport = FakeRemoteTransport()
+        val mirror = RemoteMirrorSession.create(cwd, agentDir)
+        var shouldFail = false
+        val handle = RemoteSessionHandle(
+            target = target(transport),
+            transport = transport,
+            mirror = mirror,
+            injectedScope = backgroundScope,
+            fitRemoteImages = { parts ->
+                if (shouldFail) {
+                    Result.failure(IllegalArgumentException("Images too large"))
+                } else {
+                    Result.success(parts.map { RouteImagePart(data = "c21hbGw=", mimeType = "image/jpeg") })
+                }
+            },
+        )
+
+        val job1 = launch {
+            handle.prompt(
+                text = "inspect photos",
+                images = listOf(ImagePart(data = "A".repeat(1_200_000), mimeType = "image/jpeg")),
+            )
+        }
+        runCurrent()
+        val call1 = transport.calls.single { it.method == "bot.prompt" }
+        val sentImg = call1.params.getValue("images").jsonArray.single().jsonObject
+        assertEquals("c21hbGw=", sentImg.getValue("data").jsonPrimitive.content)
+        transport.emit(call1.routeId, 0L, FakeEvents.textDelta("ok"))
+        transport.emit(call1.routeId, 1L, FakeEvents.settled())
+        runCurrent()
+        assertTrue(job1.isCompleted)
+
+        shouldFail = true
+        val errors = mutableListOf<String>()
+        val unsub = handle.subscribe { event ->
+            if (event is SessionEvent.SessionError) errors += event.message
+        }
+        handle.prompt(
+            text = "too big",
+            images = listOf(ImagePart(data = "B".repeat(1_200_000), mimeType = "image/jpeg")),
+        )
+        unsub()
+        assertEquals(1, transport.calls.count { it.method == "bot.prompt" })
+        assertEquals(listOf("Images too large"), errors)
     }
 
     private fun engine(transport: FakeRemoteTransport, scope: CoroutineScope): RemoteSessionEngine =

@@ -276,7 +276,7 @@ class RemoteAgentServerTest {
                 params = buildJsonObject { put("requestId", "req-1") },
             ),
         )
-        assertEquals("unsupported", sent.last().getValue("code").jsonPrimitive.content)
+        assertEquals("permission_denied", sent.last().getValue("code").jsonPrimitive.content)
     }
 
     @Test
@@ -1210,5 +1210,114 @@ class RemoteAgentServerTest {
         )
         assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
         assertEquals(listOf(sessionId), reloadedSessionIds)
+    }
+
+    @Test
+    fun bindsCallerRouteWhenSessionIsAlreadyBusySignalsSeqResetAfterRestartAndPrunesOfflinePeers() = runTest {
+        val host = FakeAgentRuntime().apply {
+            sessions = listOf(
+                ConversationSummary("s-shared", "Shared", 100L, "/shared.jsonl", "/home"),
+                ConversationSummary("s-restarted", "Restarted", 100L, "/restarted.jsonl", "/home"),
+            )
+        }
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(host, { defaultBots }, { sent.add(it); true }, backgroundScope)
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-caller-a",
+                from = "phone-a",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("sessionId", "s-shared")
+                    put("text", "first prompt")
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+
+        sent.clear()
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-caller-b",
+                from = "phone-b",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("sessionId", "s-shared")
+                    put("text", "second prompt")
+                },
+            ),
+        )
+        assertEquals(listOf("first prompt"), host.sent)
+        assertEquals(listOf("second prompt"), host.followUps)
+        assertTrue(
+            sent.any { frame ->
+                frame["type"]?.jsonPrimitive?.content == "route_ok" &&
+                    frame["id"]?.jsonPrimitive?.content == "r-caller-b"
+            },
+        )
+        assertTrue(
+            sent.any { frame ->
+                frame["type"]?.jsonPrimitive?.content == "route_event" &&
+                    frame["id"]?.jsonPrimitive?.content == "r-caller-a" &&
+                    frame["event"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "queue_update"
+            },
+        )
+        assertFalse(
+            sent.any { frame ->
+                frame["type"]?.jsonPrimitive?.content == "route_event" &&
+                    frame["id"]?.jsonPrimitive?.content == "r-caller-b" &&
+                    frame["event"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "queue_update"
+            },
+        )
+
+        sent.clear()
+        host.emitFor("s-shared", RuntimeEvent.TextDelta("run-1", "done both"))
+        host.emitFor("s-shared", RuntimeEvent.RunFinished("run-1", "done both", RunStatus.DONE, 200L))
+        runCurrent()
+        assertTrue(
+            sent.any { frame ->
+                frame["id"]?.jsonPrimitive?.content == "r-caller-b" &&
+                    frame["event"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "agent_settled"
+            },
+        )
+
+        sent.clear()
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-stale-resume",
+                from = "phone-a",
+                method = "bot.resume",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("sessionId", "s-restarted")
+                    put("afterSeq", 1500L)
+                },
+            ),
+        )
+        val resumeOk = sent.single().getValue("result").jsonObject
+        assertEquals(true, resumeOk.getValue("reset").jsonPrimitive.boolean)
+        assertEquals(-1L, resumeOk.getValue("seq").jsonPrimitive.long)
+        assertEquals(true, resumeOk.getValue("gap").jsonPrimitive.boolean)
+
+        sent.clear()
+        host.emitFor("s-restarted", RuntimeEvent.RunStarted("run-2", 300L, "after restart"))
+        host.emitFor("s-restarted", RuntimeEvent.RunFinished("run-2", "ok", RunStatus.DONE, 400L))
+        runCurrent()
+        assertTrue(
+            sent.any { frame ->
+                frame["id"]?.jsonPrimitive?.content == "r-stale-resume" &&
+                    frame["event"]?.jsonObject?.get("type")?.jsonPrimitive?.content == "agent_start"
+            },
+        )
+
+        sent.clear()
+        server.onPeerOffline("phone-a")
+        host.emitFor("s-restarted", RuntimeEvent.RunStarted("run-3", 500L, "no offline send"))
+        runCurrent()
+        assertFalse(sent.any { it["id"]?.jsonPrimitive?.content == "r-stale-resume" })
     }
 }

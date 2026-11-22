@@ -182,8 +182,9 @@ sealed interface RelayServerFrame {
 
 internal object RelayFrames {
     private const val PROTOCOL_VERSION = 1
-    private const val MAX_IMAGES = 4
-    private const val MAX_IMAGE_BASE64_CHARS = 8_000_000
+    const val MAX_IMAGES = 4
+    const val MAX_IMAGE_BASE64_CHARS = 2_000_000
+    const val MAX_IMAGES_TOTAL_BASE64_CHARS = 2_900_000
     const val MAX_RELATIVE_PATH_LENGTH = 512
     const val MAX_FILE_CHUNK_BYTES = 256 * 1024
     const val MAX_FILE_CHUNK_BASE64_CHARS = 360_000
@@ -475,31 +476,42 @@ internal object RelayFrames {
     fun parseImages(params: JsonObject): List<RouteImagePart> {
         val array = params["images"] as? JsonArray ?: return emptyList()
         val out = ArrayList<RouteImagePart>(minOf(array.size, MAX_IMAGES))
+        var totalChars = 0
         for (item in array) {
             if (out.size >= MAX_IMAGES) break
             val json = item as? JsonObject ?: continue
             val data = json.string("data") ?: continue
             val mimeType = json.string("mimeType")?.lowercase() ?: continue
             if (mimeType !in ALLOWED_IMAGE_MIME_TYPES) continue
-            if (data.length > MAX_IMAGE_BASE64_CHARS) continue
+            if (data.isEmpty() || data.length > MAX_IMAGE_BASE64_CHARS) continue
+            if (totalChars + data.length > MAX_IMAGES_TOTAL_BASE64_CHARS) continue
+            totalChars += data.length
             out += RouteImagePart(data = data, mimeType = mimeType)
         }
         return out
     }
 
-    fun imagesArray(images: List<RouteImagePart>): JsonArray = JsonArray(
-        images.take(MAX_IMAGES).mapNotNull { image ->
+    fun imagesArray(images: List<RouteImagePart>): JsonArray {
+        val out = ArrayList<JsonObject>(minOf(images.size, MAX_IMAGES))
+        var totalChars = 0
+        for (image in images) {
+            if (out.size >= MAX_IMAGES) break
             val data = image.data.trim()
             val mimeType = image.mimeType.trim().lowercase()
             if (data.isEmpty() || mimeType !in ALLOWED_IMAGE_MIME_TYPES || data.length > MAX_IMAGE_BASE64_CHARS) {
-                return@mapNotNull null
+                continue
             }
-            buildJsonObject {
+            if (totalChars + data.length > MAX_IMAGES_TOTAL_BASE64_CHARS) {
+                continue
+            }
+            totalChars += data.length
+            out += buildJsonObject {
                 put("data", data)
                 put("mimeType", mimeType)
             }
-        },
-    )
+        }
+        return JsonArray(out)
+    }
 
     fun parseQuestions(element: JsonElement?): List<UserQuestion> {
         val array = element as? JsonArray ?: return emptyList()

@@ -685,6 +685,9 @@ class RelayLive(
                     }
                     return
                 }
+                if (!frame.online) {
+                    server.onPeerOffline(frame.deviceId)
+                }
                 devicesMutex.withLock {
                     val existing = _devices.value
                     val updated = mergePresenceLocked(frame, existing)
@@ -729,10 +732,13 @@ class RelayLive(
                 send(RelayFrames.routeError(frame.id, code, "remote use is disabled on this device"))
             }
             is RelayServerFrame.RouteOk -> calls.settle(frame.id, RemoteCallOutcome.Ok(frame.result))
-            is RelayServerFrame.RouteError -> calls.settle(
-                frame.id,
-                RemoteCallOutcome.Failed(RemoteCallError(frame.code, frame.message)),
-            )
+            is RelayServerFrame.RouteError -> {
+                server.onRouteRejected(frame.id)
+                calls.settle(
+                    frame.id,
+                    RemoteCallOutcome.Failed(RemoteCallError(frame.code, frame.message)),
+                )
+            }
 
             is RelayServerFrame.RouteEvent -> {
                 val event = RemoteEvent(routeId = frame.id, seq = frame.seq, event = frame.event)

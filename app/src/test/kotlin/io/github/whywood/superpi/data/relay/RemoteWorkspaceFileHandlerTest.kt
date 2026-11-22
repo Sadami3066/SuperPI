@@ -233,4 +233,21 @@ class RemoteWorkspaceFileHandlerTest {
             assertEquals("bad_request", err.code)
         }
     }
+
+    @Test
+    fun recursiveDeleteDoesNotFollowSymlinkedDirectoryOutsideWorkspace() {
+        val root = temp.newFolder("ws-del-root")
+        val outsideDir = temp.newFolder("ws-del-outside")
+        val victim = File(outsideDir, "important.jpg").apply { writeText("keep-me") }
+        val parentDir = File(root, "parent").apply { mkdirs() }
+        File(parentDir, "inside.txt").writeText("inside")
+        Files.createSymbolicLink(File(parentDir, "dcim-link").toPath(), outsideDir.toPath())
+
+        val handler = RemoteWorkspaceFileHandler()
+        assertEquals(true to "parent", handler.delete(root.absolutePath, "parent", recursive = true))
+        assertFalse(parentDir.exists())
+        assertTrue(outsideDir.exists())
+        assertTrue(victim.exists())
+        assertEquals("keep-me", victim.readText())
+    }
 }

@@ -1349,6 +1349,7 @@ internal fun AppShell(
             workspaces = state.workspaces,
             activeWorkspaceId = state.currentWorkspaceId,
             activeSessionId = state.conversationId,
+            activeRemoteSessionId = state.conversationId?.let(RemoteSessionRegistry::peerSessionId),
             pinnedWorkspaceIds = uiPreferences.pinnedWorkspaceIds,
             expandedWorkspaceIds = expandedWorkspaceIds,
             busySessionIds = state.busySessionIds,

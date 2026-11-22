@@ -418,6 +418,7 @@ fun SuperPIDrawer(
     onDelete: (String) -> Unit,
     onSettings: () -> Unit,
     hasUpdate: Boolean = false,
+    activeRemoteSessionId: String? = null,
     remoteDrawerStates: Map<String, RemoteDrawerState> = emptyMap(),
     relayOnline: Boolean = true,
     remoteBotManageWorkspaceIds: Set<String> = emptySet(),
@@ -697,8 +698,12 @@ fun SuperPIDrawer(
                     is DrawerEntry.RemoteSession -> {
                         val remoteKey = entry.workspace.id to entry.session.id
                         val currentMenuKey = remoteSessionMenuTarget?.let { it.first.id to it.second.id }
+                        val selected = entry.workspace.id == activeWorkspaceId &&
+                            activeRemoteSessionId != null &&
+                            entry.session.id == activeRemoteSessionId
                         DrawerRemoteSessionRow(
                             session = entry.session,
+                            selected = selected,
                             manageable = entry.workspace.id in remoteSessionManageWorkspaceIds,
                             menuExpanded = currentMenuKey == remoteKey,
                             menuAnchor = remoteSessionMenuAnchor,
@@ -1302,6 +1307,7 @@ private fun DrawerRemoteNoticeRow(
 @Composable
 private fun DrawerRemoteSessionRow(
     session: RemoteSessionSummaryDto,
+    selected: Boolean = false,
     manageable: Boolean,
     menuExpanded: Boolean,
     menuAnchor: Offset,
@@ -1338,7 +1344,7 @@ private fun DrawerRemoteSessionRow(
                 .fillMaxWidth()
                 .height(40.dp)
                 .clip(DdShapes.Medium)
-                .background(colors.ink.copy(alpha = wash))
+                .background(colors.ink.copy(alpha = if (selected) 0.06f else wash))
                 .pointerInput(manageable, session.id) {
                     detectTapGestures(
                         onPress = { offset ->
@@ -1369,7 +1375,11 @@ private fun DrawerRemoteSessionRow(
                 text = displayTitle,
                 modifier = Modifier.weight(1f),
                 style = DdType.bodySmall.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
-                color = if (session.archived) colors.inkTertiary else colors.inkSecondary,
+                color = when {
+                    selected -> colors.ink
+                    session.archived -> colors.inkTertiary
+                    else -> colors.inkSecondary
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

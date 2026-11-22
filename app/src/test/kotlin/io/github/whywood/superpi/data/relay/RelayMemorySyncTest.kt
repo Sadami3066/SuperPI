@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -195,6 +197,28 @@ class RelayMemorySyncTest {
         env.accounts.value.value = null
         testScheduler.advanceUntilIdle()
         assertTrue("lease-2" in env.server.releasedLeaseIds)
+    }
+
+    @Test
+    fun idleTimerReleasesRollupLeaseWithoutSelfCancellation() = runTest {
+        val now = 2_000_000L
+        val env = environment(clock = { now })
+        env.login()
+        env.server.leaseResponse = RelayMemoryRollupLease(
+            acquired = true,
+            leaseId = "lease-idle",
+            holderDeviceId = "dev",
+            expiresAt = now + 300_000L,
+        )
+
+        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
+        advanceTimeBy(29_000L)
+        runCurrent()
+        assertTrue(env.server.releasedLeaseIds.isEmpty())
+
+        advanceTimeBy(2_000L)
+        runCurrent()
+        assertEquals(listOf("lease-idle"), env.server.releasedLeaseIds)
     }
 
     private fun TestScope.environment(clock: () -> Long = System::currentTimeMillis): Environment {

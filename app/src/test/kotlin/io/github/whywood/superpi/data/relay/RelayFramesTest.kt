@@ -182,6 +182,18 @@ class RelayFramesTest {
             },
         )
         assertEquals(listOf(RouteImagePart("YWJj", "image/png")), images)
+
+        val oversizedChunk = "A".repeat(1_200_000)
+        val boundedArray = RelayFrames.imagesArray(
+            listOf(
+                RouteImagePart(oversizedChunk, "image/jpeg"),
+                RouteImagePart(oversizedChunk, "image/jpeg"),
+                RouteImagePart(oversizedChunk, "image/jpeg"),
+            ),
+        )
+        assertEquals(2, boundedArray.size)
+        val boundedParsed = RelayFrames.parseImages(buildJsonObject { put("images", boundedArray) })
+        assertEquals(2, boundedParsed.size)
     }
 
     @Test
