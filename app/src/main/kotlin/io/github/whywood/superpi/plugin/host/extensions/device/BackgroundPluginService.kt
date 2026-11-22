@@ -22,7 +22,10 @@ internal class BackgroundPluginService(private val deps: DeviceServiceDeps) : Ba
     private val scheduler = PluginBackgroundScheduler(deps.appContext, deps.pluginId)
 
     init {
-        deps.scope.coroutineContext[Job]?.invokeOnCompletion { runCatching { scheduler.cancelScheduled() } }
+        deps.scope.coroutineContext[Job]?.invokeOnCompletion {
+            runCatching { scheduler.cancelScheduled() }
+            runCatching { PluginHostService.stop(deps.appContext, deps.pluginId) }
+        }
         deps.scope.launch {
             runCatching { if (pluginEnabled()) restore() }
         }

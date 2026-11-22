@@ -90,6 +90,7 @@ class RelayMemorySync(
     private var activeRollupLeaseAccount: RelayAccount? = null
     private var activeRollupLeaseToken: String? = null
     private var rollupReleaseJob: Job? = null
+    private var rollupInFlightCount = 0
 
     private var versions: Map<String, Long> = emptyMap()
     private var syncedAt = 0L
@@ -191,6 +192,31 @@ class RelayMemorySync(
         _state.update { it.copy(error = null) }
     }
 
+    suspend fun <T> withRollupLease(
+        ttlMs: Long = DEFAULT_ROLLUP_LEASE_TTL_MILLIS,
+        block: suspend () -> T,
+    ): T? {
+        val status = acquireRollupLease(ttlMs)
+        if (!status.allowed) return null
+        rollupLeaseMutex.withLock {
+            rollupInFlightCount += 1
+            rollupReleaseJob?.cancel()
+            rollupReleaseJob = null
+        }
+        return try {
+            block()
+        } finally {
+            withContext(NonCancellable) {
+                rollupLeaseMutex.withLock {
+                    rollupInFlightCount = (rollupInFlightCount - 1).coerceAtLeast(0)
+                    if (rollupInFlightCount == 0 && activeRollupLeaseId != null) {
+                        scheduleRollupReleaseLocked()
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun acquireRollupLease(ttlMs: Long = DEFAULT_ROLLUP_LEASE_TTL_MILLIS): RollupLeaseStatus =
         rollupLeaseMutex.withLock {
             val current = account ?: return@withLock RollupLeaseStatus.LOCAL
@@ -234,7 +260,7 @@ class RelayMemorySync(
 
     private suspend fun releaseRollupLeaseInternal(fromTimerJob: Job?) {
         val (acct, secret, leaseId) = rollupLeaseMutex.withLock {
-            if (fromTimerJob != null && rollupReleaseJob !== fromTimerJob) {
+            if (fromTimerJob != null && (rollupReleaseJob !== fromTimerJob || rollupInFlightCount > 0)) {
                 return
             }
             val id = activeRollupLeaseId
@@ -252,6 +278,10 @@ class RelayMemorySync(
 
     private fun scheduleRollupReleaseLocked() {
         rollupReleaseJob?.cancel()
+        if (rollupInFlightCount > 0) {
+            rollupReleaseJob = null
+            return
+        }
         var jobRef: Job? = null
         val job = scope.launch(start = CoroutineStart.LAZY) {
             delay(ROLLUP_IDLE_RELEASE_MILLIS)

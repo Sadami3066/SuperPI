@@ -52,6 +52,9 @@
     <string name="files_delete_message">确定要删除「%1$s」吗？</string>
     <string name="files_delete_folder_message">确定要删除文件夹「%1$s」及其中的内容吗？</string>
     <string name="files_delete_confirm">删除</string>
+    <string name="files_upload_overwrite_title">替换已有文件</string>
+    <string name="files_upload_overwrite_message">「%1$s」已存在，确定要替换吗？</string>
+    <string name="files_upload_overwrite_confirm">替换</string>
     <string name="files_cancel">取消</string>
     <string name="files_retry">重试</string>
     <string name="files_more_actions">更多操作</string>

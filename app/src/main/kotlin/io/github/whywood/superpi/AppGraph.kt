@@ -596,7 +596,7 @@ class AppGraph(context: Context) : AppDependencies {
         },
         screenTools = { platformGraph.screenToolset.tools() },
         virtualScreenTools = { platformGraph.virtualScreenFeature.tools() },
-        acquireMemoryRollupLease = { dataGraph.relayMemorySync.acquireRollupLease().allowed },
+        runWithMemoryRollupLease = { block -> dataGraph.relayMemorySync.withRollupLease { block() } },
         refreshMemoryForRollup = { dataGraph.relayMemorySync.refreshIfStale(0L) },
     )
 

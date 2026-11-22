@@ -22,6 +22,8 @@ internal const val ARRANGE_HOUR_MILLIS = 3_600_000L
 internal const val ARRANGE_DAY_MILLIS = 86_400_000L
 internal const val ARRANGE_WRITABLE_ACCESS_LEVEL = 500
 internal const val ARRANGE_MAX_REMINDERS = 5
+internal const val RECURRING_EVENT_GUARD_MESSAGE =
+    "Event is part of a recurring series; pass series=true after confirming with the user to modify or delete the entire series"
 private const val UTC_TIMEZONE = "UTC"
 
 data class ArrangeCalendarInfo(
@@ -67,6 +69,7 @@ data class ArrangeEventPatch(
     val description: String? = null,
     val calendarId: Long? = null,
     val reminderMinutes: List<Int>? = null,
+    val allowRecurringSeries: Boolean = false,
 )
 
 class ArrangeCalendarPermissionException(
@@ -134,6 +137,8 @@ interface ArrangeCalendarGateway {
     fun update(id: Long, patch: ArrangeEventPatch): ArrangeCalendarEvent?
 
     fun delete(id: Long): Boolean
+
+    fun delete(id: Long, allowRecurringSeries: Boolean): Boolean = delete(id)
 }
 
 internal fun accessLevelIsWritable(accessLevel: Int): Boolean = accessLevel >= ARRANGE_WRITABLE_ACCESS_LEVEL
@@ -369,13 +374,19 @@ class AndroidArrangeCalendarGateway(context: Context) : ArrangeCalendarGateway {
     override fun update(id: Long, patch: ArrangeEventPatch): ArrangeCalendarEvent? {
         requireWritePermission()
         val current = get(id) ?: return null
+        require(!current.recurring || patch.allowRecurringSeries) { RECURRING_EVENT_GUARD_MESSAGE }
         val update = mergeEventPatch(current, patch)
         update.calendarId?.let { requireWritableCalendar(it) }
         return writer.update(id, update)
     }
 
-    override fun delete(id: Long): Boolean {
+    override fun delete(id: Long): Boolean = delete(id, allowRecurringSeries = false)
+
+    override fun delete(id: Long, allowRecurringSeries: Boolean): Boolean {
         requireWritePermission()
+        if (!allowRecurringSeries && hasReadPermission() && get(id)?.recurring == true) {
+            throw IllegalArgumentException(RECURRING_EVENT_GUARD_MESSAGE)
+        }
         val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
         return resolver.delete(uri, null, null) > 0
     }

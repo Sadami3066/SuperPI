@@ -59,7 +59,7 @@ class ArrangeToolsTest {
             listOf("calendars", "list", "get", "create", "update", "delete"),
             ((properties["action"] as JsonObject)["enum"] as JsonArray).map { it.jsonPrimitive.content },
         )
-        listOf("id", "calendarId", "title", "start", "end", "allDay", "location", "description", "reminders", "query", "limit")
+        listOf("id", "calendarId", "title", "start", "end", "allDay", "location", "description", "reminders", "query", "limit", "series")
             .forEach { field -> assertTrue(field, properties.containsKey(field)) }
         assertEquals(200, ((properties["limit"] as JsonObject)["maximum"] as JsonPrimitive).int)
     }
@@ -224,6 +224,51 @@ class ArrangeToolsTest {
     }
 
     @Test
+    fun recurringEventRequiresSeriesTrueForUpdateAndDelete() = runTest {
+        val recurring = calendar.seedRecurring(
+            title = "每周例会",
+            startMillis = 1_793_000_000_000L,
+            endMillis = 1_793_003_600_000L,
+        )
+
+        val blockedUpdate = run(
+            "update",
+            buildJsonObject {
+                put("id", recurring.id)
+                put("title", "改名")
+            },
+        )
+        assertEquals(true, blockedUpdate.isError)
+        assertTrue(blockedUpdate.text().contains("series=true"))
+        assertEquals("每周例会", calendar.get(recurring.id)!!.title)
+
+        val blockedDelete = run("delete", buildJsonObject { put("id", recurring.id) })
+        assertEquals(true, blockedDelete.isError)
+        assertTrue(blockedDelete.text().contains("series=true"))
+
+        val allowedUpdate = run(
+            "update",
+            buildJsonObject {
+                put("id", recurring.id)
+                put("title", "改名后例会")
+                put("series", true)
+            },
+        )
+        assertNull(allowedUpdate.isError)
+        assertEquals("改名后例会", calendar.get(recurring.id)!!.title)
+
+        val allowedDelete = run(
+            "delete",
+            buildJsonObject {
+                put("id", recurring.id)
+                put("series", true)
+            },
+        )
+        assertNull(allowedDelete.isError)
+        assertNull(calendar.get(recurring.id))
+    }
+
+    @Test
     fun permissionFailureBecomesToolError() = runTest {
         calendar.readAllowed = false
         val result = run("calendars")
@@ -328,10 +373,26 @@ class ArrangeToolsTest {
             return event
         }
 
+        fun seedRecurring(title: String, startMillis: Long, endMillis: Long): ArrangeCalendarEvent {
+            val event = ArrangeCalendarEvent(
+                id = nextId++,
+                calendarId = 1L,
+                title = title,
+                startMillis = startMillis,
+                endMillis = endMillis,
+                allDay = false,
+                timezone = "Asia/Shanghai",
+                recurring = true,
+            )
+            events[event.id] = event
+            return event
+        }
+
         override fun update(id: Long, patch: ArrangeEventPatch): ArrangeCalendarEvent? {
             checkWrite()
             lastPatch = patch
             val current = events[id] ?: return null
+            require(!current.recurring || patch.allowRecurringSeries) { RECURRING_EVENT_GUARD_MESSAGE }
             val update = mergeEventPatch(current, patch, zone)
             val updated = current.copy(
                 title = update.title ?: current.title,
@@ -345,8 +406,14 @@ class ArrangeToolsTest {
             return updated
         }
 
-        override fun delete(id: Long): Boolean {
+        override fun delete(id: Long): Boolean = delete(id, allowRecurringSeries = false)
+
+        override fun delete(id: Long, allowRecurringSeries: Boolean): Boolean {
             checkWrite()
+            val current = events[id] ?: return false
+            if (!allowRecurringSeries && current.recurring) {
+                throw IllegalArgumentException(RECURRING_EVENT_GUARD_MESSAGE)
+            }
             return events.remove(id) != null
         }
     }

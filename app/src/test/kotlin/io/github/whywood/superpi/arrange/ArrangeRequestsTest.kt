@@ -29,6 +29,7 @@ class ArrangeRequestsTest {
         assertEquals(dateTime, parseCalendarMillis("2026-10-26T10:00", zone))
         assertEquals(date, parseCalendarMillis("2026-10-26", zone))
         assertEquals(1_793_000_000_000L, parseCalendarMillis("1793000000000", zone))
+        assertEquals(1_793_000_000_000L, parseCalendarMillis("1793000000", zone))
         assertEquals(dateTime, parseCalendarMillis("2026-10-26T10:00:00+08:00", zone))
     }
 
@@ -36,6 +37,9 @@ class ArrangeRequestsTest {
     fun rejectsUnparsableCalendarTime() {
         assertThrows(IllegalArgumentException::class.java) { parseCalendarMillis("明天", zone) }
         assertThrows(IllegalArgumentException::class.java) { parseCalendarMillis("  ", zone) }
+        assertThrows(IllegalArgumentException::class.java) { parseCalendarMillis("0", zone) }
+        assertThrows(IllegalArgumentException::class.java) { parseCalendarMillis("12345", zone) }
+        assertThrows(IllegalArgumentException::class.java) { parseCalendarMillis("99999999999999", zone) }
     }
 
     @Test

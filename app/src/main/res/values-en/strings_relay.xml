@@ -44,6 +44,9 @@
     <string name="relay_pair_generating">Generating pairing link…</string>
     <string name="relay_pair_dialog_title">Pair a new device</string>
     <string name="relay_pair_dialog_hint">Valid for 10 minutes and one-time use. Scan the QR code or copy the link on another phone to connect.</string>
+    <string name="relay_pair_expires_in">Expires in %1$s · one-time use. Scan the QR code or copy the link on another phone to connect.</string>
+    <string name="relay_pair_expired">This pairing link has expired. Generate a new one.</string>
+    <string name="relay_pair_regenerate">Regenerate</string>
     <string name="relay_pair_copy">Copy link</string>
     <string name="relay_pair_copied">Copied</string>
     <string name="relay_pair_close">Close</string>

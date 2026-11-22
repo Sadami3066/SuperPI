@@ -71,6 +71,6 @@ internal class RuntimeGraphDeps(
     val postCustomMessage: suspend (String, String, String, String) -> Boolean,
     val screenTools: () -> List<CodingTool>,
     val virtualScreenTools: () -> List<CodingTool>,
-    val acquireMemoryRollupLease: suspend () -> Boolean = { true },
+    val runWithMemoryRollupLease: suspend (suspend () -> String?) -> String? = { block -> block() },
     val refreshMemoryForRollup: suspend () -> Unit = {},
 )

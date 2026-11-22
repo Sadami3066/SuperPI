@@ -30,6 +30,8 @@ private const val MAX_SCROLL_AMOUNT = 10
 private const val DEFAULT_WAIT_MILLIS = 5000
 private const val MIN_WAIT_MILLIS = 100
 private const val MAX_WAIT_MILLIS = 60000
+private const val MAX_SCREENSHOT_FILES = 50
+private const val MAX_SCREENSHOT_BYTES = 100L * 1024L * 1024L
 
 internal val SCREEN_KEYS = setOf(
     "back",
@@ -554,6 +556,7 @@ private fun screenshotTool(
             val fileName = "screen-${java.util.UUID.randomUUID()}.png"
             val file = File(screenshotDir, fileName)
             file.writeBytes(capture.png)
+            runCatching { pruneScreenshots(screenshotDir, keep = file) }
             textResult(
                 buildJsonObject {
                     put("path", file.absolutePath)
@@ -893,3 +896,27 @@ private fun JsonObject.requiredString(name: String): String =
 
 private fun JsonObject.requiredInt(name: String): Int =
     intOrNull(name) ?: throw IllegalArgumentException("Missing or invalid required parameter: $name")
+
+internal fun pruneScreenshots(
+    dir: File,
+    keep: File? = null,
+    maxFiles: Int = MAX_SCREENSHOT_FILES,
+    maxBytes: Long = MAX_SCREENSHOT_BYTES,
+) {
+    val candidates = dir.listFiles { file ->
+        file.isFile && file.name.startsWith("screen-") && file.name.endsWith(".png")
+    }?.sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name }) ?: return
+    val keepPath = keep?.let { file -> runCatching { file.canonicalPath }.getOrElse { file.absolutePath } }
+    var remainingCount = candidates.size
+    var remainingBytes = candidates.sumOf { it.length() }
+    for (candidate in candidates) {
+        if (remainingCount <= maxFiles && remainingBytes <= maxBytes) break
+        val candidatePath = runCatching { candidate.canonicalPath }.getOrElse { candidate.absolutePath }
+        if (keepPath != null && candidatePath == keepPath) continue
+        val length = candidate.length()
+        if (runCatching { candidate.delete() }.getOrDefault(false)) {
+            remainingCount -= 1
+            remainingBytes -= length
+        }
+    }
+}

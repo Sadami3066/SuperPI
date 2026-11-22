@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -108,10 +109,12 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 @Composable
@@ -211,6 +214,17 @@ internal fun RelayScreen(
                 onDismissPairCode()
             }
         }
+        val expiresAt = state.pairExpiresAt
+        var nowMillis by remember(activePairLink, expiresAt) { mutableLongStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(activePairLink, expiresAt) {
+            if (expiresAt == null) return@LaunchedEffect
+            while (nowMillis < expiresAt) {
+                delay(1_000L)
+                nowMillis = System.currentTimeMillis()
+            }
+        }
+        val expired = expiresAt != null && nowMillis >= expiresAt
+        val remainingSeconds = expiresAt?.let { ((it - nowMillis).coerceAtLeast(0L) + 999L) / 1_000L }
         val qrBitmap = remember(activePairLink) {
             runCatching { QrCodeMatrix.encode(activePairLink)?.toBitmap(modulePx = 8)?.asImageBitmap() }.getOrNull()
         }
@@ -219,41 +233,59 @@ internal fun RelayScreen(
             title = stringResource(R.string.relay_pair_dialog_title),
             content = {
                 Column(verticalArrangement = Arrangement.spacedBy(DdSpacing.Md)) {
-                    if (qrBitmap != null) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.Center,
-                        ) {
+                    if (expired) {
+                        Text(
+                            text = stringResource(R.string.relay_pair_expired),
+                            style = DdType.bodySmall,
+                            color = colors.danger,
+                        )
+                    } else {
+                        if (qrBitmap != null) {
                             Box(
-                                modifier = Modifier
-                                    .clip(DdShapes.Medium)
-                                    .background(Color.White)
-                                    .border(1.dp, colors.hairline, DdShapes.Medium)
-                                    .padding(DdSpacing.Md),
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                Image(
-                                    bitmap = qrBitmap,
-                                    contentDescription = stringResource(R.string.relay_pair_dialog_title),
+                                Box(
                                     modifier = Modifier
-                                        .size(200.dp)
-                                        .testTag("relay_pair_qr"),
-                                    filterQuality = FilterQuality.None,
-                                    contentScale = ContentScale.Fit,
-                                )
+                                        .clip(DdShapes.Medium)
+                                        .background(Color.White)
+                                        .border(1.dp, colors.hairline, DdShapes.Medium)
+                                        .padding(DdSpacing.Md),
+                                ) {
+                                    Image(
+                                        bitmap = qrBitmap,
+                                        contentDescription = stringResource(R.string.relay_pair_dialog_title),
+                                        modifier = Modifier
+                                            .size(200.dp)
+                                            .testTag("relay_pair_qr"),
+                                        filterQuality = FilterQuality.None,
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                }
                             }
                         }
-                    }
-                    Text(
-                        text = stringResource(R.string.relay_pair_dialog_hint),
-                        style = DdType.bodySmall,
-                        color = colors.inkSecondary,
-                    )
-                    SelectionContainer {
+                        val hintText = if (remainingSeconds != null) {
+                            val formatted = "%d:%02d".format(
+                                Locale.ROOT,
+                                remainingSeconds / 60L,
+                                remainingSeconds % 60L,
+                            )
+                            stringResource(R.string.relay_pair_expires_in, formatted)
+                        } else {
+                            stringResource(R.string.relay_pair_dialog_hint)
+                        }
                         Text(
-                            text = activePairLink,
-                            style = DdType.numeric,
-                            color = colors.ink,
+                            text = hintText,
+                            style = DdType.bodySmall,
+                            color = colors.inkSecondary,
                         )
+                        SelectionContainer {
+                            Text(
+                                text = activePairLink,
+                                style = DdType.numeric,
+                                color = colors.ink,
+                            )
+                        }
                     }
                 }
             },
@@ -263,15 +295,24 @@ internal fun RelayScreen(
                     onClick = onDismissPairCode,
                     color = colors.inkSecondary,
                 )
-                DdTextAction(
-                    text = stringResource(if (pairCopied) R.string.relay_pair_copied else R.string.relay_pair_copy),
-                    onClick = {
-                        val clipboard = context.getSystemService(ClipboardManager::class.java)
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("pair-link", activePairLink))
-                        pairCopied = true
-                    },
-                    color = colors.accent,
-                )
+                if (expired) {
+                    DdTextAction(
+                        text = stringResource(R.string.relay_pair_regenerate),
+                        onClick = onGeneratePairCode,
+                        enabled = !state.generatingPairCode,
+                        color = colors.accent,
+                    )
+                } else {
+                    DdTextAction(
+                        text = stringResource(if (pairCopied) R.string.relay_pair_copied else R.string.relay_pair_copy),
+                        onClick = {
+                            val clipboard = context.getSystemService(ClipboardManager::class.java)
+                            clipboard?.setPrimaryClip(ClipData.newPlainText("pair-link", activePairLink))
+                            pairCopied = true
+                        },
+                        color = colors.accent,
+                    )
+                }
             },
         )
     }

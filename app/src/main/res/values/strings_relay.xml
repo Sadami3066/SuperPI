@@ -44,6 +44,9 @@
     <string name="relay_pair_generating">正在生成配对链接…</string>
     <string name="relay_pair_dialog_title">配对新设备</string>
     <string name="relay_pair_dialog_hint">10 分钟内有效，仅可使用一次。用另一台手机扫码或复制下方链接完成连接。</string>
+    <string name="relay_pair_expires_in">剩余 %1$s，仅可使用一次。用另一台手机扫码或复制下方链接完成连接。</string>
+    <string name="relay_pair_expired">配对链接已过期，请重新生成。</string>
+    <string name="relay_pair_regenerate">重新生成</string>
     <string name="relay_pair_copy">复制链接</string>
     <string name="relay_pair_copied">已复制</string>
     <string name="relay_pair_close">关闭</string>

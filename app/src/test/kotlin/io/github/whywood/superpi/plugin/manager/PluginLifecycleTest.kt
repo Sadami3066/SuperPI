@@ -22,6 +22,7 @@ class PluginLifecycleTest {
     private fun lifecycle(
         gate: PluginRuntimeRegistry,
         parentScope: CoroutineScope = CoroutineScope(SupervisorJob()),
+        onDeactivatePlugin: (String) -> Unit = {},
     ): PluginLifecycle {
         val root = Files.createTempDirectory("plugin-lifecycle").toFile()
         return PluginLifecycle(
@@ -30,6 +31,7 @@ class PluginLifecycleTest {
             gate = gate,
             skillStore = PluginSkillStore(root.resolve("skills"), root.resolve("repo")),
             external = null,
+            onDeactivatePlugin = onDeactivatePlugin,
         )
     }
 
@@ -85,7 +87,8 @@ class PluginLifecycleTest {
     @Test
     fun deactivateCancelsScopeClosesPluginAndDetaches() = runTest {
         val gate = PluginRuntimeRegistry()
-        val lifecycle = lifecycle(gate)
+        val deactivated = mutableListOf<String>()
+        val lifecycle = lifecycle(gate, onDeactivatePlugin = { deactivated += it })
         val plugin = CountingPlugin()
         register(lifecycle, gate, plugin)
         val scope = gate.view("alpha")!!.scope
@@ -93,6 +96,7 @@ class PluginLifecycleTest {
 
         assertNull(lifecycle.deactivate("alpha"))
 
+        assertEquals(listOf("alpha"), deactivated)
         assertFalse(scope.isActive)
         assertEquals(1, plugin.count("close"))
         assertNull(gate.view("alpha")?.plugin)

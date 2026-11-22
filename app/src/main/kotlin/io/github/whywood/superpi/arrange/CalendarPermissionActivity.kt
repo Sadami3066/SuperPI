@@ -26,7 +26,7 @@ class CalendarPermissionActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (!completed) CalendarPermissionBridge.complete(requestId, false)
+        if (!completed && !isChangingConfigurations) CalendarPermissionBridge.complete(requestId, false)
         super.onDestroy()
     }
 }

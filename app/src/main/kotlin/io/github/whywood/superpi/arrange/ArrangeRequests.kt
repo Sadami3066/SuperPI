@@ -11,6 +11,10 @@ import java.util.Locale
 
 internal const val MAX_LABEL_LENGTH = 200
 internal const val MAX_TEXT_LENGTH = 1_024
+private const val MIN_EPOCH_SECONDS = 946_684_800L
+private const val MAX_EPOCH_SECONDS = 4_102_444_800L
+private const val MIN_EPOCH_MILLIS = MIN_EPOCH_SECONDS * 1_000L
+private const val MAX_EPOCH_MILLIS = MAX_EPOCH_SECONDS * 1_000L
 
 private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT)
 private val DATE_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
@@ -25,7 +29,15 @@ internal fun boundedOptionalText(raw: String?, maxLength: Int, field: String): S
 internal fun parseCalendarMillis(raw: String, zone: ZoneId = ZoneId.systemDefault()): Long {
     val text = raw.trim()
     if (text.isEmpty()) throw IllegalArgumentException("Time must not be empty")
-    text.toLongOrNull()?.let { return it }
+    text.toLongOrNull()?.let { numeric ->
+        return when (numeric) {
+            in MIN_EPOCH_SECONDS..MAX_EPOCH_SECONDS -> numeric * 1_000L
+            in MIN_EPOCH_MILLIS..MAX_EPOCH_MILLIS -> numeric
+            else -> throw IllegalArgumentException(
+                "Epoch timestamp \"$raw\" is out of supported range (2000-01-01 to 2100-01-01 in seconds or milliseconds)",
+            )
+        }
+    }
     runCatching { OffsetDateTime.parse(text) }.getOrNull()?.let { return it.toInstant().toEpochMilli() }
     val normalized = text.replace(' ', 'T')
     runCatching { LocalDateTime.parse(normalized) }.getOrNull()?.let {

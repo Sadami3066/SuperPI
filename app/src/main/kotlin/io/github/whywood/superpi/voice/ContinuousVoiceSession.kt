@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.callbackFlow
 internal const val VOICE_STOP_TIMEOUT_MS = 1200L
 internal const val VOICE_RESTART_DELAY_MS = 120L
 internal const val MAX_VOICE_RETRIES = 2
+private const val MAX_SILENT_RESTARTS = 20
 
 internal const val PCM_LEVEL_FLOOR_DB = -50.0
 internal const val PCM_LEVEL_CEILING_DB = -15.0
@@ -132,6 +133,7 @@ internal class ContinuousVoiceSession(context: Context) {
         private var stopped = false
         private var finished = false
         private var retries = 0
+        private var silentRestarts = 0
         private var lastVolume = -1f
         private var bufferVolumes = false
 
@@ -219,9 +221,20 @@ internal class ContinuousVoiceSession(context: Context) {
             main.postDelayed(restart, VOICE_RESTART_DELAY_MS)
         }
 
+        private fun handleSilentRestart() {
+            silentRestarts += 1
+            if (silentRestarts > MAX_SILENT_RESTARTS) {
+                events.trySend(SpeechEvent.Timeout)
+                finish()
+                return
+            }
+            scheduleRestart()
+        }
+
         private fun deliverFinal(text: String) {
             events.trySend(SpeechEvent.Final(text))
             retries = 0
+            silentRestarts = 0
         }
 
         override fun onReadyForSpeech(params: Bundle?) = Unit
@@ -249,7 +262,10 @@ internal class ContinuousVoiceSession(context: Context) {
         override fun onPartialResults(partialResults: Bundle?) {
             if (finished) return
             val text = recognitionText(partialResults)
-            if (text.isNotEmpty()) events.trySend(SpeechEvent.Partial(text))
+            if (text.isNotEmpty()) {
+                silentRestarts = 0
+                events.trySend(SpeechEvent.Partial(text))
+            }
         }
 
         override fun onResults(results: Bundle?) {
@@ -262,7 +278,7 @@ internal class ContinuousVoiceSession(context: Context) {
                 finish()
                 return
             }
-            scheduleRestart()
+            if (text.isNotEmpty()) scheduleRestart() else handleSilentRestart()
         }
 
         override fun onError(error: Int) {
@@ -275,7 +291,7 @@ internal class ContinuousVoiceSession(context: Context) {
             }
             val speechError = speechErrorForCode(error)
             when (voiceErrorDisposition(speechError)) {
-                VoiceErrorDisposition.RESTART -> scheduleRestart()
+                VoiceErrorDisposition.RESTART -> handleSilentRestart()
                 VoiceErrorDisposition.RETRY -> {
                     if (voiceShouldRetry(speechError, retries)) {
                         retries += 1

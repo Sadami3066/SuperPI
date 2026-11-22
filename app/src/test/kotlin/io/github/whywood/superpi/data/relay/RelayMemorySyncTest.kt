@@ -4,8 +4,10 @@ import io.github.whywood.superpi.runtime.MemoryWriteOutcome
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -219,6 +221,44 @@ class RelayMemorySyncTest {
         advanceTimeBy(2_000L)
         runCurrent()
         assertEquals(listOf("lease-idle"), env.server.releasedLeaseIds)
+    }
+
+    @Test
+    fun withRollupLeaseKeepsLeaseAliveDuringLongWorkAndReleasesAfterIdle() = runTest {
+        val now = 3_000_000L
+        val env = environment(clock = { now })
+        env.login()
+        env.server.leaseResponse = RelayMemoryRollupLease(
+            acquired = true,
+            leaseId = "lease-long",
+            holderDeviceId = "dev",
+            expiresAt = now + 300_000L,
+        )
+
+        var blockCompleted = false
+        val job = launch {
+            val result = env.sync.withRollupLease {
+                delay(45_000L)
+                blockCompleted = true
+                "done"
+            }
+            assertEquals("done", result)
+        }
+
+        advanceTimeBy(35_000L)
+        runCurrent()
+        assertFalse(blockCompleted)
+        assertTrue(env.server.releasedLeaseIds.isEmpty())
+
+        advanceTimeBy(10_000L)
+        runCurrent()
+        assertTrue(blockCompleted)
+        assertTrue(job.isCompleted)
+        assertTrue(env.server.releasedLeaseIds.isEmpty())
+
+        advanceTimeBy(31_000L)
+        runCurrent()
+        assertEquals(listOf("lease-long"), env.server.releasedLeaseIds)
     }
 
     private fun TestScope.environment(clock: () -> Long = System::currentTimeMillis): Environment {

@@ -52,6 +52,9 @@
     <string name="files_delete_message">Delete “%1$s”?</string>
     <string name="files_delete_folder_message">Delete folder “%1$s” and everything inside?</string>
     <string name="files_delete_confirm">Delete</string>
+    <string name="files_upload_overwrite_title">Replace existing file</string>
+    <string name="files_upload_overwrite_message">“%1$s” already exists. Replace it?</string>
+    <string name="files_upload_overwrite_confirm">Replace</string>
     <string name="files_cancel">Cancel</string>
     <string name="files_retry">Retry</string>
     <string name="files_more_actions">More actions</string>

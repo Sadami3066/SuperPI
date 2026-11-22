@@ -1,8 +1,10 @@
 package io.github.whywood.superpi.ui.onboarding
 
 import android.Manifest
+import android.app.Activity
 import android.app.NotificationManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -42,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +67,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -438,6 +442,7 @@ internal fun PermissionsStep(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findOnboardingActivity() }
     var notifications by remember { mutableStateOf(notificationsEnabled(context)) }
     var overlay by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var assistant by remember { mutableStateOf(AssistantRole.isHeld(context)) }
@@ -447,35 +452,71 @@ internal fun PermissionsStep(
     var camera by remember { mutableStateOf(cameraAccessGranted(context)) }
     var microphone by remember { mutableStateOf(microphoneAccessGranted(context)) }
     var battery by remember { mutableStateOf(batteryOptimizationIgnored(context)) }
+    var notificationDeniedPermanently by rememberSaveable { mutableStateOf(false) }
+    var storageDeniedPermanently by rememberSaveable { mutableStateOf(false) }
+    var calendarDeniedPermanently by rememberSaveable { mutableStateOf(false) }
+    var cameraDeniedPermanently by rememberSaveable { mutableStateOf(false) }
+    var microphoneDeniedPermanently by rememberSaveable { mutableStateOf(false) }
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> notifications = granted }
+    ) { granted ->
+        notifications = granted
+        notificationDeniedPermanently = !granted && Build.VERSION.SDK_INT >= 33 && activity != null &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.POST_NOTIFICATIONS)
+    }
     val storageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         storage = granted
-        if (granted) onSharedStorageGranted()
+        if (granted) {
+            storageDeniedPermanently = false
+            onSharedStorageGranted()
+        } else {
+            storageDeniedPermanently = activity != null &&
+                !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
     }
     val calendarLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { calendar = calendarAccessGranted(context) }
+    ) {
+        val granted = calendarAccessGranted(context)
+        calendar = granted
+        calendarDeniedPermanently = !granted && activity != null &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.READ_CALENDAR) &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.WRITE_CALENDAR)
+    }
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> camera = granted }
+    ) { granted ->
+        camera = granted
+        cameraDeniedPermanently = !granted && activity != null &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+    }
     val microphoneLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> microphone = granted }
+    ) { granted ->
+        microphone = granted
+        microphoneDeniedPermanently = !granted && activity != null &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
+    }
     LifecycleResumeEffect(Unit) {
         val hadStorage = storage
         notifications = notificationsEnabled(context)
+        if (notifications) notificationDeniedPermanently = false
         overlay = Settings.canDrawOverlays(context)
         assistant = AssistantRole.isHeld(context)
         shortcut = assistantShortcutPinned(context)
         storage = storageAccessGranted(context)
-        if (!hadStorage && storage) onSharedStorageGranted()
+        if (storage) {
+            storageDeniedPermanently = false
+            if (!hadStorage) onSharedStorageGranted()
+        }
         calendar = calendarAccessGranted(context)
+        if (calendar) calendarDeniedPermanently = false
         camera = cameraAccessGranted(context)
+        if (camera) cameraDeniedPermanently = false
         microphone = microphoneAccessGranted(context)
+        if (microphone) microphoneDeniedPermanently = false
         battery = batteryOptimizationIgnored(context)
         onPauseOrDispose {}
     }
@@ -497,7 +538,7 @@ internal fun PermissionsStep(
                 granted = notifications,
                 testTag = "onboarding_permission_notification",
                 onClick = {
-                    if (Build.VERSION.SDK_INT >= 33 && !notifications) {
+                    if (Build.VERSION.SDK_INT >= 33 && !notifications && !notificationDeniedPermanently) {
                         notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
                         openNotificationSettings(context)
@@ -539,10 +580,11 @@ internal fun PermissionsStep(
                 granted = storage,
                 testTag = "onboarding_permission_storage",
                 onClick = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        openAllFilesSettings(context)
-                    } else {
-                        storageLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                    when {
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> openAllFilesSettings(context)
+                        !storage && !storageDeniedPermanently ->
+                            storageLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                        else -> openAppDetailsSettings(context)
                     }
                 },
             )
@@ -554,12 +596,16 @@ internal fun PermissionsStep(
                 granted = calendar,
                 testTag = "onboarding_permission_calendar",
                 onClick = {
-                    calendarLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.READ_CALENDAR,
-                            Manifest.permission.WRITE_CALENDAR,
-                        ),
-                    )
+                    if (calendar || calendarDeniedPermanently) {
+                        openAppDetailsSettings(context)
+                    } else {
+                        calendarLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.READ_CALENDAR,
+                                Manifest.permission.WRITE_CALENDAR,
+                            ),
+                        )
+                    }
                 },
             )
             DdHairline()
@@ -569,7 +615,13 @@ internal fun PermissionsStep(
                 subtitle = stringResource(R.string.onboarding_permission_camera_hint),
                 granted = camera,
                 testTag = "onboarding_permission_camera",
-                onClick = { cameraLauncher.launch(Manifest.permission.CAMERA) },
+                onClick = {
+                    if (camera || cameraDeniedPermanently) {
+                        openAppDetailsSettings(context)
+                    } else {
+                        cameraLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                },
             )
             DdHairline()
             PermissionRow(
@@ -578,7 +630,13 @@ internal fun PermissionsStep(
                 subtitle = stringResource(R.string.onboarding_permission_microphone_hint),
                 granted = microphone,
                 testTag = "onboarding_permission_microphone",
-                onClick = { microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                onClick = {
+                    if (microphone || microphoneDeniedPermanently) {
+                        openAppDetailsSettings(context)
+                    } else {
+                        microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
             )
             DdHairline()
             PermissionRow(
@@ -991,4 +1049,21 @@ private fun openAssistantSettings(context: Context) {
     AssistantRole.defaultAppsIntent(context)?.let { intent ->
         runCatching { context.startActivity(intent) }
     }
+}
+
+private fun Context.findOnboardingActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
+private fun openAppDetailsSettings(context: Context) {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        "package:${context.packageName}".toUri(),
+    )
+    runCatching { context.startActivity(intent) }
 }

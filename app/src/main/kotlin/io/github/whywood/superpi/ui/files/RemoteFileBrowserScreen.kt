@@ -174,6 +174,13 @@ private data class RemotePreviewTarget(
     val file: File,
 )
 
+private data class PendingUploadOverwrite(
+    val uri: Uri,
+    val name: String,
+    val size: Long?,
+    val targetPath: String,
+)
+
 private data class UploadSourceMeta(
     val name: String,
     val size: Long?,
@@ -217,6 +224,7 @@ fun RemoteFileBrowserScreen(
     var previewTarget by remember { mutableStateOf<RemotePreviewTarget?>(null) }
     var pendingSaveItem by remember { mutableStateOf<RemoteFileItem?>(null) }
     var pendingSaveCachedFile by remember { mutableStateOf<File?>(null) }
+    var pendingUploadOverwrite by remember { mutableStateOf<PendingUploadOverwrite?>(null) }
 
     val loadFailedText = stringResource(R.string.files_remote_load_failed)
     val opFailedText = stringResource(R.string.files_remote_op_failed)
@@ -294,15 +302,14 @@ fun RemoteFileBrowserScreen(
         transferJob = launched
     }
 
-    val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val meta = queryUploadMeta(context, uri)
-        if (meta.size != null && meta.size > RemoteFileClient.MAX_TRANSFER_BYTES) {
-            Toast.makeText(context, tooLargeText, Toast.LENGTH_SHORT).show()
-            return@rememberLauncherForActivityResult
-        }
-        val targetPath = RemoteFileBrowserLogic.childPath(currentPath, meta.name)
-        startTransfer(uploading = true, fileName = meta.name, totalBytes = meta.size ?: 0L) { onProgress ->
+    fun launchUpload(
+        uri: Uri,
+        name: String,
+        size: Long?,
+        targetPath: String,
+        overwrite: Boolean,
+    ) {
+        startTransfer(uploading = true, fileName = name, totalBytes = size ?: 0L) { onProgress ->
             val result = withContext(Dispatchers.IO) {
                 val input = runCatching { context.contentResolver.openInputStream(uri) }.getOrNull()
                     ?: return@withContext RemoteFileResult.Error("io_error", opFailedText)
@@ -312,22 +319,48 @@ fun RemoteFileBrowserScreen(
                         botId = botId,
                         remotePath = targetPath,
                         inputStream = stream,
-                        totalBytes = meta.size,
-                        overwrite = true,
+                        totalBytes = size,
+                        overwrite = overwrite,
                         onProgress = { progress -> onProgress(progress.transferred, progress.total) },
                     )
                 }
             }
             when (result) {
                 is RemoteFileResult.Ok -> {
-                    Toast.makeText(context, resources.getString(R.string.files_remote_upload_done, meta.name), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, resources.getString(R.string.files_remote_upload_done, name), Toast.LENGTH_SHORT).show()
                     refreshEpoch += 1
                 }
                 is RemoteFileResult.Error -> {
-                    Toast.makeText(context, errorMessageFor(result.code, opFailedText), Toast.LENGTH_SHORT).show()
+                    if (!overwrite && result.code == "already_exists") {
+                        pendingUploadOverwrite = PendingUploadOverwrite(
+                            uri = uri,
+                            name = name,
+                            size = size,
+                            targetPath = targetPath,
+                        )
+                    } else {
+                        Toast.makeText(context, errorMessageFor(result.code, opFailedText), Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
+    }
+
+    val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val meta = queryUploadMeta(context, uri)
+        if (meta.size != null && meta.size > RemoteFileClient.MAX_TRANSFER_BYTES) {
+            Toast.makeText(context, tooLargeText, Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        val targetPath = RemoteFileBrowserLogic.childPath(currentPath, meta.name)
+        launchUpload(
+            uri = uri,
+            name = meta.name,
+            size = meta.size,
+            targetPath = targetPath,
+            overwrite = false,
+        )
     }
 
     val saveDocumentLauncher = rememberLauncherForActivityResult(
@@ -744,6 +777,41 @@ fun RemoteFileBrowserScreen(
                         }
                     }
                 }
+            },
+        )
+    }
+
+    pendingUploadOverwrite?.let { pending ->
+        DdDialog(
+            onDismissRequest = { pendingUploadOverwrite = null },
+            title = stringResource(R.string.files_upload_overwrite_title),
+            content = {
+                Text(
+                    text = stringResource(R.string.files_upload_overwrite_message, pending.name),
+                    style = DdType.bodySmall,
+                    color = colors.inkSecondary,
+                )
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.files_cancel),
+                    onClick = { pendingUploadOverwrite = null },
+                    color = colors.inkSecondary,
+                )
+                DdTextAction(
+                    text = stringResource(R.string.files_upload_overwrite_confirm),
+                    onClick = {
+                        pendingUploadOverwrite = null
+                        launchUpload(
+                            uri = pending.uri,
+                            name = pending.name,
+                            size = pending.size,
+                            targetPath = pending.targetPath,
+                            overwrite = true,
+                        )
+                    },
+                    color = colors.danger,
+                )
             },
         )
     }

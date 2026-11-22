@@ -22,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.AppLanguage
 import io.github.whywood.superpi.voice.ContinuousVoiceSession
@@ -194,6 +196,16 @@ internal fun rememberComposerVoice(
             }
 
             else -> permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (listening || stopping) {
+            job?.cancel()
+            job = null
+            session.cancel()
+            pendingSend = false
+            finishRecording(sendAfterCommit = false)
         }
     }
 

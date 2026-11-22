@@ -27,6 +27,7 @@ internal class PluginLifecycle(
     private val skillStore: PluginSkillStore,
     private val external: ExternalPluginRuntime?,
     private val onPluginCrash: (pluginId: String, error: Throwable) -> Unit = { _, _ -> },
+    private val onDeactivatePlugin: (pluginId: String) -> Unit = {},
 ) {
     fun createRuntime(
         record: PluginRecord,
@@ -112,6 +113,7 @@ internal class PluginLifecycle(
     suspend fun deactivate(pluginId: String): String? {
         val view = gate.view(pluginId) ?: return null
         view.scope.cancel()
+        runCatching { onDeactivatePlugin(pluginId) }
         val error = close(view)
         gate.detachPlugin(pluginId)
         external?.forget(pluginId)

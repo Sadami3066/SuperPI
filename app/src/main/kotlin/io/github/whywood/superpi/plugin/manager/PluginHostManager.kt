@@ -11,6 +11,7 @@ import io.github.whywood.superpi.plugin.host.PluginRegistry
 import io.github.whywood.superpi.plugin.host.PluginRegistrySnapshot
 import io.github.whywood.superpi.plugin.host.PluginServices
 import io.github.whywood.superpi.plugin.host.PluginTextResolver
+import io.github.whywood.superpi.plugin.host.components.PluginHostService
 import io.github.whywood.superpi.plugin.host.ui.SlotRegistry
 import io.github.whywood.superpi.plugin.host.ui.ToolRendererRegistry
 import io.github.whywood.superpi.runtime.PluginPromptContribution
@@ -70,6 +71,7 @@ class PluginHostManager internal constructor(
         skillStore = skillStore,
         external = external,
         onPluginCrash = ::onPluginCrash,
+        onDeactivatePlugin = { pluginId -> runCatching { PluginHostService.stop(context, pluginId) } },
     )
     private val materializer = PluginContributionMaterializer(gate) { text -> textResolver.resolve(text) }
     private val uiProjection = PluginUiProjection(textResolver, strings)

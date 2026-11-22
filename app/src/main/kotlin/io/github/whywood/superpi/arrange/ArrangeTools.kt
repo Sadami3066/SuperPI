@@ -115,6 +115,13 @@ private val calendarParameters: JsonObject = buildJsonObject {
             put("minimum", 1)
             put("maximum", MAX_CALENDAR_LIMIT)
         }
+        putJsonObject("series") {
+            put("type", "boolean")
+            put(
+                "description",
+                "Set true on update or delete to modify or delete an entire recurring series after confirming with the user; defaults to false.",
+            )
+        }
     }
     put("required", buildJsonArray { add(JsonPrimitive("action")) })
 }
@@ -232,6 +239,7 @@ private fun arrangeCalendarTool(
 
                     CALENDAR_UPDATE -> {
                         val id = args.requiredLong("id")
+                        val allowSeries = args.booleanOrNull("series") ?: false
                         val patch = ArrangeEventPatch(
                             title = if (args.containsKey("title")) args.optionalText("title", MAX_LABEL_LENGTH) else null,
                             startMillis = args.stringOrNull("start")?.takeIf { it.isNotBlank() }
@@ -243,8 +251,12 @@ private fun arrangeCalendarTool(
                             description = if (args.containsKey("description")) args.stringOrNull("description") else null,
                             calendarId = args.longOrNull("calendarId"),
                             reminderMinutes = if (args.containsKey("reminders")) args.reminderMinutes() else null,
+                            allowRecurringSeries = allowSeries,
                         )
                         calendar.ensureWriteAccess()
+                        if (!allowSeries && calendar.hasReadPermission() && calendar.get(id)?.recurring == true) {
+                            throw IllegalArgumentException(RECURRING_EVENT_GUARD_MESSAGE)
+                        }
                         val updated = calendar.update(id, patch)
                             ?: throw IllegalArgumentException("Event $id not found")
                         textResult(
@@ -257,8 +269,12 @@ private fun arrangeCalendarTool(
 
                     CALENDAR_DELETE -> {
                         val id = args.requiredLong("id")
+                        val allowSeries = args.booleanOrNull("series") ?: false
                         calendar.ensureWriteAccess()
-                        val removed = calendar.delete(id)
+                        if (!allowSeries && calendar.hasReadPermission() && calendar.get(id)?.recurring == true) {
+                            throw IllegalArgumentException(RECURRING_EVENT_GUARD_MESSAGE)
+                        }
+                        val removed = calendar.delete(id, allowSeries)
                         if (!removed) throw IllegalArgumentException("Event $id not found")
                         textResult(buildJsonObject { put("deleted", id) }.toString())
                     }

@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val pendingDeepDestination = mutableStateOf<AppDestination?>(null)
     private val pendingShare = mutableStateOf<SharePayload?>(null)
     private val pendingPluginImportUri = mutableStateOf<String?>(null)
+    private var lastHandledIntentKey: String? = null
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(LanguagePreferences.wrap(newBase))
@@ -58,9 +59,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) {
+            lastHandledIntentKey = intentFingerprint(intent)
             handleIntent(intent)
         } else {
             restoreIntake(savedInstanceState)
+            val incomingKey = intentFingerprint(intent)
+            if (incomingKey != null && incomingKey != lastHandledIntentKey) {
+                lastHandledIntentKey = incomingKey
+                handleIntent(intent)
+            }
         }
         startAgentService()
         graph.processRuntime.startAsync()
@@ -94,11 +101,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        lastHandledIntentKey = intentFingerprint(intent)
         handleIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        pendingSessionId.value?.let { outState.putString(EXTRA_PENDING_SESSION_ID, it) }
+        pendingDeepDestination.value?.routeKey?.let { outState.putString(EXTRA_PENDING_DEEP_ROUTE, it) }
+        lastHandledIntentKey?.let { outState.putString(EXTRA_LAST_HANDLED_INTENT_KEY, it) }
         pendingShare.value?.let { payload ->
             outState.putStringArrayList(EXTRA_SHARE_STREAMS, ArrayList(payload.streams))
             outState.putString(EXTRA_SHARE_TEXT, payload.text)
@@ -157,7 +168,9 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        pendingSessionId.value = intent.getStringExtra(NotificationCenter.EXTRA_SESSION_ID)
+        intent.getStringExtra(NotificationCenter.EXTRA_SESSION_ID)?.takeIf { it.isNotBlank() }?.let {
+            pendingSessionId.value = it
+        }
         if (intent.action == Intent.ACTION_ASSIST) {
             startActivity(
                 Intent(this, AssistantOverlayActivity::class.java).setAction(Intent.ACTION_ASSIST),
@@ -259,6 +272,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun restoreIntake(savedInstanceState: Bundle) {
+        lastHandledIntentKey = savedInstanceState.getString(EXTRA_LAST_HANDLED_INTENT_KEY)
+        savedInstanceState.getString(EXTRA_PENDING_SESSION_ID)?.let { pendingSessionId.value = it }
+        savedInstanceState.getString(EXTRA_PENDING_DEEP_ROUTE)
+            ?.let(AppDestination::fromRouteKey)
+            ?.let { pendingDeepDestination.value = it }
         savedInstanceState.getString(EXTRA_PLUGIN_IMPORT_URI)?.let { pendingPluginImportUri.value = it }
         val streams = savedInstanceState.getStringArrayList(EXTRA_SHARE_STREAMS).orEmpty()
         val text = savedInstanceState.getString(EXTRA_SHARE_TEXT).orEmpty()
@@ -271,6 +289,40 @@ class MainActivity : ComponentActivity() {
             title = title,
         )
         if (!payload.isEmpty) pendingShare.value = payload
+    }
+
+    private fun intentFingerprint(intent: Intent?): String? {
+        if (intent == null) return null
+        if (intent.action == Intent.ACTION_VIEW && !intent.dataString.isNullOrBlank()) {
+            return "VIEW:${intent.dataString}|${intent.type.orEmpty()}"
+        }
+        intent.getStringExtra(NotificationCenter.EXTRA_SESSION_ID)?.takeIf { it.isNotBlank() }?.let {
+            return "SESSION:$it"
+        }
+        if (intent.action == Intent.ACTION_ASSIST) return "ASSIST"
+        val action = intent.action
+        if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
+            val streams = if (action == Intent.ACTION_SEND) {
+                listOfNotNull(
+                    IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.toString(),
+                )
+            } else {
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                    .orEmpty()
+                    .map(Uri::toString)
+            }
+            val clipStreams = intent.clipData?.let { clip ->
+                (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri?.toString() }
+            }.orEmpty()
+            return buildString {
+                append(action)
+                append('|').append(intent.type.orEmpty())
+                append('|').append(intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty())
+                append('|').append(intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty())
+                append('|').append((streams + clipStreams).joinToString(","))
+            }
+        }
+        return null
     }
 
     private fun isPluginPackage(uri: Uri, mimeType: String?): Boolean =
@@ -299,6 +351,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val EXTRA_PENDING_SESSION_ID = "io.github.whywood.superpi.extra.PENDING_SESSION_ID"
+        const val EXTRA_PENDING_DEEP_ROUTE = "io.github.whywood.superpi.extra.PENDING_DEEP_ROUTE"
+        const val EXTRA_LAST_HANDLED_INTENT_KEY = "io.github.whywood.superpi.extra.LAST_HANDLED_INTENT_KEY"
         const val EXTRA_SHARE_STREAMS = "io.github.whywood.superpi.extra.SHARE_STREAMS"
         const val EXTRA_SHARE_TEXT = "io.github.whywood.superpi.extra.SHARE_TEXT"
         const val EXTRA_SHARE_TITLE = "io.github.whywood.superpi.extra.SHARE_TITLE"

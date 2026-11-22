@@ -76,9 +76,7 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
         store = memoryStore,
         scope = deps.scope,
         complete = { prompt ->
-            if (!deps.acquireMemoryRollupLease()) {
-                null
-            } else {
+            deps.runWithMemoryRollupLease {
                 completeWithCheapModel(deps.providerCatalog, prompt)
             }
         },

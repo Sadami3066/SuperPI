@@ -861,7 +861,7 @@ class RemoteSessionHandleTest {
         val handle = engine.create(null, ModelConfig())
 
         val attachmentDir = File(cwd, "attachments").apply { mkdirs() }
-        val localFile = File(attachmentDir, "a1_notes.txt").apply {
+        val localFile = File(attachmentDir, "a1b2c3d4e5f6_notes.txt").apply {
             writeText("cross-phone attachment payload")
         }
         val promptWithAttachment = """
@@ -879,11 +879,11 @@ class RemoteSessionHandleTest {
         val uploadCall = transport.calls.firstOrNull { it.method == "file.write_chunk" }
         assertTrue(uploadCall != null)
         assertEquals("pi", uploadCall!!.params.getValue("botId").jsonPrimitive.content)
-        assertEquals("attachments/a1_notes.txt", uploadCall.params.getValue("path").jsonPrimitive.content)
+        assertEquals("attachments/a1b2c3d4e5f6_notes.txt", uploadCall.params.getValue("path").jsonPrimitive.content)
 
         val promptCall = transport.calls.last { it.method == "bot.prompt" }
         val sentText = promptCall.params.getValue("text").jsonPrimitive.content
-        assertTrue(sentText.contains("- attachments/a1_notes.txt | notes.txt | text/plain | ${localFile.length()}"))
+        assertTrue(sentText.contains("- attachments/a1b2c3d4e5f6_notes.txt | notes.txt | text/plain | ${localFile.length()}"))
         assertFalse(sentText.contains(localFile.absolutePath))
 
         transport.emit(promptCall.routeId, 0, FakeEvents.textDelta("Summary ready"))
@@ -892,7 +892,7 @@ class RemoteSessionHandleTest {
         assertTrue(job.isCompleted)
 
         val mirroredUserText = (handle.messages.first().asLlmMessage() as UserMessage).content.text()
-        assertTrue(mirroredUserText.contains("- attachments/a1_notes.txt | notes.txt | text/plain | ${localFile.length()}"))
+        assertTrue(mirroredUserText.contains("- attachments/a1b2c3d4e5f6_notes.txt | notes.txt | text/plain | ${localFile.length()}"))
         assertFalse(mirroredUserText.contains(localFile.absolutePath))
     }
 
@@ -903,7 +903,7 @@ class RemoteSessionHandleTest {
         val handle = engine.create(null, ModelConfig())
 
         val attachmentDir = File(cwd, "attachments").apply { mkdirs() }
-        val localFile = File(attachmentDir, "b2_report.csv").apply {
+        val localFile = File(attachmentDir, "b2c3d4e5f6a1_report.csv").apply {
             writeText("id,value\n1,42\n")
         }
         val promptWithAttachment = """
@@ -927,7 +927,7 @@ class RemoteSessionHandleTest {
         val promptCall = transport.calls.last { it.method == "bot.prompt" }
         assertTrue(
             promptCall.params.getValue("text").jsonPrimitive.content
-                .contains("- attachments/b2_report.csv | report.csv | text/csv | ${localFile.length()}"),
+                .contains("- attachments/b2c3d4e5f6a1_report.csv | report.csv | text/csv | ${localFile.length()}"),
         )
         transport.emit(promptCall.routeId, 0, FakeEvents.textDelta("Report analyzed"))
         transport.emit(promptCall.routeId, 1, FakeEvents.settled())
@@ -936,6 +936,71 @@ class RemoteSessionHandleTest {
 
         val userMessages = handle.messages.mapNotNull { it.asLlmMessage() as? UserMessage }
         assertEquals(1, userMessages.size)
+    }
+
+    @Test
+    fun promptWithCollidingAttachmentBasenamesUsesDistinctRemotePathsWithoutOverwrite() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+
+        val firstFile = File(File(root, "dir1").apply { mkdirs() }, "report.pdf").apply {
+            writeText("first version of report")
+        }
+        val secondFile = File(File(root, "dir2").apply { mkdirs() }, "report.pdf").apply {
+            writeText("second different report")
+        }
+
+        val job1 = launch {
+            handle.prompt(
+                """
+                first file
+
+                <attachments>
+                - ${firstFile.absolutePath} | report.pdf | application/pdf | ${firstFile.length()}
+                </attachments>
+                """.trimIndent(),
+            )
+        }
+        runCurrent()
+        val upload1 = transport.calls.last { it.method == "file.write_chunk" }
+        val remotePath1 = upload1.params.getValue("path").jsonPrimitive.content
+        assertFalse(upload1.params.getValue("overwrite").jsonPrimitive.boolean)
+        assertTrue(Regex("^attachments/[0-9a-f]{8}_report\\.pdf$").matches(remotePath1))
+        val prompt1 = transport.calls.last { it.method == "bot.prompt" }
+        assertTrue(prompt1.params.getValue("text").jsonPrimitive.content.contains("- $remotePath1 |"))
+        transport.emit(prompt1.routeId, 0, FakeEvents.textDelta("ok1"))
+        transport.emit(prompt1.routeId, 1, FakeEvents.settled())
+        runCurrent()
+        assertTrue(job1.isCompleted)
+
+        val job2 = launch {
+            handle.prompt(
+                """
+                second file
+
+                <attachments>
+                - ${secondFile.absolutePath} | report.pdf | application/pdf | ${secondFile.length()}
+                </attachments>
+                """.trimIndent(),
+            )
+        }
+        runCurrent()
+        val upload2 = transport.calls.last { it.method == "file.write_chunk" }
+        val remotePath2 = upload2.params.getValue("path").jsonPrimitive.content
+        assertFalse(upload2.params.getValue("overwrite").jsonPrimitive.boolean)
+        assertTrue(Regex("^attachments/[0-9a-f]{8}_report\\.pdf$").matches(remotePath2))
+        assertTrue(remotePath1 != remotePath2)
+        val prompt2 = transport.calls.last { it.method == "bot.prompt" }
+        assertTrue(prompt2.params.getValue("text").jsonPrimitive.content.contains("- $remotePath2 |"))
+        transport.emit(prompt2.routeId, 0, FakeEvents.textDelta("ok2"))
+        transport.emit(prompt2.routeId, 1, FakeEvents.settled())
+        runCurrent()
+        assertTrue(job2.isCompleted)
+
+        val userTexts = handle.messages.mapNotNull { it.asLlmMessage() as? UserMessage }.map { it.content.text() }
+        assertTrue(userTexts[0].contains("- $remotePath1 |"))
+        assertTrue(userTexts[1].contains("- $remotePath2 |"))
     }
 
     @Test

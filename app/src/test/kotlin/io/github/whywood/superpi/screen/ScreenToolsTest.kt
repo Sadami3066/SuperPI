@@ -650,6 +650,39 @@ class ScreenToolsTest {
     }
 
     @Test
+    fun pruneScreenshotsCapsFileCountAndBytesWhilePreservingKeepAndOtherFiles() {
+        screenshotDir.mkdirs()
+        val files = (1..5).map { idx ->
+            File(screenshotDir, "screen-0$idx.png").apply {
+                writeBytes(ByteArray(100) { idx.toByte() })
+                setLastModified(idx * 1000L)
+            }
+        }
+        val unrelated = File(screenshotDir, "notes.txt").apply {
+            writeText("keep me")
+        }
+
+        pruneScreenshots(screenshotDir, keep = files.last(), maxFiles = 3, maxBytes = 10_000L)
+        assertFalse(files[0].exists())
+        assertFalse(files[1].exists())
+        assertTrue(files[2].exists())
+        assertTrue(files[3].exists())
+        assertTrue(files[4].exists())
+        assertTrue(unrelated.exists())
+
+        pruneScreenshots(screenshotDir, keep = files[2], maxFiles = 10, maxBytes = 200L)
+        assertTrue(files[2].exists())
+        assertFalse(files[3].exists())
+        assertTrue(files[4].exists())
+        assertTrue(unrelated.exists())
+
+        pruneScreenshots(screenshotDir, keep = files[2], maxFiles = 10, maxBytes = 50L)
+        assertTrue(files[2].exists())
+        assertFalse(files[4].exists())
+        assertTrue(unrelated.exists())
+    }
+
+    @Test
     fun observeJsonReportsOtherWindowsOnTheSameScreen() {
         val snapshot = GuiNodeTree.buildSnapshot(
             root = GuiNode(

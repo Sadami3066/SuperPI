@@ -55,6 +55,7 @@ import io.github.whywood.superpi.sdk.coding.session.SessionEvent
 import io.github.whywood.superpi.sdk.mcp.config.McpServerConfig
 import java.io.File
 import java.io.FileInputStream
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -1404,8 +1405,7 @@ class RemoteSessionHandle internal constructor(
         if (!rawPath.startsWith("/")) return Result.success(line)
         val localFile = File(rawPath)
         if (!localFile.isFile) return Result.success(line)
-        val safeFileName = sanitizeAttachmentFileName(localFile.name)
-        val remotePath = "$ATTACHMENT_REMOTE_DIR/$safeFileName"
+        val remotePath = remoteAttachmentPath(localFile)
         val rewrittenLine = "- $remotePath | $displayName | $mimeType | $sizeField"
         val supportsFiles = transport.supportsPeerCapability(
             target.deviceId,
@@ -1428,6 +1428,7 @@ class RemoteSessionHandle internal constructor(
                         remotePath = remotePath,
                         inputStream = input,
                         totalBytes = localFile.length(),
+                        overwrite = false,
                     )
                 }
             } catch (cancelled: CancellationException) {
@@ -1438,8 +1439,12 @@ class RemoteSessionHandle internal constructor(
             when (uploadOutcome) {
                 is RemoteFileResult.Ok -> uploadedAttachments[cacheKey] = remotePath
                 is RemoteFileResult.Error -> {
-                    val msg = uploadOutcome.message.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
-                    return Result.failure(IllegalStateException(msg))
+                    if (uploadOutcome.code == "already_exists") {
+                        uploadedAttachments[cacheKey] = remotePath
+                    } else {
+                        val msg = uploadOutcome.message.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
+                        return Result.failure(IllegalStateException(msg))
+                    }
                 }
             }
         }
@@ -1467,8 +1472,8 @@ class RemoteSessionHandle internal constructor(
                     val parts = line.removePrefix("- ").split(" | ", limit = 4)
                     if (parts.size == 4 && parts[0].trim().startsWith("/")) {
                         val localFile = File(parts[0].trim())
-                        val safeFileName = sanitizeAttachmentFileName(localFile.name)
-                        "- $ATTACHMENT_REMOTE_DIR/$safeFileName | ${parts[1].trim()} | ${parts[2].trim()} | ${parts[3].trim()}"
+                        val remotePath = remoteAttachmentPath(localFile)
+                        "- $remotePath | ${parts[1].trim()} | ${parts[2].trim()} | ${parts[3].trim()}"
                     } else {
                         line
                     }
@@ -1477,6 +1482,22 @@ class RemoteSessionHandle internal constructor(
                 else -> line
             }
         }
+    }
+
+    private fun remoteAttachmentPath(localFile: File): String {
+        val safeFileName = sanitizeAttachmentFileName(localFile.name)
+        if (ATTACHMENT_ID_PREFIX.matches(safeFileName)) {
+            return "$ATTACHMENT_REMOTE_DIR/$safeFileName"
+        }
+        val digestInput = if (localFile.isFile) {
+            "${localFile.absolutePath}:${localFile.length()}:${localFile.lastModified()}"
+        } else {
+            localFile.absolutePath
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(digestInput.toByteArray(Charsets.UTF_8))
+        val tag = digest.take(4).joinToString("") { "%02x".format(it) }
+        return "$ATTACHMENT_REMOTE_DIR/${tag}_$safeFileName"
     }
 
     private fun sanitizeAttachmentFileName(raw: String): String =
@@ -1660,6 +1681,7 @@ class RemoteSessionHandle internal constructor(
         private const val ATTACHMENT_OPEN_TAG = "<attachments>"
         private const val ATTACHMENT_CLOSE_TAG = "</attachments>"
         private const val ATTACHMENT_REMOTE_DIR = "attachments"
+        private val ATTACHMENT_ID_PREFIX = Regex("^[0-9a-f]{12}_.+")
         private const val UNSUPPORTED_ATTACHMENT_MESSAGE =
             "The remote device does not support file attachments."
     }

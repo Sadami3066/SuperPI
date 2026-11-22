@@ -40,6 +40,7 @@ class PluginHostService : Service() {
     override fun onDestroy() {
         notifications.keys.forEach { pluginId -> notificationManager()?.cancel(notificationId(pluginId)) }
         notifications.clear()
+        activePlugins.clear()
         foregroundStarted = false
         foregroundPluginId = null
         super.onDestroy()
@@ -49,6 +50,7 @@ class PluginHostService : Service() {
         val pluginId = intent.getStringExtra(EXTRA_PLUGIN_ID)?.takeIf { it.isNotBlank() } ?: return
         val options = optionsFrom(intent) ?: return
         notifications[pluginId] = options
+        activePlugins.add(pluginId)
         ensureChannel(pluginId, options)
         val notification = buildNotification(
             pluginId = pluginId,
@@ -59,6 +61,7 @@ class PluginHostService : Service() {
             !foregroundStarted -> {
                 if (!startForegroundCompat(notificationId(pluginId), notification)) {
                     notifications.remove(pluginId)
+                    activePlugins.remove(pluginId)
                     stopSelf()
                     return
                 }
@@ -69,6 +72,7 @@ class PluginHostService : Service() {
             foregroundPluginId == pluginId -> {
                 if (!startForegroundCompat(notificationId(pluginId), notification)) {
                     notifications.remove(pluginId)
+                    activePlugins.remove(pluginId)
                 }
             }
 
@@ -79,6 +83,7 @@ class PluginHostService : Service() {
     private fun handleStop(intent: Intent) {
         val pluginId = intent.getStringExtra(EXTRA_PLUGIN_ID)?.takeIf { it.isNotBlank() } ?: return
         notifications.remove(pluginId)
+        activePlugins.remove(pluginId)
         notificationManager()?.cancel(notificationId(pluginId))
         if (foregroundPluginId != pluginId) {
             if (!foregroundStarted) stopSelf()
@@ -186,6 +191,7 @@ class PluginHostService : Service() {
         private const val EXTRA_FIRST_PAGE_ID = "firstPageId"
         private const val CHANNEL_KIND = "service"
         private const val NOTIFICATION_BASE = 900_000
+        private val activePlugins = ConcurrentHashMap.newKeySet<String>()
 
         internal fun start(
             context: Context,
@@ -200,12 +206,21 @@ class PluginHostService : Service() {
             options: ForegroundServiceOptions,
         ): Boolean = dispatch(context, ACTION_UPDATE, pluginId, options, null)
 
-        internal fun stop(context: Context, pluginId: String): Boolean = runCatching {
-            context.startService(
-                buildIntent(context, ACTION_STOP, pluginId, null, null),
-            )
-            true
-        }.getOrDefault(false)
+        internal fun stop(context: Context, pluginId: String): Boolean {
+            if (!activePlugins.remove(pluginId)) return false
+            val sent = runCatching {
+                context.startService(
+                    buildIntent(context, ACTION_STOP, pluginId, null, null),
+                )
+                true
+            }.getOrDefault(false)
+            if (!sent) {
+                runCatching {
+                    context.getSystemService(NotificationManager::class.java)?.cancel(notificationId(pluginId))
+                }
+            }
+            return true
+        }
 
         private fun dispatch(
             context: Context,
@@ -213,13 +228,19 @@ class PluginHostService : Service() {
             pluginId: String,
             options: ForegroundServiceOptions?,
             firstPageId: String?,
-        ): Boolean = runCatching {
-            ContextCompat.startForegroundService(
-                context,
-                buildIntent(context, action, pluginId, options, firstPageId),
-            )
-            true
-        }.getOrDefault(false)
+        ): Boolean {
+            val started = runCatching {
+                ContextCompat.startForegroundService(
+                    context,
+                    buildIntent(context, action, pluginId, options, firstPageId),
+                )
+                true
+            }.getOrDefault(false)
+            if (started && (action == ACTION_START || action == ACTION_UPDATE)) {
+                activePlugins.add(pluginId)
+            }
+            return started
+        }
 
         private fun buildIntent(
             context: Context,

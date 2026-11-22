@@ -96,8 +96,12 @@ internal class PluginInstaller(
 
     suspend fun uninstall(pluginId: String): Boolean = withContext(ioDispatcher) {
         val record = recordStore.get(pluginId) ?: return@withContext false
-        recordStore.remove(record.id)
-        runCatching { PluginPaths.pluginRoot(pluginsRoot, record.id).deleteRecursively() }
+        recordStore.upsert(record.copy(enabled = false))
+        val root = PluginPaths.pluginRoot(pluginsRoot, record.id)
+        runCatching { root.deleteRecursively() }
+        if (!root.exists()) {
+            recordStore.remove(record.id)
+        }
         true
     }
 

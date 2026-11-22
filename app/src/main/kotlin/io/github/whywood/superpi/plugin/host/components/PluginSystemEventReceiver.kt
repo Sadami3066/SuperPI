@@ -99,7 +99,15 @@ class PluginSystemEventReceiver : BroadcastReceiver() {
     private suspend fun handleExactAlarm(context: Context, intent: Intent) {
         val pluginId = intent.getStringExtra(EXTRA_PLUGIN_ID)?.let(::sanitizedPluginId) ?: return
         val taskId = intent.getStringExtra(EXTRA_TASK_ID)?.trim()?.takeIf { it.isNotEmpty() } ?: return
-        val directory = File(File(context.filesDir, "plugins"), pluginId)
+        val pluginsRoot = File(context.filesDir, "plugins")
+        val directory = File(pluginsRoot, pluginId)
+        val enabled = runCatching {
+            ExternalPluginRecordStore(File(pluginsRoot, "plugins.json")).get(pluginId)?.enabled
+        }.getOrNull()
+        if (enabled == false || !directory.isDirectory) {
+            runCatching { PluginBackgroundScheduler(context, pluginId).cancel(taskId) }
+            return
+        }
         val store = PluginBackgroundStore(backgroundStoreFile(directory))
         val task = store.record(taskId) ?: return
         if (task.kind != PluginBackgroundKind.EXACT) return
