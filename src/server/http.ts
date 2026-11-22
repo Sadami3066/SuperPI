@@ -303,10 +303,10 @@ async function handle(
         throw new HttpError(400, 'bad_request', 'body must be an object')
       }
       const rawName = (payload as { name?: unknown }).name
-      if (typeof rawName !== 'string' || rawName.trim() === '' || rawName.trim().length > MAX_DEVICE_NAME_LENGTH) {
+      const cleanName = typeof rawName === 'string' ? sanitizeDeviceName(rawName) : ''
+      if (cleanName === '') {
         throw new HttpError(400, 'bad_request', 'name must be a non-empty string up to 128 chars')
       }
-      const cleanName = rawName.trim()
       const updated = options.store.renameDevice(id, cleanName, currentNow)
       if (!updated) throw new HttpError(404, 'not_found', `unknown device: ${id}`)
       options.onDeviceRenamed?.(id, updated.name)

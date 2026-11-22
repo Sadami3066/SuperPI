@@ -230,6 +230,14 @@ describe('relay http', () => {
 
     const listAfterRename = (await (await fetch(`${harness.baseUrl}/v1/devices`, { headers: auth(body.token) })).json()) as DeviceListResponse
     expect(listAfterRename.devices[0]?.name).toBe('Main Phone')
+
+    const sanitizedRenameResponse = await fetch(`${harness.baseUrl}/v1/devices/${encodeURIComponent(body.deviceId)}`, {
+      method: 'PATCH',
+      headers: { ...auth(body.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'My\nPhone\r\tTest' }),
+    })
+    expect(sanitizedRenameResponse.status).toBe(200)
+    expect(await sanitizedRenameResponse.json()).toEqual({ deviceId: body.deviceId, name: 'My Phone Test' })
   })
 
   it('rejects a wrong login secret', async () => {

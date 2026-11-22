@@ -203,7 +203,7 @@ describe('realtime hub', () => {
     const presence = await desktop.next()
     expect(presence.type).toBe('presence')
     if (presence.type !== 'presence') throw new Error('unexpected frame')
-    expect(presence).toMatchObject({ deviceId: second.deviceId, online: true })
+    expect(presence).toMatchObject({ deviceId: second.deviceId, name: 'Phone', online: true })
     expect(presence.bots).toEqual([{ id: 'pi', name: 'PI' }])
 
     const list = (await (
@@ -790,5 +790,90 @@ describe('realtime hub', () => {
       botId: 'home',
       deviceId: desktop.deviceId,
     })
+  })
+
+  it('streams session.retry events after route_ok until agent_settled', async () => {
+    const harness = await startRelay()
+    const caller = await enrollDevice(harness, 'Caller', 'android')
+    const host = await enrollDevice(harness, 'Host', 'android')
+
+    const callerClient = await Client.open(harness.wsBase, caller.token)
+    callerClient.send(hello(caller.deviceId))
+    await nextOf(callerClient, 'hello_ok')
+
+    const hostClient = await Client.open(harness.wsBase, host.token)
+    hostClient.send(hello(host.deviceId))
+    await nextOf(hostClient, 'hello_ok')
+    await nextOf(callerClient, 'presence')
+
+    callerClient.send({
+      type: 'route',
+      id: 'req-retry-1',
+      to: host.deviceId,
+      method: 'session.retry',
+      params: { botId: 'pi', sessionId: 's-1' },
+    })
+    const inbound = await nextOf(hostClient, 'route')
+    expect(inbound).toMatchObject({ id: 'req-retry-1', method: 'session.retry' })
+
+    hostClient.send({ type: 'route_ok', id: 'req-retry-1', result: { sessionId: 's-1', retried: true } })
+    expect(await nextOf(callerClient, 'route_ok')).toMatchObject({ id: 'req-retry-1' })
+
+    hostClient.send({ type: 'route_event', id: 'req-retry-1', seq: 0, event: { type: 'agent_start' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'req-retry-1', seq: 0 })
+
+    hostClient.send({ type: 'route_event', id: 'req-retry-1', seq: 1, event: { type: 'agent_settled' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'req-retry-1', seq: 1 })
+
+    hostClient.send({ type: 'route_event', id: 'req-retry-1', seq: 2, event: { type: 'agent_start' } })
+    const rejected = await nextOf(hostClient, 'route_error')
+    expect(rejected).toMatchObject({ id: 'req-retry-1', code: 'internal' })
+  })
+
+  it('keeps accepted bot.resume routes alive across sweeper ticks while both peers are online', async () => {
+    let clock = 100_000
+    const harness = await startRelay({
+      now: () => clock,
+      hubOptions: { sweeperIntervalMs: 25 },
+    })
+    const caller = await enrollDevice(harness, 'Caller', 'android')
+    const host = await enrollDevice(harness, 'Host', 'android')
+
+    const callerClient = await Client.open(harness.wsBase, caller.token)
+    callerClient.send(hello(caller.deviceId))
+    await nextOf(callerClient, 'hello_ok')
+
+    const hostClient = await Client.open(harness.wsBase, host.token)
+    hostClient.send(hello(host.deviceId))
+    await nextOf(hostClient, 'hello_ok')
+    await nextOf(callerClient, 'presence')
+
+    callerClient.send({
+      type: 'route',
+      id: 'req-resume-long',
+      to: host.deviceId,
+      method: 'bot.resume',
+      params: { botId: 'pi', sessionId: 's-1' },
+    })
+    await nextOf(hostClient, 'route')
+    hostClient.send({ type: 'route_ok', id: 'req-resume-long', result: { sessionId: 's-1', busy: false } })
+    await nextOf(callerClient, 'route_ok')
+
+    callerClient.send({
+      type: 'route',
+      id: 'req-stale-unaccepted',
+      to: host.deviceId,
+      method: 'bot.state',
+      params: { botId: 'pi' },
+    })
+    await nextOf(hostClient, 'route')
+
+    clock += 3 * 60 * 60 * 1000
+    const staleTimeout = await nextOf(callerClient, 'route_error')
+    expect(staleTimeout).toMatchObject({ id: 'req-stale-unaccepted', code: 'internal' })
+
+    hostClient.send({ type: 'route_event', id: 'req-resume-long', seq: 5, event: { type: 'agent_start' } })
+    const lateEvent = await nextOf(callerClient, 'route_event')
+    expect(lateEvent).toMatchObject({ id: 'req-resume-long', seq: 5, event: { type: 'agent_start' } })
   })
 })

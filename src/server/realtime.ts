@@ -36,6 +36,7 @@ export interface RealtimeHub {
 export interface RealtimeHubOptions {
   heartbeatIntervalMs?: number
   heartbeatTimeoutMs?: number
+  sweeperIntervalMs?: number
 }
 
 interface Connection {
@@ -95,6 +96,11 @@ export function createRealtimeHub(
     const idleCutoff = current - ROUTE_TTL_MS
     const hardCutoff = current - MAX_ROUTE_LIFETIME_MS
     for (const [id, pending] of pendingRoutes) {
+      if (pending.method === 'bot.resume' && pending.accepted) {
+        const requesterAlive = connections.get(pending.from)?.state === 'active'
+        const targetAlive = connections.get(pending.to)?.state === 'active'
+        if (requesterAlive && targetAlive) continue
+      }
       if (pending.at > idleCutoff && pending.createdAt > hardCutoff) continue
       pendingRoutes.delete(id)
       if (pending.streaming && pending.accepted && pending.at <= idleCutoff) continue
@@ -103,7 +109,7 @@ export function createRealtimeHub(
         send(requester, { type: 'route_error', id, code: 'internal', message: 'request timed out' })
       }
     }
-  }, 60_000)
+  }, options.sweeperIntervalMs ?? 60_000)
   sweeper.unref?.()
 
   const heartbeat = setInterval(() => {
@@ -186,6 +192,7 @@ export function createRealtimeHub(
       online,
       lastSeen: device?.lastSeen ?? now(),
     }
+    if (device?.name) frame.name = device.name
     if (bots) frame.bots = bots
     if (capabilities) frame.capabilities = capabilities
     for (const connection of connections.values()) {
@@ -299,7 +306,8 @@ export function createRealtimeHub(
       send(connection, error)
       return
     }
-    const streaming = frame.method === 'bot.prompt' || frame.method === 'bot.resume'
+    const streaming =
+      frame.method === 'bot.prompt' || frame.method === 'bot.resume' || frame.method === 'session.retry'
     const sessionKey =
       frame.method === 'bot.resume'
         ? `${typeof frame.params.botId === 'string' ? frame.params.botId : ''}:${typeof frame.params.sessionId === 'string' ? frame.params.sessionId : ''}`
