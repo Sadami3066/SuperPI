@@ -72,6 +72,7 @@ const MAX_PENDING_SOCKETS = 256
 const MAX_PENDING_PER_DEVICE = 8
 const MAX_PENDING_ROUTES = 2048
 const MAX_ROUTES_PER_DEVICE = 64
+const MAX_RESUME_ROUTES_PER_DEVICE = 12
 const MIN_IDENTICAL_HELLO_INTERVAL_MS = 1_000
 const SYNC_EVENT_WINDOW_MS = 1_000
 const MAX_SYNC_EVENTS_PER_WINDOW = 30
@@ -273,6 +274,31 @@ export function createRealtimeHub(
       })
       return
     }
+    const sessionKey =
+      frame.method === 'bot.resume'
+        ? `${typeof frame.params.botId === 'string' ? frame.params.botId : ''}:${typeof frame.params.sessionId === 'string' ? frame.params.sessionId : ''}`
+        : undefined
+    if (sessionKey !== undefined) {
+      const resumeEntries: Array<[string, PendingRoute]> = []
+      for (const [existingId, existingRoute] of pendingRoutes) {
+        if (existingRoute.from !== connection.deviceId || existingRoute.method !== 'bot.resume') continue
+        if (existingRoute.to === frame.to && existingRoute.sessionKey === sessionKey) {
+          pendingRoutes.delete(existingId)
+        } else {
+          resumeEntries.push([existingId, existingRoute])
+        }
+      }
+      while (resumeEntries.length >= MAX_RESUME_ROUTES_PER_DEVICE) {
+        let oldestIdx = 0
+        for (let i = 1; i < resumeEntries.length; i += 1) {
+          if (resumeEntries[i]![1].at < resumeEntries[oldestIdx]![1].at) {
+            oldestIdx = i
+          }
+        }
+        const [evictId] = resumeEntries.splice(oldestIdx, 1)[0]!
+        pendingRoutes.delete(evictId)
+      }
+    }
     if (pendingRoutes.size >= MAX_PENDING_ROUTES) {
       send(connection, {
         type: 'route_error',
@@ -308,22 +334,6 @@ export function createRealtimeHub(
     }
     const streaming =
       frame.method === 'bot.prompt' || frame.method === 'bot.resume' || frame.method === 'session.retry'
-    const sessionKey =
-      frame.method === 'bot.resume'
-        ? `${typeof frame.params.botId === 'string' ? frame.params.botId : ''}:${typeof frame.params.sessionId === 'string' ? frame.params.sessionId : ''}`
-        : undefined
-    if (sessionKey !== undefined) {
-      for (const [existingId, existingRoute] of pendingRoutes) {
-        if (
-          existingRoute.from === connection.deviceId &&
-          existingRoute.to === frame.to &&
-          existingRoute.method === 'bot.resume' &&
-          existingRoute.sessionKey === sessionKey
-        ) {
-          pendingRoutes.delete(existingId)
-        }
-      }
-    }
     const current = now()
     pendingRoutes.set(frame.id, {
       from: connection.deviceId,

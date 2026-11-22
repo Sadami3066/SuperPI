@@ -876,4 +876,61 @@ describe('realtime hub', () => {
     const lateEvent = await nextOf(callerClient, 'route_event')
     expect(lateEvent).toMatchObject({ id: 'req-resume-long', seq: 5, event: { type: 'agent_start' } })
   })
+
+  it('caps bot.resume routes per sender with LRU eviction', async () => {
+    let clock = 200_000
+    const harness = await startRelay({ now: () => clock })
+    const caller = await enrollDevice(harness, 'Caller', 'android')
+    const host = await enrollDevice(harness, 'Host', 'android')
+
+    const callerClient = await Client.open(harness.wsBase, caller.token)
+    callerClient.send(hello(caller.deviceId))
+    await nextOf(callerClient, 'hello_ok')
+
+    const hostClient = await Client.open(harness.wsBase, host.token)
+    hostClient.send(hello(host.deviceId))
+    await nextOf(hostClient, 'hello_ok')
+    await nextOf(callerClient, 'presence')
+
+    for (let i = 1; i <= 15; i += 1) {
+      clock += 10
+      const id = `r${i}`
+      callerClient.send({
+        type: 'route',
+        id,
+        to: host.deviceId,
+        method: 'bot.resume',
+        params: { botId: 'pi', sessionId: `s${i}` },
+      })
+      const inbound = await nextOf(hostClient, 'route')
+      expect(inbound).toMatchObject({ id, method: 'bot.resume' })
+      hostClient.send({ type: 'route_ok', id, result: { sessionId: `s${i}`, busy: false } })
+      const ok = await nextOf(callerClient, 'route_ok')
+      expect(ok).toMatchObject({ id })
+    }
+
+    for (const evictedId of ['r1', 'r2', 'r3']) {
+      hostClient.send({ type: 'route_event', id: evictedId, seq: 1, event: { type: 'agent_start' } })
+      const err = await nextOf(hostClient, 'route_error')
+      expect(err).toMatchObject({ id: evictedId, code: 'internal' })
+    }
+
+    for (const keptId of ['r4', 'r15']) {
+      hostClient.send({ type: 'route_event', id: keptId, seq: 1, event: { type: 'agent_start' } })
+      const ev = await nextOf(callerClient, 'route_event')
+      expect(ev).toMatchObject({ id: keptId, seq: 1, event: { type: 'agent_start' } })
+    }
+
+    callerClient.send({
+      type: 'route',
+      id: 'rpc-state-after-lru',
+      to: host.deviceId,
+      method: 'bot.state',
+      params: { botId: 'pi' },
+    })
+    const stateInbound = await nextOf(hostClient, 'route')
+    expect(stateInbound).toMatchObject({ id: 'rpc-state-after-lru', method: 'bot.state' })
+    hostClient.send({ type: 'route_ok', id: 'rpc-state-after-lru', result: { busy: false } })
+    expect(await nextOf(callerClient, 'route_ok')).toMatchObject({ id: 'rpc-state-after-lru' })
+  })
 })
