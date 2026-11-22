@@ -57,4 +57,7 @@
     <string name="relay_battery_keepalive_title">保持后台常驻</string>
     <string name="relay_battery_keepalive_hint">避免锁屏后断开连接</string>
     <string name="relay_battery_keepalive_action">去开启</string>
+    <string name="relay_device_rename_title">修改设备名称</string>
+    <string name="relay_device_rename_confirm">保存</string>
+    <string name="relay_device_rename_saving">保存中…</string>
 </resources>

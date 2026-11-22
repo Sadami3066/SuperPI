@@ -120,6 +120,7 @@ sealed interface RelayServerFrame {
         val lastSeen: Long,
         val bots: List<RelayBot>?,
         val capabilities: List<String>? = null,
+        val name: String? = null,
     ) : RelayServerFrame
 
     data class Route(
@@ -324,6 +325,7 @@ internal object RelayFrames {
                 lastSeen = json["lastSeen"]?.jsonPrimitive?.longOrNull ?: 0L,
                 bots = json["bots"]?.let(::parseBots),
                 capabilities = json["capabilities"]?.let(::parseStrings),
+                name = json.string("name")?.trim()?.takeIf { it.isNotEmpty() },
             )
 
             "route" -> RelayServerFrame.Route(

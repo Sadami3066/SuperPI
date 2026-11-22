@@ -57,4 +57,7 @@
     <string name="relay_battery_keepalive_title">Stay active in background</string>
     <string name="relay_battery_keepalive_hint">Prevent disconnecting when screen is off</string>
     <string name="relay_battery_keepalive_action">Allow</string>
+    <string name="relay_device_rename_title">Rename device</string>
+    <string name="relay_device_rename_confirm">Save</string>
+    <string name="relay_device_rename_saving">Saving…</string>
 </resources>

@@ -176,6 +176,14 @@ class RelayControllerTest {
         assertEquals(listOf("dev-desktop"), revokedCallback)
         assertEquals(listOf("dev-desktop"), enroller.revokedDevices)
 
+        val renamedCallback = mutableListOf<Pair<String, String>>()
+        controller.renameDevice("dev", "  主力手机  ") { id, name -> renamedCallback += id to name }
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("dev" to "主力手机"), renamedCallback)
+        assertEquals(listOf("dev" to "主力手机"), enroller.renamedDevices)
+        assertEquals("主力手机", controller.state.value.account?.deviceName)
+        assertEquals("主力手机", store.read()?.deviceName)
+
         controller.signOut()
         testScheduler.advanceUntilIdle()
         assertEquals(listOf("dev-desktop", "dev"), enroller.revokedDevices)
@@ -241,6 +249,7 @@ class RelayControllerTest {
         var loginSecret: String? = null
             private set
         val revokedDevices = mutableListOf<String>()
+        val renamedDevices = mutableListOf<Pair<String, String>>()
 
         override suspend fun fetchCa(origin: String): String? {
             failure?.let { throw it }
@@ -281,6 +290,11 @@ class RelayControllerTest {
         override suspend fun revokeDevice(account: RelayAccount, token: String, deviceId: String) {
             failure?.let { throw it }
             revokedDevices += deviceId
+        }
+
+        override suspend fun renameDevice(account: RelayAccount, token: String, deviceId: String, name: String) {
+            failure?.let { throw it }
+            renamedDevices += deviceId to name
         }
 
         override fun fingerprintOf(caPem: String): String? = fingerprint

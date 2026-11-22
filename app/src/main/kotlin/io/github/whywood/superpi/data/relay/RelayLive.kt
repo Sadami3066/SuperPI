@@ -240,6 +240,29 @@ class RelayLive(
         }
     }
 
+    fun updateDeviceName(deviceId: String, name: String) {
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) return
+        scope.launch {
+            devicesMutex.withLock {
+                val current = _devices.value
+                var changed = false
+                val updated = current.map { device ->
+                    if (device.deviceId == deviceId && device.name != cleanName) {
+                        changed = true
+                        device.copy(name = cleanName)
+                    } else {
+                        device
+                    }
+                }
+                if (changed) {
+                    _devices.value = updated
+                    persistDevicesLocked(updated)
+                }
+            }
+        }
+    }
+
     fun setAllowRemote(enabled: Boolean) {
         scope.launch { accounts.setAllowRemote(enabled) }
     }
@@ -430,7 +453,7 @@ class RelayLive(
         }
         val merged = RelayDevice(
             deviceId = frame.deviceId,
-            name = previous?.name ?: frame.deviceId,
+            name = frame.name?.takeIf { it.isNotBlank() } ?: previous?.name ?: frame.deviceId,
             platform = previous?.platform.orEmpty(),
             online = frame.online,
             lastSeen = frame.lastSeen,
@@ -619,7 +642,17 @@ class RelayLive(
         when (frame) {
             is RelayServerFrame.HelloOk -> {
                 _relayCapabilities.value = frame.capabilities
-                val self = account?.deviceId
+                val currentAccount = account
+                val self = currentAccount?.deviceId
+                val selfDevice = frame.devices.firstOrNull { it.deviceId == self }
+                if (currentAccount != null && selfDevice != null && selfDevice.name.isNotBlank() && selfDevice.name != currentAccount.deviceName) {
+                    scope.launch(io) {
+                        val token = accounts.token()
+                        if (!token.isNullOrBlank()) {
+                            runCatching { accounts.save(currentAccount.copy(deviceName = selfDevice.name), token) }
+                        }
+                    }
+                }
                 devicesMutex.withLock {
                     val updated = mergeDevices(
                         incoming = frame.devices.filter { device -> device.deviceId != self },
@@ -638,8 +671,20 @@ class RelayLive(
             }
 
             is RelayServerFrame.Presence -> {
-                val self = account?.deviceId
-                if (frame.deviceId == self) return
+                val currentAccount = account
+                val self = currentAccount?.deviceId
+                if (frame.deviceId == self) {
+                    val newName = frame.name?.takeIf { it.isNotBlank() }
+                    if (currentAccount != null && newName != null && newName != currentAccount.deviceName) {
+                        scope.launch(io) {
+                            val token = accounts.token()
+                            if (!token.isNullOrBlank()) {
+                                runCatching { accounts.save(currentAccount.copy(deviceName = newName), token) }
+                            }
+                        }
+                    }
+                    return
+                }
                 devicesMutex.withLock {
                     val existing = _devices.value
                     val updated = mergePresenceLocked(frame, existing)

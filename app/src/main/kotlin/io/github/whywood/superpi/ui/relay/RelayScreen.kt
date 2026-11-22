@@ -129,6 +129,7 @@ internal fun RelayScreen(
     onGeneratePairCode: () -> Unit = {},
     onDismissPairCode: () -> Unit = {},
     onRevokeDevice: (String) -> Unit = {},
+    onRenameDevice: (deviceId: String, name: String) -> Unit = { _, _ -> },
 ) {
     val colors = superPiColors()
     val context = LocalContext.current
@@ -138,6 +139,8 @@ internal fun RelayScreen(
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var scanningQr by rememberSaveable { mutableStateOf(false) }
     var confirmRevokeDevice by remember { mutableStateOf<RelayDevice?>(null) }
+    var renameTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var renameInput by rememberSaveable { mutableStateOf("") }
     var pairCopied by remember(state.pairLink) { mutableStateOf(false) }
     val fingerprint = remember(link) { RelayPairingLink.parse(link)?.fingerprint }
     val connect = { onConnect(link.trim(), secret.trim().ifEmpty { null }, deviceName.trim()) }
@@ -189,6 +192,10 @@ internal fun RelayScreen(
                 onToggleAllowRemote = onToggleAllowRemote,
                 onGeneratePairCode = onGeneratePairCode,
                 onRequestRevokeDevice = { device -> confirmRevokeDevice = device },
+                onRequestRenameDevice = { id, currentName ->
+                    renameTarget = id to currentName
+                    renameInput = currentName
+                },
                 onDismissError = onDismissError,
                 onSignOut = { confirmSignOut = true },
             )
@@ -266,6 +273,51 @@ internal fun RelayScreen(
                         clipboard?.setPrimaryClip(ClipData.newPlainText("pair-link", activePairLink))
                         pairCopied = true
                     },
+                    color = colors.accent,
+                )
+            },
+        )
+    }
+
+    val pendingRename = renameTarget
+    if (pendingRename != null) {
+        val savingRename = state.renamingDeviceId == pendingRename.first
+        val submitRename = {
+            val clean = renameInput.trim()
+            if (clean.isNotEmpty() && !savingRename) {
+                val targetId = pendingRename.first
+                renameTarget = null
+                if (clean != pendingRename.second) {
+                    onRenameDevice(targetId, clean)
+                }
+            }
+        }
+        DdDialog(
+            onDismissRequest = { if (!savingRename) renameTarget = null },
+            title = stringResource(R.string.relay_device_rename_title),
+            content = {
+                DdTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    placeholder = stringResource(R.string.relay_device_name_placeholder),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    onDone = submitRename,
+                    testTag = "relay_rename_device_input",
+                )
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.relay_cancel),
+                    onClick = { renameTarget = null },
+                    enabled = !savingRename,
+                    color = colors.inkSecondary,
+                )
+                DdTextAction(
+                    text = stringResource(
+                        if (savingRename) R.string.relay_device_rename_saving else R.string.relay_device_rename_confirm,
+                    ),
+                    onClick = submitRename,
+                    enabled = !savingRename && renameInput.trim().isNotEmpty(),
                     color = colors.accent,
                 )
             },
@@ -494,6 +546,7 @@ private fun ColumnScope.ConnectedAccount(
     onToggleAllowRemote: (Boolean) -> Unit,
     onGeneratePairCode: () -> Unit,
     onRequestRevokeDevice: (RelayDevice) -> Unit,
+    onRequestRenameDevice: (deviceId: String, currentName: String) -> Unit,
     onDismissError: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -517,6 +570,8 @@ private fun ColumnScope.ConnectedAccount(
             DdListRow(
                 title = stringResource(R.string.relay_account_device),
                 value = account.deviceName,
+                onClick = { onRequestRenameDevice(account.deviceId, account.deviceName) },
+                showChevron = true,
             )
             DdListRow(
                 title = stringResource(R.string.relay_account_server),
@@ -535,6 +590,7 @@ private fun ColumnScope.ConnectedAccount(
             revokingDeviceId = revokingDeviceId,
             onToggleAllowRemote = onToggleAllowRemote,
             onRequestRevokeDevice = onRequestRevokeDevice,
+            onRequestRenameDevice = onRequestRenameDevice,
         )
         Spacer(Modifier.height(DdSpacing.Lg))
         DdPrimaryButton(
@@ -569,6 +625,7 @@ private fun ShareCard(
     revokingDeviceId: String?,
     onToggleAllowRemote: (Boolean) -> Unit,
     onRequestRevokeDevice: (RelayDevice) -> Unit,
+    onRequestRenameDevice: (deviceId: String, currentName: String) -> Unit,
 ) {
     val colors = superPiColors()
     val context = LocalContext.current
@@ -641,6 +698,7 @@ private fun ShareCard(
                     } else {
                         stringResource(R.string.relay_devices_offline)
                     },
+                    onClick = { onRequestRenameDevice(device.deviceId, device.name) },
                     trailing = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

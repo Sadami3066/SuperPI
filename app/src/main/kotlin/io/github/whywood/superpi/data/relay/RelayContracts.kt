@@ -29,5 +29,7 @@ interface RelayEnroller {
 
     suspend fun revokeDevice(account: RelayAccount, token: String, deviceId: String)
 
+    suspend fun renameDevice(account: RelayAccount, token: String, deviceId: String, name: String) {}
+
     fun fingerprintOf(caPem: String): String?
 }

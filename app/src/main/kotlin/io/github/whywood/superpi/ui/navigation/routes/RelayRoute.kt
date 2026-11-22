@@ -36,5 +36,10 @@ internal fun RelayRoute(
                 dependencies.relayLive.removeDevice(revoked)
             }
         },
+        onRenameDevice = { deviceId, name ->
+            dependencies.relayController.renameDevice(deviceId, name) { renamedId, cleanName ->
+                dependencies.relayLive.updateDeviceName(renamedId, cleanName)
+            }
+        },
     )
 }

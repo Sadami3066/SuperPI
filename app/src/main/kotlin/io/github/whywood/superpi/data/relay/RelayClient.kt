@@ -137,6 +137,44 @@ class RelayClient(
             }
         }
 
+    override suspend fun renameDevice(
+        account: RelayAccount,
+        token: String,
+        deviceId: String,
+        name: String,
+    ) = withContext(Dispatchers.IO) {
+        val pin = account.caPem?.let { RelayTls.decodeBytes(it.toByteArray(Charsets.UTF_8)) }
+        val client = RelayTls.client(pin = pin, remote = true)
+        val url = account.origin.toHttpUrlOrNull()
+            ?.newBuilder()
+            ?.addPathSegment("v1")
+            ?.addPathSegment("devices")
+            ?.addPathSegment(deviceId)
+            ?.build()
+            ?: throw RelayException(RelayFailure.BadResponse)
+        val body = RelayProtocol.renameDeviceRequest(name).toRequestBody(JSON)
+        val request = Request.Builder()
+            .url(url)
+            .header("authorization", "Bearer $token")
+            .patch(body)
+            .build()
+        try {
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.isSuccessful -> Unit
+                    response.code == 401 || response.code == 403 -> throw RelayException(RelayFailure.Unauthorized)
+                    else -> throw RelayException(RelayFailure.BadResponse)
+                }
+            }
+        } catch (error: RelayException) {
+            throw error
+        } catch (error: SSLException) {
+            throw RelayException(RelayFailure.CertificateRejected, cause = error)
+        } catch (error: IOException) {
+            throw RelayException(RelayFailure.Unreachable, cause = error)
+        }
+    }
+
     override fun fingerprintOf(caPem: String): String? {
         val certificate = RelayTls.decodeBytes(caPem.toByteArray(Charsets.UTF_8)) ?: return null
         return RelayPairingLink.normalizeFingerprint(RelayTls.sha256Hex(certificate))

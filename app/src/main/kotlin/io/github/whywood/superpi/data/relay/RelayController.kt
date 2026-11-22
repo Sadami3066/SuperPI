@@ -30,6 +30,7 @@ data class RelayUiState(
     val pairExpiresAt: Long? = null,
     val generatingPairCode: Boolean = false,
     val revokingDeviceId: String? = null,
+    val renamingDeviceId: String? = null,
 )
 
 class RelayController(
@@ -124,6 +125,7 @@ class RelayController(
                 pairExpiresAt = null,
                 generatingPairCode = false,
                 revokingDeviceId = null,
+                renamingDeviceId = null,
             )
         }
         scope.launch {
@@ -218,6 +220,48 @@ class RelayController(
         }
     }
 
+    fun renameDevice(
+        deviceId: String,
+        name: String,
+        onRenamed: (deviceId: String, name: String) -> Unit = { _, _ -> },
+    ) {
+        val current = _state.value.account ?: return
+        val cleanName = name.trim().take(MAX_DEVICE_NAME_LENGTH)
+        if (cleanName.isEmpty() || _state.value.renamingDeviceId != null) return
+        _state.update { state -> state.copy(renamingDeviceId = deviceId, error = null) }
+        scope.launch {
+            try {
+                val token = store.token() ?: throw RelayException(RelayFailure.Unauthorized)
+                enroller.renameDevice(current, token, deviceId, cleanName)
+                if (deviceId == current.deviceId && current.deviceName != cleanName) {
+                    val updatedAccount = current.copy(deviceName = cleanName)
+                    store.save(updatedAccount, token)
+                    _state.update { state ->
+                        state.copy(account = updatedAccount, renamingDeviceId = null, error = null)
+                    }
+                } else {
+                    _state.update { state -> state.copy(renamingDeviceId = null, error = null) }
+                }
+                onRenamed(deviceId, cleanName)
+            } catch (cancelled: CancellationException) {
+                _state.update { state -> state.copy(renamingDeviceId = null) }
+                throw cancelled
+            } catch (error: RelayException) {
+                _state.update { state ->
+                    state.copy(renamingDeviceId = null, error = error.failure.toRelayError())
+                }
+            } catch (_: IOException) {
+                _state.update { state ->
+                    state.copy(renamingDeviceId = null, error = RelayError.Unreachable)
+                }
+            } catch (_: Exception) {
+                _state.update { state ->
+                    state.copy(renamingDeviceId = null, error = RelayError.BadResponse)
+                }
+            }
+        }
+    }
+
     fun dismissError() {
         _state.update { state -> state.copy(error = null) }
     }
@@ -247,5 +291,6 @@ class RelayController(
 
     private companion object {
         private const val DEFAULT_DEVICE_NAME = "Android"
+        private const val MAX_DEVICE_NAME_LENGTH = 128
     }
 }

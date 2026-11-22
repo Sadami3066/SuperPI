@@ -26,6 +26,10 @@ internal object RelayProtocol {
         if (!loginSecret.isNullOrBlank()) put("loginSecret", loginSecret)
     }.toString()
 
+    fun renameDeviceRequest(name: String): String = buildJsonObject {
+        put("name", name)
+    }.toString()
+
     fun parseEnrollment(body: String): RelayEnrollment? {
         val json = parseObject(body) ?: return null
         val deviceId = json.string("deviceId") ?: return null
