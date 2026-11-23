@@ -1,0 +1,57 @@
+{
+  "id": "io.github.whywood.superpi.plugin.hotel",
+  "version": "1.4.1",
+  "apiLevel": 7,
+  "minHostVersion": "2.0.0",
+  "capabilities": [
+    "clipboard",
+    "files",
+    "images",
+    "linux",
+    "logs",
+    "settings",
+    "ui"
+  ],
+  "entryClass": "io.github.whywood.superpi.plugin.hotel.HotelPlugin",
+  "name": {
+    "default": "RollingGo酒店",
+    "zh": "RollingGo酒店",
+    "en": "RollingGo Hotels"
+  },
+  "summary": {
+    "default": "搜索 RollingGo 酒店、查看房型与订单、创建待支付订单与取消订单",
+    "zh": "搜索 RollingGo 酒店、查看房型与订单、创建待支付订单与取消订单",
+    "en": "Search RollingGo hotels, view rooms and orders, create or cancel a booking"
+  },
+  "description": {
+    "default": "连接 RollingGo 后，在对话里按预算、距离、标签和品牌筛选酒店，查看实时房型、创建待支付订单、查订单与取消订单；结果以卡片展示，支付在 RollingGo 官方页面完成。插件页管理服务安装、更新与登录，不需要 API Key。",
+    "zh": "连接 RollingGo 后，在对话里按预算、距离、标签和品牌筛选酒店，查看实时房型、创建待支付订单、查订单与取消订单；结果以卡片展示，支付在 RollingGo 官方页面完成。插件页管理服务安装、更新与登录，不需要 API Key。",
+    "en": "Connect RollingGo to filter hotels by budget, distance, tags and brand, view live rooms, create a pending booking, check orders and cancel a booking from chat. Results appear as cards; payment happens on the official RollingGo page. The plugin page manages installation, updates and sign-in, with no API key."
+  },
+  "publisher": {
+    "name": "milous"
+  },
+  "ui": {
+    "apiLevel": 2
+  },
+  "provides": {
+    "tools": [
+      "hotel_search",
+      "hotel_detail",
+      "hotel_book",
+      "hotel_orders",
+      "hotel_order_detail",
+      "hotel_cancel",
+      "hotel_tags"
+    ],
+    "skills": [
+      "superpi-hotel"
+    ],
+    "uiSlots": [],
+    "pages": [
+      "main"
+    ]
+  },
+  "defaultEnabled": true,
+  "icon": "asset:icon.png"
+}

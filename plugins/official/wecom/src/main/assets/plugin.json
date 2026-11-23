@@ -1,0 +1,52 @@
+{
+  "id": "io.github.whywood.superpi.plugin.wecom",
+  "version": "2.6.2",
+  "publisher": {
+    "name": "milous"
+  },
+  "apiLevel": 7,
+  "minHostVersion": "2.0.0",
+  "capabilities": [
+    "app",
+    "files",
+    "linux",
+    "logs",
+    "network",
+    "notifications",
+    "settings",
+    "ui"
+  ],
+  "permissions": [
+    "notifications.post"
+  ],
+  "entryClass": "io.github.whywood.superpi.plugin.wecom.WecomPlugin",
+  "name": {
+    "default": "企业微信",
+    "zh": "企业微信",
+    "en": "WeCom"
+  },
+  "summary": {
+    "default": "消息、邮件、文档、日程与待办",
+    "zh": "消息、邮件、文档、日程与待办",
+    "en": "Messages, mail, docs, calendar and to-dos"
+  },
+  "description": {
+    "default": "连接企业微信后，可以在对话里处理消息、邮件、文档、日程与待办；在插件页完成安装与扫码授权。",
+    "zh": "连接企业微信后，可以在对话里处理消息、邮件、文档、日程与待办；在插件页完成安装与扫码授权。",
+    "en": "Connect WeCom to handle messages, mail, docs, calendar and to-dos in chat; install and scan to authorize from the plugin page."
+  },
+  "icon": "asset:icon.png",
+  "ui": {
+    "apiLevel": 2
+  },
+  "provides": {
+    "tools": [],
+    "skills": [
+      "superpi-wecom"
+    ],
+    "uiSlots": [],
+    "pages": [
+      "main"
+    ]
+  }
+}

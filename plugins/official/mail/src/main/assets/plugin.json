@@ -1,0 +1,61 @@
+{
+  "id": "io.github.whywood.superpi.plugin.mail",
+  "version": "1.6.2",
+  "apiLevel": 7,
+  "minHostVersion": "2.0.0",
+  "ui": {
+    "apiLevel": 2
+  },
+  "capabilities": [
+    "network",
+    "secrets",
+    "notifications",
+    "logs",
+    "app",
+    "ui",
+    "chat",
+    "background",
+    "settings",
+    "media"
+  ],
+  "entryClass": "io.github.whywood.superpi.plugin.mail.MailPlugin",
+  "name": {
+    "default": "邮箱",
+    "zh": "邮箱",
+    "en": "Mail"
+  },
+  "summary": {
+    "default": "接入 IMAP/SMTP 邮箱，让 PI 读信、找邮件、起草与发送",
+    "zh": "接入 IMAP/SMTP 邮箱，让 PI 读信、找邮件、起草与发送",
+    "en": "Connect IMAP/SMTP mailboxes so PI can read, search, draft and send"
+  },
+  "description": {
+    "default": "用授权码或应用专用密码接入 QQ、163、126、腾讯企业邮、阿里云邮箱、Gmail、iCloud、Fastmail、Yahoo、Zoho 与自定义 IMAP/SMTP 邮箱。插件提供邮件列表、会话阅读、写信与账户管理，并让 Agent 搜索、阅读、归档邮件、起草回复；你明确要求时可以让 Agent 直接发送。",
+    "zh": "用授权码或应用专用密码接入 QQ、163、126、腾讯企业邮、阿里云邮箱、Gmail、iCloud、Fastmail、Yahoo、Zoho 与自定义 IMAP/SMTP 邮箱。插件提供邮件列表、会话阅读、写信与账户管理，并让 Agent 搜索、阅读、归档邮件、起草回复；你明确要求时可以让 Agent 直接发送。",
+    "en": "Connect QQ, 163, 126, Tencent Exmail, Alibaba Mail, Gmail, iCloud, Fastmail, Yahoo, Zoho or any custom IMAP/SMTP mailbox with an authorization code or app password. The plugin provides message list, conversation reading, composing and account management, and lets the agent search, read, archive and draft replies; when you ask it to send, it can send directly."
+  },
+  "icon": "asset:icon.png",
+  "publisher": {
+    "name": "milous"
+  },
+  "provides": {
+    "tools": [
+      "mail_search",
+      "mail_read",
+      "mail_draft",
+      "mail_send",
+      "mail_mark",
+      "mail_archive",
+      "mail_save_attachment"
+    ],
+    "skills": [],
+    "uiSlots": [],
+    "pages": [
+      "mail"
+    ]
+  },
+  "defaultEnabled": true,
+  "components": {
+    "background": true
+  }
+}

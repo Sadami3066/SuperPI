@@ -1,0 +1,52 @@
+{
+  "id": "io.github.whywood.superpi.plugin.feishu",
+  "version": "2.7.1",
+  "publisher": {
+    "name": "milous"
+  },
+  "apiLevel": 7,
+  "minHostVersion": "2.0.0",
+  "ui": {
+    "apiLevel": 2
+  },
+  "capabilities": [
+    "clipboard",
+    "files",
+    "linux",
+    "logs",
+    "network",
+    "notifications",
+    "settings",
+    "ui"
+  ],
+  "permissions": [
+    "notifications.post"
+  ],
+  "entryClass": "io.github.whywood.superpi.plugin.feishu.FeishuPlugin",
+  "name": {
+    "default": "飞书",
+    "zh": "飞书",
+    "en": "Feishu"
+  },
+  "summary": {
+    "default": "消息、日历、云文档与邮箱",
+    "zh": "消息、日历、云文档与邮箱",
+    "en": "Messages, calendar, docs and mail"
+  },
+  "description": {
+    "default": "连接飞书账号后，可以在对话里读写消息、日历、云文档、云空间、邮箱与任务；在插件页完成安装、连接与权限管理。",
+    "zh": "连接飞书账号后，可以在对话里读写消息、日历、云文档、云空间、邮箱与任务；在插件页完成安装、连接与权限管理。",
+    "en": "Connect your Feishu account to read and write messages, calendar, docs, drive, mail and tasks in chat; install, connect and manage permissions from the plugin page."
+  },
+  "icon": "asset:icon.png",
+  "provides": {
+    "tools": [],
+    "skills": [
+      "superpi-feishu"
+    ],
+    "uiSlots": [],
+    "pages": [
+      "main"
+    ]
+  }
+}

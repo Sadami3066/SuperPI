@@ -1,0 +1,252 @@
+package io.github.whywood.superpi.plugin.ride
+
+import io.github.whywood.superpi.plugin.api.PluginRunSignal
+import io.github.whywood.superpi.plugin.api.PluginToolCall
+import io.github.whywood.superpi.plugin.api.PluginToolResult
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class RideOrdersTest {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private val zh: RideTranslate = { text, _ -> text }
+
+    private val confirmCalls = mutableListOf<String>()
+    private val cliCalls = mutableListOf<Pair<String, JsonObject>>()
+
+    private fun toolCall(args: String, sessionId: String = "session-1"): PluginToolCall = object : PluginToolCall {
+        override val callId: String = "call-1"
+        override val args: JsonObject = json.parseToJsonElement(args) as JsonObject
+        override val signal: PluginRunSignal? = null
+        override val sessionId: String = sessionId
+
+        override fun partial(result: PluginToolResult) = Unit
+    }
+
+    private fun stateWithEstimate(): RideToolState {
+        val state = RideToolState()
+        state.rememberEstimate(
+            "session-1",
+            RideEstimate(
+                fromName = "公司",
+                toName = "机场",
+                items = listOf(
+                    RideEstimateItem(
+                        productName = "快车",
+                        priceText = "14",
+                        priceDiscounted = "12",
+                        productCategory = "1",
+                        eta = "3 分钟",
+                    ),
+                ),
+                traceId = "trace-1",
+            ),
+        )
+        return state
+    }
+
+    private suspend fun create(
+        state: RideToolState,
+        args: String,
+        confirmAnswer: Boolean,
+        option: String = "确认",
+    ): PluginToolResult = createRideOrder(
+        translate = zh,
+        confirm = {
+            confirmCalls += option
+            confirmAnswer
+        },
+        callTool = { tool, callArgs ->
+            cliCalls += tool to callArgs
+            RideResponse(
+                payload = json.parseToJsonElement(
+                    """{"orderId":"order-1","statusCode":0,"from":{"name":"公司"},"to":{"name":"机场"},"phoneNumberSuffix":"1234"}""",
+                ),
+                raw = """{"structuredContent":{"orderId":"order-1","statusCode":0}}""",
+            )
+        },
+        currentKey = { null },
+        warn = { _, _ -> },
+        toolState = state,
+        call = toolCall(args),
+    )
+
+    private suspend fun cancel(
+        state: RideToolState,
+        args: String,
+        confirmAnswer: Boolean,
+    ): PluginToolResult = cancelRideOrder(
+        translate = zh,
+        confirm = {
+            confirmCalls += "取消"
+            confirmAnswer
+        },
+        callTool = { tool, callArgs ->
+            cliCalls += tool to callArgs
+            RideResponse(
+                payload = json.parseToJsonElement("""{"success":true}"""),
+                raw = """{"structuredContent":{"success":true}}""",
+            )
+        },
+        currentKey = { null },
+        warn = { _, _ -> },
+        toolState = state,
+        call = toolCall(args),
+    )
+
+    @Test
+    fun createOrderWithoutConfirmFlagNeverCallsCli() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+
+        val result = create(stateWithEstimate(), """{"product_name":"快车"}""", confirmAnswer = true)
+
+        assertTrue(result.isError)
+        assertTrue(cliCalls.isEmpty())
+        assertTrue(confirmCalls.isEmpty())
+    }
+
+    @Test
+    fun createOrderRejectedInNativeConfirmNeverCallsCli() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+
+        val result = create(stateWithEstimate(), """{"product_name":"快车","confirm":true}""", confirmAnswer = false)
+
+        assertTrue(result.isError)
+        assertTrue(cliCalls.isEmpty())
+        assertEquals(listOf("确认"), confirmCalls)
+        assertTrue(result.text.orEmpty().contains("已取消叫车"))
+    }
+
+    @Test
+    fun confirmedCreateOrderCallsCliExactlyOnce() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+
+        val result = create(stateWithEstimate(), """{"product_name":"快车","confirm":true}""", confirmAnswer = true)
+
+        assertFalse(result.isError)
+        assertEquals(1, cliCalls.size)
+        assertEquals("taxi_create_order", cliCalls.single().first)
+        assertEquals("1", cliCalls.single().second["product_category"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("trace-1", cliCalls.single().second["estimate_trace_id"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("", result.text)
+        assertEquals(
+            """{"structuredContent":{"orderId":"order-1","statusCode":0}}""",
+            result.details?.get(RIDE_RAW_DETAIL_KEY)?.jsonPrimitive?.contentOrNull,
+        )
+        assertTrue(result.details?.get(RIDE_CARD_DETAIL_KEY) is JsonObject)
+        assertTrue(result.details?.get(RIDE_GUIDANCE_DETAIL_KEY)?.jsonPrimitive?.contentOrNull.orEmpty().isNotBlank())
+        assertEquals(
+            "order-1",
+            (result.details?.get("orderId") as JsonPrimitive).contentOrNull,
+        )
+    }
+
+    @Test
+    fun cancelOrderWithoutConfirmFlagNeverCallsCli() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+
+        val result = cancel(RideToolState(), """{"order_id":"order-1"}""", confirmAnswer = true)
+
+        assertTrue(result.isError)
+        assertTrue(cliCalls.isEmpty())
+        assertTrue(confirmCalls.isEmpty())
+    }
+
+    @Test
+    fun cancelOrderRejectedInNativeConfirmNeverCallsCli() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+
+        val result = cancel(
+            RideToolState().also { it.rememberOrder("session-1", "order-1") },
+            """{"confirm":true}""",
+            confirmAnswer = false,
+        )
+
+        assertTrue(result.isError)
+        assertTrue(cliCalls.isEmpty())
+        assertEquals(listOf("取消"), confirmCalls)
+        assertTrue(result.text.orEmpty().contains("已保留订单"))
+    }
+
+    @Test
+    fun confirmedCancelOrderCallsCliWithOrderId() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+
+        val result = cancel(
+            RideToolState().also { it.rememberOrder("session-1", "order-1") },
+            """{"confirm":true}""",
+            confirmAnswer = true,
+        )
+
+        assertFalse(result.isError)
+        assertEquals(1, cliCalls.size)
+        assertEquals("taxi_cancel_order", cliCalls.single().first)
+        assertEquals("order-1", cliCalls.single().second["order_id"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(
+            """{"structuredContent":{"success":true}}""",
+            result.details?.get(RIDE_RAW_DETAIL_KEY)?.jsonPrimitive?.contentOrNull,
+        )
+        assertTrue(result.details?.get(RIDE_CARD_DETAIL_KEY) is JsonObject)
+        assertEquals("", result.text)
+    }
+
+    @Test
+    fun failedCreateOrderAttachesUpstreamRaw() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+        val raw = """{"error":{"code":-32040,"message":"订单已经取消过了"}}"""
+
+        val result = createRideOrder(
+            translate = zh,
+            confirm = { true },
+            callTool = { _, _ -> throw DidiException("订单已经取消过了", -32040, raw = raw) },
+            currentKey = { null },
+            warn = { _, _ -> },
+            toolState = stateWithEstimate(),
+            call = toolCall("""{"product_name":"快车","confirm":true}"""),
+        )
+
+        assertTrue(result.isError)
+        assertEquals(raw, result.details?.get(RIDE_RAW_DETAIL_KEY)?.jsonPrimitive?.contentOrNull)
+        assertEquals("", result.text)
+        val error = result.details?.get(RIDE_ERROR_DETAIL_KEY) as JsonObject
+        assertEquals("upstream", error["kind"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("订单已经取消过了", error["message"]?.jsonPrimitive?.contentOrNull)
+    }
+
+    @Test
+    fun estimateWithoutTraceIdIsRejectedBeforeCli() = runTest {
+        confirmCalls.clear()
+        cliCalls.clear()
+        val state = RideToolState()
+        state.rememberEstimate(
+            "session-1",
+            RideEstimate(
+                fromName = "公司",
+                toName = "机场",
+                items = listOf(RideEstimateItem("快车", "14", null, "1")),
+                traceId = null,
+            ),
+        )
+
+        val result = create(state, """{"product_name":"快车","confirm":true}""", confirmAnswer = true)
+
+        assertTrue(result.isError)
+        assertTrue(cliCalls.isEmpty())
+        assertTrue(confirmCalls.isEmpty())
+    }
+}
