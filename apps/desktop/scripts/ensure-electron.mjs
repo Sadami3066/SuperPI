@@ -25,8 +25,15 @@ const archiveName = `electron-v${version}-linux-${arch === 'x64' ? 'x64' : arch}
 const cacheRoot = process.env.electron_config_cache ?? path.join(homedir(), '.cache', 'electron')
 const archive = findArchive(cacheRoot, archiveName)
 if (!archive) {
-  console.error(`ensure-electron: no cached ${archiveName}; run pnpm install first`)
-  process.exit(1)
+  if (process.env.CI === 'true') {
+    const installer = path.join(electronDir, 'install.js')
+    if (existsSync(installer)) {
+      execFileSync(process.execPath, [installer], { stdio: 'inherit' })
+      process.exit(0)
+    }
+  }
+  console.warn(`ensure-electron: no cached ${archiveName}; skipping local archive extraction`)
+  process.exit(0)
 }
 
 const distDir = path.join(electronDir, 'dist')

@@ -15,10 +15,16 @@ import java.util.zip.ZipOutputStream
 private val SIGNING_FILE_SUFFIX_PRIVATE = ".pem"
 private val SIGNING_FILE_SUFFIX_PUBLIC = ".pub"
 
-val signingKeyFile = layout.projectDirectory.file(
-    providers.gradleProperty("pluginSigningKey")
-        .getOrElse(rootProject.layout.projectDirectory.file("keys/plugin-signing").asFile.absolutePath),
-)
+val signingKeyBasePath: String = listOfNotNull(
+    providers.gradleProperty("pluginSigningKey").orNull?.takeIf { it.isNotBlank() },
+    System.getenv("SUPERPI_PLUGIN_SIGNING_KEY")?.takeIf { it.isNotBlank() },
+    File(
+        System.getenv("SUPERPI_SECRETS_DIR") ?: "${System.getProperty("user.home")}/.config/superpi/secrets",
+        "plugin-signing",
+    ).takeIf { File(it.parentFile, it.name + SIGNING_FILE_SUFFIX_PRIVATE).isFile }?.absolutePath,
+    rootProject.layout.projectDirectory.file("keys/plugin-signing").asFile.absolutePath,
+).first()
+val signingKeyFile = layout.projectDirectory.file(signingKeyBasePath)
 val signingPrivateKeyFile = File(signingKeyFile.asFile.parentFile, signingKeyFile.asFile.name + SIGNING_FILE_SUFFIX_PRIVATE)
 val signingPublicKeyFile = File(signingKeyFile.asFile.parentFile, signingKeyFile.asFile.name + SIGNING_FILE_SUFFIX_PUBLIC)
 val unsignedBundle = layout.buildDirectory.file("plugin/${project.name}.unsigned.ddp")

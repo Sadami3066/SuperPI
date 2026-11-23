@@ -93,7 +93,7 @@ async function startRelay(options?: { now?: () => number; hubOptions?: RealtimeH
   return harness
 }
 
-async function enrollDevice(harness: Harness, name: string, platform: 'android' | 'desktop'): Promise<EnrollResponse> {
+async function enrollDevice(harness: Harness, name: string, platform: 'android' | 'desktop' | 'cli'): Promise<EnrollResponse> {
   const response = await fetch(`${harness.httpBase}/v1/pair/enroll`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -161,14 +161,18 @@ class Client {
   }
 }
 
-async function nextOf<T extends ServerFrame['type']>(client: Client, type: T): Promise<Extract<ServerFrame, { type: T }>> {
+async function nextOf<T extends ServerFrame['type']>(
+  client: Client,
+  type: T,
+  timeoutMs?: number,
+): Promise<Extract<ServerFrame, { type: T }>> {
   while (true) {
-    const frame = await client.next()
+    const frame = await client.next(timeoutMs)
     if (frame.type === type) return frame as Extract<ServerFrame, { type: T }>
   }
 }
 
-function hello(deviceId: string, bots: BotInfo[] = []): ClientFrame {
+function hello(deviceId: string, bots: BotInfo[] = []): Extract<ClientFrame, { type: 'hello' }> {
   return {
     type: 'hello',
     protocolVersion: PROTOCOL_VERSION,

@@ -8,7 +8,7 @@ TEST_PACKAGE="io.github.whywood.superpi.test"
 RUNNER="androidx.test.runner.AndroidJUnitRunner"
 TEST_CLASS="io.github.whywood.superpi.plugin.manager.ExternalPluginE2ETest"
 DEVICE_DIR="/sdcard/Android/data/${PACKAGE}/files/plugin-e2e"
-PLUGINS_DIR="${PLUGINS_DIR:-$(superpi_neighbor_dir plugins SuperPI-Plugins || true)}"
+PLUGINS_DIR="${PLUGINS_DIR:-$(cd "$(superpi_repo_root)/../../plugins" && pwd)}"
 E2E_MODULE="${E2E_MODULE:-sample}"
 E2E_DDP="${E2E_DDP:-${PLUGINS_DIR}/${E2E_MODULE}/build/plugin/${E2E_MODULE}.ddp}"
 

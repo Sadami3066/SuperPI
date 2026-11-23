@@ -10,7 +10,7 @@ if [[ -z "${ANDROID_HOME:-}" && -f local.properties ]]; then
   fi
 fi
 
-./scripts/gradlew-locked \
+./scripts/gradlew-locked "$@" \
   :cli-common:testDebugUnitTest \
   :feishu:testDebugUnitTest \
   :feishu:verifyPlugin \

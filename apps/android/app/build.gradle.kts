@@ -6,9 +6,16 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-val keystorePropertiesFile = rootProject.file("keystore.properties")
+val secretsDir = File(
+    System.getenv("SUPERPI_SECRETS_DIR") ?: "${System.getProperty("user.home")}/.config/superpi/secrets",
+)
+val keystorePropertiesFile = listOfNotNull(
+    rootProject.file("keystore.properties").takeIf { it.isFile },
+    System.getenv("SUPERPI_KEYSTORE_PROPERTIES")?.let(::File)?.takeIf { it.isFile },
+    File(secretsDir, "keystore.properties").takeIf { it.isFile },
+).firstOrNull()
 val keystoreProperties = Properties().apply {
-    if (keystorePropertiesFile.isFile) keystorePropertiesFile.inputStream().use { load(it) }
+    keystorePropertiesFile?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -44,8 +51,11 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropertiesFile.isFile) {
-                storeFile = file(keystoreProperties.getProperty("storeFile", "release.keystore"))
+            if (keystorePropertiesFile != null) {
+                val rawStoreFile = keystoreProperties.getProperty("storeFile", "release.keystore")
+                storeFile = File(rawStoreFile).takeIf { it.isAbsolute }
+                    ?: File(keystorePropertiesFile.parentFile, rawStoreFile).takeIf { it.isFile }
+                    ?: file(rawStoreFile)
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
@@ -55,7 +65,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.isFile) {
+            signingConfig = if (keystorePropertiesFile != null) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")

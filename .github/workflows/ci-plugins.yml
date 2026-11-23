@@ -1,0 +1,56 @@
+name: CI · Plugins
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/**"
+      - ".github/workflows/ci-plugins.yml"
+  pull_request:
+    paths:
+      - "plugins/**"
+      - ".github/workflows/ci-plugins.yml"
+
+concurrency:
+  group: ci-plugins-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-root-directory: plugins/official
+
+      - name: Ensure Android SDK 36
+        run: |
+          source apps/android/scripts/env.sh
+          SDK_ROOT="$(superpi_android_sdk || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}")"
+          superpi_ensure_sdk_components "$SDK_ROOT"
+
+      - name: Generate ephemeral Ed25519 key for PR signing check
+        run: |
+          openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/ci-plugin-signing.pem"
+          openssl pkey -in "$RUNNER_TEMP/ci-plugin-signing.pem" -pubout -out "$RUNNER_TEMP/ci-plugin-signing.pub"
+
+      - name: Verify official plugins
+        working-directory: plugins/official
+        run: ./scripts/check.sh --no-daemon -PpluginSigningKey="$RUNNER_TEMP/ci-plugin-signing"
+
+      - name: Verify sample plugin
+        working-directory: plugins/sample
+        run: ./gradlew verifyPlugin --no-daemon

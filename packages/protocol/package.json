@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Wire protocol shared by SuperPI Android devices and relay",
+  "description": "Wire protocol shared by SuperPI Android devices, desktop, and relay",
   "exports": {
     ".": "./src/index.ts",
     "./vectors/*": "./vectors/*"
@@ -11,5 +11,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

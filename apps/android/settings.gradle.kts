@@ -28,3 +28,12 @@ dependencyResolutionManagement {
 rootProject.name = "superpi"
 
 include(":app", ":runtime", ":runtime-api", ":shell", ":design", ":plugin-api")
+
+val useLocalSdk = providers.gradleProperty("superpi.localSdk").orNull == "true" ||
+    System.getenv("SUPERPI_LOCAL_SDK") == "1"
+if (useLocalSdk) {
+    val sdkDir = file("../../../SuperPI-KotlinSDK")
+    if (sdkDir.isDirectory) {
+        includeBuild(sdkDir)
+    }
+}

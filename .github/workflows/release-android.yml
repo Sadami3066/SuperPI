@@ -1,0 +1,98 @@
+name: Release · Android
+
+# Triggered by pushing a semver tag vX.Y.Z or via manual dispatch.
+# Note: in-app updater tracks /releases/latest and selects PI-X.Y.Z.apk; release body is displayed verbatim.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v2.1.0, must match versionName in apps/android/app/build.gradle.kts)
+        required: true
+      notes_file:
+        description: Release notes path (defaults to release-notes/<tag>.md)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve tag and notes path
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_NOTES: ${{ inputs.notes_file }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          NOTES="${INPUT_NOTES:-release-notes/${TAG}.md}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "notes=${NOTES}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-root-directory: apps/android
+
+      - name: Verify release inputs
+        env:
+          TAG_NAME: ${{ steps.meta.outputs.tag }}
+          NOTES_FILE: ${{ steps.meta.outputs.notes }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          grep -q "versionName = \"${VERSION}\"" apps/android/app/build.gradle.kts
+          test -s "$NOTES_FILE"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Ensure Android SDK 36
+        run: |
+          source apps/android/scripts/env.sh
+          SDK_ROOT="$(superpi_android_sdk || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}")"
+          superpi_ensure_sdk_components "$SDK_ROOT"
+
+      - name: Run full Android checks
+        run: ./apps/android/scripts/check.sh --full
+
+      - name: Stage signing config
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.jks" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" \
+            > apps/android/keystore.properties
+
+      - name: Build signed APK
+        working-directory: apps/android
+        run: ./scripts/gradlew-locked :app:assembleRelease --no-daemon
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag }}
+          NOTES_FILE: ${{ steps.meta.outputs.notes }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          APK="PI-${VERSION}.apk"
+          cp apps/android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/dist/$APK"
+          (cd "$RUNNER_TEMP/dist" && sha256sum "$APK" > SHA256SUMS.txt)
+          gh release create "$TAG_NAME" "$RUNNER_TEMP/dist/$APK" "$RUNNER_TEMP/dist/SHA256SUMS.txt" \
+            --latest --title "$TAG_NAME" --notes-file "$NOTES_FILE"

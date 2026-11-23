@@ -8,7 +8,7 @@ import { RelayService, type RemoteEventPayload, type RemoteSessionStore } from '
 import type { RemoteBotHost } from '../../src/main/relay/remote-server'
 import type { MemorySummary } from '../../src/main/relay/memory-client'
 
-export const remoteRepo = fileURLToPath(new URL('../../../../../SuperPI-Remote/', import.meta.url))
+export const remoteRepo = fileURLToPath(new URL('../../../relay/', import.meta.url))
 export const remoteServer = path.join(remoteRepo, 'src/server/index.ts')
 export const certScript = path.join(remoteRepo, 'scripts/gen-cert.sh')
 export const hasRemoteRepo = existsSync(remoteServer)
@@ -95,18 +95,54 @@ export function createService(
   })
 }
 
+function kindForPath(targetPath: string): 'IDENTITY' | 'ACTIVE' | 'HABIT' | 'EPISODIC' {
+  if (targetPath === 'profile.md') return 'IDENTITY'
+  if (targetPath === 'cookbook.md') return 'HABIT'
+  if (targetPath.startsWith('daily/')) return 'EPISODIC'
+  return 'ACTIVE'
+}
+
 export async function writeMemory(
   port: number,
   token: string,
   body: Record<string, unknown>,
 ): Promise<{ version: number }> {
-  const response = await fetch(`http://127.0.0.1:${port}/v1/memory/write`, {
+  const now = Date.now()
+  const opId = typeof body.idempotencyKey === 'string' && body.idempotencyKey !== '' ? body.idempotencyKey : `test-${now}`
+  const targetPath = typeof body.path === 'string' ? body.path : 'context.md'
+  const text = typeof body.text === 'string' ? body.text : ''
+  const response = await fetch(`http://127.0.0.1:${port}/v2/memory/push`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      ops: [
+        {
+          opId,
+          kind: 'memory',
+          memory: {
+            id: `mem-${opId}`,
+            kind: kindForPath(targetPath),
+            content: text,
+            tags: [],
+            entities: [],
+            confidence: 'CONFIRMED',
+            importance: 3,
+            pinned: false,
+            validFrom: now,
+            status: 'ACTIVE',
+            sourceKind: 'CHAT_EXPLICIT',
+            createdAt: now,
+            updatedAt: now,
+            revision: 1,
+          },
+        },
+      ],
+    }),
   })
   if (response.status !== 200) throw new Error(`memory write failed: ${response.status}`)
-  return (await response.json()) as { version: number }
+  const payload = (await response.json()) as { serverSeq: number; rejectedCount?: number }
+  if ((payload.rejectedCount ?? 0) > 0) throw new Error('memory write rejected')
+  return { version: payload.serverSeq }
 }
 
 export async function enrollDevice(

@@ -4,7 +4,9 @@ plugins {
     `maven-publish`
 }
 
-val pluginApiVersion: String = providers.gradleProperty("pluginApiVersion").getOrElse("1.0.0")
+val designVersion: String = providers.gradleProperty("designVersion")
+    .orElse(providers.gradleProperty("pluginApiVersion"))
+    .getOrElse("1.0.0")
 
 android {
     namespace = "io.github.whywood.superpi.design"
@@ -51,7 +53,7 @@ dependencies {
 val publishGroup = providers.gradleProperty("superpiPublishGroup")
     .getOrElse("io.github.sadami3066.superpi")
 group = publishGroup
-version = pluginApiVersion
+version = designVersion
 
 afterEvaluate {
     publishing {
@@ -66,11 +68,11 @@ afterEvaluate {
                 from(components["release"])
                 groupId = publishGroup
                 artifactId = "design"
-                version = pluginApiVersion
+                version = designVersion
                 pom {
                     name.set("Super PI Agent Design")
                     description.set("Super PI Agent design system components shared with plugin UIs")
-                    url.set("https://github.com/Sadami3066/SuperPI-Plugins")
+                    url.set("https://github.com/Sadami3066/SuperPI")
                 }
             }
         }

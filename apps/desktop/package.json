@@ -3,15 +3,37 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Desktop shell for SuperPI, built on the pi agent harness",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "dist/main/index.cjs",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "build:main": "esbuild src/main/index.ts src/preload/index.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist --out-extension:.js=.cjs",
+    "build:renderer": "vite build",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "start": "electron .",
+    "start:nosandbox": "electron . --no-sandbox",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/ensure-electron.mjs"
   },
   "dependencies": {
-    "@superpi/protocol": "link:../../../SuperPI-Remote/packages/protocol",
+    "@superpi/protocol": "workspace:*",
     "ws": "^8.23.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.2"
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^38.2.2",
+    "esbuild": "^0.25.11",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
   }
 }

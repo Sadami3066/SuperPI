@@ -101,7 +101,7 @@ subprojects {
 }
 
 val verifyDocFacts = tasks.register("verifyDocFacts") {
-    val noticesRoot = layout.projectDirectory.file("THIRD_PARTY_NOTICES.md")
+    val noticesRoot = layout.projectDirectory.file("../../THIRD_PARTY_NOTICES.md")
     val noticesPackaged = layout.projectDirectory.file("app/src/main/assets/licenses/THIRD_PARTY_NOTICES.md")
     val versionCatalog = layout.projectDirectory.file("gradle/libs.versions.toml")
     inputs.files(noticesRoot, noticesPackaged, versionCatalog)

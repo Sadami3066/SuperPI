@@ -1,5 +1,6 @@
 .gradle/
 build/
+**/build/
 local.properties
 *.iml
 .idea/
@@ -11,8 +12,20 @@ artifacts/validation/
 .kotlin/
 
 keystore.properties
-app/release.keystore
+**/release.keystore
+plugins/**/keys/*.pem
+plugins/**/keys/*.pub
 .notes/
+
+# Node / pnpm
+node_modules/
+**/node_modules/
+apps/desktop/dist/
+.vite/
+*.tsbuildinfo
+*.log
+apps/relay/data/
+apps/relay/certs/
 
 # 设计源光栅图只在本地保留（文本来源与 manifest 在 assets/ 下）
 assets/**/*.png
@@ -21,3 +34,4 @@ assets/**/*.webp
 rs.html
 
 AGENTS.md
+apps/**/AGENTS.md

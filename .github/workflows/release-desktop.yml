@@ -1,0 +1,76 @@
+name: Release · Desktop
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Desktop release tag (e.g. desktop-v0.2.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          VERSION="${TAG#desktop-v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck & test
+        run: |
+          pnpm typecheck
+          pnpm --filter @superpi/protocol test
+          pnpm --filter @superpi/desktop test
+
+      - name: Build desktop bundle
+        run: pnpm --filter @superpi/desktop build
+
+      - name: Package archive & checksums
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/stage/superpi-desktop-${VERSION}-linux-x64" "$RUNNER_TEMP/dist"
+          STAGE="$RUNNER_TEMP/stage/superpi-desktop-${VERSION}-linux-x64"
+          cp -r apps/desktop/dist apps/desktop/extensions apps/desktop/assets apps/desktop/package.json "$STAGE/"
+          cp LICENSE "$STAGE/"
+          tar -C "$RUNNER_TEMP/stage" -czf "$RUNNER_TEMP/dist/superpi-desktop-${VERSION}-linux-x64.tar.gz" "superpi-desktop-${VERSION}-linux-x64"
+          (cd "$RUNNER_TEMP/dist" && sha256sum *.tar.gz > SHA256SUMS.txt)
+
+      - name: Publish GitHub Release (never override Android latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          gh release create "$TAG_NAME" \
+            "$RUNNER_TEMP/dist/superpi-desktop-${VERSION}-linux-x64.tar.gz" \
+            "$RUNNER_TEMP/dist/SHA256SUMS.txt" \
+            --latest=false \
+            --title "SuperPI Desktop ${VERSION}" \
+            --generate-notes

@@ -123,7 +123,7 @@ export class MemoryStore {
       } catch (error) {
         if (!(error instanceof MemoryRequestError)) throw error
         const rawObj = typeof rawOp === 'object' && rawOp !== null && !Array.isArray(rawOp)
-          ? (rawOp as Record<string, unknown>)
+          ? (rawOp as unknown as Record<string, unknown>)
           : null
         const rawOpId = rawObj?.opId
         const opId =

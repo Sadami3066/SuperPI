@@ -5,7 +5,7 @@ Third-party components included in this repository and in the APK belong to thei
 
 - Full license texts in the repository: `app/src/main/assets/licenses/`, `design/src/main/assets/licenses/`, `shell/src/main/assets/licenses/`
 - Path inside the APK: `assets/licenses/` (the directories above are merged at build time)
-- Contact and GPL/LGPL source requests (written offer): <https://github.com/Sadami3066/SuperPI-App/issues>
+- Contact and GPL/LGPL source requests (written offer): <https://github.com/Sadami3066/SuperPI/issues>
 - This file is packaged into the APK as `assets/licenses/THIRD_PARTY_NOTICES.md`
 
 ## 0. Distribution Obligations at a Glance
@@ -84,7 +84,7 @@ Not legal advice; the full text of each license governs. The summary below cover
 
 ### 1.4 Written Offer (GPL / LGPL Corresponding Source)
 
-For at least three years from the date this APK was first distributed, any third party may request the complete corresponding source for the GPL/LGPL components listed in sections 1.1–1.3 at no charge through <https://github.com/Sadami3066/SuperPI-App/issues>: the OpenMinis/proot source snapshot, the `deps/build_proot.sh` build script, the Termux PRoot loader source, the talloc 2.4.2 source tarball, Alpine aports v3.24.2, and the upstream source of each package; if provided on physical media, only the cost of the media and shipping is charged.
+For at least three years from the date this APK was first distributed, any third party may request the complete corresponding source for the GPL/LGPL components listed in sections 1.1–1.3 at no charge through <https://github.com/Sadami3066/SuperPI/issues>: the OpenMinis/proot source snapshot, the `deps/build_proot.sh` build script, the Termux PRoot loader source, the talloc 2.4.2 source tarball, Alpine aports v3.24.2, and the upstream source of each package; if provided on physical media, only the cost of the media and shipping is charged.
 
 ## 2. Code Libraries Compiled into the APK
 

@@ -69,7 +69,7 @@ afterEvaluate {
                 pom {
                     name.set("Super PI Agent Plugin API")
                     description.set("Super PI Agent external plugin contract SDK")
-                    url.set("https://github.com/Sadami3066/SuperPI-Plugins")
+                    url.set("https://github.com/Sadami3066/SuperPI")
                 }
             }
         }

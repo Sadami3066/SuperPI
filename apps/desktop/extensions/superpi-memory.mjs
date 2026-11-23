@@ -26,7 +26,7 @@ export default function superpiMemory(pi) {
     name: 'memory_read',
     label: 'Memory read',
     description:
-      'Read the shared long-term memory. Pass no path to list files, or a path such as profile.md, context.md, cookbook.md or daily/2026/11/2026-11/2026-11-20.md to read one file.',
+      'Read the shared long-term memory. Pass no path to list files, or a path such as profile.md, context.md, cookbook.md or daily/notes.md to read one file.',
     parameters: {
       type: 'object',
       properties: {
@@ -86,7 +86,7 @@ export default function superpiMemory(pi) {
     name: 'memory_write',
     label: 'Memory write',
     description:
-      'Append a durable fact to the shared memory. Use profile.md for the user, context.md for current work, cookbook.md for reusable methods, or a daily/<year>/<month>/<year-month>/<date>.md path.',
+      'Append a durable fact to the shared memory. Use profile.md for the user, context.md for current work, cookbook.md for reusable methods, or daily/notes.md for episodic notes.',
     parameters: {
       type: 'object',
       properties: {
@@ -100,30 +100,63 @@ export default function superpiMemory(pi) {
       const endpoint = process.env.SUPERPI_RELAY_ENDPOINT
       const token = process.env.SUPERPI_RELAY_TOKEN
       if (!endpoint || !token) return textResult('This device is not paired with a relay, so memory writes are unavailable.', true)
-      const body = {
-        op: 'append',
-        path: typeof params?.path === 'string' ? params.path : '',
-        text: typeof params?.text === 'string' ? params.text : '',
-        idempotencyKey: `desktop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      const targetPath = typeof params?.path === 'string' && params.path.trim() !== '' ? params.path.trim() : 'context.md'
+      const text = typeof params?.text === 'string' ? params.text.trim() : ''
+      if (text === '') return textResult('Memory text is required.', true)
+      const now = Date.now()
+      const opId = `desktop-${now}-${Math.random().toString(36).slice(2, 8)}`
+      const pushBody = {
+        ops: [
+          {
+            opId,
+            kind: 'memory',
+            memory: {
+              id: `mem-${opId}`,
+              kind: kindForPath(targetPath),
+              content: text,
+              tags: [],
+              entities: [],
+              confidence: 'CONFIRMED',
+              importance: 3,
+              pinned: false,
+              validFrom: now,
+              status: 'ACTIVE',
+              sourceKind: 'CHAT_EXPLICIT',
+              createdAt: now,
+              updatedAt: now,
+              revision: 1,
+            },
+          },
+        ],
       }
-      if (typeof params?.section === 'string' && params.section.trim() !== '') body.section = params.section.trim()
       try {
-        const response = await fetch(`${endpoint}/v1/memory/write`, {
+        const response = await fetch(`${endpoint}/v2/memory/push`, {
           method: 'POST',
           headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify(pushBody),
         })
         if (response.status !== 200) {
           const detail = await response.text()
           return textResult(`Memory write failed (${response.status}): ${detail.slice(0, 300)}`, true)
         }
         const result = await response.json()
-        return textResult(`Saved to ${body.path} (memory version ${result.version}).`)
+        if ((result.rejectedCount ?? 0) > 0) {
+          const reason = result.rejected?.[0]?.reason ?? 'rejected'
+          return textResult(`Memory write failed: ${reason}`, true)
+        }
+        return textResult(`Saved to ${targetPath} (memory version ${result.serverSeq}).`)
       } catch (error) {
         return textResult(`Memory write failed: ${error instanceof Error ? error.message : String(error)}`, true)
       }
     },
   })
+}
+
+function kindForPath(path) {
+  if (path === 'profile.md') return 'IDENTITY'
+  if (path === 'cookbook.md') return 'HABIT'
+  if (path.startsWith('daily/')) return 'EPISODIC'
+  return 'ACTIVE'
 }
 
 function textResult(text, isError = false) {

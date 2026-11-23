@@ -1,5 +1,5 @@
 {
-  "name": "superpi-remote",
+  "name": "@superpi/relay",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node --watch src/server/index.ts",
     "start": "node src/server/index.ts",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

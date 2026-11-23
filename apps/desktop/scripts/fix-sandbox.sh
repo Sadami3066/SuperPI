@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../../.."
 target=$(find node_modules/.pnpm -path '*/electron/dist/chrome-sandbox' -type f | head -n 1)
 
 if [[ -z "$target" ]]; then
