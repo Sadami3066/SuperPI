@@ -1,0 +1,50 @@
+name: Bug Report
+description: Report a bug in SuperPI Android, Desktop, Relay, or Official Plugins
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for reporting an issue. Please fill in the details below so maintainers can reproduce it quickly.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the SuperPI ecosystem is affected?
+      options:
+        - Android App
+        - Desktop (Electron)
+        - Relay & Shared Memory
+        - Official Plugin
+        - Plugin SDK / Template
+        - Documentation / CI
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / Commit
+      description: App, Desktop, Relay, or plugin version
+      placeholder: e.g. v2.0.1 / desktop-v0.1.0 / plugin feishu 2.7.1
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Tap / Run ...
+        3. Observe ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      render: shell

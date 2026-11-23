@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Plugin & Skill Market Submissions
+    url: https://github.com/Sadami3066/SuperPI-Market/issues
+    about: Request listing, takedown, or metadata fixes in SuperPI-Market
+  - name: Kotlin Multiplatform SDK Issues
+    url: https://github.com/Sadami3066/SuperPI-KotlinSDK/issues
+    about: Report bugs or feature requests for pi-ai / pi-agent / pi-mcp / pi-coding-agent

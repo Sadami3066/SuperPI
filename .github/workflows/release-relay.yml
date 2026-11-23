@@ -1,0 +1,93 @@
+name: Release · Relay
+
+on:
+  push:
+    tags:
+      - "relay-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Relay release tag (e.g. relay-v0.2.0)
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          VERSION="${TAG#relay-v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies & verify
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @superpi/protocol typecheck
+          pnpm --filter @superpi/protocol test
+          pnpm --filter @superpi/relay typecheck
+          pnpm --filter @superpi/relay test
+
+      - name: Package relay tarball
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/stage/superpi-relay-${VERSION}" "$RUNNER_TEMP/dist"
+          STAGE="$RUNNER_TEMP/stage/superpi-relay-${VERSION}"
+          cp package.json pnpm-workspace.yaml pnpm-lock.yaml LICENSE "$STAGE/"
+          mkdir -p "$STAGE/apps" "$STAGE/packages"
+          cp -r apps/relay "$STAGE/apps/relay"
+          cp -r packages/protocol "$STAGE/packages/protocol"
+          rm -rf "$STAGE/apps/relay/node_modules" "$STAGE/packages/protocol/node_modules"
+          tar -C "$RUNNER_TEMP/stage" -czf "$RUNNER_TEMP/dist/superpi-relay-${VERSION}.tar.gz" "superpi-relay-${VERSION}"
+          (cd "$RUNNER_TEMP/dist" && sha256sum *.tar.gz > SHA256SUMS.txt)
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/relay/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/superpi-relay:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/superpi-relay:latest
+
+      - name: Publish GitHub Release (never override Android latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          gh release create "$TAG_NAME" \
+            "$RUNNER_TEMP/dist/superpi-relay-${VERSION}.tar.gz" \
+            "$RUNNER_TEMP/dist/SHA256SUMS.txt" \
+            --latest=false \
+            --title "SuperPI Relay ${VERSION}" \
+            --generate-notes

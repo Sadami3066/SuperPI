@@ -1,0 +1,179 @@
+name: Release · Official Plugins
+
+on:
+  push:
+    tags:
+      - "plugin-*-v*"
+  workflow_dispatch:
+    inputs:
+      module:
+        description: Plugin module to build and sign
+        required: true
+        type: choice
+        options:
+          - all
+          - amap
+          - feishu
+          - hotel
+          - mail
+          - mcpui-demo
+          - micloud
+          - rail
+          - ride
+          - themes
+          - wecom
+      market_release_tag:
+        description: Optional SuperPI-Market release tag to upload bundles to (when MARKET_PUSH_TOKEN secret is configured)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-root-directory: plugins/official
+
+      - name: Ensure Android SDK 36
+        run: |
+          source apps/android/scripts/env.sh
+          SDK_ROOT="$(superpi_android_sdk || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}")"
+          superpi_ensure_sdk_components "$SDK_ROOT"
+
+      - name: Stage official signing key
+        env:
+          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+        run: |
+          test -n "$PLUGIN_SIGNING_KEY"
+          printf '%s\n' "$PLUGIN_SIGNING_KEY" > "$RUNNER_TEMP/plugin-signing.pem"
+          chmod 600 "$RUNNER_TEMP/plugin-signing.pem"
+          openssl pkey -in "$RUNNER_TEMP/plugin-signing.pem" -pubout -out "$RUNNER_TEMP/plugin-signing.pub"
+
+      - name: Resolve target modules & release tag
+        id: meta
+        env:
+          INPUT_MODULE: ${{ inputs.module }}
+        run: |
+          if [ -n "$INPUT_MODULE" ]; then
+            MOD="$INPUT_MODULE"
+            TAG="plugins-$(date -u +%Y%m%d)"
+          else
+            RAW="${GITHUB_REF_NAME#plugin-}"
+            MOD="${RAW%-v*}"
+            TAG="$GITHUB_REF_NAME"
+          fi
+          if [ "$MOD" = "all" ]; then
+            MODULES="amap feishu hotel mail mcpui-demo micloud rail ride themes wecom"
+          else
+            MODULES="$MOD"
+          fi
+          echo "modules=${MODULES}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build, test, sign, and verify plugins
+        working-directory: plugins/official
+        env:
+          MODULES: ${{ steps.meta.outputs.modules }}
+        run: |
+          TASKS=(":cli-common:testDebugUnitTest")
+          for m in $MODULES; do
+            TASKS+=(":${m}:testDebugUnitTest" ":${m}:verifyPlugin")
+          done
+          ./scripts/gradlew-locked "${TASKS[@]}" --no-daemon -PpluginSigningKey="$RUNNER_TEMP/plugin-signing"
+
+      - name: Collect signed bundles & market metadata
+        env:
+          MODULES: ${{ steps.meta.outputs.modules }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          printf "## Official Plugin Bundles\n\n| Module | Version | File | SHA-256 | Size |\n|---|---|---|---|---|\n" > "$NOTES"
+          for m in $MODULES; do
+            VER=$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync('plugins/official/${m}/src/main/assets/plugin.json','utf8')).version)")
+            OUT="${m}-${VER}.ddp"
+            cp "plugins/official/${m}/build/plugin/${m}.ddp" "$RUNNER_TEMP/dist/${OUT}"
+            SHA=$(sha256sum "$RUNNER_TEMP/dist/${OUT}" | awk '{print $1}')
+            SIZE=$(wc -c < "$RUNNER_TEMP/dist/${OUT}" | tr -d ' ')
+            printf "| %s | %s | \`%s\` | \`%s\` | %s |\n" "$m" "$VER" "$OUT" "$SHA" "$SIZE" >> "$NOTES"
+          done
+          (cd "$RUNNER_TEMP/dist" && sha256sum *.ddp > SHA256SUMS.txt)
+
+      - name: Publish GitHub Release (never override Android latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$RUNNER_TEMP/dist/"* --clobber
+          else
+            gh release create "$TAG_NAME" "$RUNNER_TEMP/dist/"* \
+              --latest=false \
+              --title "SuperPI Official Plugins (${TAG_NAME})" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+
+      - name: Upload to SuperPI-Market Release & open PR (if MARKET_PUSH_TOKEN set)
+        if: ${{ secrets.MARKET_PUSH_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.MARKET_PUSH_TOKEN }}
+          MARKET_TAG: ${{ inputs.market_release_tag || steps.meta.outputs.tag }}
+          MODULES: ${{ steps.meta.outputs.modules }}
+        run: |
+          gh repo clone Sadami3066/SuperPI-Market "$RUNNER_TEMP/market" -- --depth=1
+          cd "$RUNNER_TEMP/market"
+          if gh release view "$MARKET_TAG" -R Sadami3066/SuperPI-Market >/dev/null 2>&1; then
+            gh release upload "$MARKET_TAG" "$RUNNER_TEMP/dist/"*.ddp -R Sadami3066/SuperPI-Market --clobber
+          else
+            gh release create "$MARKET_TAG" "$RUNNER_TEMP/dist/"*.ddp -R Sadami3066/SuperPI-Market \
+              --title "Official Plugins (${MARKET_TAG})" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          BRANCH="chore/plugins-${MARKET_TAG}"
+          git checkout -B "$BRANCH"
+          for m in $MODULES; do
+            node - "$m" "$MARKET_TAG" "$RUNNER_TEMP/dist" <<'NODE'
+          const fs = require('node:fs')
+          const crypto = require('node:crypto')
+          const [mod, tag, distDir] = process.argv.slice(2)
+          const entryFiles = fs.readdirSync('entries/plugin').filter((f) => f.endsWith(`.${mod}.json`) || f.endsWith(`${mod}.json`))
+          if (entryFiles.length !== 1) process.exit(0)
+          const p = `entries/plugin/${entryFiles[0]}`
+          const entry = JSON.parse(fs.readFileSync(p, 'utf8'))
+          const ddpName = fs.readdirSync(distDir).find((f) => f.startsWith(`${mod}-`) && f.endsWith('.ddp'))
+          if (!ddpName) process.exit(0)
+          const version = ddpName.slice(mod.length + 1, -4)
+          const buf = fs.readFileSync(`${distDir}/${ddpName}`)
+          const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
+          entry.version = version
+          entry.plugin.version = version
+          entry.artifact = {
+            url: `https://github.com/Sadami3066/SuperPI-Market/releases/download/${tag}/${ddpName}`,
+            sha256,
+            size: buf.length,
+          }
+          fs.writeFileSync(p, JSON.stringify(entry, null, 2) + '\n')
+          NODE
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add entries/plugin/
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(market): update official plugins (${MARKET_TAG})"
+            git push -f origin "$BRANCH"
+            gh pr create -R Sadami3066/SuperPI-Market --base master --head "$BRANCH" \
+              --title "chore(market): update official plugins (${MARKET_TAG})" \
+              --body-file "$RUNNER_TEMP/release-notes.md" || true
+          fi

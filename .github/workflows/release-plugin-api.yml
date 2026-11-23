@@ -1,0 +1,93 @@
+name: Release · Plugin API & Design Maven
+
+on:
+  push:
+    tags:
+      - "plugin-api-v*"
+  workflow_dispatch:
+    inputs:
+      plugin_api_version:
+        description: plugin-api version (e.g. 2.1.0)
+        required: true
+      design_version:
+        description: Optional design version (leave blank to skip publishing design)
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-root-directory: apps/android
+
+      - name: Ensure Android SDK 36
+        run: |
+          source apps/android/scripts/env.sh
+          SDK_ROOT="$(superpi_android_sdk || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}")"
+          superpi_ensure_sdk_components "$SDK_ROOT"
+
+      - name: Resolve publish versions
+        id: meta
+        env:
+          INPUT_API_VER: ${{ inputs.plugin_api_version }}
+          INPUT_DESIGN_VER: ${{ inputs.design_version }}
+        run: |
+          API_VER="${INPUT_API_VER:-${GITHUB_REF_NAME#plugin-api-v}}"
+          echo "api_version=${API_VER}" >> "$GITHUB_OUTPUT"
+          echo "design_version=${INPUT_DESIGN_VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify API compatibility & build Maven staging repo
+        working-directory: apps/android
+        env:
+          API_VER: ${{ steps.meta.outputs.api_version }}
+          DESIGN_VER: ${{ steps.meta.outputs.design_version }}
+        run: |
+          ./scripts/api-compat.sh
+          ./scripts/gradlew-locked :plugin-api:publishPluginApiPublicationToPagesRepository \
+            "-PpluginApiVersion=${API_VER}" --no-daemon
+          if [ -n "$DESIGN_VER" ]; then
+            ./scripts/gradlew-locked :design:publishDesignPublicationToPagesRepository \
+              "-PdesignVersion=${DESIGN_VER}" --no-daemon
+          fi
+
+      - name: Checkout SuperPI-Maven
+        uses: actions/checkout@v7
+        with:
+          repository: Sadami3066/SuperPI-Maven
+          path: maven-repo
+          ssh-key: ${{ secrets.MAVEN_DEPLOY_KEY }}
+          persist-credentials: true
+
+      - name: Sync artifacts and push to SuperPI-Maven
+        env:
+          API_VER: ${{ steps.meta.outputs.api_version }}
+          DESIGN_VER: ${{ steps.meta.outputs.design_version }}
+        run: |
+          cp -r apps/android/build/maven-repo/io/. maven-repo/io/
+          cd maven-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add io/
+          if git diff --cached --quiet; then
+            echo "No Maven changes to commit."
+            exit 0
+          fi
+          MSG="chore(maven): publish plugin-api ${API_VER}"
+          if [ -n "$DESIGN_VER" ]; then MSG="${MSG}, design ${DESIGN_VER}"; fi
+          git commit -m "$MSG"
+          git push origin main
