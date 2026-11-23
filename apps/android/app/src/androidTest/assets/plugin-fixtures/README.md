@@ -2,7 +2,7 @@
 
 `scripts/plugin-binary-compat.sh` pushes these `.ddp` files to the app's external directory on the device, and `PluginBinaryCompatTest` runs the install → enable → disable → upgrade → uninstall regression on device. Run it by hand once before each host release; with every later release, append the previous version's market package here.
 
-The first version comes from the `sample` module of [SuperPI-Plugins](https://github.com/Sadami3066/SuperPI-Plugins) (`a57e941`, API level 6), signed with the development signing key committed there at `sample/signing/dev-ed25519.pem`; the keyId is `ed25519:8bfc1ba034dbf5bc113d469ce1f1a6350bc4c104105aa92b104eda3896fad213`.
+The first version comes from [`plugins/sample/`](../../../../../../plugins/sample) (`a57e941`, API level 6), signed with the development signing key committed there at `signing/dev-ed25519.pem`; the keyId is `ed25519:8bfc1ba034dbf5bc113d469ce1f1a6350bc4c104105aa92b104eda3896fad213`.
 
 | File | Plugin id | Version | Purpose | Size (B) | sha256 |
 |---|---|---|---|---|---|
@@ -14,7 +14,7 @@ Both fixtures are `apiLevel=6`, `minHostVersion=1.0.4`, `ui.apiLevel=2`, and pro
 Regenerate (v1 builds inside the plugin repository; v2 is copied to a temporary directory, version-bumped and re-signed, both with the same development key):
 
 ```bash
-cd ../SuperPI-Plugins/sample && ./gradlew verifyPlugin
+cd ../../plugins/sample && ./gradlew verifyPlugin
 cp build/plugin/sample.ddp <repo>/app/src/androidTest/assets/plugin-fixtures/sample-1.0.0.ddp
 cp -a . /tmp/plugin-fixtures-build/sample-v2 && cd /tmp/plugin-fixtures-build/sample-v2
 rm -rf build .gradle

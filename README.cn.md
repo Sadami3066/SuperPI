@@ -1,141 +1,168 @@
 <div align="center">
 
-<img src="docs/media/mascot.webp" width="96" alt="PI" />
+<img src="docs/media/mascot.webp" width="96" alt="SuperPI" />
 
-# Super PI Agent
+# SuperPI
 
-**运行在 Android 上的个人智能体**
+**个人 AI 智能体生态 —— Android · Desktop · 自托管中继 · 插件平台**
 
-<sub>长按电源，一句话开始工作。</sub>
+<sub>本地优先的多端个人助手：手机随叫随做、桌面无缝接管、可选自建中继同步记忆，以及可扩展的 `.ddp` 插件体系。</sub>
 
-简体中文 · [English](README.md)
+[English](README.md) · 简体中文
 
-<a href="https://github.com/Sadami3066/SuperPI-App/releases"><img src="https://img.shields.io/badge/下载-最新版本-111111?style=for-the-badge&logo=github&logoColor=white" alt="下载最新版本" /></a>
+<a href="https://github.com/Sadami3066/SuperPI/releases/latest"><img src="https://img.shields.io/github/v/release/Sadami3066/SuperPI?style=for-the-badge&logo=github&label=%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88&color=111111" alt="下载最新 Android 安装包" /></a>
 
 <img src="https://img.shields.io/badge/Android-10%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android 10+" />
-<img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
-<img src="https://img.shields.io/badge/Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" />
-<img src="https://img.shields.io/github/v/release/Sadami3066/SuperPI-App?style=flat-square&color=111111" alt="最新版本" />
+<img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
+<img src="https://img.shields.io/badge/TypeScript-Node%2024%2B-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+<a href="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-android.yml"><img src="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-android.yml/badge.svg" alt="Android CI" /></a>
+<a href="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-ts.yml"><img src="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-ts.yml/badge.svg" alt="TS CI" /></a>
+<a href="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-plugins.yml"><img src="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-plugins.yml/badge.svg" alt="Plugins CI" /></a>
 <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="Apache-2.0" />
 
 </div>
 
-[概览](#概览) · [能力](#能力) · [快速开始](#快速开始) · [安装与配置](#安装与配置) · [边界](#边界) · [开发](#开发与构建) · [文档](#文档与反馈) · [贡献](#贡献) · [License](#license)
-
-## 概览
-
-Super PI Agent 是跑在 Android 手机上的个人智能体。长按电源键唤醒，用语音或文字说出需求，它会在本机把事情做完：读写文件、操作其他应用、运行 Linux 命令、连接外部服务。
-
-它以本地优先方式运行，不依赖中心化服务器，也不需要电脑常开。模型请求只发给你配置的服务商；对话、文件、凭据与插件数据默认保存在本机，也可按需连接自托管的 SuperPI-Remote 中继实现多端互联与记忆同步。
-
-Super PI Agent 包含一套完整的 Agent Harness：工具、技能、长期记忆、MCP 连接器与插件系统；内置轻量 Linux 环境，覆盖大部分桌面办公与代码任务；通过插件可以接入飞书、企业微信、邮箱、地图、打车、酒店、火车票等外部能力。
-
-项目开源，代码可审计；除模型服务商与用户配置的 MCP/插件外，没有数据上传。
-
-安装包从 [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases) 获取。
-
-## 能力
-
-- **多形态交互**：长按电源唤醒，悬浮层语音输入与朗读；对话、附件、图片与文件进入同一条线程。
-- **手机操作**：通过屏幕工具读取界面、点击、输入与滚动；虚拟屏幕让 Agent 在后台操作其他 App。
-- **本机执行**：内置 Alpine/proot 用户空间，可运行 shell、Node、Python 与常用编译工具链；Root 档使用原生 root 环境。
-- **帮我盯**：定时与后台任务持续检查状态，满足条件时执行下一步。
-- **小程序**：用 HTML/CSS/JS 生成轻量小应用，可从桌面快捷方式直接打开。
-- **插件生态**：安装签名 `.ddp` 插件，扩展工具、技能、页面与主题；市场提供插件、技能与远程 MCP。
-- **模型自由**：支持多家模型服务商，API Key 或 OAuth 登录；模型与思考档按会话选择。
-- **本地优先**：无中心化账号与强制后端，数据默认不离开设备；可选接入自建中继实现多端协同。
-
-## 快速开始
-
-1. **下载安装包。** 从 [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases) 下载最新版本。
-2. **安装并打开。** 系统要求 Android 10 及以上。首次启动会进入引导；建议跟着流程走，也可以跳过，之后在设置中逐项完成。
-3. **连接模型。** 进入「设置 → 服务商」，选择服务商并填写 API Key，或使用 OAuth 登录。
-4. **初始化 Linux。** 进入「设置 → 系统访问」的「Linux 环境」区完成 Alpine 初始化。
-5. **选择系统访问。** 默认使用普通档。需要操作其他应用时，在「设置 → 系统访问」中开启无线调试或 Root；开启无线调试后，可以通过系统通知输入配对码。
-
-## 安装与配置
-
-### 安装
-
-| 项目 | 说明 |
-|---|---|
-| 系统 | Android 10 及以上 |
-| 安装包 | 从 [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases) 下载 APK |
-| 账号 | 本地优先（无需注册中心化账号，可选配对自建中继）；模型 Key 仅保存在本机 |
-| 升级 | 使用同一签名覆盖安装；更换签名需要先卸载，卸载会删除本机会话与凭据 |
-| 网络 | 对话内容只发送给已配置的模型厂商；市场与更新检查访问 GitHub，部分网络环境需要代理 |
-
-### 配置
-
-| 配置项 | 位置 | 说明 |
-|---|---|---|
-| 模型服务商 | 设置 → 服务商 | 多家 Provider；API Key 或浏览器 OAuth |
-| 系统访问 | 设置 → 系统访问 | 普通 / 无线调试 ADB / Root 三档 |
-| Linux | 设置 → 系统访问 → Linux 环境 | 初始化 Alpine；安装命令、Node、Python 与编译工具链 |
-| Android 集成 | 设置 → 安卓配置 | 悬浮窗、系统助手、通知与分享接收 |
-| 多端互联 | 抽屉 → 账号 / 设备 | 通过二维码或配对链接接入自托管 SuperPI-Remote 中继，在多台安卓手机之间共享记忆、双向传输附件与展示产物，并跨设备创建、配置与调用 Bot |
-| 插件 | 抽屉 → 插件 | 导入签名 `.ddp`；查看能力清单与运行状态 |
-| 记忆 | 自动 | 会话结束时沉淀；可搜索，也可注入当前会话 |
-
-## 边界
-
-| 项目 | 说明 |
-|---|---|
-| **Linux 隔离** | 普通、无线调试档的 Alpine 运行在 proot 用户空间，不是安全沙箱；Root 档直接使用系统 root 环境 |
-| **插件权限** | 插件与 App 同进程、同 UID，没有沙箱 |
-| **审批** | 只分系统访问三档：普通、无线调试、Root，不逐条确认命令 |
-| **运行位置** | 任务在本机执行；关闭 App 后停止，目标续跑只在进程内有效 |
-| **受保护页面** | 支付、密码等页面禁止截图，Agent 会把控制权交还给你 |
-| **分发** | 通过 GitHub Releases 分发，未上架应用商店；源码已公开 |
-
-## 开发与构建
-
-<details>
-<summary><b>模块、构建与验证</b></summary>
-
-模块与依赖方向见 [架构说明](docs/ARCHITECTURE.md)。
-
-开发环境：
-
-- JDK 17；构建固定使用 Java 17（`jvmToolchain` 17）。
-- Android SDK Platform 36、build-tools 36.0.0（约 5.6 GB）。
-- 内存 ≥ 8 GB、空闲磁盘 ≥ 10 GB；冷缓存首次构建约 15–30 分钟。
-- Android SDK 默认位置：macOS `~/Library/Android/sdk`，Linux 常见 `~/Android/Sdk`；可用 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT` 指定。
-- Windows 不原生支持：脚本依赖 bash 与 flock，请使用 WSL2、Linux 或 macOS。
-
-```bash
-./scripts/dev-setup.sh            # 首次：检查 JDK 与 Android SDK、按需安装 Platform 36/build-tools、构建 debug APK
-./scripts/build.sh quick          # 日常编译
-./scripts/build.sh test           # 定向单测
-./scripts/build.sh check          # 完整验证（等价 check.sh --full）
-./scripts/build.sh release        # 完整验证后构建 release APK
-./scripts/check.sh                # 编译 + 单测 + lint + 模块边界 + APK
-./scripts/check.sh --full         # 交付前：再加插件 SDK ABI 基线
-./scripts/api-compat.sh           # 校验插件 SDK 的公开 ABI（--update 重建基线）
-```
-
-更完整的开发说明见 [开发指南](docs/DEVELOPER_GUIDE.md)。
-
-</details>
-
-## 文档与反馈
-
-- [用户指南](docs/USER_GUIDE.md)：安装、系统访问、Linux、插件、小程序、远程连接与常见问题。
-- [开发指南](docs/DEVELOPER_GUIDE.md)：环境、模块、构建、测试与代码约定。
-- [插件开发](docs/PLUGIN_DEV.md)：插件契约、清单、签名、生命周期与 UI 扩展。
-- [架构说明](docs/ARCHITECTURE.md)：模块、运行时、插件与更新模型。
-- [产品原则](docs/PRODUCT.md)：产品与设计约束。
-- [发布说明](docs/RELEASE.md)：签名、打包与分发流程。
-- [变更记录](CHANGELOG.md)：按版本记录功能与修复。
-
-## 贡献
-
-欢迎提交 Issue 与 PR。提交前请阅读[贡献指南](CONTRIBUTING.md)。插件作者可以从[插件开发](docs/PLUGIN_DEV.md)与 [Super PI Agent 官方插件](https://github.com/Sadami3066/SuperPI-Official-Plugins) 开始。安全相关问题请不要公开提交，直接联系作者。
-
-## License
-
-自有代码使用 [Apache-2.0](LICENSE)。第三方组件、字体与图标的许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[整体架构](#整体架构) · [模块与生态](#模块与生态) · [快速上手](#快速上手) · [本地开发](#本地开发) · [文档导航](#文档导航) · [参与贡献](#参与贡献)
 
 ---
 
-<sub>Built on [pi](https://pi.dev) · [SuperPI-KotlinSDK](https://github.com/Sadami3066/SuperPI-KotlinSDK) · Alpine Linux · Jetpack Compose</sub>
+## 概览
+
+**SuperPI** 是一套面向个人使用的本地优先智能体生态：
+
+- **Android 客户端（`apps/android`）**：基于 Jetpack Compose 的手机端智能体。长按电源键语音/文字唤醒，内置 Alpine/proot（或 Root）Linux 环境，支持无线 ADB / 虚拟屏幕操作其他 App、随手生成小程序，以及安装签名 `.ddp` 插件。
+- **Desktop 桌面端（`apps/desktop`）**：基于 Electron + React，通过 JSONL RPC 驱动官方 [pi](https://pi.dev) 命令行代理，与手机端共用同一个中继、远程调用彼此的 Bot 并同步共享记忆。
+- **自托管中继（`apps/relay` + `packages/protocol`）**：轻量 Node.js 24 HTTPS/WSS 服务，负责设备注册配对（CA 指纹固定）、在线状态、跨设备 Bot 路由、工作区文件传输与 **Memory v2** 增量记忆同步。
+- **插件体系（`plugins/`）**：包含 10 个官方插件（飞书、企业微信、小米云服务、IMAP/SMTP 邮箱、高德地图、12306、酒店、打车、主题包、MCP UI 示例）、独立第三方插件模板以及端到端回归测试夹具。
+
+所有对话、模型密钥与会话文件默认保存在你的设备本地，不经过中心化服务器，仅与你配置的模型服务商或自托管中继通信。
+
+## 整体架构
+
+```mermaid
+flowchart LR
+    subgraph Devices["客户端"]
+        A["Android App\n(apps/android)"]
+        D["Desktop 桌面端\n(apps/desktop)"]
+        P["签名 .ddp 插件\n(plugins/official)"]
+        A <--> P
+    end
+
+    subgraph Sync["自托管中继（可选）"]
+        R["SuperPI Relay\n(apps/relay)"]
+        PR["@superpi/protocol\n(packages/protocol)"]
+        DB[("SQLite WAL\nMemory v2 & 整理租约")]
+        R --- PR
+        R --- DB
+    end
+
+    subgraph Ext["外部关联仓库"]
+        SDK["SuperPI-KotlinSDK\n(pi-ai / pi-agent / pi-mcp)"]
+        MKT["SuperPI-Market\n(签名市场索引与分发)"]
+        MVN["SuperPI-Maven\n(plugin-api 与 SDK 制品仓)"]
+    end
+
+    A <-->|"WSS / HTTPS\n固定 CA 指纹"| R
+    D <-->|"WSS / HTTPS\n固定 CA 指纹"| R
+    A -.->|"Agent 运行时"| SDK
+    A -.->|"插件 / 技能 / MCP"| MKT
+    P -.->|"compileOnly"| MVN
+```
+
+## 模块与生态
+
+### 本仓库内（Monorepo）
+
+| 目录 | 技术栈 | 职责 |
+|---|---|---|
+| [`apps/android/`](apps/android/) | Kotlin · Compose · Gradle | Android 宿主客户端、运行时、proot/ADB/Root 桥接、`:design` 与 `:plugin-api` |
+| [`apps/desktop/`](apps/desktop/) | Electron · React · Vite | 基于 `pi --mode rpc` 的桌面端、远程 Bot 主被叫、Memory v2 客户端 |
+| [`apps/relay/`](apps/relay/) | Node 24 · TypeScript · SQLite | 自托管多端中继、配对鉴权、在线态、Memory v2 增量同步与 Dream 互斥租约 |
+| [`packages/protocol/`](packages/protocol/) | TypeScript · JSON Vectors | 跨端共享的线协议与 Memory v2 数据契约（含测试向量） |
+| [`plugins/official/`](plugins/official/) | Kotlin · `.ddp` | 官方外部插件集合（`feishu`、`wecom`、`micloud`、`mail`、`amap`、`rail`、`hotel`、`ride`、`themes`、`mcpui-demo`） |
+| [`plugins/template/`](plugins/template/) | Kotlin · Gradle | 面向社区开发者的独立 `.ddp` 插件起步模板 |
+| [`plugins/sample/`](plugins/sample/) | Kotlin · Gradle | 宿主 E2E 与二进制兼容回归测试夹具 |
+
+### 外部生态仓库
+
+| 仓库 | 定位 | 链接 |
+|---|---|---|
+| **SuperPI-KotlinSDK** | 独立可复用的 KMP（`Android` + `JVM`）Agent SDK（`pi-ai`、`pi-agent`、`pi-mcp`、`pi-coding-agent`） | [Sadami3066/SuperPI-KotlinSDK](https://github.com/Sadami3066/SuperPI-KotlinSDK) |
+| **SuperPI-Market** | 经 ECDSA 签名的官方插件、技能与远程 MCP 市场索引与制品托管 | [Sadami3066/SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) |
+| **SuperPI-Maven** | 静态 GitHub Pages Maven 仓库，托管 SDK、`plugin-api` 与 `design` 依赖 | [Sadami3066/SuperPI-Maven](https://github.com/Sadami3066/SuperPI-Maven) |
+
+## 快速上手
+
+### 1. 安装 Android 客户端
+
+1. 从 [GitHub Releases](https://github.com/Sadami3066/SuperPI/releases/latest) 下载最新的 `PI-X.Y.Z.apk`（要求 Android 10+）。
+2. 按首次引导配置模型服务商（支持 42 家内置 Provider 或自定义端点），并在「设置 → 系统访问」初始化内置 Alpine Linux 环境。
+3. 如需让助手控制手机屏幕，可在「设置 → 系统访问」启用无线调试或 Root。
+
+详细使用说明见 [用户起步指南](docs/user/getting-started.md)。
+
+### 2. 自部署多端中继（`apps/relay`）
+
+支持 Docker 一键启动或 Node.js ≥ 24 本地运行：
+
+```bash
+# 使用 GitHub Container Registry 自动构建的镜像
+docker run -d --name superpi-relay \
+  -p 8443:8443 -v superpi-relay-data:/data \
+  ghcr.io/sadami3066/superpi-relay:latest
+
+# 或从源码启动（自动签发局域网 TLS 证书并输出扫码配对链接）
+pnpm install
+./apps/relay/scripts/dev-relay.sh
+```
+
+完整证书配置与配对流程见 [中继部署指南](docs/user/self-hosting-relay.md)。
+
+### 3. 启动桌面端（`apps/desktop`）
+
+前置依赖：Node.js ≥ 24、`pnpm` 以及在 `PATH` 中安装好的 `pi`（`@earendil-works/pi-coding-agent`）：
+
+```bash
+pnpm install
+pnpm build:desktop
+pnpm dev:desktop
+```
+
+## 本地开发
+
+```bash
+# TypeScript 全栈（Protocol + Relay + Desktop）
+pnpm typecheck
+pnpm test
+pnpm build:desktop
+
+# Android 宿主与插件 SDK ABI 基线检查（JDK 17 + Android SDK 36）
+./apps/android/scripts/dev-setup.sh
+./apps/android/scripts/check.sh --full
+./apps/android/scripts/build.sh stop
+
+# 官方插件与示例夹具构建验签
+(cd plugins/official && ./scripts/check.sh)
+(cd plugins/sample && ./gradlew verifyPlugin --no-daemon)
+
+# 一键串行运行全仓库校验
+./scripts/check-all.sh
+```
+
+如需在本地直接联调同级目录 `../SuperPI-KotlinSDK` 的未发布源码，可传 `-Psuperpi.localSdk=true` 或设置 `SUPERPI_LOCAL_SDK=1`。
+
+多端发版 Tag 约定（`vX.Y.Z`、`desktop-v*`、`relay-v*`、`plugin-api-v*`、`plugin-*-v*`）请见 [发布工程文档](docs/contributing/release.md)。
+
+## 文档导航
+
+- **终端用户**：[文档总目录](docs/README.md) · [用户起步指南](docs/user/getting-started.md) · [中继部署指南](docs/user/self-hosting-relay.md)
+- **插件开发者**：[插件生态总览](docs/plugins/README.md) · [快速上手](docs/plugins/quickstart.md) · [清单与 `.ddp` 打包](docs/plugins/manifest-and-packaging.md) · [运行时 API](docs/plugins/runtime-api.md) · [UI 扩展与设计系统](docs/plugins/ui-extensions.md) · [市场上架政策](docs/plugins/market-policy.md)
+- **贡献者与维护者**：[整体架构](docs/contributing/architecture.md) · [开发指南](docs/contributing/development.md) · [发布工程](docs/contributing/release.md) · [更新记录](CHANGELOG.md)
+
+## 参与贡献与安全反馈
+
+欢迎提 Issue 与 Pull Request，提交前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。发现安全隐患请勿公开暴露，请按 [SECURITY.md](SECURITY.md) 私下联系维护者。
+
+## 许可证
+
+本仓库自有源码采用 [Apache-2.0](LICENSE) 开源；内置第三方组件、Linux 二进制、字体与图标归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

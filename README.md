@@ -1,141 +1,168 @@
 <div align="center">
 
-<img src="docs/media/mascot.webp" width="96" alt="PI" />
+<img src="docs/media/mascot.webp" width="96" alt="SuperPI" />
 
-# Super PI Agent
+# SuperPI
 
-**A personal agent for Android**
+**Personal AI Agent Ecosystem — Android · Desktop · Self-Hosted Relay · Plugin Platform**
 
-<sub>Press and hold the power button, say what you need, and it gets to work.</sub>
+<sub>Local-first assistant that works across your phone and computer, with optional self-hosted sync and extensible `.ddp` plugins.</sub>
 
-[简体中文](README.cn.md) · English
+English · [简体中文](README.cn.md)
 
-<a href="https://github.com/Sadami3066/SuperPI-App/releases"><img src="https://img.shields.io/badge/Download-Latest-111111?style=for-the-badge&logo=github&logoColor=white" alt="Download latest release" /></a>
+<a href="https://github.com/Sadami3066/SuperPI/releases/latest"><img src="https://img.shields.io/github/v/release/Sadami3066/SuperPI?style=for-the-badge&logo=github&label=Download&color=111111" alt="Download latest Android APK" /></a>
 
 <img src="https://img.shields.io/badge/Android-10%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android 10+" />
-<img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
-<img src="https://img.shields.io/badge/Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" />
-<img src="https://img.shields.io/github/v/release/Sadami3066/SuperPI-App?style=flat-square&color=111111" alt="Latest release" />
+<img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
+<img src="https://img.shields.io/badge/TypeScript-Node%2024%2B-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+<a href="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-android.yml"><img src="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-android.yml/badge.svg" alt="Android CI" /></a>
+<a href="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-ts.yml"><img src="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-ts.yml/badge.svg" alt="TS CI" /></a>
+<a href="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-plugins.yml"><img src="https://github.com/Sadami3066/SuperPI/actions/workflows/ci-plugins.yml/badge.svg" alt="Plugins CI" /></a>
 <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="Apache-2.0" />
 
 </div>
 
-[Overview](#overview) · [Capabilities](#capabilities) · [Quick Start](#quick-start) · [Installation & Configuration](#installation--configuration) · [Boundaries](#boundaries) · [Development](#development) · [Docs](#docs--feedback) · [Contributing](#contributing) · [License](#license)
-
-## Overview
-
-Super PI Agent is a personal agent that runs on an Android phone. Hold the power button, ask in voice or text, and it does the work on the device: managing files, controlling other apps, running Linux commands, and connecting to external services.
-
-It runs local-first without requiring a server or an always-on computer. Model requests go only to the provider you configure; conversations, files, credentials, and plugin data stay on the phone by default, and an optional self-hosted SuperPI-Remote relay can link multiple Android phones together.
-
-Super PI Agent ships a complete agent harness: tools, skills, long-term memory, MCP connectors, and a plugin system. A lightweight Linux environment covers most desktop office and coding tasks. Plugins connect external services such as Feishu, WeCom, email, maps, ride hailing, hotels, and rail.
-
-The project is open source and auditable. Apart from the model provider and the MCP servers or plugins you configure, it does not upload data.
-
-Installers are available from [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases).
-
-## Capabilities
-
-- **Natural interaction**: wake by holding the power button; voice input and text-to-speech in the overlay. Messages, attachments, images, and files share one thread.
-- **Phone control**: screen tools read the UI, tap, type, and scroll. A virtual display lets the agent operate other apps in the background.
-- **On-device execution**: a bundled Alpine/proot user space runs shell, Node, Python, and common toolchains. Root access runs in a native root environment.
-- **Watch for me**: scheduled and background jobs keep checking a condition and act when it matches.
-- **Miniapps**: build small HTML/CSS/JS apps and open them from a home-screen shortcut.
-- **Plugin ecosystem**: install signed `.ddp` plugins to add tools, skills, pages, and themes. The market offers plugins, skills, and remote MCP servers.
-- **Bring your own model**: multiple providers with API-key or OAuth sign-in; model and thinking level are chosen per session.
-- **Local first**: no central account system or mandatory backend; data stays on the device by default, with optional self-hosted relay sync across your own devices.
-
-## Quick Start
-
-1. **Download the installer.** Get the latest build from [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases).
-2. **Install and open.** Android 10 or newer is required. The first launch walks through setup; you can follow it or skip and finish later in Settings.
-3. **Connect a model.** Open Settings → Providers, choose a provider, and enter an API key or sign in with OAuth.
-4. **Initialize Linux.** In Settings → System access → Linux environment, finish the Alpine setup.
-5. **Choose system access.** Normal access is the default. To control other apps, enable wireless debugging or root in Settings → System access; with wireless debugging, enter the pairing code from the system notification.
-
-## Installation & Configuration
-
-### Installation
-
-| Item | Details |
-|---|---|
-| System | Android 10 or newer |
-| Installer | APK from [GitHub Releases](https://github.com/Sadami3066/SuperPI-App/releases) |
-| Account | Local-first (no mandatory account; optional self-hosted relay pairing); model keys stay on the device |
-| Updates | Install over the same signature. Changing signatures requires uninstalling, which deletes local sessions and credentials |
-| Network | Conversations go only to the configured model provider; the market and update checks use GitHub and may need a proxy on some networks |
-
-### Configuration
-
-| Item | Where | Notes |
-|---|---|---|
-| Model providers | Settings → Providers | Multiple providers; API key or browser OAuth |
-| System access | Settings → System access | Normal, wireless ADB, or root |
-| Linux | Settings → System access → Linux environment | Initialize Alpine; install shell, Node, Python, and toolchains |
-| Android integration | Settings → Android setup | Overlay, system assistant, notifications, and share targets |
-| Multi-device relay | Drawer → Account / Devices | Pair multiple Android phones via QR code or pairing link through a self-hosted SuperPI-Remote relay to share memory, transfer files and presented artifacts, and create or manage bots across devices |
-| Plugins | Drawer → Plugins | Import signed `.ddp` files; inspect capabilities and runtime state |
-| Memory | Automatic | Distilled when a session ends; searchable and injectable into the current session |
-
-## Boundaries
-
-| Item | Details |
-|---|---|
-| **Linux isolation** | On normal and wireless-debugging levels, Alpine runs in a proot user space and is not a security sandbox. Root level uses the system root environment directly |
-| **Plugin permissions** | Plugins run in the app process with the same UID; there is no sandbox |
-| **Approval** | Only the three system-access levels are chosen; commands are not confirmed one by one |
-| **Where it runs** | Tasks run on the device and stop when the app stops. Goal continuation lives only in process memory |
-| **Protected screens** | Payment and password screens cannot be captured; the agent hands control back to you |
-| **Distribution** | Distributed through GitHub Releases, not an app store. The source is public |
-
-## Development
-
-<details>
-<summary><b>Modules, build, and verification</b></summary>
-
-See [Architecture](docs/ARCHITECTURE.md) for modules and dependency direction.
-
-Requirements:
-
-- JDK 17. The build targets Java 17 (`jvmToolchain` 17).
-- Android SDK Platform 36 and build-tools 36.0.0 (about 5.6 GB).
-- At least 8 GB RAM and 10 GB free disk; a cold first build takes roughly 15–30 minutes.
-- Android SDK locations: macOS `~/Library/Android/sdk`, commonly `~/Android/Sdk` on Linux. Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` if needed.
-- Windows is not supported natively: the scripts need bash and flock. Use WSL2, Linux, or macOS.
-
-```bash
-./scripts/dev-setup.sh            # first run: check JDK and Android SDK, install Platform 36/build-tools if needed, build debug APK
-./scripts/build.sh quick          # day-to-day compile
-./scripts/build.sh test           # targeted unit tests
-./scripts/build.sh check          # full verification (same as check.sh --full)
-./scripts/build.sh release        # full verification, then release APK
-./scripts/check.sh                # compile + unit tests + lint + module boundaries + APK
-./scripts/check.sh --full         # before delivery: also plugin SDK ABI baseline
-./scripts/api-compat.sh           # verify plugin SDK public ABI (--update rewrites the baseline)
-```
-
-See the [Developer Guide](docs/DEVELOPER_GUIDE.md) for the complete workflow.
-
-</details>
-
-## Docs & Feedback
-
-- [User Guide](docs/USER_GUIDE.md): installation, system access, Linux, plugins, miniapps, remote connections, and troubleshooting.
-- [Developer Guide](docs/DEVELOPER_GUIDE.md): environment, modules, build, tests, and conventions.
-- [Plugin Development](docs/PLUGIN_DEV.md): plugin contracts, manifest, signing, lifecycle, and UI extensions.
-- [Architecture](docs/ARCHITECTURE.md): modules, runtime, plugins, and update model.
-- [Product Principles](docs/PRODUCT.md): product and design constraints.
-- [Release](docs/RELEASE.md): signing, packaging, and distribution.
-- [Changelog](CHANGELOG.md): changes by version.
-
-## Contributing
-
-Issues and pull requests are welcome. Read the [Contributing Guide](CONTRIBUTING.md) first. Plugin authors can start with [Plugin Development](docs/PLUGIN_DEV.md) and [Super PI Agent official plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins). Do not report security issues in public; contact the maintainer directly.
-
-## License
-
-Our own code is licensed under [Apache-2.0](LICENSE). Third-party components, fonts, and icons are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[Architecture](#architecture) · [Packages & Repositories](#packages--repositories) · [Quick Start](#quick-start) · [Development](#development) · [Documentation](#documentation) · [Contributing](#contributing)
 
 ---
 
-<sub>Built on [pi](https://pi.dev) · [SuperPI-KotlinSDK](https://github.com/Sadami3066/SuperPI-KotlinSDK) · Alpine Linux · Jetpack Compose</sub>
+## Overview
+
+**SuperPI** is a local-first personal AI agent ecosystem:
+
+- **Android (`apps/android`)**: On-device personal agent built with Jetpack Compose. Long-press the power button to speak or type, run Linux commands in bundled Alpine/proot (or Root), automate Android UI via wireless ADB / virtual screen, host mini-apps, and load signed `.ddp` plugins.
+- **Desktop (`apps/desktop`)**: Electron + React desktop shell driving the official [pi](https://pi.dev) agent over JSONL RPC, sharing bots, remote execution, and synced memory with your phones.
+- **Relay (`apps/relay` + `packages/protocol`)**: Optional, self-hosted Node.js 24 HTTPS/WSS service for cross-device bot routing, encrypted CA-pinned pairing, workspace file transfer, and **Memory v2** synchronization.
+- **Plugins (`plugins/`)**: 10 official integrations (`feishu`, `wecom`, `micloud`, `mail`, `amap`, `rail`, `hotel`, `ride`, `themes`, `mcpui-demo`), a third-party Gradle template, and an end-to-end sample fixture.
+
+All conversations, API keys, and sessions stay on your devices by default and talk directly only to the model providers or self-hosted relay you configure.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Devices["Client Surfaces"]
+        A["Android App\n(apps/android)"]
+        D["Desktop Shell\n(apps/desktop)"]
+        P["Signed .ddp Plugins\n(plugins/official)"]
+        A <--> P
+    end
+
+    subgraph Sync["Self-Hosted Relay (Optional)"]
+        R["SuperPI Relay\n(apps/relay)"]
+        PR["@superpi/protocol\n(packages/protocol)"]
+        DB[("SQLite WAL\nMemory v2 & Leases")]
+        R --- PR
+        R --- DB
+    end
+
+    subgraph Ext["Companion Repositories"]
+        SDK["SuperPI-KotlinSDK\n(pi-ai / pi-agent / pi-mcp)"]
+        MKT["SuperPI-Market\n(Signed Registry & Releases)"]
+        MVN["SuperPI-Maven\n(plugin-api & SDK AAR/JAR)"]
+    end
+
+    A <-->|"WSS / HTTPS\nPinned CA"| R
+    D <-->|"WSS / HTTPS\nPinned CA"| R
+    A -.->|"Agent Harness"| SDK
+    A -.->|"Plugins, Skills, MCP"| MKT
+    P -.->|"compileOnly"| MVN
+```
+
+## Packages & Repositories
+
+### Inside this Monorepo
+
+| Path | Stack | Responsibility |
+|---|---|---|
+| [`apps/android/`](apps/android/) | Kotlin · Compose · Gradle | Android agent client, runtime, proot/ADB/Root shell, `:design` & `:plugin-api` SDKs |
+| [`apps/desktop/`](apps/desktop/) | Electron · React · Vite | Desktop shell over `pi --mode rpc`, remote bot caller/callee, Memory v2 client |
+| [`apps/relay/`](apps/relay/) | Node 24 · TypeScript · SQLite | Self-hosted device relay, pairing, presence, Memory v2 push/pull & Dream lease |
+| [`packages/protocol/`](packages/protocol/) | TypeScript · JSON Vectors | Canonical WebSocket frames and Memory v2 contracts shared across TypeScript & Kotlin |
+| [`plugins/official/`](plugins/official/) | Kotlin · `.ddp` | Official plugins (`feishu`, `wecom`, `micloud`, `mail`, `amap`, `rail`, `hotel`, `ride`, `themes`, `mcpui-demo`) |
+| [`plugins/template/`](plugins/template/) | Kotlin · Gradle | Standalone starter project for third-party `.ddp` plugin authors |
+| [`plugins/sample/`](plugins/sample/) | Kotlin · Gradle | Deterministic test fixture for host E2E and binary compatibility regression |
+
+### Ecosystem Repositories
+
+| Repository | Purpose | Link |
+|---|---|---|
+| **SuperPI-KotlinSDK** | Reusable KMP (`Android` + `JVM`) agent runtime SDK (`pi-ai`, `pi-agent`, `pi-mcp`, `pi-coding-agent`) | [Sadami3066/SuperPI-KotlinSDK](https://github.com/Sadami3066/SuperPI-KotlinSDK) |
+| **SuperPI-Market** | ECDSA-signed plugin, skill & remote MCP catalog served via GitHub Pages | [Sadami3066/SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) |
+| **SuperPI-Maven** | Static GitHub Pages Maven host for SDK, `plugin-api`, and `design` artifacts | [Sadami3066/SuperPI-Maven](https://github.com/Sadami3066/SuperPI-Maven) |
+
+## Quick Start
+
+### 1. Install on Android
+
+1. Download the latest `PI-X.Y.Z.apk` from [GitHub Releases](https://github.com/Sadami3066/SuperPI/releases/latest) (requires Android 10+).
+2. Follow onboarding to add a model provider (42 built-in providers or custom endpoint) and initialize the on-device Alpine Linux environment.
+3. Optionally enable Wireless Debugging or Root in **Settings → System access** to allow screen automation.
+
+See [Getting Started](docs/user/getting-started.md) for full usage instructions.
+
+### 2. Self-Host the Relay (`apps/relay`)
+
+Run with Docker (or Node.js ≥ 24):
+
+```bash
+# Container image published to GHCR on relay releases
+docker run -d --name superpi-relay \
+  -p 8443:8443 -v superpi-relay-data:/data \
+  ghcr.io/sadami3066/superpi-relay:latest
+
+# Or from source with automatic LAN self-signed TLS & QR pairing link
+pnpm install
+./apps/relay/scripts/dev-relay.sh
+```
+
+See [Self-Hosting Relay](docs/user/self-hosting-relay.md) for TLS certificates, systemd, and multi-device pairing.
+
+### 3. Run Desktop (`apps/desktop`)
+
+Requires Node.js ≥ 24, `pnpm`, and `pi` (`@earendil-works/pi-coding-agent`) on `PATH`:
+
+```bash
+pnpm install
+pnpm build:desktop
+pnpm dev:desktop
+```
+
+## Development
+
+```bash
+# TypeScript (Protocol + Relay + Desktop)
+pnpm typecheck
+pnpm test
+pnpm build:desktop
+
+# Android App & Plugin SDK ABI (JDK 17 + Android SDK 36)
+./apps/android/scripts/dev-setup.sh
+./apps/android/scripts/check.sh --full
+./apps/android/scripts/build.sh stop
+
+# Official & Sample Plugins
+(cd plugins/official && ./scripts/check.sh)
+(cd plugins/sample && ./gradlew verifyPlugin --no-daemon)
+
+# Everything sequentially
+./scripts/check-all.sh
+```
+
+To build `apps/android` against a sibling checkout of `../SuperPI-KotlinSDK`, pass `-Psuperpi.localSdk=true` or set `SUPERPI_LOCAL_SDK=1`.
+
+For release tagging conventions (`vX.Y.Z`, `desktop-v*`, `relay-v*`, `plugin-api-v*`, `plugin-*-v*`), see [Release Engineering](docs/contributing/release.md).
+
+## Documentation
+
+- **Users**: [Documentation Index](docs/README.md) · [Getting Started](docs/user/getting-started.md) · [Self-Hosting Relay](docs/user/self-hosting-relay.md)
+- **Plugin Authors**: [Plugin Overview](docs/plugins/README.md) · [Quick Start](docs/plugins/quickstart.md) · [Manifest & Packaging](docs/plugins/manifest-and-packaging.md) · [Runtime API](docs/plugins/runtime-api.md) · [UI Extensions](docs/plugins/ui-extensions.md) · [Market Policy](docs/plugins/market-policy.md)
+- **Contributors**: [Architecture](docs/contributing/architecture.md) · [Developer Guide](docs/contributing/development.md) · [Release Engineering](docs/contributing/release.md) · [Changelog](CHANGELOG.md)
+
+## Contributing & Security
+
+Issues and PRs are welcome—read [CONTRIBUTING.md](CONTRIBUTING.md) first. Please report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Code in this repository is licensed under [Apache-2.0](LICENSE). Third-party components, bundled Linux binaries, fonts, and brand assets are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

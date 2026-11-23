@@ -1,18 +1,24 @@
-# Super PI Agent Documentation
+# SuperPI Documentation
 
-## Users
+Docs are organized by role so users, plugin authors, and core contributors each have one clear entry point.
 
-- [User Guide](USER_GUIDE.md): installation, models, system access, screen, plugins, mini apps, remote connection, troubleshooting and limits.
+## For Users
 
-## Product
+- [Getting Started](user/getting-started.md) — Android installation, model setup, system access tiers, Linux, mini-apps, multi-device sync, and FAQ.
+- [Self-Hosting Relay](user/self-hosting-relay.md) — Deploying `apps/relay` with Docker or Node.js 24, TLS certificates, pairing links, and Desktop client setup.
 
-- [Product Principles](PRODUCT.md): product, interaction and design constraints.
-- [Architecture](ARCHITECTURE.md): modules, runtime, plugins, themes and updates.
+## For Plugin Authors
 
-## Developers
+- [Plugin Overview](plugins/README.md) — How `.ddp` plugins work, starter template, and official reference plugins.
+- [Quick Start](plugins/quickstart.md) — Set up the template, declare dependencies from `SuperPI-Maven`, build and debug.
+- [Manifest & `.ddp` Packaging](plugins/manifest-and-packaging.md) — `plugin.json` schema, capabilities, permissions, themes, and Ed25519 signing spec (`ddp-1`).
+- [Runtime API & Host Services](plugins/runtime-api.md) — Lifecycle, tools, skills, hooks, host capabilities, ABI rules, and compatibility.
+- [UI Extensions & Design System](plugins/ui-extensions.md) — Compose slots, tool result cards, plugin pages, and shared `:design` tokens.
+- [Marketplace Policy](plugins/market-policy.md) & [PR Review Checklist](plugins/pr-review.md) — Canonical rules for publishing to `SuperPI-Market`.
 
-- [Developer Guide](DEVELOPER_GUIDE.md): environment, builds, modules, runtime, tests, release and code conventions.
-- [Plugin Development](PLUGIN_DEV.md): manifest, `.ddp` format, signing, lifecycle, tools, skills, hooks, UI extensions and debugging.
-- [Release](RELEASE.md): signing material, release builds and re-signing migration.
+## For Contributors & Maintainers
 
-For the product overview see the repository root [README](../README.md); for changes see [CHANGELOG](../CHANGELOG.md).
+- [Architecture](contributing/architecture.md) — Monorepo layout, Android modules, Desktop/Relay pipeline, Memory v2, plugins, and update contract.
+- [Developer Guide](contributing/development.md) — Toolchains, Gradle locking, local SDK `includeBuild`, E2E scripts, and conventions.
+- [Release Engineering](contributing/release.md) — Versioning, Secrets, and tag-driven CI releases (`v*`, `desktop-v*`, `relay-v*`, `plugin-api-v*`, `plugin-*-v*`, SDK `v*`).
+- [Prompt & Context Reference](contributing/context/README.md) — Internal reference map of system prompts, tools, memory, and compaction formatting.

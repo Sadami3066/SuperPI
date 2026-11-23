@@ -58,4 +58,4 @@ The host never reads a plugin's `res/`, so build UI with Compose or declared UI 
 | `src/main/assets/skills/template-skill/` | Example skill: `SKILL.md` + `references/format.md` |
 | `src/main/kotlin/.../TemplatePlugin.kt` | Reference implementation: `availability`, skill, prompt section, `template_echo` tool |
 
-The full contract and signing spec are in the repository's `docs/PLUGIN_DEV.md`; listing and distribution rules are in `MARKET_POLICY.md`.
+The full contract and signing spec live in [Plugin Developer Docs](../../docs/plugins/README.md); listing and distribution rules are in [Marketplace Policy](../../docs/plugins/market-policy.md).

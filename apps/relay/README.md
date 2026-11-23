@@ -17,10 +17,10 @@ It does not run models, execute tools, or interpret conversations.
 ## Repository layout
 
 ```
-packages/protocol/   wire protocol shared with SuperPI Android clients, plus JSON test vectors
-src/server/          HTTP and WebSocket server, configuration, entry point
-test/                server tests
-scripts/             deployment, certificate and backup helpers
+packages/protocol/   wire protocol shared with SuperPI Android & Desktop clients, plus JSON test vectors
+apps/relay/src/      HTTP and WebSocket server, configuration, entry point
+apps/relay/test/     server tests
+apps/relay/scripts/  deployment and certificate helpers
 ```
 
 ## Requirements
@@ -37,7 +37,7 @@ SUPERPI_PORT=8443 SUPERPI_HOST=0.0.0.0 pnpm start
 
 `GET /v1/health` returns the running version and protocol version. Configuration is read from environment variables: `SUPERPI_HOST`, `SUPERPI_PORT`, `SUPERPI_DATA_DIR`, `SUPERPI_CERT`, `SUPERPI_KEY`.
 
-For production the service runs under systemd with a generated certificate; see `scripts/` and the deployment notes in the design document.
+For production deployment with Docker or systemd and TLS certificates, see [Self-Hosting Relay](../../docs/user/self-hosting-relay.md).
 
 ## Development
 

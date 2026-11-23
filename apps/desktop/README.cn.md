@@ -11,7 +11,7 @@ SuperPI 的桌面端，构建在 [pi](https://pi.dev) coding agent 之上。
 - **本地优先**：会话、凭据与模型配置来自 pi 自身；SuperPI 只在 `~/.superpi` 保存自己的状态。
 - **桌面原生表面**：窗口、bot 抽屉、折进对话里的工具卡、键盘优先的输入区。
 
-设备之间可以经由 [SuperPI-Remote](../SuperPI-Remote) 的中继互通：同一批 bot 出现在抽屉里，任一设备都能被要求运行自己的 bot。
+设备之间可以经由 [`apps/relay`](../relay) 的中继互通：同一批 bot 出现在抽屉里，任一设备都能被要求运行自己的 bot。
 
 ## 目录
 
@@ -48,10 +48,6 @@ pnpm test
 pnpm build
 ```
 
-## 设计
-
-完整设计在作者工作区的 `../rewrite/DESKTOP-REMOTE.md`：进程模型、RPC 接入规则、bot 模型、中继协议与阶段。
-
 ## 许可证
 
-私有，不发布。
+[Apache-2.0](../../LICENSE)。

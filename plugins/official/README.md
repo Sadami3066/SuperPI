@@ -6,7 +6,7 @@ The official external-plugin source repository maintained by the Super PI Agent 
 
 ## Overview
 
-Super PI Agent is a personal AI agent on Android ([app repository](https://github.com/Sadami3066/SuperPI-App)). Plugins implement the host contract `plugin-api` in Kotlin, load inside the App process, and extend the agent with tools, skills, prompt sections and self-drawn pages. Plugins are installed only from `.ddp` files, and every plugin is a separate Android application module.
+Super PI Agent is a personal AI agent on Android ([host workspace](../../apps/android)). Plugins implement the host contract `plugin-api` in Kotlin, load inside the App process, and extend the agent with tools, skills, prompt sections and self-drawn pages. Plugins are installed only from `.ddp` files, and every plugin is a separate Android application module.
 
 This repository contains nine official plugins, published by `milous`:
 
@@ -141,8 +141,8 @@ The source code and documentation in this repository are licensed under [Apache-
 ## Disclaimer and feedback
 
 - This is a third-party integration maintained by an individual, with no affiliation or endorsement from Feishu, Tencent, Xiaomi, DiDi, RollingGo, Amap, China Railway or their affiliates.
-- Please report problems, suggestions and feedback via [GitHub Issues](https://github.com/Sadami3066/SuperPI-Official-Plugins/issues). Do not post signing private keys, credentials or security vulnerabilities publicly; contact the maintainer privately on GitHub first.
+- Please report problems, suggestions and feedback via [GitHub Issues](https://github.com/Sadami3066/SuperPI/issues). Do not post signing private keys, credentials or security vulnerabilities publicly; contact the maintainer privately on GitHub first.
 - The project is provided as-is and maintained on a best-effort basis, with no guarantee of service availability, response time or continued availability of third-party APIs.
-- Related repositories: [Super PI Agent app](https://github.com/Sadami3066/SuperPI-App) · [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) · [SuperPI-Plugins](https://github.com/Sadami3066/SuperPI-Plugins)
+- Related docs & repositories: [SuperPI](https://github.com/Sadami3066/SuperPI) · [Plugin Developer Docs](../../docs/plugins/README.md) · [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) · [Plugin Template](../template/)
 
 Development sample: [`mcpui-demo/`](mcpui-demo/README.md) renders MCP tool results with a plugin card. It is not in the market and requires `plugin-api 1.3.0` / host 1.1.0+.

@@ -4,7 +4,7 @@ The SuperPI-Market repository is the official plugin marketplace: entries are re
 
 ## What may be listed
 
-- Plugins, skills and MCP connectors that add capability to Super PI Agent; package format and contract are described in `docs/PLUGIN_DEV.md`.
+- Plugins, skills and MCP connectors that add capability to Super PI Agent; package format and contract are described in [Manifest & Packaging](manifest-and-packaging.md).
 - Artifacts that can be downloaded publicly and stay available long term (direct GitHub Releases links preferred), with a `sha256` matching the published file.
 - The publisher holds redistribution rights; the repository keeps a LICENSE or source link (redistribution-friendly licenses such as MIT, Apache-2.0 or CC-BY).
 
@@ -25,7 +25,7 @@ Open a PR against [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market)
 - `publisherKeyId` matching the `keyId` in the package's `META-INF/plugin-signature.json`; a new key means a new publisher.
 - A PNG icon of ≤128 KB (brand icons must credit their source).
 
-See the repository's `PR_REVIEW.md` for the review checklist and per-item notes. Size limits: 50 MB per plugin, 20 MB per skill; remote MCP accepts HTTP endpoints only.
+See the repository's [PR Review Checklist](pr-review.md) for the review checklist and per-item notes. Size limits: 50 MB per plugin, 20 MB per skill; remote MCP accepts HTTP endpoints only.
 
 ## Signing and trust
 

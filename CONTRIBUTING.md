@@ -1,35 +1,33 @@
-# Contributing to Super PI Agent
+# Contributing to SuperPI
 
-Thanks for your interest in Super PI Agent. This repository contains the Android app, agent runtime, shell bridge, design system, and plugin API. Official plugins live in [SuperPI-Official-Plugins](https://github.com/Sadami3066/SuperPI-Official-Plugins).
+Thank you for contributing! This monorepo contains the Android app, Desktop client, self-hosted Relay, shared Wire Protocol, Official Plugins, and Plugin Template.
 
-## Before opening an issue
+## Repository Map
 
-- Search existing issues first.
-- For bugs, include the app version, Android version and device, steps to reproduce, and relevant logs or screenshots.
-- For security issues, contact the author privately instead of opening a public issue.
+- `apps/android/` — Android app, agent runtime, shell bridges, `:design`, `:plugin-api`
+- `apps/desktop/` — Electron + React desktop client wrapping `pi --mode rpc`
+- `apps/relay/` — Node.js 24 relay and Memory v2 server
+- `packages/protocol/` — Shared WebSocket & Memory v2 protocol + JSON vectors
+- `plugins/official/` — Official `.ddp` plugins (`feishu`, `wecom`, `mail`, `micloud`, `amap`, `rail`, `hotel`, `ride`, `themes`, `mcpui-demo`)
+- `plugins/template/` & `plugins/sample/` — Third-party starter template & E2E fixture
 
-## Pull requests
+Companion repositories:
+- [SuperPI-KotlinSDK](https://github.com/Sadami3066/SuperPI-KotlinSDK) — Multiplatform `pi-ai`, `pi-agent`, `pi-mcp`, `pi-coding-agent`
+- [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) — Plugin, skill & MCP listing PRs
 
-- Keep each change focused. Split unrelated work into separate commits.
-- Use `type: summary` for commit subjects, for example `fix: handle empty provider list`.
-- Pull requests run CI (`./scripts/check.sh`); documentation-only changes are skipped. Run `./scripts/check.sh` locally before submitting. For plugin API changes, also run `./scripts/check.sh --full`. For device behavior, run `./scripts/check.sh --device` when possible.
-- Add or update tests and documentation with the change.
-- Do not commit API keys, signing keys, tokens, session files, recordings, or personal data.
-- Plugin changes belong in the official plugins repository unless they change the host contract.
+## Pull Request Guidelines
 
-## Development setup
+1. Keep each PR focused and commit messages concise (`type(scope): summary`).
+2. Add or update tests alongside behavior changes.
+3. Run the checks for the area you changed before pushing:
+   - TypeScript (`apps/desktop`, `apps/relay`, `packages/protocol`): `pnpm typecheck && pnpm test && pnpm build:desktop`
+   - Android (`apps/android`): `./apps/android/scripts/check.sh --full` (stop daemons afterwards with `./apps/android/scripts/build.sh stop`)
+   - Plugins (`plugins/`): `(cd plugins/official && ./scripts/check.sh)` or `(cd plugins/sample && ./gradlew verifyPlugin --no-daemon)`
+4. Never commit API keys, `.keystore` files, `.pem` signing keys, personal sessions, or `.superpi/` caches.
+5. Update documentation under `docs/` when contracts or CLI/UI workflows change.
 
-Requirements: JDK 17 (the build pins the Java toolchain to 17), Android SDK Platform 36, and build-tools 36.0.0 (about 5.6 GB). A cold first build takes roughly 15–30 minutes. Windows is not supported natively; use WSL2, Linux, or macOS.
-
-```bash
-./scripts/dev-setup.sh        # first run: check the toolchain and SDK, build the debug APK
-./scripts/check.sh            # compile, tests, lint, module boundaries, APK
-./scripts/check.sh --full     # add plugin SDK ABI baseline
-./scripts/check.sh --device   # install over a connected device and launch
-```
-
-All Gradle invocations must go through `./scripts/gradlew-locked`; concurrent local builds may run out of memory. See the [Developer Guide](docs/DEVELOPER_GUIDE.md) for module layout and conventions.
+See [Developer Guide](docs/contributing/development.md) for environment setup and [Plugin Docs](docs/plugins/README.md) for plugin development.
 
 ## License
 
-By contributing, you agree that your contribution is licensed under the repository's [Apache-2.0](LICENSE) license.
+By submitting a contribution, you agree that it is licensed under [Apache-2.0](LICENSE).

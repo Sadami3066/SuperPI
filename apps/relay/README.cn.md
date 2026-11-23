@@ -17,10 +17,10 @@ SuperPI 设备的中继、账号、在线状态与共享记忆服务。
 ## 目录
 
 ```
-packages/protocol/   各端共用的线协议与 JSON 测试向量
-src/server/          HTTP 与 WebSocket 服务、配置、入口
-test/                服务端测试
-scripts/             部署、证书与备份脚本
+packages/protocol/    各端共用的线协议与 JSON 测试向量
+apps/relay/src/       HTTP 与 WebSocket 服务、配置、入口
+apps/relay/test/      服务端测试
+apps/relay/scripts/   部署与证书助手脚本
 ```
 
 ## 运行
@@ -32,7 +32,7 @@ SUPERPI_PORT=8443 SUPERPI_HOST=0.0.0.0 pnpm start
 
 `GET /v1/health` 返回版本与协议版本。配置来自环境变量：`SUPERPI_HOST`、`SUPERPI_PORT`、`SUPERPI_DATA_DIR`、`SUPERPI_CERT`、`SUPERPI_KEY`。
 
-生产环境用 systemd 托管并配一张自签证书，见 `scripts/` 与设计文档中的部署一节。
+生产环境 Docker / systemd 部署与自签证书见 [自部署中继指南](../../docs/user/self-hosting-relay.md)。
 
 ## 开发
 
