@@ -2,8 +2,10 @@ package io.github.whywood.superpi.design
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -12,7 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,30 +53,32 @@ fun DdSwitch(
     activeColor: Color? = null,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val thumbProgress by animateFloatAsState(
         targetValue = if (checked) 1f else 0f,
-        animationSpec = DdMotion.SwitchSpring,
+        animationSpec = if (motionEnabled) DdMotion.SwitchSpring else snap(),
         label = "switch-thumb-offset",
     )
     val thumbScale by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.92f else 1f,
-        animationSpec = DdMotion.SwitchSpring,
+        animationSpec = if (motionEnabled) DdMotion.SwitchSpring else snap(),
         label = "switch-thumb-scale",
     )
+    val colorSpec = if (motionEnabled) tween<Color>(DdMotion.FAST, easing = DdMotion.EaseOut) else snap()
     val trackColor by animateColorAsState(
         targetValue = if (checked) {
             activeColor ?: colors.accent
         } else {
-            colors.ink.copy(alpha = if (colors.dark) 0.22f else 0.10f)
+            colors.ink.copy(alpha = if (colors.dark) 0.22f else 0.12f)
         },
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = colorSpec,
         label = "switch-track",
     )
     val thumbColor by animateColorAsState(
         targetValue = if (checked) colors.onAccent else if (colors.dark) colors.ink else Color.White,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = colorSpec,
         label = "switch-thumb-color",
     )
     val stateText = stateDescription
@@ -85,11 +89,9 @@ fun DdSwitch(
     }
     Box(
         modifier
-            .size(width = 52.dp, height = 32.dp)
-            .alpha(if (enabled) 1f else 0.4f)
+            .heightIn(min = 44.dp)
+            .alpha(if (enabled) 1f else DdAlpha.Disabled)
             .then(descriptionModifier)
-            .clip(CircleShape)
-            .background(trackColor)
             .toggleable(
                 value = checked,
                 enabled = enabled,
@@ -98,20 +100,35 @@ fun DdSwitch(
                 interactionSource = interaction,
                 indication = null,
             ),
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
-                .align(Alignment.CenterStart)
-                .offset(x = (4f + 20f * thumbProgress).dp)
-                .size(24.dp)
-                .graphicsLayer {
-                    scaleX = thumbScale
-                    scaleY = thumbScale
-                }
-                .shadow(elevation = 3.dp, shape = CircleShape, clip = false)
+                .size(width = 52.dp, height = 32.dp)
                 .clip(CircleShape)
-                .background(thumbColor),
-        )
+                .background(trackColor)
+                .then(
+                    if (!checked) {
+                        Modifier.border(1.dp, colors.hairline.copy(alpha = 0.6f), CircleShape)
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .size(24.dp)
+                    .graphicsLayer {
+                        translationX = (4f + 20f * thumbProgress).dp.toPx()
+                        scaleX = thumbScale
+                        scaleY = thumbScale
+                    }
+                    .shadow(elevation = 3.dp, shape = CircleShape, clip = false)
+                    .clip(CircleShape)
+                    .background(thumbColor),
+            )
+        }
     }
 }
 
@@ -135,7 +152,7 @@ fun <T> DdSegmentedControl(
         shape = RoundedCornerShape(DdRadius.Segmented),
         indicatorShape = RoundedCornerShape(DdRadius.Indicator),
         indicatorPadding = 3.dp,
-        indicatorColor = if (colors.dark) colors.ink.copy(alpha = DdAlpha.IndicatorDark) else colors.surface,
+        indicatorColor = if (colors.dark) colors.raised else colors.surface,
         testTags = null,
         item = item,
     )
@@ -157,11 +174,11 @@ fun <T> DdSegmentedControl(
         onSelect = onSelect,
         modifier = modifier,
         enabled = enabled,
-        height = 36.dp,
+        height = 44.dp,
         shape = CircleShape,
         indicatorShape = CircleShape,
         indicatorPadding = 3.dp,
-        indicatorColor = if (colors.dark) colors.ink.copy(alpha = DdAlpha.IndicatorDark) else colors.surface,
+        indicatorColor = if (colors.dark) colors.raised else colors.surface,
         testTags = null,
     ) { option, isSelected ->
         Text(
@@ -191,10 +208,11 @@ internal fun <T> DdSegmentedCore(
 ) {
     if (options.isEmpty()) return
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val selectedIndex = if (selected == null) -1 else options.indexOf(selected).coerceAtLeast(0)
     val animatedIndex by animateFloatAsState(
         targetValue = if (selectedIndex >= 0) selectedIndex.toFloat() else 0f,
-        animationSpec = DdMotion.SegmentedSpring,
+        animationSpec = if (motionEnabled) DdMotion.SegmentedSpring else snap(),
         label = "segment-index",
     )
     val indicatorAlpha = if (selectedIndex >= 0) 1f else 0f
@@ -209,12 +227,20 @@ internal fun <T> DdSegmentedCore(
         val segmentWidth = maxWidth / options.size.toFloat()
         Box(
             Modifier
-                .offset(x = segmentWidth * animatedIndex)
                 .width(segmentWidth)
                 .fillMaxHeight()
+                .graphicsLayer {
+                    alpha = indicatorAlpha
+                    translationX = (size.width * animatedIndex)
+                }
                 .padding(indicatorPadding)
-                .graphicsLayer { alpha = indicatorAlpha }
-                .shadow(elevation = DdElevation.Indicator, shape = indicatorShape, clip = false)
+                .then(
+                    if (colors.dark) {
+                        Modifier.border(1.dp, colors.hairline.copy(alpha = 0.7f), indicatorShape)
+                    } else {
+                        Modifier.shadow(elevation = DdElevation.Indicator, shape = indicatorShape, clip = false)
+                    },
+                )
                 .clip(indicatorShape)
                 .background(indicatorColor),
         )
@@ -239,7 +265,8 @@ internal fun <T> DdSegmentedCore(
                             onClick = { if (!isSelected) onSelect(option) },
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ),
+                        )
+                        .padding(horizontal = DdSpacing.Sm),
                     contentAlignment = Alignment.Center,
                 ) {
                     item(option, isSelected)

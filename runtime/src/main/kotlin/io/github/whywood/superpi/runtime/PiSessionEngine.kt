@@ -19,6 +19,7 @@ import io.github.whywood.superpi.sdk.coding.session.AgentSession
 import io.github.whywood.superpi.sdk.coding.session.CodingHooks
 import io.github.whywood.superpi.sdk.coding.session.CustomEntry
 import io.github.whywood.superpi.sdk.coding.session.QueueBehavior
+import io.github.whywood.superpi.sdk.coding.session.SessionEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionEvent
 import io.github.whywood.superpi.sdk.coding.session.SessionInfo
 import io.github.whywood.superpi.sdk.coding.session.SessionManager
@@ -84,7 +85,6 @@ class PiSessionEngine(
         }
         try {
             memory?.ensure()
-            memory?.refresh("session_start")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -450,6 +450,10 @@ internal class PiSessionHandle(
     }
 
     override fun history(): List<AssistantMessage> = engine.history(session)
+
+    override fun branchEntries(): List<SessionEntry> = runCatching {
+        session.sessionManager.getBranch()
+    }.getOrDefault(emptyList())
 
     override fun usage(): SessionUsage? = runCatching {
         val manager = session.sessionManager

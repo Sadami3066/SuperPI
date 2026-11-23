@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.drawable.toBitmap
@@ -44,12 +45,13 @@ import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdChip
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdShapes
@@ -150,17 +152,20 @@ fun ScanSettingsScreen(
                     Spacer(Modifier.height(10.dp))
                 }
 
-                DdSectionLabel(stringResource(R.string.scan_settings_official))
+                DdSectionLabel(
+                    stringResource(R.string.scan_settings_official),
+                    Modifier.padding(start = DdSpacing.Xs),
+                )
                 Spacer(Modifier.height(6.dp))
                 DdGroupCard {
                     loaded.official.forEachIndexed { index, strategy ->
-                        if (index > 0) DdHairline()
+                        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         StrategyRow(
                             strategy = strategy,
                             onClick = { officialDetail = strategy },
                         )
                     }
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         icon = DdIcons.Refresh,
                         title = stringResource(R.string.scan_settings_restore),
@@ -170,7 +175,10 @@ fun ScanSettingsScreen(
                 }
 
                 Spacer(Modifier.height(DdSpacing.Card))
-                DdSectionLabel(stringResource(R.string.scan_settings_custom))
+                DdSectionLabel(
+                    stringResource(R.string.scan_settings_custom),
+                    Modifier.padding(start = DdSpacing.Xs),
+                )
                 Spacer(Modifier.height(6.dp))
                 DdGroupCard {
                     if (loaded.custom.isEmpty()) {
@@ -180,7 +188,7 @@ fun ScanSettingsScreen(
                         )
                     } else {
                         loaded.custom.forEachIndexed { index, strategy ->
-                            if (index > 0) DdHairline()
+                            if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             StrategyRow(
                                 strategy = strategy,
                                 onClick = {
@@ -190,7 +198,7 @@ fun ScanSettingsScreen(
                             )
                         }
                     }
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         icon = DdIcons.Plus,
                         title = stringResource(R.string.scan_settings_add),
@@ -204,7 +212,10 @@ fun ScanSettingsScreen(
                 }
 
                 Spacer(Modifier.height(DdSpacing.Card))
-                DdSectionLabel(stringResource(R.string.scan_settings_file_section))
+                DdSectionLabel(
+                    stringResource(R.string.scan_settings_file_section),
+                    Modifier.padding(start = DdSpacing.Xs),
+                )
                 Spacer(Modifier.height(6.dp))
                 DdGroupCard {
                     DdListRow(
@@ -221,14 +232,14 @@ fun ScanSettingsScreen(
                         },
                         modifier = Modifier.testTag("scan_settings_file"),
                     )
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         icon = DdIcons.Download,
                         title = stringResource(R.string.scan_settings_import),
                         onClick = { importLauncher.launch(arrayOf("*/*")) },
                         modifier = Modifier.testTag("scan_settings_import"),
                     )
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         icon = DdIcons.Share,
                         title = stringResource(R.string.scan_settings_export),
@@ -520,14 +531,25 @@ private fun StrategyEditorDialog(
                     FormField(stringResource(R.string.scan_settings_field_action), action, { action = it }, "android.intent.action.VIEW")
                     FormField(stringResource(R.string.scan_settings_field_extras), extras, { extras = it }, "{ \"key\": true }", singleLine = false)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.scan_settings_field_fallback),
-                        style = DdType.body,
-                        color = colors.ink,
-                        modifier = Modifier.weight(1f),
-                    )
-                    DdSwitch(checked = fallbackMain, onCheckedChange = { fallbackMain = it })
+                DdPressable(
+                    onClick = { fallbackMain = !fallbackMain },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = DdShapes.Row,
+                    contentDescription = stringResource(R.string.scan_settings_field_fallback),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = DdSpacing.Xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.scan_settings_field_fallback),
+                            style = DdType.body,
+                            color = colors.ink,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(DdSpacing.Sm))
+                        DdSwitch(checked = fallbackMain, onCheckedChange = { fallbackMain = it })
+                    }
                 }
                 val currentError = error
                 if (currentError != null) {
@@ -684,8 +706,20 @@ private fun AppPickerRow(
             }
             Spacer(Modifier.width(DdSpacing.Md))
             Column(Modifier.weight(1f)) {
-                Text(text = app.label, style = DdType.body, color = colors.ink, maxLines = 1)
-                Text(text = app.packageName, style = DdType.bodySmall, color = colors.inkTertiary, maxLines = 1)
+                Text(
+                    text = app.label,
+                    style = DdType.body,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = app.packageName,
+                    style = DdType.bodySmall,
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

@@ -80,7 +80,7 @@
     <string name="bot_tools">Tools</string>
     <string name="bot_tools_screen">Screen tools</string>
     <string name="bot_tools_miniapp">Mini app tools</string>
-    <string name="bot_tools_screen_permission">Requires ADB or Root access</string>
+    <string name="bot_tools_screen_permission">Requires higher-level control in System Access</string>
     <string name="bot_instructions">Instructions</string>
     <string name="bot_created_toast">Created. Capabilities are off by default; turn them on in Bot settings.</string>
     <string name="drawer_remote_loading">Loading chats…</string>

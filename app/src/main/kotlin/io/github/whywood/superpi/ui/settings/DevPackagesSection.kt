@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.ApkMirrors
@@ -32,11 +33,12 @@ import io.github.whywood.superpi.data.DevBundleCustomization
 import io.github.whywood.superpi.data.DevPackageCatalog
 import io.github.whywood.superpi.data.DevPackagesState
 import io.github.whywood.superpi.data.label
-import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
@@ -107,15 +109,15 @@ internal fun DevPackagesSection(
             )
         }
         Spacer(Modifier.height(10.dp))
-        SettingsGroup {
+        DdGroupCard {
             if (!environmentReady) {
                 Text(
                     text = stringResource(R.string.dev_linux_required),
-                    modifier = Modifier.fillMaxWidth().padding(DdSpacing.Lg),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Lg),
                     style = DdType.bodySmall,
                     color = colors.inkTertiary,
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             }
             DevPackageCatalog.bundles.forEachIndexed { index, bundle ->
                 val composed = composeBundle(bundle, customization)
@@ -145,9 +147,12 @@ internal fun DevPackagesSection(
                                     operation?.stage?.let {
                                         Text(
                                             text = it,
+                                            modifier = Modifier.widthIn(max = 120.dp),
                                             style = DdType.bodySmall,
                                             color = colors.inkTertiary,
                                             maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                 }
@@ -158,11 +163,12 @@ internal fun DevPackagesSection(
                                 style = DdType.bodySmall,
                                 color = if (installed) colors.inkSecondary else colors.inkTertiary,
                                 maxLines = 1,
+                                softWrap = false,
                             )
                         }
                     },
                 )
-                if (index != DevPackageCatalog.bundles.lastIndex) DdHairline()
+                if (index != DevPackageCatalog.bundles.lastIndex) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             }
         }
         if (state.error != null) {
@@ -402,7 +408,8 @@ private fun MirrorPicker(
         style = DdType.bodySmall,
         color = colors.inkSecondary,
     )
-    for (mirror in ApkMirrors.all) {
+    for ((index, mirror) in ApkMirrors.all.withIndex()) {
+        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
         val checked = mirror.id in mirrors
         DdListRow(
             title = stringResource(mirror.nameRes),

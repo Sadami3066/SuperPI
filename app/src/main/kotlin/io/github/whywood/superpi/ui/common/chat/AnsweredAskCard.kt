@@ -2,6 +2,7 @@ package io.github.whywood.superpi.ui.common.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -42,6 +43,7 @@ import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 
 @Composable
@@ -52,6 +54,7 @@ internal fun AnsweredAskCard(
 ) {
     if (record.questions.isEmpty()) return
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val questionKey = record.questions.joinToString("|") { it.id }
     var expanded by rememberSaveable(questionKey) { mutableStateOf(false) }
     val answerById = record.answers.associateBy { it.questionId }
@@ -64,7 +67,7 @@ internal fun AnsweredAskCard(
     }
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "answered-ask-chevron",
     )
     val state = stringResource(
@@ -102,14 +105,22 @@ internal fun AnsweredAskCard(
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                expandFrom = Alignment.Top,
-            ) + fadeIn(tween(DdMotion.FAST)),
-            exit = shrinkVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                shrinkTowards = Alignment.Top,
-            ) + fadeOut(tween(DdMotion.FAST)),
+            enter = if (motionEnabled) {
+                expandVertically(
+                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                    expandFrom = Alignment.Top,
+                ) + fadeIn(tween(DdMotion.FAST))
+            } else {
+                fadeIn(snap())
+            },
+            exit = if (motionEnabled) {
+                shrinkVertically(
+                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                    shrinkTowards = Alignment.Top,
+                ) + fadeOut(tween(DdMotion.FAST))
+            } else {
+                fadeOut(snap())
+            },
         ) {
             Column(Modifier.fillMaxWidth().padding(top = DdSpacing.Sm, bottom = 6.dp)) {
                 record.questions.forEachIndexed { index, question ->

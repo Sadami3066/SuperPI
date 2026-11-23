@@ -650,10 +650,13 @@ private fun PresentedCardFallback(name: String, colors: SuperPIColors) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        Spacer(Modifier.width(DdSpacing.Sm))
         Text(
             text = stringResource(R.string.present_card_unavailable),
             style = DdType.bodySmall,
             color = colors.inkTertiary,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
@@ -896,10 +899,13 @@ private fun PresentedFailureRow(name: String, colors: SuperPIColors) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        Spacer(Modifier.width(DdSpacing.Sm))
         Text(
             text = stringResource(R.string.present_failed),
             style = DdType.bodySmall,
             color = colors.inkTertiary,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }

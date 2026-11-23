@@ -27,7 +27,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -42,6 +43,7 @@ import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
@@ -94,6 +96,7 @@ internal fun CapabilitiesNotice(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(DdShapes.Small)
                 .then(if (expandable) Modifier.heightIn(min = NoticeMinHeight) else Modifier)
                 .semantics { stateDescription = state }
                 .clickable(enabled = expandable, role = Role.Button) {
@@ -106,6 +109,7 @@ internal fun CapabilitiesNotice(
         ) {
             Text(
                 text = summary,
+                modifier = Modifier.weight(1f, fill = false),
                 style = textStyle,
                 color = colors.inkTertiary,
                 textAlign = TextAlign.Center,
@@ -116,7 +120,7 @@ internal fun CapabilitiesNotice(
                 Spacer(Modifier.width(DdSpacing.Xxs))
                 DdIcon(
                     icon = DdIcons.ChevronRight,
-                    modifier = Modifier.rotate(rotation),
+                    modifier = Modifier.graphicsLayer { rotationZ = rotation },
                     tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary),
                     size = 12.dp,
                 )

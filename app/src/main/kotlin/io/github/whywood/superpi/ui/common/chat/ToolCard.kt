@@ -2,6 +2,7 @@ package io.github.whywood.superpi.ui.common.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -20,12 +21,17 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,7 +55,9 @@ import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
+import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.api.PluginToolResult
 import io.github.whywood.superpi.plugin.api.TextBlock
@@ -64,6 +72,7 @@ import io.github.whywood.superpi.runtime.ToolResultPayload
 import io.github.whywood.superpi.runtime.ToolTrace
 import io.github.whywood.superpi.runtime.text
 import java.util.Base64
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -76,6 +85,9 @@ internal object ProcessRowMetrics {
     val ChevronSize = 12.dp
     val OuterInset = DdSpacing.Xs
     val InnerInset = DdSpacing.Sm
+    val HeaderMinHeight = 32.dp
+    val MarkerCenterX = OuterInset + InnerInset + IconSize / 2
+    val BodyStartPadding = OuterInset + InnerInset + IconSize + IconGap
 }
 
 @Composable
@@ -88,9 +100,10 @@ internal fun ToolCard(
     compact: Boolean = false,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val rotation = animateFloatAsState(
         targetValue = if (tool.expanded) 90f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "tool-chevron",
     )
     val state = stringResource(
@@ -109,6 +122,7 @@ internal fun ToolCard(
                 ?.firstOrNull { it.isNotBlank() }
                 ?.trim()
                 ?.replace('\n', ' ')
+                ?.let(::sanitizeToolPath)
                 .orEmpty()
 
             titleOverride == null -> toolArgsPreview(rawArguments, tool.arguments)
@@ -122,7 +136,7 @@ internal fun ToolCard(
         ToolActivityStatus.FAILED -> stringResource(R.string.assistant_tool_failed)
     }
     val statusColor = when (tool.status) {
-        ToolActivityStatus.RUNNING -> colors.inkSecondary
+        ToolActivityStatus.RUNNING -> colors.accent
         ToolActivityStatus.DONE -> colors.inkSecondary
         ToolActivityStatus.FAILED -> colors.danger
     }
@@ -131,7 +145,7 @@ internal fun ToolCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = ProcessRowMetrics.OuterInset)
-                .heightIn(min = 32.dp)
+                .heightIn(min = ProcessRowMetrics.HeaderMinHeight)
                 .clip(RoundedCornerShape(6.dp))
                 .semantics { stateDescription = state }
                 .clickable(role = Role.Button, onClick = onToggle)
@@ -139,13 +153,26 @@ internal fun ToolCard(
                 .testTag("tool_toggle_${tool.id}"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToolRowIcon(
-                kind = toolIconKind(tool.name),
-                tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary),
-            )
+            if (tool.status == ToolActivityStatus.RUNNING) {
+                DdSpinner(
+                    color = colors.accent,
+                    size = ProcessRowMetrics.IconSize,
+                    strokeWidth = 1.5.dp,
+                )
+            } else {
+                ToolRowIcon(
+                    kind = toolIconKind(tool.name),
+                    tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary),
+                )
+            }
             Spacer(Modifier.width(ProcessRowMetrics.IconGap))
             Text(
                 text = title,
+                modifier = if (preview.isEmpty()) {
+                    Modifier.weight(1f, fill = false).widthIn(max = 180.dp)
+                } else {
+                    Modifier.widthIn(max = 180.dp)
+                },
                 style = DdType.bodySmall.copy(
                     fontFamily = if (compactTitle == null && titleOverride == null) {
                         FontFamily.Monospace
@@ -156,6 +183,8 @@ internal fun ToolCard(
                     lineHeight = 18.sp,
                 ),
                 color = colors.inkSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (preview.isNotEmpty()) {
                 Spacer(Modifier.width(DdSpacing.Sm))
@@ -179,17 +208,16 @@ internal fun ToolCard(
                 text = statusText,
                 style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 18.sp),
                 color = statusColor,
+                maxLines = 1,
+                softWrap = false,
             )
             if (duration != null) {
                 Text(
-                    text = " · ",
+                    text = " · ${durationLabel(duration)}",
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 18.sp),
                     color = colors.inkTertiary,
-                )
-                Text(
-                    text = durationLabel(duration),
-                    style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 18.sp),
-                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
             Spacer(Modifier.width(DdSpacing.Xs))
@@ -204,13 +232,13 @@ internal fun ToolCard(
         AnimatedVisibility(
             visible = tool.expanded,
             enter = expandVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
                 expandFrom = Alignment.Top,
-            ) + fadeIn(tween(DdMotion.FAST)),
+            ) + fadeIn(if (motionEnabled) tween(DdMotion.FAST) else snap()),
             exit = shrinkVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
                 shrinkTowards = Alignment.Top,
-            ) + fadeOut(tween(DdMotion.FAST)),
+            ) + fadeOut(if (motionEnabled) tween(DdMotion.FAST) else snap()),
         ) {
             ToolCardDefaultBody(
                 tool = tool,
@@ -233,7 +261,16 @@ private fun ToolCardDefaultBody(
     val rawArguments = tool.rawArguments
     val argumentsText = remember(rawArguments, tool.arguments) { formatToolArguments(rawArguments, tool.arguments) }
     val fileRefs = remember(tool.resultPayload) { tool.resultPayload.fileRefs() }
-    Column(Modifier.fillMaxWidth().padding(top = DdSpacing.Xxs, bottom = 6.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(
+                start = ProcessRowMetrics.BodyStartPadding,
+                end = ProcessRowMetrics.OuterInset,
+                top = DdSpacing.Xxs,
+                bottom = 6.dp,
+            ),
+    ) {
         if (argumentsText.isNotEmpty()) {
             Text(
                 text = stringResource(R.string.assistant_tool_args),
@@ -253,6 +290,13 @@ private fun ToolCardDefaultBody(
         }
         if (output != null) {
             if (argumentsText.isNotEmpty()) Spacer(Modifier.height(DdSpacing.Sm))
+            var copied by remember(tool.id, output) { mutableStateOf(false) }
+            LaunchedEffect(copied) {
+                if (copied) {
+                    delay(1500L)
+                    copied = false
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -264,12 +308,19 @@ private fun ToolCardDefaultBody(
                 )
                 Spacer(Modifier.weight(1f))
                 DdPressable(
-                    onClick = { onCopyOutput(output) },
-                    modifier = Modifier.size(26.dp).testTag("tool_copy_${tool.id}"),
-                    shape = RoundedCornerShape(6.dp),
+                    onClick = {
+                        copied = true
+                        onCopyOutput(output)
+                    },
+                    modifier = Modifier.size(44.dp).testTag("tool_copy_${tool.id}"),
+                    shape = RoundedCornerShape(8.dp),
                     contentDescription = stringResource(R.string.assistant_tool_copy),
                 ) {
-                    DdIcon(icon = DdIcons.Copy, tint = colors.inkTertiary, size = 13.dp)
+                    DdIcon(
+                        icon = if (copied) DdIcons.Check else DdIcons.Copy,
+                        tint = if (copied) colors.accent else colors.inkTertiary,
+                        size = 14.dp,
+                    )
                 }
             }
             Spacer(Modifier.height(DdSpacing.Xxs))
@@ -320,8 +371,9 @@ private fun ToolFileRefRow(
     ) {
         DdIcon(icon = DdIcons.File, tint = colors.inkTertiary, size = 14.dp)
         Spacer(Modifier.width(DdSpacing.Sm))
+        val displayPath = remember(fileRef.path) { sanitizeToolPath(fileRef.path) }
         Text(
-            text = fileRef.path,
+            text = displayPath,
             modifier = Modifier.weight(1f),
             style = DdType.bodySmall.copy(
                 fontFamily = FontFamily.Monospace,
@@ -336,9 +388,12 @@ private fun ToolFileRefRow(
             Spacer(Modifier.width(DdSpacing.Sm))
             Text(
                 text = mimeType,
+                modifier = Modifier.widthIn(max = 100.dp),
                 style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 16.sp),
                 color = colors.inkTertiary,
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -349,9 +404,9 @@ internal fun toolArgumentsJson(raw: JsonObject?, legacy: Map<String, String>): J
 
 private fun formatToolArguments(raw: JsonObject?, legacy: Map<String, String>): String =
     if (raw != null) {
-        raw.entries.joinToString("\n") { (key, value) -> "$key = ${value.displayValue()}" }
+        raw.entries.joinToString("\n") { (key, value) -> "$key = ${sanitizeToolPath(value.displayValue())}" }
     } else {
-        legacy.entries.joinToString("\n") { (key, value) -> "$key = $value" }
+        legacy.entries.joinToString("\n") { (key, value) -> "$key = ${sanitizeToolPath(value)}" }
     }
 
 private fun JsonElement.displayValue(): String = if (this is JsonPrimitive && isString) content else toString()
@@ -426,8 +481,17 @@ private fun toolArgsPreview(raw: JsonObject?, legacy: Map<String, String>): Stri
         preferred.firstNotNullOfOrNull { key -> legacy[key]?.takeIf { it.isNotBlank() } }
             ?: legacy.values.firstOrNull { it.isNotBlank() }
     } ?: return ""
-    return value.replace('\n', ' ').trim()
+    return sanitizeToolPath(value.replace('\n', ' ').trim())
 }
+
+private val ANDROID_PRIVATE_FILES_PREFIX = Regex("""/data/(?:user/\d+|data)/[^/\s]+/files/""")
+private val ANDROID_SHARED_STORAGE_PREFIX = Regex("""/storage/emulated/\d+/?""")
+
+private fun sanitizeToolPath(raw: String): String = raw
+    .replace(ANDROID_PRIVATE_FILES_PREFIX, "~/")
+    .replace(ANDROID_SHARED_STORAGE_PREFIX) { match ->
+        if (match.value.endsWith("/")) "Storage/" else "Storage"
+    }
 
 @Composable
 private fun ToolRowIcon(kind: ToolIconKind, tint: Color) {

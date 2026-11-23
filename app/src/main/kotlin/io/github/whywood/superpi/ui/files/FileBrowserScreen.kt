@@ -8,17 +8,22 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,15 +51,16 @@ import io.github.whywood.superpi.data.HostFiles
 import io.github.whywood.superpi.data.guessMime
 import io.github.whywood.superpi.data.hasSharedStorageAccess
 import io.github.whywood.superpi.data.sharedStorageDirectory
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSegmentedControl
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
+import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.ui.common.LocalHostFiles
@@ -169,10 +175,11 @@ fun FileBrowserScreen(
     val directory = remember(activeRoot, relativePath) {
         if (relativePath.isEmpty()) activeRoot else File(activeRoot, relativePath)
     }
-    var listing by remember(directory, hostFiles) {
+    var reloadEpoch by remember { mutableStateOf(0) }
+    var listing by remember(directory, hostFiles, reloadEpoch) {
         mutableStateOf<FileBrowserListing>(FileBrowserListing.Loading)
     }
-    LaunchedEffect(directory, hostFiles) {
+    LaunchedEffect(directory, hostFiles, reloadEpoch) {
         listing = withContext(Dispatchers.IO) { readFileBrowserDirectory(directory, hostFiles) }
     }
     val canGoUp = relativePath.isNotEmpty()
@@ -195,11 +202,10 @@ fun FileBrowserScreen(
             browsingRootName = target.name
         }
     }
-    val label = when {
-        canGoUp -> relativePath
-        browsingRoot == FileBrowserRoot.SHARED -> stringResource(R.string.files_root_shared)
-        browsingRoot == FileBrowserRoot.SYSTEM -> stringResource(R.string.files_root_system)
-        else -> stringResource(R.string.files_root_private)
+    val rootLabel = when (browsingRoot) {
+        FileBrowserRoot.SHARED -> stringResource(R.string.files_root_shared)
+        FileBrowserRoot.SYSTEM -> stringResource(R.string.files_root_system)
+        FileBrowserRoot.PRIVATE -> stringResource(R.string.files_root_private)
     }
 
     DdPageScaffold(
@@ -246,51 +252,65 @@ fun FileBrowserScreen(
             }
             Spacer(Modifier.height(DdSpacing.Sm))
             PathRow(
-                label = label,
+                rootLabel = rootLabel,
+                relativePath = relativePath,
                 canGoUp = canGoUp,
                 onUp = goUp,
+                onNavigate = { relativePath = it },
             )
             Spacer(Modifier.height(DdSpacing.Xs))
-            DdHairline()
-            Column(
-                Modifier
+            DdRowDivider()
+            LazyColumn(
+                modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(top = DdSpacing.Xs, bottom = DdSpacing.Xxl),
             ) {
-                Spacer(Modifier.height(DdSpacing.Xs))
                 when (val current = listing) {
-                    FileBrowserListing.Loading -> BrowserLoading()
+                    FileBrowserListing.Loading -> item(key = "loading") { BrowserLoading() }
 
-                    FileBrowserListing.Failed -> BrowserMessage(
-                        icon = DdIcons.Folder,
-                        text = stringResource(R.string.files_unreadable),
-                    )
+                    FileBrowserListing.Failed -> item(key = "failed") {
+                        BrowserMessage(
+                            icon = DdIcons.Folder,
+                            text = stringResource(R.string.files_unreadable),
+                            action = {
+                                DdTextAction(
+                                    text = stringResource(R.string.files_retry),
+                                    onClick = { reloadEpoch += 1 },
+                                    color = colors.accent,
+                                    modifier = Modifier.testTag("files_retry"),
+                                )
+                            },
+                        )
+                    }
 
                     is FileBrowserListing.Ready -> {
                         if (current.entries.isEmpty()) {
-                            BrowserMessage(
-                                icon = DdIcons.Folder,
-                                text = stringResource(R.string.files_empty),
-                            )
-                        } else {
-                            current.entries.forEachIndexed { index, entry ->
-                                if (index > 0) DdHairline()
-                                FileRow(
-                                    entry = entry,
-                                    onClick = {
-                                        if (entry.directory) {
-                                            relativePath = FileBrowserPaths.childPath(relativePath, entry.name)
-                                        } else {
-                                            onOpenFile(entry.file.absolutePath)
-                                        }
-                                    },
+                            item(key = "empty") {
+                                BrowserMessage(
+                                    icon = DdIcons.Folder,
+                                    text = stringResource(R.string.files_empty),
                                 )
+                            }
+                        } else {
+                            itemsIndexed(current.entries, key = { _, e -> e.file.absolutePath }) { index, entry ->
+                                Column {
+                                    if (index > 0) DdRowDivider()
+                                    FileRow(
+                                        entry = entry,
+                                        onClick = {
+                                            if (entry.directory) {
+                                                relativePath = FileBrowserPaths.childPath(relativePath, entry.name)
+                                            } else {
+                                                onOpenFile(entry.file.absolutePath)
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                Spacer(Modifier.height(DdSpacing.Xxl))
             }
         }
     }
@@ -298,49 +318,102 @@ fun FileBrowserScreen(
 
 @Composable
 private fun PathRow(
-    label: String,
+    rootLabel: String,
+    relativePath: String,
     canGoUp: Boolean,
     onUp: () -> Unit,
+    onNavigate: (String) -> Unit,
 ) {
     val colors = superPiColors()
-    DdPressable(
-        onClick = onUp,
+    val segments = remember(relativePath) {
+        relativePath.split('/').filter { it.isNotEmpty() }
+    }
+    val breadcrumbScroll = rememberScrollState()
+    LaunchedEffect(relativePath) {
+        breadcrumbScroll.animateScrollTo(breadcrumbScroll.maxValue)
+    }
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .then(if (canGoUp) Modifier.testTag("files_up") else Modifier),
-        shape = RectangleShape,
-        enabled = canGoUp,
-        contentDescription = if (canGoUp) stringResource(R.string.files_up) else label,
+            .heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DdIcon(
-                icon = if (canGoUp) DdIcons.ArrowLeft else DdIcons.Folder,
-                tint = if (canGoUp) colors.inkSecondary else colors.inkTertiary,
-                size = 14.dp,
+        if (canGoUp) {
+            DdIconButton(
+                icon = DdIcons.ArrowLeft,
+                onClick = onUp,
+                contentDescription = stringResource(R.string.files_up),
+                modifier = Modifier.testTag("files_up"),
+                size = 44.dp,
+                iconSize = 18.dp,
+                tint = colors.inkSecondary,
             )
-            Spacer(Modifier.width(DdSpacing.Sm))
-            Text(
-                text = label,
-                modifier = Modifier.weight(1f),
-                style = DdType.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                color = if (canGoUp) colors.inkSecondary else colors.inkTertiary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (canGoUp) {
-                Text(
-                    text = stringResource(R.string.files_up),
-                    modifier = Modifier.padding(start = 10.dp),
-                    style = DdType.micro,
-                    color = colors.inkTertiary,
-                    maxLines = 1,
+        } else {
+            Box(
+                modifier = Modifier.size(44.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                DdIcon(
+                    icon = DdIcons.Folder,
+                    tint = colors.inkTertiary,
+                    size = 16.dp,
                 )
             }
         }
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(breadcrumbScroll),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BreadcrumbSegment(
+                label = rootLabel,
+                active = segments.isEmpty(),
+                enabled = segments.isNotEmpty(),
+                onClick = { onNavigate("") },
+            )
+            segments.forEachIndexed { index, segment ->
+                Text(
+                    text = "/",
+                    style = DdType.bodySmall,
+                    color = colors.inkTertiary,
+                    modifier = Modifier.padding(horizontal = 2.dp),
+                )
+                val targetPath = segments.take(index + 1).joinToString("/")
+                val isLast = index == segments.lastIndex
+                BreadcrumbSegment(
+                    label = segment,
+                    active = isLast,
+                    enabled = !isLast,
+                    onClick = { onNavigate(targetPath) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BreadcrumbSegment(
+    label: String,
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = superPiColors()
+    DdPressable(
+        onClick = onClick,
+        modifier = Modifier.heightIn(min = 44.dp),
+        shape = RoundedCornerShape(8.dp),
+        enabled = enabled,
+        contentDescription = label,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
+            style = DdType.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp),
+            color = if (active) colors.ink else colors.inkSecondary,
+            maxLines = 1,
+        )
     }
 }
 
@@ -385,6 +458,7 @@ private fun FileRow(entry: FileBrowserEntry, onClick: () -> Unit) {
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
                     color = colors.inkTertiary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -410,7 +484,11 @@ private fun BrowserLoading() {
 }
 
 @Composable
-private fun BrowserMessage(icon: DdIcon, text: String) {
+private fun BrowserMessage(
+    icon: DdIcon,
+    text: String,
+    action: (@Composable () -> Unit)? = null,
+) {
     val colors = superPiColors()
     Column(
         Modifier.fillMaxWidth().padding(vertical = 48.dp),
@@ -424,6 +502,10 @@ private fun BrowserMessage(icon: DdIcon, text: String) {
             color = colors.inkSecondary,
             textAlign = TextAlign.Center,
         )
+        if (action != null) {
+            Spacer(Modifier.height(DdSpacing.Sm))
+            action()
+        }
     }
 }
 

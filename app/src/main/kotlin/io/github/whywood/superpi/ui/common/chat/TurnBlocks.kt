@@ -59,8 +59,6 @@ internal fun turnBlocks(
     val steps = message.steps.filterNot { step ->
         step is AssistantStep.CustomCard && step.customType in HiddenCustomCardTypes
     }
-    val trailingText = steps.takeLastWhile { it is AssistantStep.Text }
-    val body = steps.dropLast(trailingText.size)
     val activity = mutableListOf<AssistantStep>()
 
     fun flushActivity() {
@@ -75,9 +73,16 @@ internal fun turnBlocks(
         blocks += block
     }
 
-    body.forEach { step ->
-        when {
-            step is AssistantStep.CustomCard -> {
+    steps.forEach { step ->
+        when (step) {
+            is AssistantStep.Text -> {
+                if (step.text.isNotBlank()) {
+                    flushActivity()
+                    blocks += TurnBlock.Text(step)
+                }
+            }
+
+            is AssistantStep.CustomCard -> {
                 flushActivity()
                 blocks += TurnBlock.Card(AnswerCardSource.Custom(step))
             }
@@ -93,7 +98,6 @@ internal fun turnBlocks(
         }
     }
     flushActivity()
-    trailingText.forEach { step -> blocks += TurnBlock.Text(step as AssistantStep.Text) }
     if (blocks.isEmpty() && message.streaming) {
         blocks += TurnBlock.Activity(emptyList())
     }
@@ -109,9 +113,11 @@ internal fun turnBlocks(
 }
 
 internal fun answerText(message: AssistantMessage, blocks: List<TurnBlock>): String =
-    message.text.trim().ifBlank {
-        blocks.filterIsInstance<TurnBlock.Text>().joinToString("") { it.step.text }.trim()
-    }
+    blocks.filterIsInstance<TurnBlock.Text>()
+        .map { it.step.text.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n\n")
+        .ifBlank { message.text.trim() }
 
 internal fun latestTodoPayload(messages: List<AssistantMessage>): String? {
     messages.asReversed().forEach { message ->

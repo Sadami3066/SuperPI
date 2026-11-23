@@ -28,9 +28,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.R
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
@@ -99,7 +99,7 @@ fun OAuthLoginSheet(
                     )
                     Spacer(Modifier.height(DdSpacing.Xs))
                 }
-                if (state.url != null && !state.finished) {
+                if (state.url != null && state.prompt == null && !state.finished) {
                     Text(
                         text = stringResource(R.string.settings_oauth_waiting_browser),
                         style = DdType.bodySmall,
@@ -109,7 +109,7 @@ fun OAuthLoginSheet(
                 }
                 if (state.options.isNotEmpty()) {
                     state.options.forEachIndexed { index, option ->
-                        if (index > 0) DdHairline()
+                        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = option.label,
                             subtitle = option.description,

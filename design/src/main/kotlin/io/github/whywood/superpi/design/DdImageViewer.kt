@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.design
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -22,9 +23,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -96,33 +99,43 @@ fun DdImageViewer(
 }
 
 @Composable
+private fun ClearDialogWindowDim() {
+    val dialogView = LocalView.current
+    LaunchedEffect(dialogView) {
+        (dialogView.parent as? DialogWindowProvider)?.window?.setDimAmount(0f)
+    }
+}
+
+@Composable
 private fun DdImageViewerDialog(
     onDismiss: () -> Unit,
     modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        var revealed by remember { mutableStateOf(false) }
+        var revealed by remember { mutableStateOf(!motionEnabled) }
         LaunchedEffect(Unit) { revealed = true }
         val fade by animateFloatAsState(
             targetValue = if (revealed) 1f else 0f,
-            animationSpec = tween(durationMillis = DdMotion.FAST, easing = DdMotion.EaseOut),
+            animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
             label = "dd-image-viewer",
         )
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(colors.scrim)
                 .graphicsLayer { alpha = fade }
+                .background(colors.scrim)
                 .pointerInput(Unit) {
                     detectTapGestures { onDismiss() }
                 },
             contentAlignment = Alignment.Center,
             content = { content() },
         )
+        ClearDialogWindowDim()
     }
 }

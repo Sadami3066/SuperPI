@@ -5,10 +5,10 @@ import org.junit.Test
 
 class DdFontStyleTest {
     @Test
-    fun missingPreferenceFallsBackToFredoka() {
-        assertEquals(DdFontStyle.FREDOKA, DdFontStyle.fromId(null))
-        assertEquals(DdFontStyle.FREDOKA, DdFontStyle.fromId(""))
-        assertEquals(DdFontStyle.FREDOKA, DdFontStyle.fromId("unknown"))
+    fun missingPreferenceFallsBackToManrope() {
+        assertEquals(DdFontStyle.MANROPE, DdFontStyle.fromId(null))
+        assertEquals(DdFontStyle.MANROPE, DdFontStyle.fromId(""))
+        assertEquals(DdFontStyle.MANROPE, DdFontStyle.fromId("unknown"))
     }
 
     @Test

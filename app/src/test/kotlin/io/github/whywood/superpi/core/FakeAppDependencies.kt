@@ -37,7 +37,9 @@ import io.github.whywood.superpi.runtime.SdkCredentialStore
 import io.github.whywood.superpi.runtime.SkillCatalog
 import io.github.whywood.superpi.runtime.MiniappAgentService
 import io.github.whywood.superpi.runtime.MiniappStore
-import io.github.whywood.superpi.runtime.memory.MemoryRecap
+import io.github.whywood.superpi.runtime.memory.MemoryDreamer
+import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
 import io.github.whywood.superpi.service.ProcessRuntime
 import io.github.whywood.superpi.shell.LinuxEnvironment
@@ -56,7 +58,14 @@ internal class FakeAppDependencies(
 
     override val memory: MemoryStore get() = unavailable("memory")
 
-    override val memoryRecap: MemoryRecap get() = unavailable("memoryRecap")
+    override val memoryIngestor: MemoryIngestor get() = unavailable("memoryIngestor")
+
+    override val memoryDreamer: MemoryDreamer get() = unavailable("memoryDreamer")
+
+    override val memoryPreferences: MemoryPreferencesStore get() = unavailable("memoryPreferences")
+
+    override val memorySync: io.github.whywood.superpi.data.relay.RelayMemorySync
+        get() = unavailable("memorySync")
 
     override val storageMounts: StorageMountStore get() = unavailable("storageMounts")
 

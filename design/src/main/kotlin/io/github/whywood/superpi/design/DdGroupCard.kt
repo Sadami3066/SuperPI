@@ -1,15 +1,16 @@
 package io.github.whywood.superpi.design
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -18,13 +19,16 @@ fun DdGroupCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = superPiColors()
-    CompositionLocalProvider(LocalDdRowHorizontalPadding provides 18.dp) {
+    CompositionLocalProvider(
+        LocalDdRowHorizontalPadding provides DdSpacing.RowHorizontal,
+        LocalDdRowShape provides RectangleShape,
+    ) {
         Column(
             modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
+                .clip(DdShapes.Card)
                 .background(colors.surface)
-                .padding(vertical = 2.dp),
+                .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Card),
             content = content,
         )
     }
@@ -38,12 +42,16 @@ fun DdGroupCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = superPiColors()
-    CompositionLocalProvider(LocalDdRowHorizontalPadding provides DdSpacing.RowHorizontal) {
+    CompositionLocalProvider(
+        LocalDdRowHorizontalPadding provides DdSpacing.RowHorizontal,
+        LocalDdRowShape provides RectangleShape,
+    ) {
         Column(
             modifier = modifier
                 .fillMaxWidth()
                 .clip(DdShapes.Card)
-                .background(colors.surface),
+                .background(colors.surface)
+                .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Card),
         ) {
             Column(
                 modifier = Modifier
@@ -53,10 +61,7 @@ fun DdGroupCard(
                 header()
             }
             DdRowDivider(leadingInset = DdSpacing.Card)
-            Column(
-                modifier = Modifier.padding(vertical = DdSpacing.Xxs),
-                content = content,
-            )
+            Column(content = content)
             if (footer != null) {
                 DdRowDivider(leadingInset = DdSpacing.Card)
                 Column(

@@ -18,7 +18,7 @@ Not legal advice; the full text of each license governs. The summary below cover
 | The 8 GPL-2.0-only packages in the Alpine rootfs (busybox, apk-tools, etc.) | GPL-2.0-only | The rootfs is aggregated and distributed as a data package; the code of these packages cannot be closed source | Include the full license text; provide the corresponding source (aports v3.24.2 and upstream tarballs) |
 | talloc 2.4.2 | LGPL-3.0-or-later | May be linked and distributed with proprietary programs (static linking requires providing the materials needed to relink) | Include the full license text; provide the library source; do not restrict user replacement/relinking |
 | pi2kotlin SDK | MIT | Closed-source use and redistribution permitted | Keep the copyright notice and the full license text |
-| AndroidX / Compose / Kotlin / kotlinx.coroutines / Okio / WebKit | Apache-2.0 | Closed-source use and redistribution permitted | Keep a copy of the license; keep any upstream NOTICE file |
+| AndroidX / Compose / Kotlin / kotlinx.coroutines / Okio / WebKit / AndroidX SQLite | Apache-2.0 (+ Public Domain for SQLite C source) | Closed-source use and redistribution permitted | Keep a copy of the license; keep any upstream NOTICE file |
 | libadb-android 3.1.1 / AdbLib | Apache-2.0 / BSD-3-Clause | Closed-source use and redistribution permitted | Keep the copyright notices and full license texts; this project uses it under Apache-2.0 |
 | spake2-android 2.2.1 | LGPL-3.0 | May be linked and distributed with the app; requires providing the library source and relinking conditions | Include the full license text; provide the source; do not restrict user replacement/relinking |
 | Bouncy Castle 1.86 (bcprov/bcpkix/bcutil) | Bouncy Castle License (MIT-style) | Closed-source use and redistribution permitted | Keep the copyright notice and the full license text |
@@ -101,7 +101,7 @@ For at least three years from the date this APK was first distributed, any third
 ### 2.2 AndroidX / CameraX / Jetpack Compose / Kotlin / kotlinx.coroutines / Okio / WebKit
 
 - Artifacts and versions (the Maven coordinates pin the version; artifacts are immutable):
-  - AndroidX: `androidx.core:core-ktx:1.17.0`, `androidx.activity:activity-compose:1.12.4`, `androidx.lifecycle:*:2.10.0`, `androidx.datastore:datastore-preferences:1.2.0`, `androidx.webkit:webkit:1.18.0`
+  - AndroidX: `androidx.core:core-ktx:1.17.0`, `androidx.activity:activity-compose:1.12.4`, `androidx.lifecycle:*:2.10.0`, `androidx.datastore:datastore-preferences:1.2.0`, `androidx.webkit:webkit:1.18.0`, `androidx.work:work-runtime-ktx:2.10.5`, `androidx.sqlite:sqlite-bundled:2.7.1` (Apache-2.0 wrapper; bundled SQLite C engine is Public Domain)
   - CameraX: `androidx.camera:camera-camera2:1.6.2`, `androidx.camera:camera-lifecycle:1.6.2`, `androidx.camera:camera-compose:1.6.2`
   - Jetpack Compose: BOM `2026.03.00` (`androidx.compose.*`)
   - Kotlin stdlib: `2.4.21`

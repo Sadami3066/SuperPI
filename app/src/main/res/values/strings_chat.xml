@@ -30,6 +30,7 @@
     <string name="assistant_greeting_afternoon">下午好</string>
     <string name="assistant_greeting_evening">晚上好</string>
     <string name="assistant_greeting_morning">早上好</string>
+    <string name="assistant_greeting_named">%1$s，%2$s</string>
     <string name="assistant_hint">有什么可以帮你？</string>
     <string name="assistant_home_prompt">今天想从哪里开始？</string>
     <string name="assistant_image_failed">图片无法加载</string>

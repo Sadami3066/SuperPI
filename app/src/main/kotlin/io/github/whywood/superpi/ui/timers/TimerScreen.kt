@@ -1,17 +1,13 @@
 package io.github.whywood.superpi.ui.timers
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -32,11 +28,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.R
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdEmptyState
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
@@ -128,14 +125,8 @@ internal fun TimersContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
-    Column(
-        modifier.fillMaxSize().background(colors.paper).statusBarsPadding().navigationBarsPadding()
-            .testTag("timers_screen"),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(DdIcons.ArrowLeft, onBack, stringResource(R.string.timers_back), tint = colors.ink, iconSize = 21.dp)
             Spacer(Modifier.width(DdSpacing.Xs))
             Text(stringResource(R.string.timers_title), Modifier.weight(1f), style = DdType.heading, color = colors.ink)
@@ -143,7 +134,9 @@ internal fun TimersContent(
                 DdIcons.Plus, { onNew() }, stringResource(R.string.timers_new),
                 Modifier.testTag("timers_new"), tint = colors.ink, iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier.testTag("timers_screen"),
+    ) {
         DdSearchField(
             query = state.query,
             onQueryChange = onQueryChange,
@@ -164,6 +157,7 @@ internal fun TimersContent(
                     style = DdType.bodySmall,
                     color = colors.danger,
                 )
+                Spacer(Modifier.width(DdSpacing.Sm))
                 DdTextAction(stringResource(R.string.assistant_retry), onRetry, enabled = !state.busy)
             }
         }
@@ -197,7 +191,7 @@ internal fun TimersContent(
                     itemsIndexed(state.active, key = { _, timer -> timer.id }) { index, timer ->
                         Column(Modifier.animateItem()) {
                             TimerRowItem(timer, state.titles, onOpen, onToggle)
-                            if (index != state.active.lastIndex) DdHairline()
+                            if (index != state.active.lastIndex) DdRowDivider()
                         }
                     }
                 }
@@ -209,7 +203,7 @@ internal fun TimersContent(
                     itemsIndexed(state.inactive, key = { _, timer -> timer.id }) { index, timer ->
                         Column(Modifier.animateItem()) {
                             TimerRowItem(timer, state.titles, onOpen, onToggle)
-                            if (index != state.inactive.lastIndex) DdHairline()
+                            if (index != state.inactive.lastIndex) DdRowDivider()
                         }
                     }
                 }

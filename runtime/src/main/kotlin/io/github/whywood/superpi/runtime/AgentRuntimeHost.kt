@@ -1,11 +1,17 @@
 package io.github.whywood.superpi.runtime
 
 import io.github.whywood.superpi.sdk.ai.Provider
+import io.github.whywood.superpi.sdk.coding.session.SessionEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionEvent
+import io.github.whywood.superpi.sdk.coding.session.SessionManager
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -35,6 +41,7 @@ class AgentRuntimeHost internal constructor(
     private val runLedger: RunLedger = RunLedger(null),
     private val keepHandleAlive: (String) -> Boolean = { true },
     private val clock: () -> Long = System::currentTimeMillis,
+    private val sessionMemoryExclusionChanged: ((String, Boolean) -> Unit)? = null,
 ) : AgentRuntime {
     constructor(
         homeDir: File,
@@ -53,12 +60,13 @@ class AgentRuntimeHost internal constructor(
         keepHandleAlive: (String) -> Boolean = { true },
         clock: () -> Long = System::currentTimeMillis,
         remoteWorkspaces: suspend () -> List<RuntimeWorkspace> = { emptyList() },
+        sessionMemoryExclusionChanged: ((String, Boolean) -> Unit)? = null,
     ) : this(
         homeDir, workspacesDir, { cwd -> engineFactory(cwd) }, modelConfigStore,
         CatalogSessionDirectory(catalog),
         MergedWorkspaceDirectory(WorkspaceStoreDirectory(workspaceStore), remoteWorkspaces),
         providers, backgroundScope, goalDriver, titleNamer, sessionCleaner, sessionArchived, runLedger, keepHandleAlive,
-        clock,
+        clock, sessionMemoryExclusionChanged,
     )
 
     private val eventsBuffer = MutableSharedFlow<SessionRuntimeEvent>(
@@ -297,6 +305,32 @@ class AgentRuntimeHost internal constructor(
 
     override suspend fun setSessionArchived(id: String, archived: Boolean) =
         sessionsAdmin.setArchived(id, archived)
+
+    override suspend fun setSessionMemoryExcluded(id: String, excluded: Boolean) {
+        sessionsAdmin.setMemoryExcluded(id, excluded)
+        sessionMemoryExclusionChanged?.invoke(id, excluded)
+    }
+
+    suspend fun isSessionMemoryExcluded(id: String): Boolean = sessionsAdmin.isMemoryExcluded(id)
+
+    suspend fun sessionBranch(sessionId: String): Pair<String?, List<SessionEntry>>? {
+        val openBranch = mutex.withLock {
+            handles[sessionId]?.let { it.session.sessionFile to it.session.branchEntries() }
+        }
+        if (openBranch != null) return openBranch
+        val filePath = sessionsAdmin.filePath(sessionId) ?: return null
+        val entries = withContext(Dispatchers.IO) {
+            try {
+                val path = filePath.toPath()
+                if (!FileSystem.SYSTEM.exists(path)) null else SessionManager.open(path, FileSystem.SYSTEM).getBranch()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+        } ?: return null
+        return filePath to entries
+    }
 
     override suspend fun deleteSession(id: String) = sessionsAdmin.delete(id)
 

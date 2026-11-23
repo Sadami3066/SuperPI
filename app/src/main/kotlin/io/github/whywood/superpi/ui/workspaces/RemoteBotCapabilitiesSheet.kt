@@ -27,8 +27,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
@@ -252,7 +252,7 @@ fun RemoteBotCapabilitiesSheet(
                         },
                         onClick = { applyPolicyUpdate(policy.copy(screenTools = !policy.screenTools)) },
                     )
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         title = stringResource(R.string.bot_tools_miniapp),
                         enabled = !saving,
@@ -296,7 +296,7 @@ private fun CapabilityToggleSection(
         return
     }
     items.forEachIndexed { index, (id, label) ->
-        if (index > 0) DdHairline()
+        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
         val checked = id in enabledIds
         DdListRow(
             title = label,

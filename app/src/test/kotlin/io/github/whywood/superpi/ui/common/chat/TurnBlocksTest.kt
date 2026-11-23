@@ -28,7 +28,7 @@ class TurnBlocksTest {
     }
 
     @Test
-    fun groupsActivityBeforeTrailingAnswer() {
+    fun interleavesActivityAndTextInOrder() {
         val blocks = turnBlocks(
             assistant(
                 AssistantStep.Reasoning(1, "想"),
@@ -38,10 +38,39 @@ class TurnBlocksTest {
                 AssistantStep.Text(5, "最终答案"),
             ),
         )
+        assertEquals(4, blocks.size)
+        assertEquals(listOf(1L, 2L), (blocks[0] as TurnBlock.Activity).steps.map { it.id })
+        assertEquals("中间说明", (blocks[1] as TurnBlock.Text).step.text)
+        assertEquals(listOf(4L), (blocks[2] as TurnBlock.Activity).steps.map { it.id })
+        assertEquals("最终答案", (blocks[3] as TurnBlock.Text).step.text)
+    }
+
+    @Test
+    fun blankTextDoesNotSplitActivity() {
+        val blocks = turnBlocks(
+            assistant(
+                tool(1, "bash"),
+                AssistantStep.Text(2, " \n "),
+                tool(3, "bash"),
+                AssistantStep.Text(4, "答"),
+            ),
+        )
         assertEquals(2, blocks.size)
-        val activity = blocks[0] as TurnBlock.Activity
-        assertEquals(listOf(1L, 2L, 3L, 4L), activity.steps.map { it.id })
-        assertEquals("最终答案", (blocks[1] as TurnBlock.Text).step.text)
+        assertEquals(listOf(1L, 3L), (blocks[0] as TurnBlock.Activity).steps.map { it.id })
+        assertEquals("答", (blocks[1] as TurnBlock.Text).step.text)
+    }
+
+    @Test
+    fun answerTextJoinsAllVisibleTextBlocks() {
+        val message = assistant(
+            AssistantStep.Reasoning(1, "想"),
+            tool(2, "bash"),
+            AssistantStep.Text(3, "中间说明"),
+            tool(4, "bash"),
+            AssistantStep.Text(5, "最终答案"),
+        ).copy(text = "最终答案")
+        val blocks = turnBlocks(message)
+        assertEquals("中间说明\n\n最终答案", answerText(message, blocks))
     }
 
     @Test

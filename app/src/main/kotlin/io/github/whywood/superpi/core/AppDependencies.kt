@@ -39,7 +39,9 @@ import io.github.whywood.superpi.runtime.SdkCredentialStore
 import io.github.whywood.superpi.runtime.SkillCatalog
 import io.github.whywood.superpi.runtime.MiniappAgentService
 import io.github.whywood.superpi.runtime.MiniappStore
-import io.github.whywood.superpi.runtime.memory.MemoryRecap
+import io.github.whywood.superpi.runtime.memory.MemoryDreamer
+import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
 import io.github.whywood.superpi.service.ProcessRuntime
 import io.github.whywood.superpi.shell.LinuxEnvironment
@@ -135,7 +137,13 @@ interface FeatureDependencies {
 
     val memory: MemoryStore
 
-    val memoryRecap: MemoryRecap
+    val memoryIngestor: MemoryIngestor
+
+    val memoryDreamer: MemoryDreamer
+
+    val memoryPreferences: MemoryPreferencesStore
+
+    val memorySync: io.github.whywood.superpi.data.relay.RelayMemorySync
 
     val relayController: RelayController
 

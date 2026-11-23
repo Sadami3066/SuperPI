@@ -1,7 +1,7 @@
 <resources>
     <string name="relay_title">连接设备</string>
     <string name="relay_back">返回</string>
-    <string name="relay_intro">连接后，多台手机共用同一份记忆，也能直接使用彼此的 Bot。</string>
+    <string name="relay_intro">连接后，多台设备共用同一份记忆，也能直接使用彼此的 Bot。</string>
     <string name="relay_link_label">配对链接</string>
     <string name="relay_link_placeholder">https://服务器地址:8443/#fp=…&amp;code=…</string>
     <string name="relay_fingerprint_label">服务器指纹</string>
@@ -18,7 +18,7 @@
     <string name="relay_account_since">连接时间</string>
     <string name="relay_sign_out">退出登录</string>
     <string name="relay_sign_out_title">退出登录</string>
-    <string name="relay_sign_out_message">退出后这台手机不再同步记忆，也不能使用其他设备上的 Bot。</string>
+    <string name="relay_sign_out_message">退出后这台设备不再同步记忆，其他设备也无法再使用这台设备上的 Bot。</string>
     <string name="relay_sign_out_confirm">退出</string>
     <string name="relay_cancel">取消</string>
     <string name="relay_error_invalid_link">这个链接无法识别，请检查后重试。</string>

@@ -6,8 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,12 +15,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -46,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.rememberAvatarBitmap
@@ -54,11 +52,12 @@ import io.github.whywood.superpi.data.PersonalizationUi
 import io.github.whywood.superpi.data.ProfileAvatarStore
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdGroupCard
+import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdListRow
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdTextArea
@@ -140,18 +139,8 @@ fun PersonalizationScreen(
 
     BackHandler(onBack = ::flushAndBack)
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .imePadding(),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = ::flushAndBack,
@@ -159,7 +148,9 @@ fun PersonalizationScreen(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier,
+    ) {
         Column(
             Modifier
                 .weight(1f)
@@ -206,15 +197,20 @@ fun PersonalizationScreen(
                             text = stringResource(R.string.personalization_avatar_title),
                             style = DdType.body,
                             color = colors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (avatarFile == null) {
                             Text(
                                 text = stringResource(R.string.personalization_avatar_empty),
                                 style = DdType.bodySmall,
                                 color = colors.inkTertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
+                    Spacer(Modifier.width(DdSpacing.Sm))
                     DdTextAction(
                         text = stringResource(
                             if (avatarFile == null) {
@@ -232,7 +228,7 @@ fun PersonalizationScreen(
                     )
                 }
                 if (avatarFile != null) {
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         title = stringResource(R.string.personalization_avatar_remove),
                         onClick = { removeAvatar() },
@@ -247,7 +243,7 @@ fun PersonalizationScreen(
                 Modifier.padding(start = DdSpacing.Xs),
             )
             Spacer(Modifier.height(10.dp))
-            SettingsGroup {
+            DdGroupCard {
                 Column(Modifier.fillMaxWidth().padding(DdSpacing.Lg)) {
                     DdTextField(
                         value = nickname,
@@ -271,7 +267,7 @@ fun PersonalizationScreen(
                 Modifier.padding(start = DdSpacing.Xs),
             )
             Spacer(Modifier.height(10.dp))
-            SettingsGroup {
+            DdGroupCard {
                 Column(Modifier.fillMaxWidth().padding(DdSpacing.Lg)) {
                     DdTextArea(
                         value = instruction,
@@ -292,6 +288,8 @@ fun PersonalizationScreen(
                             ),
                             style = DdType.numeric,
                             color = colors.inkTertiary,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }

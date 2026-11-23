@@ -25,6 +25,7 @@ import androidx.camera.viewfinder.core.ImplementationMode
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,6 +95,7 @@ import io.github.whywood.superpi.design.DdNoticeTone
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSpacing
@@ -600,7 +602,7 @@ private fun ColumnScope.ConnectedAccount(
             Text(
                 text = stringResource(R.string.relay_connected),
                 style = DdType.micro,
-                color = colors.accent,
+                color = colors.success,
             )
         }
         Spacer(Modifier.height(DdSpacing.Md))
@@ -611,10 +613,12 @@ private fun ColumnScope.ConnectedAccount(
                 onClick = { onRequestRenameDevice(account.deviceId, account.deviceName) },
                 showChevron = true,
             )
+            DdRowDivider()
             DdListRow(
                 title = stringResource(R.string.relay_account_server),
                 value = account.origin,
             )
+            DdRowDivider()
             DdListRow(
                 title = stringResource(R.string.relay_account_since),
                 value = formatDate(account.enrolledAt),
@@ -679,7 +683,10 @@ private fun ShareCard(
     }
     DdGroupCard(
         header = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onToggleAllowRemote(!allowRemote) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.relay_share_title),
@@ -719,6 +726,7 @@ private fun ShareCard(
                     )
                 },
             )
+            DdRowDivider()
         }
         if (devices.isEmpty()) {
             DdListRow(
@@ -726,11 +734,13 @@ private fun ShareCard(
                 subtitle = stringResource(R.string.relay_devices_empty_hint),
             )
         } else {
-            devices.forEach { device ->
+            val separator = stringResource(R.string.list_separator)
+            devices.forEachIndexed { index, device ->
+                if (index > 0) DdRowDivider()
                 DdListRow(
                     title = device.name,
                     subtitle = if (device.online) {
-                        device.bots.joinToString("、") { it.name }.ifEmpty {
+                        device.bots.joinToString(separator) { it.name }.ifEmpty {
                             stringResource(R.string.relay_devices_no_bots)
                         }
                     } else {
@@ -746,7 +756,7 @@ private fun ShareCard(
                                 Modifier
                                     .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(if (device.online) colors.accent else colors.hairline),
+                                    .background(if (device.online) colors.success else colors.hairline),
                             )
                             DdTextAction(
                                 text = stringResource(R.string.relay_device_remove),

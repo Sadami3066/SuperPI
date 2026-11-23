@@ -35,14 +35,15 @@ fun DdTypingDots(
     dotSize: Dp = 4.dp,
     spacing: Dp = 3.dp,
 ) {
-    val transition = rememberInfiniteTransition(label = "typing-dots")
+    val motionEnabled = LocalDdMotionEnabled.current
+    val transition = if (motionEnabled) rememberInfiniteTransition(label = "typing-dots") else null
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(spacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         repeat(DOT_COUNT) { index ->
-            val pulse = transition.animateFloat(
+            val pulse = transition?.animateFloat(
                 initialValue = 0f,
                 targetValue = 1f,
                 animationSpec = infiniteRepeatable(
@@ -56,10 +57,15 @@ fun DdTypingDots(
                 Modifier
                     .size(dotSize)
                     .graphicsLayer {
-                        alpha = DOT_ALPHA_MIN + (DOT_ALPHA_MAX - DOT_ALPHA_MIN) * pulse.value
-                        val scale = DOT_SCALE_MIN + (DOT_SCALE_MAX - DOT_SCALE_MIN) * pulse.value
-                        scaleX = scale
-                        scaleY = scale
+                        val value = pulse?.value
+                        if (value != null) {
+                            alpha = DOT_ALPHA_MIN + (DOT_ALPHA_MAX - DOT_ALPHA_MIN) * value
+                            val scale = DOT_SCALE_MIN + (DOT_SCALE_MAX - DOT_SCALE_MIN) * value
+                            scaleX = scale
+                            scaleY = scale
+                        } else {
+                            alpha = 0.65f
+                        }
                     }
                     .background(color, CircleShape),
             )

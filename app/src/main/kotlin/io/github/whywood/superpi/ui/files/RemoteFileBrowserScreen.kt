@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -63,13 +64,14 @@ import io.github.whywood.superpi.data.filePreviewKind
 import io.github.whywood.superpi.data.formatAttachmentSize
 import io.github.whywood.superpi.data.guessMime
 import io.github.whywood.superpi.design.DdDialog
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMenu
 import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdProgressBar
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
@@ -579,7 +581,7 @@ fun RemoteFileBrowserScreen(
                 )
             }
             Spacer(Modifier.height(DdSpacing.Xs))
-            DdHairline()
+            DdRowDivider()
             Column(
                 Modifier
                     .weight(1f)
@@ -615,7 +617,7 @@ fun RemoteFileBrowserScreen(
                             )
                         } else {
                             current.entries.forEachIndexed { index, entry ->
-                                if (index > 0) DdHairline()
+                                if (index > 0) DdRowDivider()
                                 RemoteFileRow(
                                     entry = entry,
                                     menuExpanded = rowMenuTarget?.path == entry.path,
@@ -885,7 +887,8 @@ private fun TransferBanner(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(colors.raised)
+            .background(colors.surface)
+            .border(1.dp, colors.hairline.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
             .padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Sm),
     ) {
         Row(
@@ -912,6 +915,8 @@ private fun TransferBanner(
                 },
                 style = DdType.micro,
                 color = colors.inkTertiary,
+                maxLines = 1,
+                softWrap = false,
             )
             Spacer(Modifier.width(DdSpacing.Sm))
             DdTextAction(
@@ -921,20 +926,10 @@ private fun TransferBanner(
             )
         }
         Spacer(Modifier.height(6.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(colors.hairline),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(fraction)
-                    .height(3.dp)
-                    .background(colors.accent),
-            )
-        }
+        DdProgressBar(
+            progress = if (transfer.total > 0L) fraction else null,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -992,6 +987,7 @@ private fun RemoteFileRow(
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
                     color = colors.inkTertiary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
             DdIconButton(

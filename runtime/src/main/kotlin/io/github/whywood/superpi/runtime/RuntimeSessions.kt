@@ -50,6 +50,15 @@ internal class RuntimeSessions(
         emitListChanged()
     }
 
+    suspend fun setMemoryExcluded(id: String, excluded: Boolean) {
+        catalog.setMemoryExcluded(id, excluded)
+        emitListChanged()
+    }
+
+    suspend fun isMemoryExcluded(id: String): Boolean = catalog.isMemoryExcluded(id)
+
+    suspend fun filePath(sessionId: String): String? = catalog.find(visibleCwds(), sessionId)?.filePath
+
     suspend fun delete(id: String) {
         val summary = catalog.find(visibleCwds(), id)
         detachForget(id)

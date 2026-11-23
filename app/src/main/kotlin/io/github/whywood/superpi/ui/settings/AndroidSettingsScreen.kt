@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -26,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -38,15 +38,14 @@ import io.github.whywood.superpi.data.FloatingWindowSettings
 import io.github.whywood.superpi.data.OverlayEntryMode
 import io.github.whywood.superpi.design.DdDropdown
 import io.github.whywood.superpi.design.DdGroupCard
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdPageScaffold
-import io.github.whywood.superpi.design.DdPressable
-import io.github.whywood.superpi.design.DdShapes
+import io.github.whywood.superpi.design.DdRowDivider
+import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
@@ -100,7 +99,10 @@ fun AndroidSettingsScreen(
                 color = colors.ink,
             )
             Spacer(Modifier.height(DdSpacing.Xl))
-            SectionLabel(R.string.floating_settings_title)
+            DdSectionLabel(
+                stringResource(R.string.floating_settings_title),
+                Modifier.padding(start = DdSpacing.Xs),
+            )
             Spacer(Modifier.height(DdSpacing.Sm))
             DdGroupCard {
                 DdListRow(
@@ -126,7 +128,7 @@ fun AndroidSettingsScreen(
                     modifier = Modifier.testTag("floating_enable"),
                 )
                 if (floatingSettings.enabled) {
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         title = stringResource(R.string.floating_settings_permission),
                         value = stringResource(
@@ -143,7 +145,10 @@ fun AndroidSettingsScreen(
                 }
             }
             Spacer(Modifier.height(DdSpacing.Xxl))
-            SectionLabel(R.string.assistant_settings_title)
+            DdSectionLabel(
+                stringResource(R.string.assistant_settings_title),
+                Modifier.padding(start = DdSpacing.Xs),
+            )
             Spacer(Modifier.height(DdSpacing.Sm))
             DdGroupCard {
                 DdListRow(
@@ -162,7 +167,7 @@ fun AndroidSettingsScreen(
                     showChevron = true,
                     modifier = Modifier.testTag("assistant_role"),
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 DdListRow(
                     title = stringResource(R.string.assistant_settings_power),
                     onClick = {
@@ -176,7 +181,7 @@ fun AndroidSettingsScreen(
                     showChevron = true,
                     modifier = Modifier.testTag("assistant_power_settings"),
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 OverlayEntryModeRow(
                     mode = overlayEntryMode,
                     onModeChange = onOverlayEntryModeChange,
@@ -198,36 +203,25 @@ private fun OverlayEntryModeRow(
         expanded = expanded,
         onDismissRequest = { expanded = false },
         anchor = {
-            DdPressable(
+            DdListRow(
+                title = stringResource(R.string.usage_habits_entry_mode),
                 onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth().testTag("usage_habits_entry_mode"),
-                shape = DdShapes.Row,
-                contentDescription = stringResource(R.string.usage_habits_entry_mode),
-            ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 60.dp)
-                        .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Md),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.usage_habits_entry_mode),
-                        modifier = Modifier.weight(1f),
-                        style = DdType.body,
-                        color = colors.ink,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = overlayEntryModeLabel(mode),
-                        style = DdType.bodySmall,
-                        color = colors.inkTertiary,
-                        maxLines = 1,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
-                }
-            }
+                modifier = Modifier.testTag("usage_habits_entry_mode"),
+                trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = overlayEntryModeLabel(mode),
+                            style = DdType.bodySmall,
+                            color = colors.inkTertiary,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
+                    }
+                },
+            )
         },
     ) {
         OverlayEntryMode.entries.forEach { option ->
@@ -258,17 +252,6 @@ internal fun overlayEntryModeLabel(mode: OverlayEntryMode): String = stringResou
         OverlayEntryMode.NONE -> R.string.usage_habits_mode_none
     },
 )
-
-@Composable
-private fun SectionLabel(titleRes: Int) {
-    val colors = superPiColors()
-    Text(
-        text = stringResource(titleRes),
-        style = DdType.bodySmall,
-        color = colors.inkTertiary,
-        modifier = Modifier.padding(horizontal = DdSpacing.Xs),
-    )
-}
 
 private fun openOverlayPermission(context: Context) {
     val intent = Intent(

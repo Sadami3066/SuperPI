@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -145,18 +144,11 @@ private fun FileAttachmentCard(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, colors.hairline, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = DdSpacing.Xxs),
-                ) {
-                    Text(
-                        text = extension.ifEmpty { "FILE" },
-                        style = DdType.micro.copy(fontSize = 11.sp),
-                        color = colors.inkSecondary,
-                    )
-                }
+                Text(
+                    text = extension.ifEmpty { "FILE" },
+                    style = DdType.micro,
+                    color = colors.inkTertiary,
+                )
                 Column {
                     Text(
                         text = attachment.name,

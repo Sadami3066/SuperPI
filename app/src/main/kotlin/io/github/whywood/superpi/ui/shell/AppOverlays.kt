@@ -66,6 +66,20 @@ internal class AppOverlaysState {
     var remoteOpSubmitting by mutableStateOf(false)
     var remoteOpError by mutableStateOf<String?>(null)
 
+    val anyModalOpen: Boolean
+        get() = attachmentSheetOpen ||
+            cameraSheetOpen ||
+            pluginPage != null ||
+            previewAttachment != null ||
+            usageSheetOpen ||
+            jobsSheetOpen ||
+            workspaceCreateOpen ||
+            workspaceRenameId != null ||
+            remoteBotEditTarget != null ||
+            remoteAgentsDocTarget != null ||
+            remoteCapabilitiesTarget != null ||
+            workspaceDeleteTarget != null
+
     companion object {
         val Saver: Saver<AppOverlaysState, Any> = listSaver(
             save = {
@@ -102,6 +116,7 @@ internal fun AppOverlays(
     overlays: AppOverlaysState,
     remoteTargets: List<RemoteHostTarget> = emptyList(),
     remoteBotNamesByDevice: Map<String, List<String>> = emptyMap(),
+    drawerController: ShellDrawerController? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -187,7 +202,18 @@ internal fun AppOverlays(
             attachmentPreview = overlays.previewAttachment?.let {
                 ShellOverlay.AttachmentPreview(it, graph.attachmentStore.file(it, overlays.previewRoot ?: attachmentRoot))
             },
-            usage = state.usage?.takeIf { overlays.usageSheetOpen }?.let(ShellOverlay::Usage),
+            usage = state.usage?.takeIf { overlays.usageSheetOpen }?.let { usage ->
+                val activeWorkspace = state.workspaces.firstOrNull { ws -> ws.id == state.currentWorkspaceId }
+                val canCompact = state.ready &&
+                    state.historyLoaded &&
+                    state.conversationId != null &&
+                    !state.sending &&
+                    !state.switchingConversation &&
+                    !state.compacting &&
+                    state.messages.isNotEmpty() &&
+                    activeWorkspace?.remote?.online != false
+                ShellOverlay.Usage(usage, canCompact = canCompact)
+            },
             jobs = ShellOverlay.Jobs(activeJobs, overlays.selectedJobId, overlays.jobOutput).takeIf { overlays.jobsSheetOpen },
         ),
         overlayActions = ShellOverlayActions(
@@ -336,6 +362,10 @@ internal fun AppOverlays(
                 }
             },
             onDismissUsage = { overlays.usageSheetOpen = false },
+            onCompactUsage = {
+                overlays.usageSheetOpen = false
+                chatViewModel.compactContext()
+            },
             onSelectJob = { id ->
                 val same = overlays.selectedJobId == id
                 overlays.selectedJobId = if (same) null else id
@@ -349,6 +379,7 @@ internal fun AppOverlays(
         ),
         drawer = drawer,
         drawerActions = drawerActions,
+        drawerController = drawerController,
     )
     if (overlays.attachmentSheetOpen) {
         AttachmentSourceSheet(

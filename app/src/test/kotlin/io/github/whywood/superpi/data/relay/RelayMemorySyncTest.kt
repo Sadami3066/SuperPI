@@ -1,452 +1,617 @@
 package io.github.whywood.superpi.data.relay
 
-import io.github.whywood.superpi.runtime.MemoryWriteOutcome
+import io.github.whywood.superpi.runtime.MemoryConfidence
+import io.github.whywood.superpi.runtime.MemoryDraft
+import io.github.whywood.superpi.runtime.MemoryEntityRef
+import io.github.whywood.superpi.runtime.MemoryFilter
+import io.github.whywood.superpi.runtime.MemoryItemStatus
+import io.github.whywood.superpi.runtime.MemoryKind
+import io.github.whywood.superpi.runtime.memory.DreamLeaseResult
+import io.github.whywood.superpi.runtime.memory.DreamOutcome
+import io.github.whywood.superpi.runtime.memory.EntitySyncRecord
+import io.github.whywood.superpi.runtime.memory.MemoryAccountSwitchMode
+import io.github.whywood.superpi.runtime.memory.MemoryCompletionGateway
+import io.github.whywood.superpi.runtime.memory.MemoryCompletionResponse
+import io.github.whywood.superpi.runtime.memory.MemoryCompletionResult
+import io.github.whywood.superpi.runtime.memory.MemoryDreamer
+import io.github.whywood.superpi.runtime.memory.MemoryModelTier
+import io.github.whywood.superpi.runtime.memory.MemoryRemotePullEntry
+import io.github.whywood.superpi.runtime.memory.MemoryStore
+import io.github.whywood.superpi.runtime.memory.MemorySyncOpItem
+import io.github.whywood.superpi.runtime.memory.MemorySyncOpKind
+import io.github.whywood.superpi.runtime.memory.MemorySyncRecord
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
+import java.nio.file.Files
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class RelayMemorySyncTest {
-    @Test
-    fun uploadsLocalMemoryOnFirstLogin() = runTest {
-        val env = environment()
-        env.localProfile("- Likes dark mode")
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
+    private val tempDirs = ArrayList<File>()
+    private val storesToClose = ArrayList<MemoryStore>()
 
-        assertTrue(env.server.files.getValue("profile.md").contains("Likes dark mode"))
-        assertTrue(env.syncedAccount())
-        env.sync.state.value.active
+    @Before
+    fun setUp() {
+        tempDirs.clear()
+        storesToClose.clear()
+    }
+
+    @After
+    fun tearDown() = runTest {
+        storesToClose.forEach { it.close() }
+        tempDirs.forEach { it.deleteRecursively() }
     }
 
     @Test
-    fun pullsServerSnapshotWhenLocalMemoryIsEmpty() = runTest {
-        val env = environment()
-        env.server.put("context.md", "# Now & Ahead\n\n## Now & Ahead\n\n- Ship the shell\n")
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
+    fun twoMaturePhonesMergeToLosslessUnionAndConsolidateOnceUnderDreamLease() = runTest {
+        var nowMs = 1_760_000_000_000L
+        val server = FakeRelayMemoryServer(clock = { nowMs })
+        val storeA = openStore(clock = { nowMs })
+        val storeB = openStore(clock = { nowMs })
 
-        assertTrue(File(env.root, "context.md").readText().contains("Ship the shell"))
-        assertEquals(1L, env.sync.state.value.version)
-        assertNull(env.sync.state.value.notice)
-    }
-
-    @Test
-    fun backsUpLocalMemoryWhenBothSidesHaveContent() = runTest {
-        val env = environment()
-        env.localProfile("- Local only\n")
-        env.server.put("profile.md", "# You & I\n\n- Server side\n")
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        assertTrue(File(env.root, "profile.md").readText().contains("Server side"))
-        val backups = env.root.listFiles().orEmpty().filter { it.name.startsWith(".conflict-") }
-        assertEquals(1, backups.size)
-        assertTrue(File(backups.single(), "profile.md").readText().contains("Local only"))
-        assertEquals(RelayMemoryNotice.LocalBackedUp, env.sync.state.value.notice)
-    }
-
-    @Test
-    fun queuesWritesWhileOfflineAndReplaysThem() = runTest {
-        val env = environment()
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        env.server.offline = true
-        val outcome = env.sync.append("profile.md", null, "Offline entry")
-        assertEquals(MemoryWriteOutcome.Queued, outcome)
-        assertTrue(File(env.filesDir, "relay-memory-outbox.json").isFile)
-        assertEquals(1, env.sync.state.value.pending)
-
-        env.server.offline = false
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        assertTrue(env.server.files.getValue("profile.md").contains("Offline entry"))
-        assertEquals(0, env.sync.state.value.pending)
-    }
-
-    @Test
-    fun replaysQueuedWritesWithoutDuplicates() = runTest {
-        val env = environment()
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        env.server.offline = true
-        env.sync.append("profile.md", null, "Once only")
-        env.server.offline = false
-        env.server.applyThenOffline = true
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-        assertEquals(1, env.sync.state.value.pending)
-
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        assertEquals(1, Regex("Once only").findAll(env.server.files.getValue("profile.md")).count())
-        assertEquals(0, env.sync.state.value.pending)
-    }
-
-    @Test
-    fun rejectsWritesThatKeepConflicting() = runTest {
-        val env = environment()
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        env.server.alwaysConflict = true
-        val outcome = env.sync.overwrite("profile.md", "# You & I\n\n- Mine\n")
-
-        assertTrue(outcome is MemoryWriteOutcome.Rejected)
-        assertTrue((outcome as MemoryWriteOutcome.Rejected).message.contains("changed on another device"))
-    }
-
-    @Test
-    fun conflictRefreshesLocalMirrorWithoutOverwritingConcurrentServerEdit() = runTest {
-        val env = environment()
-        env.server.put("profile.md", "# You & I\n\n- Initial\n")
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-
-        env.server.put("profile.md", "# You & I\n\n- Peer edit\n")
-        val outcome = env.sync.overwrite("profile.md", "# You & I\n\n- Stale phone edit\n")
-
-        assertTrue(outcome is MemoryWriteOutcome.Rejected)
-        assertTrue(env.server.files.getValue("profile.md").contains("Peer edit"))
-        assertTrue(File(env.root, "profile.md").readText().contains("Peer edit"))
-    }
-
-    @Test
-    fun fallsBackToLocalMemoryWhenSignedOut() = runTest {
-        val env = environment()
-        assertEquals(MemoryWriteOutcome.Inactive, env.sync.append("profile.md", null, "Local entry"))
-        assertEquals(MemoryWriteOutcome.Inactive, env.sync.overwrite("profile.md", "# You & I\n"))
-    }
-
-    @Test
-    fun clearsSharedStateWhenSignedOut() = runTest {
-        val env = environment()
-        env.server.put("profile.md", "# You & I\n\n- Server side\n")
-        env.login()
-        env.sync.refreshIfStale(maxAgeMillis = 0)
-        assertTrue(env.sync.state.value.active)
-
-        env.accounts.value.value = null
-        testScheduler.advanceUntilIdle()
-
-        assertTrue(!env.sync.state.value.active)
-        assertNull(env.sync.state.value.lastSyncedAt)
-    }
-
-    @Test
-    fun rollupLeaseHandlesLocalAcquiredReuseBusyUnsupportedDeferredAndSignOut() = runTest {
-        var now = 1_000_000L
-        val env = environment(clock = { now })
-
-        assertEquals(RollupLeaseStatus.LOCAL, env.sync.acquireRollupLease())
-        assertTrue(RollupLeaseStatus.LOCAL.allowed)
-
-        env.login()
-        env.server.leaseResponse = RelayMemoryRollupLease(
-            acquired = true,
-            leaseId = "lease-1",
-            holderDeviceId = "dev",
-            expiresAt = now + 300_000L,
+        storeA.save(
+            MemoryDraft(
+                kind = MemoryKind.IDENTITY,
+                content = "Prefers morning americano",
+                confidence = MemoryConfidence.OBSERVED,
+                entities = listOf(MemoryEntityRef("Alice")),
+            ),
         )
-        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
-        assertEquals(1, env.server.acquireLeaseCalls)
-        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
-        assertEquals(1, env.server.acquireLeaseCalls)
+        storeA.save(MemoryDraft(kind = MemoryKind.ACTIVE, content = "Submit quarterly report Friday"))
 
-        env.sync.releaseRollupLease()
-        assertEquals(listOf("lease-1"), env.server.releasedLeaseIds)
-
-        env.server.leaseResponse = RelayMemoryRollupLease(
-            acquired = false,
-            holderDeviceId = "other-phone",
-            expiresAt = now + 300_000L,
+        storeB.save(
+            MemoryDraft(
+                kind = MemoryKind.IDENTITY,
+                content = "  prefers morning americano ",
+                confidence = MemoryConfidence.INFERRED,
+            ),
         )
-        assertEquals(RollupLeaseStatus.BUSY, env.sync.acquireRollupLease())
-        assertFalse(RollupLeaseStatus.BUSY.allowed)
+        storeB.save(MemoryDraft(kind = MemoryKind.HABIT, content = "Put conclusion first in responses"))
 
-        env.server.leaseResponse = null
-        assertEquals(RollupLeaseStatus.UNSUPPORTED, env.sync.acquireRollupLease())
-        assertTrue(RollupLeaseStatus.UNSUPPORTED.allowed)
+        val accountA = testAccount(deviceId = "dev-a")
+        val accountB = testAccount(deviceId = "dev-b")
+        val accountsA = FakeRelayAccountStore(accountA, "tok-a")
+        val accountsB = FakeRelayAccountStore(accountB, "tok-b")
 
-        env.server.offline = true
-        assertEquals(RollupLeaseStatus.DEFERRED, env.sync.acquireRollupLease())
-        assertFalse(RollupLeaseStatus.DEFERRED.allowed)
+        var dreamCallsA = 0
+        var dreamCallsB = 0
+        var dreamCoordinatorA: RelayMemorySync? = null
+        var dreamCoordinatorB: RelayMemorySync? = null
 
-        env.server.offline = false
-        env.server.leaseResponse = RelayMemoryRollupLease(
-            acquired = true,
-            leaseId = "lease-2",
-            holderDeviceId = "dev",
-            expiresAt = now + 300_000L,
+        val dreamerA = MemoryDreamer(
+            store = storeA,
+            completionGateway = okDreamGateway { dreamCallsA++; """{"promotions":[]}""" },
+            scope = this,
+            clock = { nowMs },
+            coordinator = { dreamCoordinatorA },
         )
-        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
-        env.accounts.value.value = null
-        testScheduler.advanceUntilIdle()
-        assertTrue("lease-2" in env.server.releasedLeaseIds)
-    }
-
-    @Test
-    fun idleTimerReleasesRollupLeaseWithoutSelfCancellation() = runTest {
-        val now = 2_000_000L
-        val env = environment(clock = { now })
-        env.login()
-        env.server.leaseResponse = RelayMemoryRollupLease(
-            acquired = true,
-            leaseId = "lease-idle",
-            holderDeviceId = "dev",
-            expiresAt = now + 300_000L,
+        val dreamerB = MemoryDreamer(
+            store = storeB,
+            completionGateway = okDreamGateway { dreamCallsB++; """{"promotions":[]}""" },
+            scope = this,
+            clock = { nowMs },
+            coordinator = { dreamCoordinatorB },
         )
 
-        assertEquals(RollupLeaseStatus.ACQUIRED, env.sync.acquireRollupLease())
-        advanceTimeBy(29_000L)
-        runCurrent()
-        assertTrue(env.server.releasedLeaseIds.isEmpty())
+        val syncA = RelayMemorySync(
+            store = storeA,
+            accounts = accountsA,
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+        val syncB = RelayMemorySync(
+            store = storeB,
+            accounts = accountsB,
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+        dreamCoordinatorA = syncA
+        dreamCoordinatorB = syncB
 
-        advanceTimeBy(2_000L)
-        runCurrent()
-        assertEquals(listOf("lease-idle"), env.server.releasedLeaseIds)
+        assertEquals(SyncRunStatus.Synced, syncA.syncNow())
+        assertEquals(SyncRunStatus.Synced, syncB.syncNow())
+        assertEquals(SyncRunStatus.Synced, syncA.syncNow())
+
+        val contentsA = storeA.list(MemoryFilter(includeHistory = false)).map { it.content }
+        val contentsB = storeB.list(MemoryFilter(includeHistory = false)).map { it.content }
+        assertTrue("Submit quarterly report Friday" in contentsB)
+        assertTrue("Put conclusion first in responses" in contentsA)
+
+        assertTrue(dreamerB.runFromWorker() is DreamOutcome.Done)
+        assertEquals(1, dreamCallsB)
+
+        nowMs += 300_000L
+        assertEquals(DreamOutcome.Skipped("not_due"), dreamerA.runFromWorker())
+        assertEquals(0, dreamCallsA)
+
+        syncA.syncNow()
+        val activeAfterDedupA = storeA.list(MemoryFilter(kinds = setOf(MemoryKind.IDENTITY), includeHistory = false))
+        assertEquals(1, activeAfterDedupA.size)
+        assertEquals("Prefers morning americano", activeAfterDedupA.single().content)
     }
 
     @Test
-    fun withRollupLeaseKeepsLeaseAliveDuringLongWorkAndReleasesAfterIdle() = runTest {
-        val now = 3_000_000L
-        val env = environment(clock = { now })
-        env.login()
-        env.server.leaseResponse = RelayMemoryRollupLease(
-            acquired = true,
-            leaseId = "lease-long",
-            holderDeviceId = "dev",
-            expiresAt = now + 300_000L,
+    fun offlinePhoneFiveMinutesBeforeDreamSkipsAndDoesNotDuplicateAfterReconnect() = runTest {
+        var nowMs = 1_760_000_000_000L
+        val server = FakeRelayMemoryServer(clock = { nowMs })
+        val storeA = openStore(clock = { nowMs })
+        val storeB = openStore(clock = { nowMs })
+
+        storeA.save(MemoryDraft(kind = MemoryKind.EPISODIC, content = "Planned trip to Kyoto"))
+        storeB.save(MemoryDraft(kind = MemoryKind.EPISODIC, content = "Booked return flight"))
+
+        val syncA = RelayMemorySync(
+            store = storeA,
+            accounts = FakeRelayAccountStore(testAccount("dev-a"), "tok-a"),
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+        val syncB = RelayMemorySync(
+            store = storeB,
+            accounts = FakeRelayAccountStore(testAccount("dev-b"), "tok-b"),
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+        syncA.syncNow()
+        syncB.syncNow()
+
+        var dreamCallsA = 0
+        var dreamCallsB = 0
+        val dreamerA = MemoryDreamer(
+            store = storeA,
+            completionGateway = okDreamGateway {
+                dreamCallsA++
+                """{"promotions":[{"kind":"ACTIVE","content":"Preparing Kyoto trip","tags":["travel"],"entities":[],"confidence":"OBSERVED","importance":4}]}"""
+            },
+            scope = this,
+            clock = { nowMs },
+            coordinator = { syncA },
+        )
+        val dreamerB = MemoryDreamer(
+            store = storeB,
+            completionGateway = okDreamGateway {
+                dreamCallsB++
+                """{"promotions":[{"kind":"ACTIVE","content":"Duplicate Kyoto note","tags":["travel"],"entities":[],"confidence":"INFERRED","importance":3}]}"""
+            },
+            scope = this,
+            clock = { nowMs },
+            coordinator = { syncB },
         )
 
-        var blockCompleted = false
-        val job = launch {
-            val result = env.sync.withRollupLease {
-                delay(45_000L)
-                blockCompleted = true
-                "done"
-            }
-            assertEquals("done", result)
-        }
+        server.offlineDevices += "dev-b"
+        assertEquals(DreamOutcome.Skipped("sync_offline"), dreamerB.runFromWorker())
+        assertEquals(0, dreamCallsB)
 
-        advanceTimeBy(35_000L)
-        runCurrent()
-        assertFalse(blockCompleted)
-        assertTrue(env.server.releasedLeaseIds.isEmpty())
+        val outcomeA = dreamerA.runFromWorker()
+        assertTrue(outcomeA is DreamOutcome.Done)
+        assertEquals(1, dreamCallsA)
 
-        advanceTimeBy(10_000L)
-        runCurrent()
-        assertTrue(blockCompleted)
-        assertTrue(job.isCompleted)
-        assertTrue(env.server.releasedLeaseIds.isEmpty())
+        nowMs += 300_000L
+        server.offlineDevices.remove("dev-b")
+        assertEquals(DreamOutcome.Skipped("not_due"), dreamerB.runFromWorker())
+        assertEquals(0, dreamCallsB)
 
-        advanceTimeBy(31_000L)
-        runCurrent()
-        assertEquals(listOf("lease-long"), env.server.releasedLeaseIds)
+        val contentsB = storeB.list(MemoryFilter(includeHistory = false)).map { it.content }
+        assertTrue("Preparing Kyoto trip" in contentsB)
+        assertFalse("Duplicate Kyoto note" in contentsB)
     }
 
-    private fun TestScope.environment(clock: () -> Long = System::currentTimeMillis): Environment {
-        val base = File.createTempFile("relay-memory", "")
-        base.delete()
-        base.mkdirs()
-        val filesDir = File(base, "files").apply { mkdirs() }
-        val root = File(base, "memory").apply { mkdirs() }
-        val accounts = FakeAccounts()
-        val server = FakeMemoryApi()
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    @Test
+    fun fallsBackCleanlyOnLegacyRelayAndReplaysOfflineMutationsOnReconnect() = runTest {
+        var nowMs = 1_760_000_000_000L
+        val server = FakeRelayMemoryServer(clock = { nowMs })
+        val store = openStore(clock = { nowMs })
+        store.save(MemoryDraft(kind = MemoryKind.IDENTITY, content = "Local baseline"))
+
+        val legacySync = RelayMemorySync(
+            store = store,
+            accounts = FakeRelayAccountStore(testAccount("dev-a"), "tok-a"),
+            client = object : RelayMemoryApi {
+                override suspend fun push(
+                    account: RelayAccount,
+                    token: String,
+                    ops: List<MemorySyncOpItem>,
+                    dreamCompletedAt: Long?,
+                ): RelayMemoryPushResponse = throw RelayMemoryException(RelayMemoryFailure.NotFound)
+
+                override suspend fun pull(
+                    account: RelayAccount,
+                    token: String,
+                    since: Long,
+                    limit: Int,
+                ): RelayMemoryPullResponse = throw RelayMemoryException(RelayMemoryFailure.NotFound)
+            },
+            scope = this,
+            clock = { nowMs },
+        )
+        assertEquals(SyncRunStatus.Unsupported, legacySync.syncNow())
+        assertFalse(legacySync.state.value.supported)
+        assertTrue(legacySync.prepareForDream(forceManual = false, minIntervalMs = 3_600_000L) is DreamLeaseResult.Acquired)
+
         val sync = RelayMemorySync(
-            filesDir = filesDir,
-            rootDir = root,
+            store = store,
+            accounts = FakeRelayAccountStore(testAccount("dev-b"), "tok-b"),
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+        server.offlineDevices += "dev-b"
+        assertEquals(SyncRunStatus.Offline, sync.syncNow())
+
+        nowMs += 5_000L
+        store.save(MemoryDraft(kind = MemoryKind.ACTIVE, content = "Added offline"))
+        server.offlineDevices.remove("dev-b")
+        assertEquals(SyncRunStatus.Synced, sync.syncNow())
+        assertTrue(sync.state.value.serverSeq >= 2L)
+        assertTrue(server.items.values.any { it.content == "Added offline" })
+    }
+
+    @Test
+    fun splitsOversizedPushBatchesByByteBudgetAndSkipsServerRejectedOps() = runTest {
+        var nowMs = 1_760_000_000_000L
+        val store = openStore(clock = { nowMs })
+        val chunkSizes = ArrayList<Int>()
+        val chunkCounts = ArrayList<Int>()
+        val server = FakeRelayMemoryServer(clock = { nowMs })
+
+        // Write 100 entries x 4,500 Chinese chars (~13.5 KB UTF-8 each -> ~1.35 MiB for 100-op batch) -> must split.
+        val bodyText = "测".repeat(4_500)
+        repeat(100) { idx ->
+            store.save(MemoryDraft(kind = MemoryKind.EPISODIC, content = "$idx-$bodyText"))
+        }
+
+        val sync = RelayMemorySync(
+            store = store,
+            accounts = FakeRelayAccountStore(testAccount("dev-a"), "tok-a"),
+            client = object : RelayMemoryApi {
+                override suspend fun push(
+                    account: RelayAccount,
+                    token: String,
+                    ops: List<MemorySyncOpItem>,
+                    dreamCompletedAt: Long?,
+                ): RelayMemoryPushResponse {
+                    val bytes = RelayProtocol.memoryPushRequest(ops, dreamCompletedAt).toByteArray(Charsets.UTF_8).size
+                    chunkSizes += bytes
+                    chunkCounts += ops.size
+                    val baseResp = server.api.push(account, token, ops, dreamCompletedAt)
+                    return if (ops.isNotEmpty()) {
+                        baseResp.copy(
+                            rejectedCount = 1,
+                            rejected = listOf(RelayMemoryRejectedOp(ops.first().opId, "simulated_reject")),
+                        )
+                    } else {
+                        baseResp
+                    }
+                }
+
+                override suspend fun pull(
+                    account: RelayAccount,
+                    token: String,
+                    since: Long,
+                    limit: Int,
+                ): RelayMemoryPullResponse = server.api.pull(account, token, since, limit)
+            },
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+
+        assertEquals(SyncRunStatus.Synced, sync.syncNow())
+        assertEquals(100, chunkCounts.sum())
+        assertTrue(chunkSizes.size >= 2)
+        assertTrue(chunkSizes.all { it <= 1_024 * 1_024 })
+    }
+
+    @Test
+    fun releasesDreamLeaseAndResetsSyncingWhenCancelledAndClassifiesErrors() = runTest {
+        val nowMs = 1_760_000_000_000L
+        val server = FakeRelayMemoryServer(clock = { nowMs })
+        val store = openStore(clock = { nowMs })
+        store.save(MemoryDraft(kind = MemoryKind.IDENTITY, content = "Has memory"))
+
+        val sync = RelayMemorySync(
+            store = store,
+            accounts = FakeRelayAccountStore(testAccount("dev-a"), "tok-a"),
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+
+        val enteredDream = CompletableDeferred<Unit>()
+        val holdDream = CompletableDeferred<Unit>()
+        val dreamer = MemoryDreamer(
+            store = store,
+            completionGateway = object : MemoryCompletionGateway {
+                override suspend fun complete(tier: MemoryModelTier, prompt: String): MemoryCompletionResult {
+                    enteredDream.complete(Unit)
+                    holdDream.await()
+                    return MemoryCompletionResult.Paused
+                }
+            },
+            scope = this,
+            clock = { nowMs },
+            coordinator = { sync },
+        )
+
+        val dreamJob = launch { dreamer.runNow() }
+        enteredDream.await()
+        assertEquals("dev-a", server.leaseHolder)
+        dreamJob.cancel()
+        dreamJob.join()
+        assertEquals(null, server.leaseHolder)
+
+        // Error classification & syncing flag reset on cancellation
+        val pullStarted = CompletableDeferred<Unit>()
+        val pullGate = CompletableDeferred<Unit>()
+        var failMode: RelayMemoryFailure? = null
+        val customSync = RelayMemorySync(
+            store = store,
+            accounts = FakeRelayAccountStore(testAccount("dev-err"), "tok-e"),
+            client = object : RelayMemoryApi {
+                override suspend fun push(
+                    account: RelayAccount,
+                    token: String,
+                    ops: List<MemorySyncOpItem>,
+                    dreamCompletedAt: Long?,
+                ): RelayMemoryPushResponse = throw RelayMemoryException(failMode ?: RelayMemoryFailure.Unreachable)
+
+                override suspend fun pull(
+                    account: RelayAccount,
+                    token: String,
+                    since: Long,
+                    limit: Int,
+                ): RelayMemoryPullResponse {
+                    failMode?.let { throw RelayMemoryException(it) }
+                    pullStarted.complete(Unit)
+                    pullGate.await()
+                    return RelayMemoryPullResponse(0L, false, 0L, null, emptyList())
+                }
+            },
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
+        )
+
+        val syncJob = launch { customSync.syncNow() }
+        pullStarted.await()
+        assertTrue(customSync.state.value.syncing)
+        syncJob.cancel()
+        syncJob.join()
+        assertFalse(customSync.state.value.syncing)
+
+        failMode = RelayMemoryFailure.Unauthorized
+        assertEquals(SyncRunStatus.Unauthorized, customSync.syncNow())
+        assertEquals(RelayMemorySyncErrorKind.Unauthorized, customSync.state.value.errorKind)
+        assertEquals(DreamLeaseResult.Unauthorized, customSync.prepareForDream(forceManual = true, minIntervalMs = 0L))
+
+        failMode = RelayMemoryFailure.Rejected
+        assertEquals(SyncRunStatus.Rejected, customSync.syncNow())
+        assertEquals(RelayMemorySyncErrorKind.Rejected, customSync.state.value.errorKind)
+        assertEquals(DreamLeaseResult.Rejected, customSync.prepareForDream(forceManual = true, minIntervalMs = 0L))
+    }
+
+    @Test
+    fun accountSwitchGatedUntilUserResolvesMergeOrClear() = runTest {
+        val nowMs = 1_760_000_000_000L
+        val server = FakeRelayMemoryServer(clock = { nowMs })
+        val store = openStore(clock = { nowMs })
+        store.save(MemoryDraft(kind = MemoryKind.IDENTITY, content = "Local pre-switch memory"))
+
+        val accounts = FakeRelayAccountStore(testAccount("dev-a"), "tok-a")
+        val sync = RelayMemorySync(
+            store = store,
             accounts = accounts,
-            client = server,
-            scope = scope,
-            io = UnconfinedTestDispatcher(testScheduler),
-            clock = clock,
+            client = server.api,
+            scope = this,
+            relayCapabilities = { listOf("memory-v2") },
+            clock = { nowMs },
         )
-        return Environment(base, filesDir, root, accounts, server, sync)
+        assertEquals(SyncRunStatus.Synced, sync.syncNow())
+
+        // Switch to another relay account
+        accounts.save(
+            RelayAccount(
+                origin = "https://other.relay:8443",
+                fingerprint = "fp-2",
+                caPem = null,
+                deviceId = "dev-x",
+                deviceName = "dev-x",
+                accountId = "acct-other",
+                enrolledAt = 2_000L,
+            ),
+            "tok-other",
+        )
+        assertEquals(SyncRunStatus.PendingAccountSwitch, sync.syncNow())
+        assertEquals(1, sync.state.value.pendingAccountSwitch?.localMemoryCount)
+        assertEquals(DreamLeaseResult.Blocked("account_switch_pending"), sync.prepareForDream(forceManual = true, minIntervalMs = 0L))
+
+        assertEquals(SyncRunStatus.Synced, sync.resolveAccountSwitch(MemoryAccountSwitchMode.MERGE_ALL))
+        assertEquals(null, sync.state.value.pendingAccountSwitch)
+        assertTrue(server.items.values.any { it.content == "Local pre-switch memory" })
     }
 
-    private class Environment(
-        private val base: File,
-        val filesDir: File,
-        val root: File,
-        val accounts: FakeAccounts,
-        val server: FakeMemoryApi,
-        val sync: RelayMemorySync,
-    ) {
-        init {
-            base.deleteOnExit()
-        }
-
-        fun localProfile(body: String) {
-            File(root, "profile.md").writeText("# You & I\n\n$body")
-        }
-
-        fun login() {
-            accounts.value.value = account
-        }
-
-        fun syncedAccount(): Boolean {
-            val prefs = File(filesDir, "relay-memory.json")
-            return prefs.isFile && prefs.readText().contains(account.accountId)
-        }
+    private fun openStore(clock: () -> Long): MemoryStore {
+        val dir = Files.createTempDirectory("mem-relay-sync-test").toFile()
+        tempDirs += dir
+        return MemoryStore(dir, clock = clock).also { storesToClose += it }
     }
 
-    private class FakeAccounts : RelayAccountStore {
-        val value = MutableStateFlow<RelayAccount?>(null)
+    private fun testAccount(deviceId: String) = RelayAccount(
+        origin = "https://relay.test:8443",
+        fingerprint = "fp-1",
+        caPem = null,
+        deviceId = deviceId,
+        deviceName = deviceId,
+        accountId = "acct-main",
+        enrolledAt = 1_000L,
+    )
 
-        override val account: Flow<RelayAccount?> = value
+    private fun okDreamGateway(onCall: () -> String) = object : MemoryCompletionGateway {
+        override suspend fun complete(tier: MemoryModelTier, prompt: String): MemoryCompletionResult =
+            MemoryCompletionResult.Success(MemoryCompletionResponse("mock/dream", onCall()))
+    }
 
-        override suspend fun read(): RelayAccount? = value.value
-
-        override suspend fun token(): String? = value.value?.let { "token" }
-
+    private class FakeRelayAccountStore(
+        initial: RelayAccount?,
+        private val tokenValue: String?,
+    ) : RelayAccountStore {
+        private val flow = MutableStateFlow(initial)
+        override val account: Flow<RelayAccount?> = flow
+        override suspend fun read(): RelayAccount? = flow.value
+        override suspend fun token(): String? = tokenValue
         override suspend fun save(account: RelayAccount, token: String) {
-            value.value = account
+            flow.value = account
         }
-
         override suspend fun clear() {
-            value.value = null
+            flow.value = null
         }
     }
 
-    private class FakeMemoryApi : RelayMemoryApi {
-        val files = LinkedHashMap<String, String>()
-        private val versions = HashMap<String, Long>()
-        private val writes = HashSet<String>()
-        private var version = 0L
+    private class FakeRelayMemoryServer(private val clock: () -> Long) {
+        val items = LinkedHashMap<String, MemorySyncRecord>()
+        val entities = LinkedHashMap<String, EntitySyncRecord>()
+        val opsLog = ArrayList<MemoryRemotePullEntry>()
+        val seenOps = HashSet<String>()
+        val offlineDevices = HashSet<String>()
+        var serverSeq = 0L
+        var lastDreamAt: Long? = null
+        var leaseHolder: String? = null
+        var leaseId: String? = null
+        var leaseExpiresAt: Long = 0L
 
-        @Volatile
-        var offline = false
-
-        @Volatile
-        var alwaysConflict = false
-
-        @Volatile
-        var applyThenOffline = false
-
-        @Volatile
-        var leaseResponse: RelayMemoryRollupLease? = null
-
-        var acquireLeaseCalls = 0
-        val releasedLeaseIds = mutableListOf<String?>()
-
-        override suspend fun acquireRollupLease(
-            account: RelayAccount,
-            token: String,
-            ttlMs: Long,
-        ): RelayMemoryRollupLease? {
-            acquireLeaseCalls += 1
-            if (offline) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
-            return leaseResponse
-        }
-
-        override suspend fun releaseRollupLease(
-            account: RelayAccount,
-            token: String,
-            leaseId: String?,
-        ): Boolean {
-            releasedLeaseIds += leaseId
-            return true
-        }
-
-        fun put(path: String, text: String) {
-            files[path] = text
-            version += 1
-            versions[path] = version
-        }
-
-        override suspend fun snapshot(account: RelayAccount, token: String): RelayMemorySnapshot {
-            if (offline) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
-            return RelayMemorySnapshot(
-                version = version,
-                files = files.toMap(),
-                versions = versions.toMap(),
-            )
-        }
-
-        override suspend fun write(account: RelayAccount, token: String, request: RelayMemoryWrite): Long {
-            if (offline) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
-            if (request.idempotencyKey in writes) return versions[request.path] ?: 0L
-            if (alwaysConflict) throw RelayMemoryException(RelayMemoryFailure.Conflict)
-            val current = files[request.path].orEmpty()
-            val currentVersion = versions[request.path] ?: 0L
-            if (request.op != "append" && request.baseVersion != currentVersion) {
-                throw RelayMemoryException(RelayMemoryFailure.Conflict)
+        val api: RelayMemoryApi = object : RelayMemoryApi {
+            override suspend fun push(
+                account: RelayAccount,
+                token: String,
+                ops: List<MemorySyncOpItem>,
+                dreamCompletedAt: Long?,
+            ): RelayMemoryPushResponse {
+                if (account.deviceId in offlineDevices) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
+                var applied = 0
+                var skipped = 0
+                for (op in ops) {
+                    if (!seenOps.add("${account.deviceId}:${op.opId}")) {
+                        skipped++
+                        continue
+                    }
+                    when (op.kind) {
+                        MemorySyncOpKind.MEMORY -> {
+                            val mem = op.memory!!
+                            val prev = items[mem.id]
+                            if (prev == null ||
+                                mem.updatedAt > prev.updatedAt ||
+                                (mem.updatedAt == prev.updatedAt && account.deviceId > prev.updatedByDeviceId.orEmpty())
+                            ) {
+                                serverSeq++
+                                val stored = mem.copy(updatedByDeviceId = account.deviceId)
+                                items[mem.id] = stored
+                                opsLog.removeAll { it.kind == MemorySyncOpKind.MEMORY && it.memory?.id == mem.id }
+                                opsLog += MemoryRemotePullEntry(serverSeq, MemorySyncOpKind.MEMORY, account.deviceId, memory = stored)
+                                applied++
+                            } else {
+                                skipped++
+                            }
+                        }
+                        MemorySyncOpKind.ENTITY -> {
+                            val ent = op.entity!!
+                            serverSeq++
+                            val stored = ent.copy(updatedByDeviceId = account.deviceId)
+                            entities[ent.canonicalKey] = stored
+                            opsLog.removeAll { it.kind == MemorySyncOpKind.ENTITY && it.entity?.canonicalKey == ent.canonicalKey }
+                            opsLog += MemoryRemotePullEntry(serverSeq, MemorySyncOpKind.ENTITY, account.deviceId, entity = stored)
+                            applied++
+                        }
+                    }
+                }
+                if (dreamCompletedAt != null && dreamCompletedAt > 0L) {
+                    val bounded = minOf(dreamCompletedAt, clock())
+                    if (lastDreamAt == null || bounded > lastDreamAt!!) {
+                        lastDreamAt = bounded
+                    }
+                }
+                return RelayMemoryPushResponse(serverSeq, applied, skipped, lastDreamAt)
             }
-            val next = when (request.op) {
-                "append" -> appendBlock(current, request.section, request.text)
-                "replace_section" -> replaceSection(current, request.section.orEmpty(), request.text)
-                "overwrite" -> request.text.trimEnd() + "\n"
-                else -> throw RelayMemoryException(RelayMemoryFailure.Rejected, "unknown op")
-            }
-            files[request.path] = next
-            version += 1
-            versions[request.path] = version
-            writes += request.idempotencyKey
-            if (applyThenOffline) {
-                applyThenOffline = false
-                throw RelayMemoryException(RelayMemoryFailure.Unreachable)
-            }
-            return version
-        }
 
-        private fun appendBlock(content: String, section: String?, text: String): String {
-            if (section == null) {
-                val base = content.trimEnd()
-                return (if (base.isEmpty()) "" else "$base\n\n") + text + "\n"
+            override suspend fun pull(
+                account: RelayAccount,
+                token: String,
+                since: Long,
+                limit: Int,
+            ): RelayMemoryPullResponse {
+                if (account.deviceId in offlineDevices) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
+                val matched = opsLog.filter { it.seq > since }.sortedBy { it.seq }
+                val page = matched.take(limit)
+                return RelayMemoryPullResponse(
+                    serverSeq = serverSeq,
+                    hasMore = matched.size > page.size,
+                    nextSince = page.lastOrNull()?.seq ?: since,
+                    lastDreamAt = lastDreamAt,
+                    entries = page,
+                )
             }
-            val heading = "## $section"
-            val index = content.indexOf(heading)
-            if (index < 0) {
-                val base = content.trimEnd()
-                return (if (base.isEmpty()) "" else "$base\n\n") + "$heading\n\n$text\n"
-            }
-            val after = content.indexOf("\n## ", index + heading.length)
-            val head = content.substring(0, if (after < 0) content.length else after).trimEnd()
-            val tail = if (after < 0) "" else content.substring(after)
-            return "$head\n$text\n$tail"
-        }
 
-        private fun replaceSection(content: String, section: String, text: String): String {
-            val heading = "## $section"
-            val index = content.indexOf(heading)
-            if (index < 0) {
-                val base = content.trimEnd()
-                return (if (base.isEmpty()) "" else "$base\n\n") + "$heading\n\n$text\n"
+            override suspend fun acquireDreamLease(
+                account: RelayAccount,
+                token: String,
+                ttlMs: Long,
+                minIntervalMs: Long,
+            ): RelayMemoryDreamLease {
+                if (account.deviceId in offlineDevices) throw RelayMemoryException(RelayMemoryFailure.Unreachable)
+                val now = clock()
+                if (minIntervalMs > 0L && lastDreamAt != null && now - lastDreamAt!! < minIntervalMs) {
+                    return RelayMemoryDreamLease(
+                        acquired = false,
+                        expiresAt = lastDreamAt!! + minIntervalMs,
+                        lastDreamAt = lastDreamAt,
+                        serverSeq = serverSeq,
+                    )
+                }
+                if (leaseHolder != null && leaseExpiresAt > now && leaseHolder != account.deviceId) {
+                    return RelayMemoryDreamLease(
+                        acquired = false,
+                        holderDeviceId = leaseHolder,
+                        expiresAt = leaseExpiresAt,
+                        lastDreamAt = lastDreamAt,
+                        serverSeq = serverSeq,
+                    )
+                }
+                leaseHolder = account.deviceId
+                leaseId = "lease-${account.deviceId}-$now"
+                leaseExpiresAt = now + ttlMs
+                return RelayMemoryDreamLease(
+                    acquired = true,
+                    leaseId = leaseId,
+                    expiresAt = leaseExpiresAt,
+                    lastDreamAt = lastDreamAt,
+                    serverSeq = serverSeq,
+                )
             }
-            val after = content.indexOf("\n## ", index + heading.length)
-            val head = content.substring(0, index + heading.length).trimEnd()
-            val tail = if (after < 0) "" else content.substring(after)
-            return "$head\n\n$text\n$tail"
-        }
-    }
 
-    private companion object {
-        val account = RelayAccount(
-            origin = "https://relay.example:8443",
-            fingerprint = "ab".repeat(32),
-            caPem = "PEM",
-            deviceId = "dev",
-            deviceName = "Pixel",
-            accountId = "acct",
-            enrolledAt = 1L,
-        )
+            override suspend fun releaseDreamLease(account: RelayAccount, token: String, leaseId: String?): Boolean {
+                if (leaseHolder == account.deviceId) {
+                    leaseHolder = null
+                    return true
+                }
+                return false
+            }
+        }
     }
 }

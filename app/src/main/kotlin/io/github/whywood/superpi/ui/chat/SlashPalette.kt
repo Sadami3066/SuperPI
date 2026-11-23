@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.ui.chat
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
@@ -42,12 +43,12 @@ import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 
 private const val SLASH_ENTER_MILLIS = 140
 private const val SLASH_MAX_HEIGHT_DP = 300
 private const val SLASH_ROW_HEIGHT_DP = 52
-private const val SLASH_NAME_WIDTH_DP = 150
 private const val SLASH_DISABLED_ALPHA = 0.4f
 
 data class CommandItem(
@@ -82,9 +83,10 @@ fun SlashPalette(
     if (filtered.isEmpty()) return
     var appeared by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { appeared = true }
+    val motionEnabled = LocalDdMotionEnabled.current
     val progress by animateFloatAsState(
         targetValue = if (appeared) 1f else 0f,
-        animationSpec = DdMotion.spec<Float>(duration = SLASH_ENTER_MILLIS),
+        animationSpec = if (motionEnabled) DdMotion.spec<Float>(duration = SLASH_ENTER_MILLIS) else snap(),
         label = "slash-palette-enter",
     )
     val paletteDescription = stringResource(R.string.cmd_palette_description)
@@ -95,7 +97,7 @@ fun SlashPalette(
             .fillMaxWidth()
             .alpha(progress)
             .clip(shape)
-            .background(colors.paper)
+            .background(colors.raised)
             .border(1.dp, colors.hairline, shape)
             .semantics { contentDescription = paletteDescription }
             .testTag("slash_palette"),
@@ -108,14 +110,19 @@ fun SlashPalette(
         ) {
             Text(
                 text = stringResource(R.string.cmd_palette_title),
+                modifier = Modifier.weight(1f),
                 style = DdType.micro,
                 color = colors.inkTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(DdSpacing.Sm))
             Text(
                 text = filtered.size.toString(),
                 style = DdType.numeric,
                 color = colors.inkTertiary,
+                maxLines = 1,
+                softWrap = false,
             )
         }
         Column(
@@ -135,14 +142,14 @@ fun SlashPalette(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .height(SLASH_ROW_HEIGHT_DP.dp)
+                            .heightIn(min = SLASH_ROW_HEIGHT_DP.dp)
                             .alpha(if (item.enabled) 1f else SLASH_DISABLED_ALPHA)
-                            .padding(horizontal = DdSpacing.Lg),
+                            .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = "/${item.name}",
-                            modifier = Modifier.width(SLASH_NAME_WIDTH_DP.dp),
+                            modifier = Modifier.widthIn(min = 100.dp, max = 144.dp),
                             style = DdType.bodySmall.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 13.sp,
@@ -150,8 +157,10 @@ fun SlashPalette(
                             ),
                             color = colors.accent,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        Spacer(Modifier.width(DdSpacing.Md))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 text = item.title,

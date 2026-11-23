@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -72,7 +73,8 @@ internal fun FloatingBubble(
                 .size(FloatingBubbleSize)
                 .floatingLift(CircleShape, colors)
                 .clip(CircleShape)
-                .background(Color.White),
+                .background(colors.surface)
+                .border(1.dp, colors.hairline, CircleShape),
         )
         val motionEnabled = LocalDdMotionEnabled.current
         Crossfade(
@@ -98,13 +100,13 @@ internal fun FloatingBubble(
                     .size(20.dp)
                     .floatingLift(CircleShape, colors)
                     .clip(CircleShape)
-                    .background(Color(0xFF18181B)),
+                    .background(colors.accent),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (pending > 99) "99+" else pending.toString(),
                     style = DdType.numeric,
-                    color = Color.White,
+                    color = colors.onAccent,
                     maxLines = 1,
                 )
             }

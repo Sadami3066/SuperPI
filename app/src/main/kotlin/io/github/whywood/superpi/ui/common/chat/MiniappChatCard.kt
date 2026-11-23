@@ -119,7 +119,12 @@ fun MiniappChatCard(
                     .padding(horizontal = 14.dp, vertical = DdSpacing.Md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            Text(text = app.icon.ifBlank { ICON_FALLBACK }, fontSize = 22.sp)
+            val iconText = app.icon.trim()
+            if (iconText.isEmpty() || iconText == ICON_FALLBACK) {
+                DdIcon(icon = DdIcons.Apps, tint = colors.inkSecondary, size = 22.dp)
+            } else {
+                Text(text = iconText, fontSize = 22.sp)
+            }
             Spacer(Modifier.width(DdSpacing.Md))
             Column(Modifier.weight(1f)) {
                 Text(

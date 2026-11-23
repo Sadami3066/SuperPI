@@ -4,6 +4,7 @@ import io.github.whywood.superpi.sdk.agent.AgentMessage
 import io.github.whywood.superpi.sdk.ai.Model
 import io.github.whywood.superpi.sdk.ai.Provider
 import io.github.whywood.superpi.sdk.coding.session.QueueBehavior
+import io.github.whywood.superpi.sdk.coding.session.SessionEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionEvent
 import io.github.whywood.superpi.sdk.mcp.config.McpServerConfig
 
@@ -41,6 +42,7 @@ interface SessionHandle {
     fun registerProvider(provider: Provider)
     suspend fun compact(): SessionCompaction?
     fun history(): List<AssistantMessage>
+    fun branchEntries(): List<SessionEntry> = emptyList()
     fun usage(): SessionUsage?
     fun sessionName(): String?
     suspend fun appendTitle(title: String)

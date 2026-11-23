@@ -21,10 +21,13 @@ fun HostTheme(
 ) {
     val state by controller.state.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
-    val colors = remember(state, systemDark) {
-        state.colors ?: ThemePalettes.of(state.choice, systemDark)
+    val effectiveDark = state.appearance.resolveDark(systemDark)
+    val colors = remember(state, effectiveDark) {
+        state.colors ?: ThemePalettes.of(state.choice, effectiveDark)
     }
-    HostThemeRuntime.dark = colors.dark
+    SideEffect {
+        HostThemeRuntime.dark = colors.dark
+    }
     SystemBarIcons(dark = colors.dark)
     SuperPITheme(colors = colors, fontStyle = DdFonts.style, content = content)
 }

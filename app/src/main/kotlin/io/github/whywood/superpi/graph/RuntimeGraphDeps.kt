@@ -12,7 +12,6 @@ import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.data.PersonalizationStore
 import io.github.whywood.superpi.plugin.manager.PluginHostManager
 import io.github.whywood.superpi.runtime.GoalService
-import io.github.whywood.superpi.runtime.MemoryBackend
 import io.github.whywood.superpi.runtime.JobRegistry
 import io.github.whywood.superpi.runtime.MiniappStore
 import io.github.whywood.superpi.runtime.McpConfigStore
@@ -28,6 +27,7 @@ import io.github.whywood.superpi.runtime.TimerService
 import io.github.whywood.superpi.runtime.WorkspaceStore
 import io.github.whywood.superpi.runtime.host.HostAccessController
 import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
+import io.github.whywood.superpi.runtime.memory.MemoryDreamCoordinator
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 
@@ -61,7 +61,6 @@ internal class RuntimeGraphDeps(
     val timerService: () -> TimerService,
     val jobRegistry: () -> JobRegistry,
     val appPreferences: AppPreferences,
-    val memoryBackend: MemoryBackend,
     val remoteWorkspaces: suspend () -> List<RuntimeWorkspace>,
     val remoteRoot: File,
     val remoteTarget: (String) -> RemoteSessionTarget?,
@@ -71,6 +70,5 @@ internal class RuntimeGraphDeps(
     val postCustomMessage: suspend (String, String, String, String) -> Boolean,
     val screenTools: () -> List<CodingTool>,
     val virtualScreenTools: () -> List<CodingTool>,
-    val runWithMemoryRollupLease: suspend (suspend () -> String?) -> String? = { block -> block() },
-    val refreshMemoryForRollup: suspend () -> Unit = {},
+    val memoryDreamCoordinator: () -> MemoryDreamCoordinator? = { null },
 )

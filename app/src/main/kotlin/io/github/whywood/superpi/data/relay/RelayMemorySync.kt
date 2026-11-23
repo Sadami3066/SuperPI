@@ -1,16 +1,18 @@
 package io.github.whywood.superpi.data.relay
 
-import io.github.whywood.superpi.runtime.DEFAULT_REFRESH_AGE
-import io.github.whywood.superpi.runtime.MemoryBackend
-import io.github.whywood.superpi.runtime.MemoryWriteOutcome
-import java.io.File
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.UUID
+import android.util.Log
+import io.github.whywood.superpi.runtime.memory.DreamLeaseResult
+import io.github.whywood.superpi.runtime.memory.MemoryAccountSwitchCheck
+import io.github.whywood.superpi.runtime.memory.MemoryAccountSwitchMode
+import io.github.whywood.superpi.runtime.memory.MemoryDreamCoordinator
+import io.github.whywood.superpi.runtime.memory.MemoryStore
+import io.github.whywood.superpi.runtime.memory.MemorySyncOpItem
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -18,665 +20,531 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
-import kotlinx.serialization.json.put
 
-data class RelayMemoryState(
-    val active: Boolean = false,
-    val version: Long = 0,
-    val lastSyncedAt: Long? = null,
-    val pending: Int = 0,
-    val error: String? = null,
-    val notice: RelayMemoryNotice? = null,
-)
-
-enum class RelayMemoryNotice {
-    LocalBackedUp,
+enum class RelayMemorySyncErrorKind {
+    Unauthorized,
+    Offline,
+    Rejected,
 }
 
-enum class RollupLeaseStatus(val allowed: Boolean) {
-    LOCAL(true),
-    ACQUIRED(true),
-    UNSUPPORTED(true),
-    BUSY(false),
-    DEFERRED(false),
+data class MemoryAccountSwitchPrompt(
+    val accountKey: String,
+    val accountId: String,
+    val origin: String,
+    val localMemoryCount: Int,
+)
+
+data class RelayMemorySyncState(
+    val syncing: Boolean = false,
+    val serverSeq: Long = 0L,
+    val lastSyncedAt: Long? = null,
+    val lastError: String? = null,
+    val errorKind: RelayMemorySyncErrorKind? = null,
+    val supported: Boolean = true,
+    val pendingAccountSwitch: MemoryAccountSwitchPrompt? = null,
+)
+
+enum class SyncRunStatus {
+    Synced,
+    NoAccount,
+    Unsupported,
+    Offline,
+    Unauthorized,
+    Rejected,
+    PendingAccountSwitch,
 }
 
 class RelayMemorySync(
-    filesDir: File,
-    private val rootDir: File,
+    private val store: MemoryStore,
     private val accounts: RelayAccountStore,
     private val client: RelayMemoryApi,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val relayCapabilities: () -> List<String> = { emptyList() },
+    private val onPostMergeConsolidation: () -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
-) : MemoryBackend {
+) : MemoryDreamCoordinator {
+    private val started = AtomicBoolean(false)
     private val syncMutex = Mutex()
-    private val mutex = Mutex()
-    private val rollupLeaseMutex = Mutex()
-    private val prefsFile = File(filesDir, PREFS)
-    private val outboxFile = File(filesDir, OUTBOX)
-    private val queue = ArrayList<QueuedWrite>()
+    private val scheduleMutex = Mutex()
+    private val unsupportedOrigins = ConcurrentHashMap.newKeySet<String>()
 
     @Volatile
-    private var reconciledAccount: String? = null
+    private var applyingRemote = false
 
-    @Volatile
-    private var account: RelayAccount? = null
+    private var debounceJob: Job? = null
+    private var activeSyncJob: Job? = null
+    private var pendingResyncDelayMs: Long? = null
+    private var lastObservedAccountKey: String? = null
 
-    @Volatile
-    private var token: String? = null
+    private val _state = MutableStateFlow(RelayMemorySyncState())
+    val state: StateFlow<RelayMemorySyncState> = _state.asStateFlow()
 
-    @Volatile
-    private var lastAttemptAt = 0L
-
-    @Volatile
-    private var lastFailureAt = 0L
-
-    private var activeRollupLeaseId: String? = null
-    private var activeRollupLeaseExpiresAt = 0L
-    private var activeRollupLeaseAccount: RelayAccount? = null
-    private var activeRollupLeaseToken: String? = null
-    private var rollupReleaseJob: Job? = null
-    private var rollupInFlightCount = 0
-
-    private var versions: Map<String, Long> = emptyMap()
-    private var syncedAt = 0L
-
-    private val _state = MutableStateFlow(RelayMemoryState())
-    val state: StateFlow<RelayMemoryState> = _state.asStateFlow()
-
-    init {
-        loadPrefs()
-        loadQueue()
-        scope.launch {
-            accounts.account.collect { value ->
-                syncMutex.withLock {
-                    val previous = account
-                    account = value
-                    if (value == null) {
-                        clearOnSignOutLocked()
-                    } else {
-                        token = accounts.token()
-                        _state.update { it.copy(active = true) }
-                        if (previous?.accountId != value.accountId) {
-                            try {
-                                refreshNowLocked(value)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (error: Exception) {
-                                recordError(error)
-                            }
+    fun start() {
+        if (!started.compareAndSet(false, true)) return
+        scope.launch(io) {
+            accounts.account.collect { account ->
+                if (account == null) {
+                    lastObservedAccountKey = null
+                    cancelScheduledSync()
+                    _state.value = RelayMemorySyncState()
+                } else {
+                    val key = accountKey(account)
+                    if (key != lastObservedAccountKey) {
+                        lastObservedAccountKey = key
+                        unsupportedOrigins.remove(account.origin)
+                        _state.update {
+                            it.copy(
+                                supported = true,
+                                lastError = null,
+                                errorKind = null,
+                                pendingAccountSwitch = null,
+                            )
                         }
+                        scheduleSync(0L)
                     }
+                }
+            }
+        }
+        scope.launch(io) {
+            store.changes.drop(1).collect {
+                if (applyingRemote) return@collect
+                if (accounts.read() != null &&
+                    _state.value.supported &&
+                    _state.value.pendingAccountSwitch == null
+                ) {
+                    scheduleSync(LOCAL_PUSH_DEBOUNCE_MS)
                 }
             }
         }
     }
 
-    private suspend fun clearOnSignOutLocked() {
-        releaseRollupLease()
-        withContext(io) {
-            mutex.withLock {
-                token = null
-                versions = emptyMap()
-                reconciledAccount = null
-                syncedAt = 0L
-                lastAttemptAt = 0L
-                lastFailureAt = 0L
-                queue.clear()
-                runCatching { prefsFile.delete() }
-                runCatching { outboxFile.delete() }
+    fun onRemoteVersionHint(serverSeq: Long) {
+        scope.launch(io) {
+            val current = accounts.read() ?: return@launch
+            unsupportedOrigins.remove(current.origin)
+            _state.update { it.copy(supported = true) }
+            if (_state.value.pendingAccountSwitch != null) return@launch
+            val knownSeq = _state.value.serverSeq
+            if (serverSeq <= 0L || serverSeq > knownSeq) {
+                scheduleSync(REMOTE_PULL_DEBOUNCE_MS)
             }
         }
-        _state.value = RelayMemoryState()
     }
 
-    override suspend fun append(path: String, section: String?, text: String): MemoryWriteOutcome =
-        submitWrite(op = "append", path = path, section = section, text = text, baseVersion = null)
+    fun requestSyncIfConnected() {
+        scope.launch(io) {
+            val account = accounts.read() ?: return@launch
+            if (isSyncUnsupported(account)) return@launch
+            if (_state.value.pendingAccountSwitch != null) return@launch
+            scheduleSync(0L)
+        }
+    }
 
-    override suspend fun replaceSection(path: String, section: String, text: String): MemoryWriteOutcome =
-        submitWrite(
-            op = "replace_section",
-            path = path,
-            section = section,
-            text = text,
-            baseVersion = versionOf(path),
-        )
+    suspend fun syncNow(): SyncRunStatus = syncInternal(dreamCompletedAt = null).status
 
-    override suspend fun overwrite(path: String, text: String): MemoryWriteOutcome =
-        submitWrite(
-            op = "overwrite",
-            path = path,
-            section = null,
-            text = text,
-            baseVersion = versionOf(path),
-        )
+    suspend fun resolveAccountSwitch(mode: MemoryAccountSwitchMode): SyncRunStatus {
+        val resolved = syncMutex.withLock {
+            val account = accounts.read()
+            if (account == null) {
+                _state.update { it.copy(pendingAccountSwitch = null) }
+                return@withLock false
+            }
+            store.resolveAccountSwitch(
+                accountKey = accountKey(account),
+                accountIdentity = accountIdentity(account),
+                mode = mode,
+            )
+            _state.update { it.copy(pendingAccountSwitch = null, errorKind = null, lastError = null) }
+            true
+        }
+        if (!resolved) return SyncRunStatus.NoAccount
+        val outcome = syncInternal(dreamCompletedAt = null)
+        if (outcome.triggerPostMergeDream) {
+            onPostMergeConsolidation()
+        }
+        return outcome.status
+    }
 
-    override suspend fun refreshIfStale(maxAgeMillis: Long): Boolean = syncMutex.withLock {
-        val current = account ?: return@withLock false
-        val reconciled = reconciledAccount == current.accountId
-        val now = clock()
-        if (now - lastFailureAt < FAILURE_BACKOFF_MILLIS) return@withLock false
-        if (!reconciled && now - lastAttemptAt < RECONCILE_RETRY_MILLIS) return@withLock false
-        val pending = mutex.withLock { queue.isNotEmpty() }
-        if (reconciled && pending.not() && now - syncedAt < maxAgeMillis) return@withLock false
-        lastAttemptAt = now
+    override suspend fun prepareForDream(forceManual: Boolean, minIntervalMs: Long): DreamLeaseResult {
+        val account = accounts.read() ?: return DreamLeaseResult.Acquired(null)
+        val token = accounts.token()?.takeIf { it.isNotBlank() } ?: return DreamLeaseResult.Acquired(null)
+        if (isSyncUnsupported(account)) return DreamLeaseResult.Acquired(null)
+
+        when (syncInternal(dreamCompletedAt = null).status) {
+            SyncRunStatus.NoAccount,
+            SyncRunStatus.Unsupported,
+            -> return DreamLeaseResult.Acquired(null)
+
+            SyncRunStatus.Offline -> return DreamLeaseResult.Offline
+            SyncRunStatus.Unauthorized -> return DreamLeaseResult.Unauthorized
+            SyncRunStatus.Rejected -> return DreamLeaseResult.Rejected
+            SyncRunStatus.PendingAccountSwitch -> return DreamLeaseResult.Blocked("account_switch_pending")
+            SyncRunStatus.Synced -> Unit
+        }
+
+        val intervalToCheck = if (forceManual) 0L else minIntervalMs.coerceAtLeast(0L)
+        val lease = try {
+            client.acquireDreamLease(
+                account = account,
+                token = token,
+                ttlMs = DREAM_LEASE_TTL_MS,
+                minIntervalMs = intervalToCheck,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: RelayMemoryException) {
+            return when (error.failure) {
+                RelayMemoryFailure.Unauthorized -> DreamLeaseResult.Unauthorized
+                RelayMemoryFailure.Rejected -> DreamLeaseResult.Rejected
+                RelayMemoryFailure.NotFound -> {
+                    unsupportedOrigins.add(account.origin)
+                    _state.update { it.copy(supported = false) }
+                    return DreamLeaseResult.Acquired(null)
+                }
+                RelayMemoryFailure.Unreachable,
+                RelayMemoryFailure.BadResponse,
+                -> DreamLeaseResult.Offline
+            }
+        }
+
+        if (lease == null) {
+            unsupportedOrigins.add(account.origin)
+            _state.update { it.copy(supported = false) }
+            return DreamLeaseResult.Acquired(null)
+        }
+        lease.lastDreamAt?.let { store.updateRemoteLastDreamAt(accountKey(account), it) }
+
+        if (lease.acquired) {
+            return DreamLeaseResult.Acquired(lease.leaseId)
+        }
+        val reason = if (!lease.holderDeviceId.isNullOrBlank()) "busy" else "not_due"
+        return DreamLeaseResult.Blocked(reason)
+    }
+
+    override suspend fun onDreamCompleted(leaseId: String?, finishedAt: Long) {
         try {
-            refreshNowLocked(current)
+            syncInternal(dreamCompletedAt = finishedAt)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            recordError(error)
-            false
+            runCatching { Log.w(TAG, "post-dream memory sync push failed", error) }
         }
     }
 
-    fun clearNotice() {
-        _state.update { it.copy(notice = null) }
-    }
-
-    fun clearError() {
-        _state.update { it.copy(error = null) }
-    }
-
-    suspend fun <T> withRollupLease(
-        ttlMs: Long = DEFAULT_ROLLUP_LEASE_TTL_MILLIS,
-        block: suspend () -> T,
-    ): T? {
-        val status = acquireRollupLease(ttlMs)
-        if (!status.allowed) return null
-        rollupLeaseMutex.withLock {
-            rollupInFlightCount += 1
-            rollupReleaseJob?.cancel()
-            rollupReleaseJob = null
+    override suspend fun onDreamFinished(leaseId: String?) {
+        if (leaseId.isNullOrBlank()) return
+        withContext(NonCancellable) {
+            val account = accounts.read() ?: return@withContext
+            val token = accounts.token()?.takeIf { it.isNotBlank() } ?: return@withContext
+            runCatching { client.releaseDreamLease(account, token, leaseId) }
         }
-        return try {
-            block()
+    }
+
+    private fun scheduleSync(delayMs: Long) {
+        scope.launch(io) {
+            scheduleMutex.withLock {
+                if (activeSyncJob?.isActive == true) {
+                    val existing = pendingResyncDelayMs
+                    pendingResyncDelayMs = if (existing == null) delayMs else minOf(existing, delayMs)
+                    return@withLock
+                }
+                debounceJob?.cancel()
+                debounceJob = scope.launch(io) {
+                    if (delayMs > 0L) delay(delayMs)
+                    runScheduledLoop()
+                }
+            }
+        }
+    }
+
+    private suspend fun runScheduledLoop() {
+        scheduleMutex.withLock {
+            activeSyncJob = coroutineContext[Job]
+            debounceJob = null
+        }
+        try {
+            var nextDelay: Long? = 0L
+            while (nextDelay != null) {
+                if (nextDelay > 0L) delay(nextDelay)
+                val outcome = syncInternal(dreamCompletedAt = null)
+                if (outcome.triggerPostMergeDream) {
+                    onPostMergeConsolidation()
+                }
+                nextDelay = scheduleMutex.withLock {
+                    val queued = pendingResyncDelayMs
+                    pendingResyncDelayMs = null
+                    queued
+                }
+            }
         } finally {
             withContext(NonCancellable) {
-                rollupLeaseMutex.withLock {
-                    rollupInFlightCount = (rollupInFlightCount - 1).coerceAtLeast(0)
-                    if (rollupInFlightCount == 0 && activeRollupLeaseId != null) {
-                        scheduleRollupReleaseLocked()
+                scheduleMutex.withLock {
+                    if (activeSyncJob == coroutineContext[Job]) {
+                        activeSyncJob = null
                     }
                 }
             }
         }
     }
 
-    suspend fun acquireRollupLease(ttlMs: Long = DEFAULT_ROLLUP_LEASE_TTL_MILLIS): RollupLeaseStatus =
-        rollupLeaseMutex.withLock {
-            val current = account ?: return@withLock RollupLeaseStatus.LOCAL
-            val secret = token ?: accounts.token() ?: return@withLock RollupLeaseStatus.DEFERRED
-            token = secret
-            val now = clock()
-            val existingId = activeRollupLeaseId
-            if (existingId != null &&
-                activeRollupLeaseAccount?.accountId == current.accountId &&
-                now < activeRollupLeaseExpiresAt - ROLLUP_RENEW_BUFFER_MILLIS
-            ) {
-                scheduleRollupReleaseLocked()
-                return@withLock RollupLeaseStatus.ACQUIRED
+    private suspend fun cancelScheduledSync() {
+        scheduleMutex.withLock {
+            pendingResyncDelayMs = null
+            debounceJob?.cancel()
+            debounceJob = null
+            activeSyncJob?.cancel()
+            activeSyncJob = null
+        }
+    }
+
+    private suspend fun syncInternal(dreamCompletedAt: Long?): SyncResult {
+        var overlapDetected = false
+        val status = syncMutex.withLock {
+            val account = accounts.read() ?: return@withLock SyncRunStatus.NoAccount
+            val token = accounts.token()?.takeIf { it.isNotBlank() } ?: return@withLock SyncRunStatus.NoAccount
+            if (isSyncUnsupported(account)) {
+                _state.update { it.copy(supported = false, syncing = false) }
+                return@withLock SyncRunStatus.Unsupported
             }
-            val lease = try {
-                withContext(io) { client.acquireRollupLease(current, secret, ttlMs) }
+            val key = accountKey(account)
+            val identity = accountIdentity(account)
+            store.ensure()
+            when (val switchCheck = store.inspectAccountSwitch(identity)) {
+                is MemoryAccountSwitchCheck.NeedsDecision -> {
+                    _state.update {
+                        it.copy(
+                            syncing = false,
+                            lastError = null,
+                            errorKind = null,
+                            pendingAccountSwitch = MemoryAccountSwitchPrompt(
+                                accountKey = key,
+                                accountId = account.accountId,
+                                origin = account.origin,
+                                localMemoryCount = switchCheck.localMemoryCount,
+                            ),
+                        )
+                    }
+                    return@withLock SyncRunStatus.PendingAccountSwitch
+                }
+                MemoryAccountSwitchCheck.Ready -> Unit
+            }
+
+            _state.update { it.copy(syncing = true, lastError = null, errorKind = null, pendingAccountSwitch = null) }
+            try {
+                val cursor = store.readSyncCursor(key)
+                var currentPulledSeq = cursor.lastPulledServerSeq
+                var latestServerSeq = cursor.lastPulledServerSeq
+
+                val firstPull = pullAllLocked(account, key, token, currentPulledSeq)
+                currentPulledSeq = firstPull.pulledSeq
+                latestServerSeq = maxOf(latestServerSeq, firstPull.serverSeq)
+                if (firstPull.hadOverlap) overlapDetected = true
+
+                var dreamStampRemaining = dreamCompletedAt
+                while (true) {
+                    val batch = store.collectPendingPushBatch(key, account.deviceId, limit = PUSH_BATCH_SIZE)
+                    if (batch.ops.isEmpty()) {
+                        if (dreamStampRemaining != null) {
+                            val response = client.push(account, token, emptyList(), dreamCompletedAt = dreamStampRemaining)
+                            dreamStampRemaining = null
+                            latestServerSeq = maxOf(latestServerSeq, response.serverSeq)
+                            store.markPushAcked(key, batch, response.serverSeq, response.lastDreamAt)
+                        } else if (batch.isBaseline && batch.nextInitialPushDone) {
+                            store.markPushAcked(key, batch, latestServerSeq, null)
+                        }
+                        break
+                    }
+                    val isFinalBatch = (!batch.isBaseline && batch.ops.size < PUSH_BATCH_SIZE) ||
+                        (batch.isBaseline && batch.nextInitialPushDone)
+                    val chunks = splitOpsByByteBudget(batch.ops)
+                    var lastRemoteDreamAt: Long? = null
+                    for ((index, chunk) in chunks.withIndex()) {
+                        val attachedDreamAt = if (isFinalBatch && index == chunks.lastIndex) dreamStampRemaining else null
+                        val response = client.push(account, token, chunk, dreamCompletedAt = attachedDreamAt)
+                        if (attachedDreamAt != null) dreamStampRemaining = null
+                        latestServerSeq = maxOf(latestServerSeq, response.serverSeq)
+                        lastRemoteDreamAt = response.lastDreamAt ?: lastRemoteDreamAt
+                        if (response.rejectedCount > 0) {
+                            val summary = response.rejected.joinToString("; ") { "${it.opId}:${it.reason}" }
+                            runCatching { Log.w(TAG, "server rejected ${response.rejectedCount} sync ops: $summary") }
+                        }
+                    }
+                    store.markPushAcked(key, batch, latestServerSeq, lastRemoteDreamAt)
+                }
+
+                if (latestServerSeq > currentPulledSeq) {
+                    val trailingPull = pullAllLocked(account, key, token, currentPulledSeq)
+                    currentPulledSeq = trailingPull.pulledSeq
+                    latestServerSeq = maxOf(latestServerSeq, trailingPull.serverSeq)
+                    if (trailingPull.hadOverlap) overlapDetected = true
+                }
+
+                _state.update {
+                    it.copy(
+                        syncing = false,
+                        serverSeq = currentPulledSeq,
+                        lastSyncedAt = clock(),
+                        lastError = null,
+                        errorKind = null,
+                        supported = true,
+                        pendingAccountSwitch = null,
+                    )
+                }
+                SyncRunStatus.Synced
             } catch (cancelled: CancellationException) {
+                _state.update { it.copy(syncing = false) }
                 throw cancelled
-            } catch (_: Exception) {
-                return@withLock RollupLeaseStatus.DEFERRED
-            }
-            if (lease == null) {
-                clearRollupLeaseStateLocked()
-                return@withLock RollupLeaseStatus.UNSUPPORTED
-            }
-            if (!lease.acquired || lease.leaseId.isNullOrBlank()) {
-                clearRollupLeaseStateLocked()
-                return@withLock RollupLeaseStatus.BUSY
-            }
-            activeRollupLeaseId = lease.leaseId
-            activeRollupLeaseExpiresAt = lease.expiresAt
-            activeRollupLeaseAccount = current
-            activeRollupLeaseToken = secret
-            scheduleRollupReleaseLocked()
-            RollupLeaseStatus.ACQUIRED
-        }
-
-    suspend fun releaseRollupLease() {
-        releaseRollupLeaseInternal(fromTimerJob = null)
-    }
-
-    private suspend fun releaseRollupLeaseInternal(fromTimerJob: Job?) {
-        val (acct, secret, leaseId) = rollupLeaseMutex.withLock {
-            if (fromTimerJob != null && (rollupReleaseJob !== fromTimerJob || rollupInFlightCount > 0)) {
-                return
-            }
-            val id = activeRollupLeaseId
-            val acct = activeRollupLeaseAccount
-            val secret = activeRollupLeaseToken
-            clearRollupLeaseStateLocked(cancelJob = fromTimerJob == null)
-            Triple(acct, secret, id)
-        }
-        if (acct != null && secret != null && leaseId != null) {
-            withContext(NonCancellable + io) {
-                runCatching { client.releaseRollupLease(acct, secret, leaseId) }
-            }
-        }
-    }
-
-    private fun scheduleRollupReleaseLocked() {
-        rollupReleaseJob?.cancel()
-        if (rollupInFlightCount > 0) {
-            rollupReleaseJob = null
-            return
-        }
-        var jobRef: Job? = null
-        val job = scope.launch(start = CoroutineStart.LAZY) {
-            delay(ROLLUP_IDLE_RELEASE_MILLIS)
-            releaseRollupLeaseInternal(fromTimerJob = jobRef)
-        }
-        jobRef = job
-        rollupReleaseJob = job
-        job.start()
-    }
-
-    private fun clearRollupLeaseStateLocked(cancelJob: Boolean = true) {
-        if (cancelJob) rollupReleaseJob?.cancel()
-        rollupReleaseJob = null
-        activeRollupLeaseId = null
-        activeRollupLeaseExpiresAt = 0L
-        activeRollupLeaseAccount = null
-        activeRollupLeaseToken = null
-    }
-
-    private suspend fun refreshNowLocked(current: RelayAccount): Boolean = withContext(io) {
-        val secret = token ?: accounts.token() ?: return@withContext false
-        token = secret
-        try {
-            if (reconciledAccount != current.accountId) {
-                reconcile(current, secret)
-            } else {
-                flushQueued(current, secret)
-                pull(current, secret)
-            }
-            true
-        } catch (error: RelayMemoryException) {
-            recordError(error)
-            false
-        }
-    }
-
-    private suspend fun reconcile(current: RelayAccount, secret: String) {
-        val snapshot = client.snapshot(current, secret)
-        val localContent = hasLocalContent()
-        val serverContent = snapshot.files.any { (path, text) -> path != SUMMARY_LOG && text.isNotBlank() }
-        when {
-            !serverContent && localContent -> {
-                uploadBaseline(current, secret, snapshot)
-                pull(current, secret)
-            }
-
-            serverContent && localContent -> {
-                backupLocal()
-                applySnapshot(snapshot)
-                _state.update { it.copy(notice = RelayMemoryNotice.LocalBackedUp) }
-            }
-
-            else -> applySnapshot(snapshot)
-        }
-        reconciledAccount = current.accountId
-        savePrefs()
-    }
-
-    private suspend fun uploadBaseline(
-        current: RelayAccount,
-        secret: String,
-        snapshot: RelayMemorySnapshot,
-    ) {
-        localMemoryFiles().forEach { (path, text) ->
-            client.write(
-                current,
-                secret,
-                RelayMemoryWrite(
-                    op = "overwrite",
-                    path = path,
-                    text = text,
-                    section = null,
-                    baseVersion = snapshot.versions[path] ?: 0L,
-                    idempotencyKey = idempotencyKey(current),
-                ),
-            )
-        }
-    }
-
-    private suspend fun pull(current: RelayAccount, secret: String) {
-        applySnapshot(client.snapshot(current, secret))
-    }
-
-    private suspend fun applySnapshot(snapshot: RelayMemorySnapshot) = withContext(io) {
-        mutex.withLock {
-            rootDir.mkdirs()
-            val files = snapshot.files.filterKeys { validPath(it) && it != SUMMARY_LOG }
-            files.forEach { (path, text) -> writeMirror(path, text) }
-            pruneMirror(files.keys)
-            versions = snapshot.versions.filterKeys { it in files.keys }
-            syncedAt = clock()
-            savePrefs()
-            _state.update { state ->
-                state.copy(
-                    active = true,
-                    version = snapshot.version,
-                    lastSyncedAt = syncedAt,
-                    pending = queue.size,
-                    error = null,
-                )
+            } catch (error: RelayMemoryException) {
+                when (error.failure) {
+                    RelayMemoryFailure.NotFound -> {
+                        unsupportedOrigins.add(account.origin)
+                        _state.update { it.copy(syncing = false, supported = false, lastError = null, errorKind = null) }
+                        SyncRunStatus.Unsupported
+                    }
+                    RelayMemoryFailure.Unauthorized -> {
+                        _state.update {
+                            it.copy(
+                                syncing = false,
+                                lastError = error.detail ?: error.failure.name,
+                                errorKind = RelayMemorySyncErrorKind.Unauthorized,
+                            )
+                        }
+                        SyncRunStatus.Unauthorized
+                    }
+                    RelayMemoryFailure.Rejected -> {
+                        _state.update {
+                            it.copy(
+                                syncing = false,
+                                lastError = error.detail ?: error.failure.name,
+                                errorKind = RelayMemorySyncErrorKind.Rejected,
+                            )
+                        }
+                        SyncRunStatus.Rejected
+                    }
+                    RelayMemoryFailure.Unreachable,
+                    RelayMemoryFailure.BadResponse,
+                    -> {
+                        _state.update {
+                            it.copy(
+                                syncing = false,
+                                lastError = error.detail ?: error.failure.name,
+                                errorKind = RelayMemorySyncErrorKind.Offline,
+                            )
+                        }
+                        SyncRunStatus.Offline
+                    }
+                }
+            } catch (error: Exception) {
+                runCatching { Log.w(TAG, "memory sync round failed", error) }
+                _state.update {
+                    it.copy(
+                        syncing = false,
+                        lastError = error.message ?: "sync failed",
+                        errorKind = RelayMemorySyncErrorKind.Offline,
+                    )
+                }
+                SyncRunStatus.Offline
+            } finally {
+                _state.update { it.copy(syncing = false) }
             }
         }
+        return SyncResult(
+            status = status,
+            triggerPostMergeDream = status == SyncRunStatus.Synced && overlapDetected && dreamCompletedAt == null,
+        )
     }
 
-    private suspend fun flushQueued(current: RelayAccount, secret: String) {
+    private fun splitOpsByByteBudget(ops: List<MemorySyncOpItem>): List<List<MemorySyncOpItem>> {
+        if (ops.isEmpty()) return emptyList()
+        val chunks = ArrayList<List<MemorySyncOpItem>>()
+        var current = ArrayList<MemorySyncOpItem>()
+        var currentBytes = PUSH_ENVELOPE_OVERHEAD_BYTES
+        for (op in ops) {
+            val opBytes = RelayProtocol.encodeSyncOpJson(op).toByteArray(Charsets.UTF_8).size + 1
+            if (current.isNotEmpty() && currentBytes + opBytes > PUSH_MAX_PAYLOAD_BYTES) {
+                chunks.add(current)
+                current = ArrayList()
+                currentBytes = PUSH_ENVELOPE_OVERHEAD_BYTES
+            }
+            current.add(op)
+            currentBytes += opBytes
+        }
+        if (current.isNotEmpty()) chunks.add(current)
+        return chunks
+    }
+
+    private suspend fun pullAllLocked(
+        account: RelayAccount,
+        accountKey: String,
+        token: String,
+        initialSince: Long,
+    ): PullResult {
+        var since = initialSince
+        var serverSeq = initialSince
+        var anyOverlap = false
         while (true) {
-            val entry = mutex.withLock { queue.firstOrNull() } ?: return
-            when (val outcome = submit(current, secret, entry)) {
-                is SubmitOutcome.Applied -> {
-                    val pending = mutex.withLock {
-                        queue.remove(entry)
-                        persistQueueLocked()
-                        queue.size
-                    }
-                    _state.update { it.copy(pending = pending) }
-                }
-
-                SubmitOutcome.Offline -> return
-
-                is SubmitOutcome.Rejected -> {
-                    val pending = mutex.withLock {
-                        queue.remove(entry)
-                        persistQueueLocked()
-                        queue.size
-                    }
-                    _state.update { it.copy(pending = pending, error = outcome.message) }
-                }
-            }
-        }
-    }
-
-    private suspend fun submitWrite(
-        op: String,
-        path: String,
-        section: String?,
-        text: String,
-        baseVersion: Long?,
-    ): MemoryWriteOutcome = syncMutex.withLock {
-        val current = account ?: return@withLock MemoryWriteOutcome.Inactive
-        val secret = token ?: accounts.token() ?: return@withLock MemoryWriteOutcome.Inactive
-        token = secret
-        val entry = QueuedWrite(
-            op = op,
-            path = path,
-            section = section,
-            text = text,
-            baseVersion = baseVersion,
-            idempotencyKey = idempotencyKey(current),
-            createdAt = clock(),
-        )
-        withContext(io) {
-            when (val outcome = submit(current, secret, entry)) {
-                is SubmitOutcome.Applied -> {
-                    runCatching { pull(current, secret) }.onFailure(::recordError)
-                    _state.update { it.copy(version = outcome.version, lastSyncedAt = syncedAt) }
-                    MemoryWriteOutcome.Applied
-                }
-
-                SubmitOutcome.Offline -> {
-                    val pending = mutex.withLock {
-                        queue += entry
-                        persistQueueLocked()
-                        queue.size
-                    }
-                    _state.update { it.copy(pending = pending) }
-                    MemoryWriteOutcome.Queued
-                }
-
-                is SubmitOutcome.Rejected -> MemoryWriteOutcome.Rejected(outcome.message)
-            }
-        }
-    }
-
-    private suspend fun submit(
-        current: RelayAccount,
-        secret: String,
-        entry: QueuedWrite,
-    ): SubmitOutcome {
-        val request = RelayMemoryWrite(
-            op = entry.op,
-            path = entry.path,
-            text = entry.text,
-            section = entry.section,
-            baseVersion = entry.baseVersion,
-            idempotencyKey = entry.idempotencyKey,
-        )
-        return try {
-            SubmitOutcome.Applied(client.write(current, secret, request))
-        } catch (error: RelayMemoryException) {
-            when (error.failure) {
-                RelayMemoryFailure.Conflict -> {
-                    val snapshot = runCatching { client.snapshot(current, secret) }.getOrNull()
-                    if (snapshot != null) applySnapshot(snapshot)
-                    SubmitOutcome.Rejected(CONFLICT_MESSAGE)
-                }
-
-                RelayMemoryFailure.Unreachable,
-                RelayMemoryFailure.BadResponse,
-                -> SubmitOutcome.Offline
-
-                RelayMemoryFailure.Unauthorized -> SubmitOutcome.Rejected(SIGNED_OUT_MESSAGE)
-                RelayMemoryFailure.NotFound,
-                RelayMemoryFailure.Rejected,
-                -> SubmitOutcome.Rejected(error.detail ?: WRITE_FAILED_MESSAGE)
-            }
-        }
-    }
-
-    private fun versionOf(path: String): Long = versions[path] ?: 0L
-
-    private fun idempotencyKey(current: RelayAccount): String =
-        "${current.deviceId}:${UUID.randomUUID()}"
-
-    private fun recordError(error: Throwable) {
-        lastFailureAt = clock()
-        val message = when (error) {
-            is RelayMemoryException -> error.detail ?: error.failure.name
-            else -> error.message ?: "memory sync failed"
-        }
-        _state.update { it.copy(error = message) }
-    }
-
-    private fun hasLocalContent(): Boolean = localMemoryFiles().isNotEmpty()
-
-    private fun localMemoryFiles(): Map<String, String> {
-        val files = LinkedHashMap<String, String>()
-        ZONE_FILES.forEach { name ->
-            val text = File(rootDir, name).readTextOrEmpty()
-            if (textHasBody(text)) files[name] = text
-        }
-        val daily = File(rootDir, "daily")
-        if (daily.isDirectory) {
-            daily.walkTopDown()
-                .filter { it.isFile && it.name.endsWith(".md") }
-                .sortedBy { it.path }
-                .forEach { file ->
-                    val text = file.readTextOrEmpty()
-                    if (textHasBody(text)) {
-                        files[file.relativeTo(rootDir).invariantSeparatorsPath] = text
-                    }
-                }
-        }
-        return files
-    }
-
-    private fun textHasBody(text: String): Boolean = text.lineSequence().any { line ->
-        val trimmed = line.trim()
-        trimmed.isNotEmpty() && !trimmed.startsWith("# ")
-    }
-
-    private fun backupLocal() {
-        val target = File(rootDir, ".conflict-${STAMP.format(LocalDateTime.now())}")
-        if (!target.mkdirs()) return
-        ZONE_FILES.forEach { name ->
-            val file = File(rootDir, name)
-            if (file.isFile) file.copyTo(File(target, name), overwrite = true)
-        }
-        val daily = File(rootDir, "daily")
-        if (daily.isDirectory) {
-            daily.copyRecursively(File(target, "daily"), overwrite = true)
-        }
-    }
-
-    private fun writeMirror(path: String, text: String) {
-        runCatching {
-            val file = File(rootDir, path)
-            file.parentFile?.mkdirs()
-            val temp = File(file.parentFile, ".${file.name}.tmp")
-            temp.writeText(text)
-            if (!temp.renameTo(file)) {
-                file.delete()
-                if (!temp.renameTo(file)) file.writeText(text)
-            }
-        }
-    }
-
-    private fun pruneMirror(keep: Set<String>) {
-        val daily = File(rootDir, "daily")
-        if (daily.isDirectory) {
-            daily.walkTopDown()
-                .filter { it.isFile && it.name.endsWith(".md") }
-                .forEach { file ->
-                    if (file.relativeTo(rootDir).invariantSeparatorsPath !in keep) {
-                        runCatching { file.delete() }
-                    }
-                }
-        }
-        ZONE_FILES.forEach { name ->
-            if (name !in keep) runCatching { File(rootDir, name).delete() }
-        }
-    }
-
-    private fun validPath(path: String): Boolean {
-        if (path.isEmpty() || path.startsWith("/") || path.contains("..")) return false
-        if (path in ZONE_FILES || path == SUMMARY_LOG) return true
-        return path.startsWith("daily/") && path.endsWith(".md")
-    }
-
-    private fun loadPrefs() {
-        val text = runCatching { prefsFile.readText() }.getOrNull()?.trim().orEmpty()
-        if (text.isEmpty()) return
-        val json = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
-        reconciledAccount = json["account"]?.jsonPrimitive?.contentOrNull
-        syncedAt = json["syncedAt"]?.jsonPrimitive?.longOrNull ?: 0L
-    }
-
-    private fun savePrefs() {
-        val payload = buildJsonObject {
-            reconciledAccount?.let { put("account", it) }
-            if (syncedAt > 0L) put("syncedAt", syncedAt)
-        }
-        runCatching {
-            prefsFile.parentFile?.mkdirs()
-            prefsFile.writeText(payload.toString())
-        }
-    }
-
-    private fun loadQueue() {
-        val text = runCatching { outboxFile.readText() }.getOrNull()?.trim().orEmpty()
-        if (text.isEmpty()) return
-        val array = runCatching { Json.parseToJsonElement(text).jsonArray }.getOrNull() ?: return
-        array.forEach { element ->
-            val json = runCatching { element.jsonObject }.getOrNull() ?: return@forEach
-            val entry = runCatching {
-                QueuedWrite(
-                    op = json.getValue("op").jsonPrimitive.content,
-                    path = json.getValue("path").jsonPrimitive.content,
-                    section = json["section"]?.jsonPrimitive?.contentOrNull,
-                    text = json.getValue("text").jsonPrimitive.content,
-                    baseVersion = json["baseVersion"]?.jsonPrimitive?.longOrNull,
-                    idempotencyKey = json.getValue("idempotencyKey").jsonPrimitive.content,
-                    createdAt = json["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+            val page = client.pull(account, token, since = since, limit = PULL_PAGE_SIZE)
+            serverSeq = maxOf(serverSeq, page.serverSeq)
+            val mergeResult = try {
+                applyingRemote = true
+                store.applyRemotePullBatch(
+                    accountKey = accountKey,
+                    selfDeviceId = account.deviceId,
+                    entries = page.entries,
+                    nextSince = page.nextSince,
+                    serverSeq = page.serverSeq,
+                    remoteLastDreamAt = page.lastDreamAt,
                 )
-            }.getOrNull() ?: return@forEach
-            queue += entry
-        }
-        _state.update { it.copy(pending = queue.size) }
-    }
-
-    private fun persistQueueLocked() {
-        val payload = buildJsonArray {
-            queue.forEach { entry ->
-                add(buildJsonObject {
-                    put("op", entry.op)
-                    put("path", entry.path)
-                    entry.section?.let { put("section", it) }
-                    put("text", entry.text)
-                    entry.baseVersion?.let { put("baseVersion", it) }
-                    put("idempotencyKey", entry.idempotencyKey)
-                    put("createdAt", entry.createdAt)
-                })
+            } finally {
+                applyingRemote = false
             }
+            if (mergeResult.hadLocalAndRemoteOverlap) anyOverlap = true
+            val progressed = page.nextSince > since
+            if (progressed) since = page.nextSince
+            if (!page.hasMore || !progressed) break
         }
-        runCatching {
-            outboxFile.parentFile?.mkdirs()
-            outboxFile.writeText(payload.toString())
-        }
+        return PullResult(pulledSeq = since, serverSeq = serverSeq, hadOverlap = anyOverlap)
     }
 
-    private fun File.readTextOrEmpty(): String =
-        runCatching { if (isFile) readText() else "" }.getOrDefault("")
+    private fun isSyncUnsupported(account: RelayAccount): Boolean {
+        if (account.origin in unsupportedOrigins) return true
+        val caps = relayCapabilities()
+        return caps.isNotEmpty() && CAPABILITY_MEMORY_V2 !in caps
+    }
 
-    private data class QueuedWrite(
-        val op: String,
-        val path: String,
-        val section: String?,
-        val text: String,
-        val baseVersion: Long?,
-        val idempotencyKey: String,
-        val createdAt: Long,
+    private fun accountKey(account: RelayAccount): String =
+        "${account.accountId}|${account.origin}|${account.deviceId}"
+
+    private fun accountIdentity(account: RelayAccount): String =
+        "${account.accountId}|${account.origin}"
+
+    private data class PullResult(
+        val pulledSeq: Long,
+        val serverSeq: Long,
+        val hadOverlap: Boolean,
     )
 
-    private sealed interface SubmitOutcome {
-        data class Applied(val version: Long) : SubmitOutcome
+    private data class SyncResult(
+        val status: SyncRunStatus,
+        val triggerPostMergeDream: Boolean,
+    )
 
-        data object Offline : SubmitOutcome
-
-        data class Rejected(val message: String) : SubmitOutcome
-    }
-
-    private companion object {
-        private const val PREFS = "relay-memory.json"
-        private const val OUTBOX = "relay-memory-outbox.json"
-        private const val SUMMARY_LOG = "summaries.log"
-        private const val RECONCILE_RETRY_MILLIS = 60_000L
-        private const val FAILURE_BACKOFF_MILLIS = 30_000L
-        private const val DEFAULT_ROLLUP_LEASE_TTL_MILLIS = 5 * 60_000L
-        private const val ROLLUP_RENEW_BUFFER_MILLIS = 15_000L
-        private const val ROLLUP_IDLE_RELEASE_MILLIS = 30_000L
-        private const val CONFLICT_MESSAGE =
-            "Memory changed on another device. Read it again, then retry the write."
-        private const val SIGNED_OUT_MESSAGE =
-            "This phone is no longer connected to the account, so memory was not written."
-        private const val WRITE_FAILED_MESSAGE = "The shared memory rejected this write."
-        private val ZONE_FILES = listOf("profile.md", "context.md", "cookbook.md")
-        private val STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+    companion object {
+        private const val TAG = "RelayMemorySync"
+        private const val CAPABILITY_MEMORY_V2 = "memory-v2"
+        private const val PULL_PAGE_SIZE = 200
+        private const val PUSH_BATCH_SIZE = 100
+        private const val PUSH_MAX_PAYLOAD_BYTES = 1_024 * 1_024
+        private const val PUSH_ENVELOPE_OVERHEAD_BYTES = 128
+        private const val LOCAL_PUSH_DEBOUNCE_MS = 1_500L
+        private const val REMOTE_PULL_DEBOUNCE_MS = 300L
+        private const val DREAM_LEASE_TTL_MS = 10 * 60_000L
     }
 }

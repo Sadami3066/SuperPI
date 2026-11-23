@@ -3,10 +3,17 @@ package io.github.whywood.superpi.ui.shell
 import android.content.Context
 import android.graphics.Bitmap
 import android.content.Intent
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.DraggableState
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,20 +22,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.data.AttachmentRef
 import io.github.whywood.superpi.data.relay.RemoteSessionSummaryDto
@@ -37,6 +55,12 @@ import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdText
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import io.github.whywood.superpi.plugin.api.PluginPagePresentation
 import io.github.whywood.superpi.plugin.host.services.PluginPageRequest
 import io.github.whywood.superpi.R
@@ -91,7 +115,7 @@ sealed interface ShellOverlay {
         val errorMessage: String? = null,
     ) : ShellOverlay
     data class AttachmentPreview(val attachment: AttachmentRef, val file: File) : ShellOverlay
-    data class Usage(val usage: SessionUsage) : ShellOverlay
+    data class Usage(val usage: SessionUsage, val canCompact: Boolean = false) : ShellOverlay
     data class Jobs(val jobs: List<JobSnapshot>, val selectedJobId: String?, val output: String?) : ShellOverlay
 }
 
@@ -116,7 +140,9 @@ data class ShellOverlayActions(
     val onConfirmWorkspaceDelete: () -> Unit, val onDismissWorkspaceDelete: () -> Unit,
     val onDismissAttachmentPreview: () -> Unit, val onShareAttachmentPreview: () -> Unit,
     val onExportAttachmentPreview: () -> Unit,
-    val onDismissUsage: () -> Unit, val onSelectJob: (String) -> Unit,
+    val onDismissUsage: () -> Unit,
+    val onCompactUsage: () -> Unit = {},
+    val onSelectJob: (String) -> Unit,
     val onCloseJobOutput: () -> Unit, val onKillJob: (String) -> Unit,
     val onClearSettledJobs: () -> Unit, val onDismissJobs: () -> Unit,
 )
@@ -146,7 +172,7 @@ data class ShellDrawerState(
     val canCreateRemoteBotDeviceIds: Set<String> = emptySet(),
 )
 data class ShellDrawerActions(
-    val onNavigate: (AppDestination) -> Unit, val onDismiss: () -> Unit,
+    val onNavigate: (AppDestination) -> Unit, val onDismiss: () -> Unit, val onOpen: () -> Unit = {},
     val onCreateWorkspace: () -> Unit, val onCreateWorkspaceForDevice: (String) -> Unit = {},
     val onToggleWorkspaceExpanded: (String) -> Unit,
     val onToggleWorkspacePinned: (String) -> Unit, val onNewSessionInWorkspace: (String) -> Unit,
@@ -184,8 +210,14 @@ internal fun OverlayHost(
     overlayActions: ShellOverlayActions,
     drawer: ShellDrawerState,
     drawerActions: ShellDrawerActions,
+    drawerController: ShellDrawerController? = null,
 ) {
-    ShellDrawerHost(drawer, drawerActions)
+    val activeDrawerController = drawerController ?: rememberShellDrawerController(
+        open = drawer.open,
+        onOpen = drawerActions.onOpen,
+        onDismiss = drawerActions.onDismiss,
+    )
+    ShellDrawerHost(drawer, drawerActions, activeDrawerController)
     resolveOverlays(overlays).forEach { overlay ->
         key(overlay::class) {
             when (overlay) {
@@ -236,7 +268,11 @@ internal fun OverlayHost(
                     onExport = overlayActions.onExportAttachmentPreview,
                 )
 
-                is ShellOverlay.Usage -> UsageSheet(overlay.usage, overlayActions.onDismissUsage)
+                is ShellOverlay.Usage -> UsageSheet(
+                    usage = overlay.usage,
+                    onDismiss = overlayActions.onDismissUsage,
+                    onCompact = if (overlay.canCompact) overlayActions.onCompactUsage else null,
+                )
 
                 is ShellOverlay.Jobs -> JobsSheet(
                     overlay.jobs, overlay.selectedJobId, overlay.output,
@@ -284,45 +320,248 @@ private fun PluginPageSheet(request: PluginPageRequest, onDismiss: () -> Unit) {
     }
 }
 
-@Composable
-private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions) {
-    val colors = superPiColors()
-    val density = LocalDensity.current
-    val drawerWidthPx = with(density) { 304.dp.toPx() }
-    val transition = updateTransition(state.open, label = "drawer")
-    val progress = transition.animateFloat(
-        transitionSpec = { tween(DdMotion.BASE, easing = DdMotion.EaseOut) },
-        label = "drawer-progress",
-    ) { open -> if (open) 1f else 0f }
-    var mounted by remember { mutableStateOf(state.open) }
-    LaunchedEffect(Unit) {
-        snapshotFlow { state.open || progress.value > 0.01f }
-            .collect { visible -> mounted = visible }
+@Stable
+internal class ShellDrawerController(
+    private val scope: CoroutineScope,
+    private val drawerProgress: Animatable<Float, AnimationVector1D>,
+    private val draggingState: MutableState<Boolean>,
+    private val currentStateOpen: State<Boolean>,
+    private val currentOnOpen: State<() -> Unit>,
+    private val currentOnDismiss: State<() -> Unit>,
+) {
+    var drawerWidthPx: Float = 0f
+    var directionSign: Float = 1f
+    var openFlingVelocityPx: Float = 0f
+    var closeFlingVelocityPx: Float = 0f
+    var motionEnabled: Boolean = true
+    var onSwipeStart: () -> Unit = {}
+
+    private var dragGeneration = 0
+
+    val dragState: DraggableState = DraggableState { delta -> onDragDelta(delta) }
+    val progress: Float get() = drawerProgress.value
+    val dragging: Boolean get() = draggingState.value
+
+    fun onDragStart() {
+        dragGeneration += 1
+        draggingState.value = true
     }
-    Box(Modifier.fillMaxSize()) {
-        if (mounted) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = progress.value }
-                    .drawBehind { drawRect(colors.scrim.copy(alpha = 0.32f * progress.value)) }
-                    .then(
-                        if (state.open) {
-                            Modifier.clickable { actions.onDismiss() }
-                        } else {
-                            Modifier
-                        },
-                    ),
-            )
+
+    fun onDragDelta(deltaPx: Float) {
+        if (drawerWidthPx <= 0f) return
+        val next = (drawerProgress.value + (deltaPx * directionSign / drawerWidthPx)).coerceIn(0f, 1f)
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            drawerProgress.snapTo(next)
         }
-        if (mounted) {
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .width(304.dp)
-                    .align(Alignment.CenterStart)
-                    .graphicsLayer { translationX = -drawerWidthPx * (1f - progress.value) },
-            ) {
+    }
+
+    fun onDragEnd(velocityPx: Float) {
+        val gen = dragGeneration
+        val effectiveVelocity = velocityPx * directionSign
+        val wasOpen = currentStateOpen.value
+        val openTarget = if (!wasOpen) {
+            effectiveVelocity > openFlingVelocityPx ||
+                (effectiveVelocity >= -openFlingVelocityPx && drawerProgress.value >= 0.14f)
+        } else {
+            !(
+                effectiveVelocity < -closeFlingVelocityPx ||
+                    (effectiveVelocity <= closeFlingVelocityPx && drawerProgress.value <= 0.82f)
+                )
+        }
+        scope.launch {
+            val targetValue = if (openTarget) 1f else 0f
+            if (motionEnabled && drawerWidthPx > 0f) {
+                drawerProgress.animateTo(
+                    targetValue = targetValue,
+                    initialVelocity = (effectiveVelocity / drawerWidthPx).coerceIn(-6f, 6f),
+                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                )
+            } else {
+                drawerProgress.snapTo(targetValue)
+            }
+            if (gen != dragGeneration) return@launch
+            draggingState.value = false
+            val stillOpen = currentStateOpen.value
+            if (openTarget && !stillOpen) {
+                currentOnOpen.value.invoke()
+            } else if (!openTarget && stillOpen) {
+                currentOnDismiss.value.invoke()
+            }
+        }
+    }
+}
+
+@Composable
+internal fun rememberShellDrawerController(
+    open: Boolean,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+    onSwipeStart: () -> Unit = {},
+): ShellDrawerController {
+    val motionEnabled = LocalDdMotionEnabled.current
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val directionSign = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1f else 1f
+    val drawerWidthPx = with(density) { 304.dp.toPx() }
+    val openFlingVelocityPx = with(density) { 180.dp.toPx() }
+    val closeFlingVelocityPx = with(density) { 220.dp.toPx() }
+    val drawerProgress = remember { Animatable(if (open) 1f else 0f) }
+    val draggingState = remember { mutableStateOf(false) }
+    val currentOnOpen = rememberUpdatedState(onOpen)
+    val currentOnDismiss = rememberUpdatedState(onDismiss)
+    val currentStateOpen = rememberUpdatedState(open)
+    val currentOnSwipeStart = rememberUpdatedState(onSwipeStart)
+
+    val controller = remember(scope, drawerProgress, draggingState) {
+        ShellDrawerController(
+            scope = scope,
+            drawerProgress = drawerProgress,
+            draggingState = draggingState,
+            currentStateOpen = currentStateOpen,
+            currentOnOpen = currentOnOpen,
+            currentOnDismiss = currentOnDismiss,
+        )
+    }
+    SideEffect {
+        controller.drawerWidthPx = drawerWidthPx
+        controller.directionSign = directionSign
+        controller.openFlingVelocityPx = openFlingVelocityPx
+        controller.closeFlingVelocityPx = closeFlingVelocityPx
+        controller.motionEnabled = motionEnabled
+        controller.onSwipeStart = { currentOnSwipeStart.value.invoke() }
+    }
+
+    LaunchedEffect(open, draggingState.value, motionEnabled) {
+        if (draggingState.value) return@LaunchedEffect
+        val target = if (open) 1f else 0f
+        if (drawerProgress.value != target) {
+            if (motionEnabled) {
+                drawerProgress.animateTo(target, tween(DdMotion.BASE, easing = DdMotion.EaseOut))
+            } else {
+                drawerProgress.snapTo(target)
+            }
+        }
+    }
+    return controller
+}
+
+internal fun Modifier.drawerOpenSwipeGesture(
+    enabled: Boolean,
+    controller: ShellDrawerController,
+): Modifier = if (!enabled) {
+    this
+} else {
+    pointerInput(enabled, controller) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+            var tracking = true
+            var startedDragging = false
+            val velocityTracker = VelocityTracker()
+            try {
+                while (tracking) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                    if (change == null || !change.pressed || change.isConsumed) {
+                        tracking = false
+                    } else {
+                        val dx = change.position.x - down.position.x
+                        val dy = change.position.y - down.position.y
+                        val slop = viewConfiguration.touchSlop
+                        if (hypot(dx, dy) >= slop) {
+                            val directionalDx = dx * controller.directionSign
+                            if (directionalDx > 0f && abs(dx) > abs(dy) * 1.15f) {
+                                startedDragging = true
+                                controller.onSwipeStart()
+                                controller.onDragStart()
+                                velocityTracker.addPosition(down.uptimeMillis, down.position)
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                change.consume()
+                                controller.onDragDelta(dx)
+                                tracking = false
+                            } else {
+                                tracking = false
+                            }
+                        }
+                    }
+                }
+                while (startedDragging) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                    if (change == null || !change.pressed) {
+                        val velocityX = velocityTracker.calculateVelocity().x
+                        startedDragging = false
+                        change?.consume()
+                        controller.onDragEnd(velocityX)
+                        break
+                    }
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    val deltaX = change.positionChange().x
+                    change.consume()
+                    if (deltaX != 0f) {
+                        controller.onDragDelta(deltaX)
+                    }
+                }
+            } finally {
+                if (startedDragging) {
+                    controller.onDragEnd(0f)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShellDrawerHost(
+    state: ShellDrawerState,
+    actions: ShellDrawerActions,
+    controller: ShellDrawerController,
+) {
+    val colors = superPiColors()
+    val drawerWidthPx = controller.drawerWidthPx
+    val directionSign = controller.directionSign
+    val currentOpen = rememberUpdatedState(state.open)
+    val mounted by remember(controller) {
+        derivedStateOf { currentOpen.value || controller.dragging || controller.progress > 0.005f }
+    }
+    if (!mounted) return
+    Box(
+        Modifier
+            .fillMaxSize()
+            .draggable(
+                state = controller.dragState,
+                orientation = Orientation.Horizontal,
+                enabled = state.open || controller.dragging,
+                onDragStarted = { controller.onDragStart() },
+                onDragStopped = { velocity -> controller.onDragEnd(velocity) },
+            ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(colors.scrim.copy(alpha = colors.scrim.alpha * controller.progress))
+                }
+                .then(
+                    if (state.open) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { actions.onDismiss() }
+                    } else {
+                        Modifier
+                    },
+                ),
+        )
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .width(304.dp)
+                .align(Alignment.CenterStart)
+                .graphicsLayer {
+                    translationX = -drawerWidthPx * (1f - controller.progress) * directionSign
+                }
+                .pointerInput(Unit) { detectTapGestures {} },
+        ) {
             SuperPIDrawer(
                 sessions = state.sessions,
                 workspaces = state.workspaces,
@@ -381,7 +620,6 @@ private fun ShellDrawerHost(state: ShellDrawerState, actions: ShellDrawerActions
                 onDeleteRemoteSession = actions.onDeleteRemoteSession,
             )
         }
-    }
     }
 }
 

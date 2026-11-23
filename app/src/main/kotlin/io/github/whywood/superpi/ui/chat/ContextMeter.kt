@@ -40,12 +40,16 @@ fun ContextMeter(
     val fraction = (usedTokens.toDouble() / windowTokens.toDouble()).coerceIn(0.0, 1.0).toFloat()
     val percent = (fraction * 100f).roundToInt()
     val trackColor = colors.ink.copy(alpha = 0.12f)
-    val progressColor = colors.accent
+    val progressColor = when {
+        fraction >= 0.90f -> colors.danger
+        fraction >= 0.75f -> colors.warning
+        else -> colors.accent
+    }
     val description = stringResource(R.string.usage_meter_description, percent)
     DdPressable(
         onClick = onClick,
         modifier = modifier
-            .sizeIn(minWidth = 31.dp, minHeight = 31.dp)
+            .sizeIn(minWidth = 44.dp, minHeight = 44.dp)
             .testTag("context_meter"),
         shape = DdShapes.Small,
         contentDescription = description,
@@ -86,6 +90,7 @@ fun ContextMeter(
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
                     color = colors.inkSecondary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
         }

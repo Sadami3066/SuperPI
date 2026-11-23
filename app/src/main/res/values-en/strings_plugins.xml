@@ -16,8 +16,8 @@
     <string name="plugins_info_version">Version</string>
     <string name="plugins_info_installed_version">Installed version</string>
     <string name="plugins_info_size">Size</string>
-    <string name="plugins_info_capabilities">Permissions</string>
-    <string name="plugins_import_capabilities">Permissions</string>
+    <string name="plugins_info_capabilities">App capabilities</string>
+    <string name="plugins_import_capabilities">App capabilities</string>
     <string name="plugins_capability_linux">Linux commands</string>
     <string name="plugins_capability_screen">Screen control</string>
     <string name="plugins_capability_notifications">Notifications</string>
@@ -79,6 +79,7 @@
 
     <string name="plugins_import_unreadable">Could not read the plugin package</string>
     <string name="plugins_import_invalid">Not a valid plugin package</string>
+    <string name="plugins_import_failed">Import failed. Check the package and try again.</string>
     <string name="plugins_import_title">Import plugin</string>
     <string name="plugins_import_version">Version</string>
     <string name="plugins_import_size">Size</string>
@@ -103,7 +104,7 @@
     <string name="plugins_updating_update">Updating…</string>
     <string name="plugin_notification_listener_label">PI plugin notifications</string>
 
-    <string name="plugins_import_permissions">Permissions</string>
+    <string name="plugins_import_permissions">System permissions</string>
     <string name="plugins_import_components">System components</string>
     <string name="plugins_permission_location_coarse">Approximate location</string>
     <string name="plugins_permission_location_fine">Precise location</string>

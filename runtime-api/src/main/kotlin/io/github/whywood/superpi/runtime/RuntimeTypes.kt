@@ -41,6 +41,7 @@ data class ConversationSummary(
     val cwd: String = "",
     val pinned: Boolean = false,
     val archived: Boolean = false,
+    val memoryExcluded: Boolean = false,
 )
 
 data class RemoteBotRef(
@@ -469,6 +470,8 @@ interface Maintenance {
     suspend fun setSessionPinned(id: String, pinned: Boolean)
 
     suspend fun setSessionArchived(id: String, archived: Boolean)
+
+    suspend fun setSessionMemoryExcluded(id: String, excluded: Boolean) {}
 
     suspend fun deleteSession(id: String)
 }

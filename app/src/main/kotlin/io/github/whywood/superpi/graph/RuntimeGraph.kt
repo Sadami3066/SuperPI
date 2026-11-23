@@ -14,6 +14,7 @@ import io.github.whywood.superpi.runtime.AgentRuntimeHost
 import io.github.whywood.superpi.runtime.AppToolContext
 import io.github.whywood.superpi.runtime.GoalPhase
 import io.github.whywood.superpi.runtime.JobStatus
+import io.github.whywood.superpi.runtime.MemoryModelMode
 import io.github.whywood.superpi.runtime.MiniappAgentService
 import io.github.whywood.superpi.remote.RemoteSessionEngine
 import io.github.whywood.superpi.remote.RemoteSessionRegistry
@@ -21,12 +22,15 @@ import io.github.whywood.superpi.runtime.PiSessionEngine
 import io.github.whywood.superpi.runtime.SessionEngine
 import io.github.whywood.superpi.runtime.SessionCloseReason
 import io.github.whywood.superpi.runtime.RunLedger
-import io.github.whywood.superpi.runtime.memory.MemoryRecap
-import io.github.whywood.superpi.runtime.memory.MemoryRollup
+import io.github.whywood.superpi.runtime.memory.CatalogMemoryCompletionGateway
+import io.github.whywood.superpi.runtime.memory.MemoryDreamer
+import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.memory.MemoryModelRouter
+import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
-import io.github.whywood.superpi.runtime.memory.completeWithCheapModel
 import io.github.whywood.superpi.runtime.memory.memoryTools
 import io.github.whywood.superpi.runtime.todoWriteTool
+import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.RuntimeHooks
 import io.github.whywood.superpi.runtime.SessionBinding
 import io.github.whywood.superpi.runtime.StorageMountInfo
@@ -39,6 +43,7 @@ import io.github.whywood.superpi.runtime.presentTool
 import io.github.whywood.superpi.runtime.systemShellTool
 import io.github.whywood.superpi.runtime.timerTools
 import io.github.whywood.superpi.service.LinuxJobRunner
+import io.github.whywood.superpi.service.MemoryDreamScheduler
 import io.github.whywood.superpi.web.DeepSeekWebProvider
 import io.github.whywood.superpi.web.RoutingWebProvider
 import io.github.whywood.superpi.web.WebProvider
@@ -48,7 +53,15 @@ import io.github.whywood.superpi.web.serperBackend
 import io.github.whywood.superpi.web.tavilyBackend
 import io.github.whywood.superpi.web.webTools
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+private const val IDLE_DEBOUNCE_MS = 5 * 60_000L
 
 internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
     private val webProvider by lazy {
@@ -69,18 +82,34 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
 
     internal val pluginArrangeCalendar: io.github.whywood.superpi.arrange.ArrangeCalendarGateway get() = arrangeCalendar
 
-    private val memoryStore = MemoryStore(File(deps.agentDir, "memory")).also { it.attachBackend(deps.memoryBackend) }
-
-    private val memoryRecap = MemoryRecap(memoryStore, deps.providerCatalog, deps.scope)
-    private val memoryRollup = MemoryRollup(
-        store = memoryStore,
-        scope = deps.scope,
-        complete = { prompt ->
-            deps.runWithMemoryRollupLease {
-                completeWithCheapModel(deps.providerCatalog, prompt)
-            }
-        },
+    private val memoryStore: MemoryStore = MemoryStore(File(deps.agentDir, "memory"))
+    private val memoryPreferencesStore: MemoryPreferencesStore = MemoryPreferencesStore(
+        context = deps.appContext,
+        onPauseModeChanged = { paused -> memoryIngestorService.onPauseModeChanged(paused) },
     )
+    private val memoryModelRouter: MemoryModelRouter = MemoryModelRouter(
+        providers = deps.providerCatalog,
+        modelSettings = deps.modelConfigStore,
+        memorySettings = memoryPreferencesStore,
+        configuredProviders = deps.configuredProviderIds,
+    )
+    private val memoryGateway: CatalogMemoryCompletionGateway =
+        CatalogMemoryCompletionGateway(deps.providerCatalog, memoryModelRouter)
+    private val memoryIngestorService: MemoryIngestor = MemoryIngestor(
+        store = memoryStore,
+        completionGateway = memoryGateway,
+        scope = deps.scope,
+        isSessionExcluded = { sessionId -> host.isSessionMemoryExcluded(sessionId) },
+        isPaused = { memoryPreferencesStore.read().mode == MemoryModelMode.PAUSED },
+    )
+    private val memoryDreamerService = MemoryDreamer(
+        store = memoryStore,
+        completionGateway = memoryGateway,
+        scope = deps.scope,
+        coordinator = deps.memoryDreamCoordinator,
+    )
+    private val memoryDreamScheduler = MemoryDreamScheduler(deps.appContext)
+    private val idleDebounceJobs = ConcurrentHashMap<String, Job>()
 
     val appToolContext: AppToolContext by lazy {
         AppToolContext(
@@ -112,7 +141,13 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
             addAll(miniappTools(deps.miniappStore, binding.supportsChatDelivery))
             add(miniappEditTool(deps.miniappStore))
         }
-        addAll(memoryTools(memoryStore) { binding.current()?.sessionId })
+        addAll(
+            memoryTools(
+                store = memoryStore,
+                sessionId = { binding.current()?.sessionId },
+                isSessionExcluded = { sessionId -> host.isSessionMemoryExcluded(sessionId) },
+            ),
+        )
         if (policy.screenTools && deps.hostEnvironment.current().capabilities.hasScreenControl) {
             addAll(deps.screenTools())
             addAll(deps.virtualScreenTools())
@@ -128,8 +163,8 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
             toolHooks = delegate.toolHooks,
             onSessionBound = { binding ->
                 deps.pluginManager().bindSessionHooks(binding, delegate, excludedPluginsFor(binding))
-                memoryRollup.launchIfDue()
-                memoryRecap.launchRetryPending()
+                memoryDreamerService.launchIfDue()
+                memoryIngestorService.launchRetryPending()
             },
             onSessionClosed = { sessionId -> deps.pluginManager().onSessionClosed(sessionId) },
         )
@@ -327,26 +362,79 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
                     deps.questionCenter.pending.value.any { question -> question.sessionId == sessionId } ||
                     RemoteSessionRegistry.isWatching(sessionId)
             },
+            sessionMemoryExclusionChanged = { sessionId, excluded ->
+                deps.scope.launch {
+                    val branch = if (!excluded) host.sessionBranch(sessionId) else null
+                    memoryIngestorService.onSessionExclusionChanged(
+                        sessionId = sessionId,
+                        excluded = excluded,
+                        sessionFile = branch?.first,
+                        entries = branch?.second,
+                    )
+                }
+            },
         )
     }
 
     val memory: MemoryStore get() = memoryStore
 
-    val memoryRecapService: MemoryRecap get() = memoryRecap
+    val memoryIngestor: MemoryIngestor get() = memoryIngestorService
+
+    val memoryDreamer: MemoryDreamer get() = memoryDreamerService
+
+    val memoryPreferences: MemoryPreferencesStore get() = memoryPreferencesStore
 
     init {
+        memoryDreamScheduler.ensureScheduled()
         deps.scope.launch {
-            runCatching { deps.refreshMemoryForRollup() }
-            memoryRollup.launchIfDue()
+            memoryIngestorService.onPauseModeChanged(memoryPreferencesStore.read().mode == MemoryModelMode.PAUSED)
+            if (deps.configuredProviderIds().isEmpty()) {
+                deps.credentials.authKinds.filter { it.isNotEmpty() }.first()
+            }
+            memoryDreamerService.launchIfDue()
+            memoryIngestorService.launchRetryPending()
         }
-        memoryRecap.launchRetryPending()
     }
 
     init {
         deps.scope.launch {
+            host.events.collect { sessionEvent ->
+                when (sessionEvent.event) {
+                    is RuntimeEvent.RunStarted -> {
+                        idleDebounceJobs.remove(sessionEvent.sessionId)?.cancel()
+                    }
+                    is RuntimeEvent.RunFinished -> {
+                        val sessionId = sessionEvent.sessionId
+                        idleDebounceJobs.remove(sessionId)?.cancel()
+                        idleDebounceJobs[sessionId] = deps.scope.launch {
+                            val currentJob = coroutineContext[Job]
+                            try {
+                                delay(IDLE_DEBOUNCE_MS)
+                                val branch = host.sessionBranch(sessionId)
+                                memoryIngestorService.launchIdleDebounce(
+                                    sessionId = sessionId,
+                                    sessionFile = branch?.first,
+                                    entries = branch?.second,
+                                )
+                            } finally {
+                                if (currentJob != null) {
+                                    idleDebounceJobs.remove(sessionId, currentJob)
+                                }
+                            }
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        deps.scope.launch {
             host.sdkEvents.collect { event ->
                 if (event.event is SessionEvent.CompactionStarted) {
                     try {
+                        val branch = host.sessionBranch(event.sessionId)
+                        if (branch != null) {
+                            memoryIngestorService.launchCompactionFlush(event.sessionId, branch.first, branch.second)
+                        }
                         memoryStore.refresh("compaction")
                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                         throw cancelled
@@ -358,10 +446,11 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
         }
         deps.scope.launch {
             host.sessionClosures.collect { closure ->
+                idleDebounceJobs.remove(closure.sessionId)?.cancel()
                 if (closure.reason == SessionCloseReason.Idle || closure.reason == SessionCloseReason.Closed) {
-                    memoryRecap.launchSessionClose(closure.sessionId)
+                    memoryIngestorService.launchSessionClose(closure.sessionId)
                 } else {
-                    memoryRecap.discard(closure.sessionId)
+                    memoryIngestorService.discard(closure.sessionId)
                 }
             }
         }

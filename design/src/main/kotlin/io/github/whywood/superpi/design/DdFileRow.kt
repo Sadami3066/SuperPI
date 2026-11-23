@@ -1,6 +1,8 @@
 package io.github.whywood.superpi.design
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -13,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -28,13 +31,8 @@ fun DdFileRow(
 ) {
     val colors = superPiColors()
     val alpha = if (enabled) 1f else DdAlpha.Disabled
-    DdPressable(
-        onClick = onClick ?: {},
-        modifier = modifier.fillMaxWidth(),
-        shape = DdShapes.Row,
-        enabled = onClick != null && enabled,
-        contentDescription = name,
-    ) {
+    val rowShape = LocalDdRowShape.current
+    val rowContent: @Composable BoxScope.() -> Unit = {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -74,5 +72,22 @@ fun DdFileRow(
                 trailing()
             }
         }
+    }
+    if (onClick != null) {
+        DdPressable(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth(),
+            shape = rowShape,
+            enabled = enabled,
+            contentDescription = name,
+            content = rowContent,
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(rowShape),
+            content = rowContent,
+        )
     }
 }

@@ -4,7 +4,9 @@ import android.content.Context
 import io.github.whywood.superpi.sdk.ai.auth.oauth.OAuthRuntime
 import io.github.whywood.superpi.conversation.ConversationState
 import io.github.whywood.superpi.core.AppDependencies
-import io.github.whywood.superpi.runtime.memory.MemoryRecap
+import io.github.whywood.superpi.runtime.memory.MemoryDreamer
+import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
 import io.github.whywood.superpi.conversation.ConversationStore
 import io.github.whywood.superpi.conversation.nextMessageId
@@ -174,7 +176,7 @@ class AppGraph(context: Context) : AppDependencies {
             scope = scope,
             accounts = dataGraph.relayStore,
             host = host,
-            memorySync = dataGraph.relayMemorySync,
+            onRemoteMemoryChanged = { version -> memorySync.onRemoteVersionHint(version) },
             appVersion = BuildConfig.VERSION_NAME,
             questionCenter = dataGraph.questionCenter,
             avatarStorageDir = File(appContext.filesDir, "bot-avatars"),
@@ -423,7 +425,19 @@ class AppGraph(context: Context) : AppDependencies {
     override val host: AgentRuntimeHost get() = runtimeGraph.host
     override val conversationStore: ConversationStore get() = runtimeGraph.conversationStore
     override val memory: MemoryStore get() = runtimeGraph.memory
-    override val memoryRecap: MemoryRecap get() = runtimeGraph.memoryRecapService
+    override val memoryIngestor: MemoryIngestor get() = runtimeGraph.memoryIngestor
+    override val memoryDreamer: MemoryDreamer get() = runtimeGraph.memoryDreamer
+    override val memoryPreferences: MemoryPreferencesStore get() = runtimeGraph.memoryPreferences
+    override val memorySync: io.github.whywood.superpi.data.relay.RelayMemorySync by lazy {
+        io.github.whywood.superpi.data.relay.RelayMemorySync(
+            store = runtimeGraph.memory,
+            accounts = dataGraph.relayStore,
+            client = io.github.whywood.superpi.data.relay.RelayMemoryClient(),
+            scope = scope,
+            relayCapabilities = { relayLive.relayCapabilities.value },
+            onPostMergeConsolidation = { runtimeGraph.memoryDreamer.launchPostMergeConsolidation() },
+        )
+    }
     override val miniappAgentService: MiniappAgentService get() = runtimeGraph.miniappAgentService
 
     val notificationCenter: NotificationCenter get() = serviceGraph.notificationCenter
@@ -506,6 +520,7 @@ class AppGraph(context: Context) : AppDependencies {
             }
         }
         OAuthRuntime.callbackServerFactory = SuperPIOAuthCallbackServerFactory()
+        memorySync.start()
         scope.launch {
             host.sdkEvents.collect { event ->
                 pluginManager.onSessionSdkEvent(event.sessionId, event.event)
@@ -574,7 +589,6 @@ class AppGraph(context: Context) : AppDependencies {
         timerService = { serviceGraph.timerService },
         jobRegistry = { serviceGraph.jobRegistry },
         appPreferences = dataGraph.appPreferences,
-        memoryBackend = dataGraph.relayMemorySync,
         remoteWorkspaces = {
             io.github.whywood.superpi.data.relay.RemoteWorkspaces.workspaces(
                 root = remoteWorkspaceRoot,
@@ -596,8 +610,7 @@ class AppGraph(context: Context) : AppDependencies {
         },
         screenTools = { platformGraph.screenToolset.tools() },
         virtualScreenTools = { platformGraph.virtualScreenFeature.tools() },
-        runWithMemoryRollupLease = { block -> dataGraph.relayMemorySync.withRollupLease { block() } },
-        refreshMemoryForRollup = { dataGraph.relayMemorySync.refreshIfStale(0L) },
+        memoryDreamCoordinator = { memorySync },
     )
 
     private fun serviceGraphDeps(): ServiceGraphDeps = ServiceGraphDeps(
@@ -673,6 +686,7 @@ class AppGraph(context: Context) : AppDependencies {
         }
         credentials.preloadAll()
         reconcileModelSelection()
+        memorySync.start()
     }
 
     private suspend fun reconcileModelSelection() {

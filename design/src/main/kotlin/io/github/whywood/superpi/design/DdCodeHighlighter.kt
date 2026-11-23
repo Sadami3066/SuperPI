@@ -279,14 +279,25 @@ internal fun highlightCode(code: String, language: String?): List<CodeToken> {
 }
 
 fun highlightedCode(code: String, language: String?, colors: SuperPIColors): AnnotatedString {
+    val key = language?.trim()?.lowercase().orEmpty()
     val tokens = highlightCode(code, language)
     if (tokens.isEmpty()) return AnnotatedString(code)
+    val isDiff = key == "diff" || key == "patch"
     return buildAnnotatedString {
         append(code)
         tokens.forEach { token ->
-            addStyle(SpanStyle(color = codeColor(token.type, colors)), token.start, token.end)
+            val color = if (isDiff) diffColor(code, token, colors) else codeColor(token.type, colors)
+            addStyle(SpanStyle(color = color), token.start, token.end)
         }
     }
+}
+
+private fun diffColor(code: String, token: CodeToken, colors: SuperPIColors): Color = when {
+    code.startsWith("@@", token.start) -> colors.accent
+    code.startsWith("+++", token.start) || code.startsWith("---", token.start) -> colors.codeComment
+    code.startsWith("+", token.start) -> colors.success
+    code.startsWith("-", token.start) -> colors.danger
+    else -> codeColor(token.type, colors)
 }
 
 internal fun codeColor(type: CodeTokenType, colors: SuperPIColors): Color = when (type) {
@@ -327,7 +338,12 @@ private fun lex(code: String, language: CodeLanguage): List<CodeToken> {
         val delimiter = language.strings.firstOrNull { code.startsWith(it, index) }
         if (delimiter != null) {
             val end = stringEnd(code, index, delimiter, delimiter in language.multilineStrings)
-            tokens += CodeToken(index, end, CodeTokenType.STRING)
+            val tokenType = if (language === Json && isFollowedByColon(code, end)) {
+                CodeTokenType.TYPE
+            } else {
+                CodeTokenType.STRING
+            }
+            tokens += CodeToken(index, end, tokenType)
             index = end
             continue
         }
@@ -368,6 +384,13 @@ private fun lex(code: String, language: CodeLanguage): List<CodeToken> {
         index++
     }
     return tokens
+}
+
+private fun isFollowedByColon(code: String, start: Int): Boolean {
+    var cursor = start
+    val length = code.length
+    while (cursor < length && (code[cursor] == ' ' || code[cursor] == '\t')) cursor++
+    return cursor < length && code[cursor] == ':'
 }
 
 private fun stringEnd(code: String, start: Int, delimiter: String, multiline: Boolean): Int {

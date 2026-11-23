@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.ui.jobs
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -173,7 +173,7 @@ private fun JobRow(
     DdPressable(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth().testTag("jobs_item_${job.id}"),
-        shape = RectangleShape,
+        shape = DdShapes.Row,
         background = if (selected) colors.wash else Color.Transparent,
         contentDescription = label,
     ) {
@@ -181,7 +181,7 @@ private fun JobRow(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 52.dp)
-                .padding(horizontal = DdSpacing.Xxs),
+                .padding(horizontal = DdSpacing.Sm, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             DdIcon(
@@ -190,32 +190,39 @@ private fun JobRow(
                 size = 16.dp,
             )
             Spacer(Modifier.width(10.dp))
-            Text(
-                text = label,
-                modifier = Modifier.weight(1f),
-                style = DdType.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                ),
-                color = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = jobStatusLabel(job.status),
-                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
-                color = statusColor,
-                maxLines = 1,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = formatDuration(elapsed),
-                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
-                color = colors.inkTertiary,
-                maxLines = 1,
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = DdType.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    ),
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = jobStatusLabel(job.status),
+                        style = DdType.micro,
+                        color = statusColor,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    Text(
+                        text = formatDuration(elapsed),
+                        style = DdType.micro,
+                        color = colors.inkTertiary,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
             if (running) {
                 Spacer(Modifier.width(DdSpacing.Xs))
                 DdTextAction(
@@ -270,7 +277,7 @@ private fun JobOutput(output: String?, onCloseOutput: () -> Unit) {
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
                 ),
-                color = colors.inkTertiary,
+                color = colors.inkSecondary,
             )
         }
     }

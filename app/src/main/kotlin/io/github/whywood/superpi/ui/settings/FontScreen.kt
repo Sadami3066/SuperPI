@@ -1,26 +1,22 @@
 package io.github.whywood.superpi.ui.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,12 +25,13 @@ import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdFontStyle
 import io.github.whywood.superpi.design.DdFonts
-import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
-import io.github.whywood.superpi.design.DdShapes
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
@@ -47,18 +44,9 @@ fun FontScreen(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("font_settings"),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        modifier = modifier.testTag("font_settings"),
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -66,7 +54,8 @@ fun FontScreen(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -80,10 +69,10 @@ fun FontScreen(
                 color = colors.ink,
             )
             Spacer(Modifier.height(DdSpacing.Xl))
-            SettingsGroup {
+            DdGroupCard {
                 DdFontStyle.entries.forEachIndexed { index, style ->
                     if (index > 0) {
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     }
                     FontPreviewRow(
                         style = style,
@@ -115,14 +104,14 @@ private fun FontPreviewRow(
     DdPressable(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = DdShapes.Row,
+        shape = RectangleShape,
         contentDescription = if (selected) "$label $currentLabel" else label,
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 104.dp)
-                .padding(horizontal = DdSpacing.Lg, vertical = 14.dp),
+                .padding(horizontal = DdSpacing.RowHorizontal, vertical = 14.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Row(
@@ -131,6 +120,7 @@ private fun FontPreviewRow(
             ) {
                 Text(
                     text = label,
+                    modifier = Modifier.weight(1f, fill = false),
                     style = DdType.label.copy(fontFamily = family),
                     color = colors.ink,
                     maxLines = 1,
@@ -143,6 +133,7 @@ private fun FontPreviewRow(
                         style = DdType.chip,
                         color = colors.accent,
                         maxLines = 1,
+                        softWrap = false,
                     )
                     Spacer(Modifier.width(DdSpacing.Xxs))
                     DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
@@ -155,13 +146,14 @@ private fun FontPreviewRow(
                 verticalArrangement = Arrangement.spacedBy(DdSpacing.Xxs),
             ) {
                 Text(
-                    text = "Quick brown fox",
+                    text = stringResource(R.string.settings_font_preview_primary),
                     style = DdType.body.copy(fontFamily = family, fontSize = 18.sp, lineHeight = 26.sp),
                     color = colors.inkSecondary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "jumps over the lazy dog",
+                    text = stringResource(R.string.settings_font_preview_secondary),
                     style = DdType.bodySmall.copy(fontFamily = family, fontSize = 13.sp, lineHeight = 19.sp),
                     color = colors.inkTertiary,
                     maxLines = 1,

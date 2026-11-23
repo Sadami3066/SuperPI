@@ -16,8 +16,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdDialog
-import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
@@ -55,50 +56,50 @@ internal fun PluginImportDialog(
                         modifier = Modifier.padding(horizontal = DdSpacing.Xs, vertical = DdSpacing.Sm),
                     )
                 } else {
-                    PluginGroup {
+                    DdGroupCard {
                         DdListRow(title = inspection.name)
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_import_version),
                             value = inspection.version,
                         )
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_import_size),
                             value = formatPluginSize(context, inspection.size),
                         )
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_import_sha256),
                             value = inspection.sha256.take(16),
                         )
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_import_publisher),
                             value = inspection.publisherName.ifBlank { inspection.publisherKeyId.take(12) },
                             subtitle = inspection.publisherKeyId,
                         )
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_import_provides),
                             value = providedSummary(inspection),
                         )
                         if (inspection.capabilities.isNotEmpty()) {
-                            DdHairline()
+                            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             DdListRow(
                                 title = stringResource(R.string.plugins_import_capabilities),
                                 value = capabilitySummary(inspection.capabilities),
                             )
                         }
                         if (inspection.permissions.isNotEmpty()) {
-                            DdHairline()
+                            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             DdListRow(
                                 title = stringResource(R.string.plugins_import_permissions),
                                 value = permissionSummary(inspection.permissions),
                             )
                         }
                         if (inspection.components.isNotEmpty()) {
-                            DdHairline()
+                            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             DdListRow(
                                 title = stringResource(R.string.plugins_import_components),
                                 value = componentSummary(inspection.components),
@@ -107,9 +108,10 @@ internal fun PluginImportDialog(
                     }
                     if (!inspection.trusted) {
                         Spacer(Modifier.height(10.dp))
-                        PluginGroup {
+                        DdGroupCard {
                             DdListRow(
                                 title = stringResource(R.string.plugins_import_trust_publisher),
+                                onClick = { onTrustChange(!trustPublisher) },
                                 trailing = {
                                     DdSwitch(
                                         checked = trustPublisher,

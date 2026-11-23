@@ -16,11 +16,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -53,22 +58,27 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
+@Immutable
 data class DdMarkdownImage(
     val alt: String,
     val source: String,
     val title: String? = null,
 )
 
-private val mdBody = DdType.body.copy(letterSpacing = 0.sp)
-private val mdHeading1 = mdBody.copy(fontSize = 22.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold)
-private val mdHeading2 = mdBody.copy(fontSize = 19.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold)
-private val mdHeading3 = mdBody.copy(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+private val mdBody @Composable get() = DdType.body.copy(letterSpacing = 0.sp)
+private val mdHeading1 @Composable get() = mdBody.copy(fontSize = 22.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold)
+private val mdHeading2 @Composable get() = mdBody.copy(fontSize = 19.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold)
+private val mdHeading3 @Composable get() = mdBody.copy(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
 
-private val tableCellStyle = DdType.bodySmall.copy(fontSize = 14.sp, lineHeight = 21.sp)
-private val tableHeaderStyle = tableCellStyle.copy(fontWeight = FontWeight.Medium)
+private val tableCellStyle @Composable get() = DdType.bodySmall.copy(fontSize = 14.sp, lineHeight = 21.sp)
+private val tableHeaderStyle @Composable get() = tableCellStyle.copy(fontWeight = FontWeight.Medium)
 
 @Composable
 fun DdMarkdown(
@@ -95,24 +105,37 @@ fun DdMarkdown(
     val document = remember(plan.links, plan.footnoteNumbers, plan.footnotes) {
         MarkdownDocument(emptyList(), plan.links, plan.footnoteNumbers, plan.footnotes)
     }
-    val blocks = ArrayList<MarkdownBlock>(plan.chunks.size)
-    plan.chunks.forEach { chunk -> blocks += rememberChunkBlocks(chunk) }
+    val chunkBlocks = ArrayList<List<MarkdownBlock>>(plan.chunks.size)
+    plan.chunks.forEach { chunk -> chunkBlocks += rememberChunkBlocks(chunk) }
     val fileClick = rememberFileClickHandler(onFileClick)
     val linkClick = rememberLinkClickHandler(onLinkClick)
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DdSpacing.Md)) {
-        MarkdownBlocks(
-            blocks = blocks,
-            document = document,
-            colors = colors,
-            onFileClick = fileClick,
-            onLinkClick = linkClick,
-            live = live,
-            codeLabel = codeLabel,
-            copyCodeLabel = copyCodeLabel,
-            onCopyCode = onCopyCode,
-            onImage = onImage,
-        )
+    val copyCode = rememberCopyCodeHandler(onCopyCode)
+    val imageHandler = rememberImageHandler(onImage)
+    Column(modifier.fillMaxWidth()) {
+        plan.chunks.indices.forEach { chunkIndex ->
+            val blocks = chunkBlocks[chunkIndex]
+            val previousTail = if (chunkIndex > 0) chunkBlocks[chunkIndex - 1].lastOrNull() else null
+            key(chunkIndex) {
+                if (chunkIndex > 0 && blocks.isNotEmpty()) {
+                    val gap = if (previousTail != null) blockGap(previousTail, blocks.first()) else DdSpacing.Md
+                    Spacer(Modifier.height(gap))
+                }
+                MarkdownBlocks(
+                    blocks = blocks,
+                    document = document,
+                    colors = colors,
+                    onFileClick = fileClick,
+                    onLinkClick = linkClick,
+                    live = live,
+                    codeLabel = codeLabel,
+                    copyCodeLabel = copyCodeLabel,
+                    onCopyCode = copyCode,
+                    onImage = imageHandler,
+                )
+            }
+        }
         if (document.footnotes.isNotEmpty()) {
+            if (chunkBlocks.any { it.isNotEmpty() }) Spacer(Modifier.height(DdSpacing.Md))
             FootnoteList(document.footnotes, document, colors, fileClick, linkClick)
         }
     }
@@ -143,6 +166,32 @@ private fun rememberLinkClickHandler(onLinkClick: ((String) -> Unit)?): ((String
             null
         } else {
             { url: String -> current.value?.invoke(url) }
+        }
+    }
+}
+
+@Composable
+private fun rememberCopyCodeHandler(onCopyCode: ((String) -> Unit)?): ((String) -> Unit)? {
+    val current = rememberUpdatedState(onCopyCode)
+    return remember(onCopyCode == null) {
+        if (onCopyCode == null) {
+            null
+        } else {
+            { code: String -> current.value?.invoke(code) }
+        }
+    }
+}
+
+@Composable
+private fun rememberImageHandler(
+    onImage: (@Composable (DdMarkdownImage) -> Unit)?,
+): (@Composable (DdMarkdownImage) -> Unit)? {
+    val current = rememberUpdatedState(onImage)
+    return remember(onImage == null) {
+        if (onImage == null) {
+            null
+        } else {
+            @Composable { image: DdMarkdownImage -> current.value?.invoke(image) }
         }
     }
 }
@@ -299,18 +348,22 @@ private fun QuoteBlock(
     onCopyCode: ((String) -> Unit)?,
     onImage: (@Composable (DdMarkdownImage) -> Unit)?,
 ) {
-    val barColor = colors.hairline
+    val barColor = colors.accent.copy(alpha = 0.55f)
+    val quoteShape = RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp)
     Box(
         Modifier
             .fillMaxWidth()
+            .clip(quoteShape)
+            .background(colors.wash.copy(alpha = 0.48f))
             .drawBehind {
                 drawRoundRect(
                     color = barColor,
                     topLeft = Offset.Zero,
-                    size = Size(2.dp.toPx(), size.height),
-                    cornerRadius = CornerRadius(1.dp.toPx()),
+                    size = Size(3.dp.toPx(), size.height),
+                    cornerRadius = CornerRadius(1.5.dp.toPx()),
                 )
-            },
+            }
+            .padding(top = 8.dp, bottom = 8.dp, end = 12.dp),
     ) {
         MarkdownBlocks(
             blocks = block.blocks,
@@ -372,19 +425,31 @@ private fun CodeBlock(
     copyCodeLabel: String,
     onCopyCode: ((String) -> Unit)?,
 ) {
-    val highlighted = remember(code, language, colors, live) {
+    val plainText = remember(code) { AnnotatedString(code) }
+    val highlighted by produceState(initialValue = plainText, code, language, colors, live) {
         if (live) {
-            AnnotatedString(code)
+            value = plainText
         } else {
-            highlightedCode(code, language, colors)
+            value = withContext(Dispatchers.Default) {
+                highlightedCode(code, language, colors)
+            }
+        }
+    }
+    val displayText = if (!live && highlighted.text == code) highlighted else plainText
+    var copied by remember(code) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500)
+            copied = false
         }
     }
     Column(
         Modifier
             .fillMaxWidth()
             .clip(DdShapes.Medium)
-            .background(colors.wash)
-            .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 14.dp),
+            .background(colors.codeBackground)
+            .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Medium)
+            .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 14.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             DdText(
@@ -395,19 +460,22 @@ private fun CodeBlock(
             )
             if (onCopyCode != null) {
                 DdIconButton(
-                    icon = DdIcons.Copy,
-                    onClick = { onCopyCode(code) },
+                    icon = if (copied) DdIcons.Check else DdIcons.Copy,
+                    onClick = {
+                        onCopyCode(code)
+                        copied = true
+                    },
                     contentDescription = copyCodeLabel,
                     modifier = Modifier.testTag("markdown_code_copy"),
-                    size = 30.dp,
-                    iconSize = 14.dp,
-                    tint = colors.inkTertiary,
+                    size = 44.dp,
+                    iconSize = 15.dp,
+                    tint = if (copied) colors.success else colors.inkTertiary,
                 )
             }
         }
-        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        Box(Modifier.fillMaxWidth().padding(end = 8.dp).horizontalScroll(rememberScrollState())) {
             DdText(
-                text = highlighted,
+                text = displayText,
                 style = DdType.bodySmall.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
@@ -470,19 +538,19 @@ private fun ListMarker(marker: MarkdownMarker, colors: SuperPIColors, depth: Int
     when (marker) {
         MarkdownMarker.Bullet -> DdText(
             text = if (depth == 0) "•" else "◦",
-            modifier = Modifier.width(24.dp),
+            modifier = Modifier.width(18.dp),
             style = DdType.body,
             color = colors.inkSecondary.copy(alpha = if (depth == 0) 1f else 0.72f),
         )
 
         is MarkdownMarker.Ordered -> DdText(
             text = "${marker.number}.",
-            modifier = Modifier.width(24.dp),
+            modifier = Modifier.widthIn(min = 24.dp),
             style = DdType.body,
             color = colors.inkSecondary,
         )
 
-        is MarkdownMarker.Task -> Box(Modifier.width(24.dp)) {
+        is MarkdownMarker.Task -> Box(Modifier.width(22.dp)) {
             Box(
                 Modifier
                     .padding(top = 6.dp)
@@ -514,25 +582,63 @@ private fun TableBlock(
     val columns = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
     if (columns == 0) return
     val textMeasurer = rememberTextMeasurer()
-    val naturalWidths = remember(
-        block,
+    val density = LocalDensity.current
+    val headerStyle = tableHeaderStyle
+    val cellStyle = tableCellStyle
+    val headerFontPx = with(density) { headerStyle.fontSize.takeOrElse { 14.sp }.toPx() }
+    val cellFontPx = with(density) { cellStyle.fontSize.takeOrElse { 14.sp }.toPx() }
+    val renderedHeader = remember(
+        block.header,
         document.links,
         document.footnoteNumbers,
         colors,
         onFileClick,
         onLinkClick,
+    ) {
+        block.header.map { renderInline(it, document, colors, onFileClick, onLinkClick) }
+    }
+    val renderedRows = remember(
+        block.rows,
+        document.links,
+        document.footnoteNumbers,
+        colors,
+        onFileClick,
+        onLinkClick,
+    ) {
+        block.rows.map { row -> row.map { renderInline(it, document, colors, onFileClick, onLinkClick) } }
+    }
+    val naturalWidths = remember(
+        renderedHeader,
+        renderedRows,
+        headerStyle,
+        cellStyle,
+        headerFontPx,
+        cellFontPx,
         textMeasurer,
         live,
     ) {
         if (live) {
-            List(columns) { 0 }
+            List(columns) { column ->
+                var widest = estimateTextWidthPx(
+                    renderedHeader.getOrNull(column)?.text?.text.orEmpty(),
+                    headerFontPx,
+                )
+                renderedRows.forEach { row ->
+                    val est = estimateTextWidthPx(
+                        row.getOrNull(column)?.text?.text.orEmpty(),
+                        cellFontPx,
+                    )
+                    if (est > widest) widest = est
+                }
+                widest
+            }
         } else {
             List(columns) { column ->
                 var widest = 0
-                fun measure(cell: String, style: TextStyle) {
-                    if (cell.isEmpty()) return
+                fun measure(rendered: RenderedInline?, style: TextStyle) {
+                    if (rendered == null || rendered.text.isEmpty()) return
                     val measured = textMeasurer.measure(
-                        text = renderInline(cell, document, colors, onFileClick, onLinkClick).text,
+                        text = rendered.text,
                         style = style,
                         overflow = TextOverflow.Clip,
                         softWrap = false,
@@ -540,14 +646,13 @@ private fun TableBlock(
                     )
                     if (measured.size.width > widest) widest = measured.size.width
                 }
-                measure(block.header.getOrNull(column).orEmpty(), tableHeaderStyle)
-                block.rows.forEach { row -> measure(row.getOrNull(column).orEmpty(), tableCellStyle) }
+                measure(renderedHeader.getOrNull(column), headerStyle)
+                renderedRows.forEach { row -> measure(row.getOrNull(column), cellStyle) }
                 widest
             }
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val density = LocalDensity.current
         val horizontalPadding = 12.dp
         val verticalPadding = 8.dp
         val paddingPx = with(density) { (horizontalPadding * 2).roundToPx() }
@@ -567,30 +672,24 @@ private fun TableBlock(
                     .border(1.dp, colors.hairline, DdShapes.Medium),
             ) {
                 TableRow(
-                    block.header,
+                    renderedHeader,
                     widthDps,
-                    document,
                     colors,
-                    onFileClick,
-                    onLinkClick,
                     header = true,
                     horizontalPadding,
                     verticalPadding,
                 )
                 DdHairline()
-                block.rows.forEachIndexed { index, row ->
+                renderedRows.forEachIndexed { index, row ->
                     TableRow(
                         row,
                         widthDps,
-                        document,
                         colors,
-                        onFileClick,
-                        onLinkClick,
                         header = false,
                         horizontalPadding,
                         verticalPadding,
                     )
-                    if (index != block.rows.lastIndex) DdHairline()
+                    if (index != renderedRows.lastIndex) DdHairline()
                 }
             }
         }
@@ -599,12 +698,9 @@ private fun TableBlock(
 
 @Composable
 private fun TableRow(
-    cells: List<String>,
+    cells: List<RenderedInline>,
     widths: List<Dp>,
-    document: MarkdownDocument,
     colors: SuperPIColors,
-    onFileClick: ((String) -> Unit)?,
-    onLinkClick: ((String) -> Unit)?,
     header: Boolean,
     horizontalPadding: Dp,
     verticalPadding: Dp,
@@ -617,9 +713,10 @@ private fun TableRow(
         verticalAlignment = Alignment.Top,
     ) {
         widths.forEachIndexed { index, width ->
+            val cell = cells.getOrNull(index) ?: RenderedInline(AnnotatedString(""), emptyList())
             Box(Modifier.width(width).padding(horizontal = horizontalPadding, vertical = verticalPadding)) {
                 InlineCodeText(
-                    rendered = rememberedInline(cells.getOrNull(index).orEmpty(), document, colors, onFileClick, onLinkClick),
+                    rendered = cell,
                     style = style,
                     color = colors.ink,
                 )
@@ -656,6 +753,15 @@ private fun distributeRemaining(
     return widths
 }
 
+private fun estimateTextWidthPx(text: String, fontSizePx: Float): Int {
+    if (text.isEmpty()) return 0
+    var units = 0f
+    for (ch in text) {
+        units += if (ch.code > 0x2E7F) 1.0f else 0.56f
+    }
+    return (units * fontSizePx).toInt()
+}
+
 private data class RenderedInline(
     val text: AnnotatedString,
     val codeRanges: List<IntRange>,
@@ -668,6 +774,15 @@ private fun InlineCodeText(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    if (rendered.codeRanges.isEmpty()) {
+        DdText(
+            text = rendered.text,
+            modifier = modifier,
+            style = style,
+            color = color,
+        )
+        return
+    }
     val colors = superPiColors()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     DdText(
@@ -675,12 +790,15 @@ private fun InlineCodeText(
         modifier = modifier.drawBehind {
             val textLayout = layout ?: return@drawBehind
             if (rendered.codeRanges.isEmpty()) return@drawBehind
+            if (textLayout.layoutInput.text != rendered.text) return@drawBehind
+            val textLength = textLayout.layoutInput.text.length
             val horizontalPadding = 3.dp.toPx()
             val fontSize = style.fontSize.takeOrElse { 15.sp }.toPx()
             val ascent = fontSize * 0.84f
             val descent = fontSize * 0.32f
             val cornerRadius = CornerRadius(4.dp.toPx())
             rendered.codeRanges.forEach { range ->
+                if (range.first < 0 || range.last >= textLength || range.first > range.last) return@forEach
                 val firstLine = textLayout.getLineForOffset(range.first)
                 val lastLine = textLayout.getLineForOffset(range.last)
                 for (line in firstLine..lastLine) {
@@ -689,13 +807,15 @@ private fun InlineCodeText(
                     if (start >= end) continue
                     val startX = textLayout.getHorizontalPosition(start, usePrimaryDirection = true)
                     val endX = textLayout.getHorizontalPosition(end, usePrimaryDirection = true)
+                    val left = minOf(startX, endX)
+                    val right = maxOf(startX, endX)
                     val baseline = textLayout.getLineBaseline(line)
                     val top = baseline - ascent
                     val bottom = baseline + descent
                     drawRoundRect(
                         color = colors.inlineCodeBackground,
-                        topLeft = Offset(startX - horizontalPadding, top),
-                        size = Size(endX - startX + horizontalPadding * 2, bottom - top),
+                        topLeft = Offset(left - horizontalPadding, top),
+                        size = Size(right - left + horizontalPadding * 2, bottom - top),
                         cornerRadius = cornerRadius,
                     )
                 }
@@ -775,7 +895,7 @@ private fun AnnotatedString.Builder.appendInlineNodes(
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
+                            fontSize = 0.88.em,
                             color = colors.inkSecondary,
                         ),
                     ) {
@@ -786,7 +906,7 @@ private fun AnnotatedString.Builder.appendInlineNodes(
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
+                            fontSize = 0.88.em,
                             color = colors.inkSecondary,
                         ),
                     ) {

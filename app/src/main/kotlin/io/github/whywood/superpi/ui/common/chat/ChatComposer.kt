@@ -3,11 +3,10 @@ package io.github.whywood.superpi.ui.common.chat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -28,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,15 +49,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -82,12 +76,12 @@ import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.runtime.QueuedInput
 import io.github.whywood.superpi.runtime.ThinkingLevel
-import io.github.whywood.superpi.ui.common.rememberHapticFeedback
 import io.github.whywood.superpi.ui.common.ComposerVoice
 import io.github.whywood.superpi.ui.common.VoiceRecordingBar
 import io.github.whywood.superpi.ui.common.VoiceTranscriptPreview
@@ -167,14 +161,13 @@ internal fun ChatComposer(
     }
     val canSend = state.inputEnabled && state.ready && state.configured &&
         value.isNotBlank() && !state.importingAttachment
-    val stops = state.sending && value.isBlank()
+    val stops = state.sending && !canSend
     val sendDescription = when {
         stops -> stringResource(R.string.assistant_stop)
         state.sending -> stringResource(R.string.assistant_send_steer)
         else -> stringResource(R.string.assistant_send)
     }
     var focused by remember { mutableStateOf(false) }
-    val focusScale = remember { Animatable(1f) }
     var pendingExpand by remember { mutableStateOf(false) }
     var committedVoice by remember { mutableStateOf("") }
 
@@ -238,26 +231,12 @@ internal fun ChatComposer(
         }
     }
 
-    LaunchedEffect(focused) {
-        if (!focused || !chatAnimationsEnabled()) {
-            focusScale.snapTo(1f)
-            return@LaunchedEffect
-        }
-        focusScale.animateTo(1.03f, tween(durationMillis = 120, easing = DdMotion.EaseOut))
-        focusScale.animateTo(
-            targetValue = 1f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
-        )
-    }
-
+    val motionEnabled = LocalDdMotionEnabled.current
     val collapsedInset =
         ComposerMetrics.CollapsedHorizontalPadding - ComposerMetrics.ExpandedHorizontalPadding
     val horizontalInset by animateDpAsState(
         targetValue = if (surface == ComposerSurface.Collapsed) collapsedInset else 0.dp,
-        animationSpec = tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "composer-inset",
     )
     val cornerRadius by animateDpAsState(
@@ -266,7 +245,7 @@ internal fun ChatComposer(
         } else {
             ComposerMetrics.ShapeRadius
         },
-        animationSpec = tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "composer-corner",
     )
     val shape = RoundedCornerShape(cornerRadius)
@@ -296,16 +275,26 @@ internal fun ChatComposer(
                     targetState = surface,
                     modifier = Modifier.fillMaxWidth(),
                     transitionSpec = {
-                        (fadeIn(tween(durationMillis = 160, easing = DdMotion.EaseOut)) togetherWith
-                            fadeOut(tween(durationMillis = 120, easing = DdMotion.EaseOut)))
+                        val fadeInSpec = if (motionEnabled) {
+                            tween<Float>(durationMillis = DdMotion.FAST, easing = DdMotion.EaseOut)
+                        } else {
+                            snap()
+                        }
+                        val fadeOutSpec = if (motionEnabled) {
+                            tween<Float>(durationMillis = 110, easing = DdMotion.EaseOut)
+                        } else {
+                            snap()
+                        }
+                        (fadeIn(fadeInSpec) togetherWith fadeOut(fadeOutSpec))
                             .using(
                                 SizeTransform(
                                     clip = false,
                                     sizeAnimationSpec = { _, _ ->
-                                        tween(
-                                            durationMillis = DdMotion.BASE,
-                                            easing = DdMotion.EaseOut,
-                                        )
+                                        if (motionEnabled) {
+                                            tween(durationMillis = 180, easing = DdMotion.EaseOut)
+                                        } else {
+                                            snap()
+                                        }
                                     },
                                 ),
                             )
@@ -325,7 +314,6 @@ internal fun ChatComposer(
                     ComposerSurface.Expanded -> ComposerCard(
                         shape = shape,
                         focused = focused,
-                        scale = focusScale.value,
                     ) {
                         ChatComposerExpandedContent(
                             state = state,
@@ -375,10 +363,11 @@ internal fun ChatComposer(
                 ) {
                     Text(
                         text = stringResource(R.string.assistant_configure_hint),
+                        modifier = Modifier.weight(1f),
                         style = DdType.bodySmall,
                         color = colors.inkTertiary,
                     )
-                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.width(DdSpacing.Sm))
                     DdTextAction(
                         text = stringResource(R.string.assistant_open_settings),
                         onClick = actions.onManageProviders,
@@ -412,29 +401,29 @@ internal fun ChatComposer(
 private fun ComposerCard(
     shape: RoundedCornerShape,
     focused: Boolean = false,
-    scale: Float = 1f,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val elevation by animateDpAsState(
         targetValue = if (focused) 15.dp else 10.dp,
-        animationSpec = tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "composer-elevation",
     )
     val spotAlpha by animateFloatAsState(
         targetValue = if (focused) 0.34f else 0.24f,
-        animationSpec = tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "composer-spot",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) colors.inkTertiary.copy(alpha = 0.45f) else colors.hairline,
+        animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
+        label = "composer-border",
     )
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                transformOrigin = TransformOrigin(0.5f, 1f)
-            }
             .shadow(
                 elevation = elevation,
                 shape = shape,
@@ -444,13 +433,7 @@ private fun ComposerCard(
             )
             .clip(shape)
             .background(colors.composer)
-            .then(
-                if (colors.paper.luminance() < 0.5f) {
-                    Modifier.border(1.dp, colors.ink.copy(alpha = 0.08f), shape)
-                } else {
-                    Modifier
-                },
-            ),
+            .border(1.dp, borderColor, shape),
         content = content,
     )
 }
@@ -486,8 +469,8 @@ private fun ChatComposerCollapsedContent(
                 onClick = onPickAttachment,
                 contentDescription = stringResource(R.string.assistant_attach_add),
                 modifier = Modifier.testTag("assistant_attach"),
-                size = 34.dp,
-                iconSize = 17.dp,
+                size = 44.dp,
+                iconSize = 18.dp,
                 tint = colors.inkTertiary,
             )
         }
@@ -529,6 +512,7 @@ private fun ChatComposerExpandedContent(
     onInputFocusChanged: (Boolean) -> Unit,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val quote = state.quote
     var lastQuote by remember { mutableStateOf<QuotedMessage?>(null) }
 
@@ -560,16 +544,24 @@ private fun ChatComposerExpandedContent(
             }
             AnimatedVisibility(
                 visible = quote != null,
-                enter = fadeIn(tween(DdMotion.FAST)) +
-                    expandVertically(
-                        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                        expandFrom = Alignment.Top,
-                    ),
-                exit = fadeOut(tween(DdMotion.FAST)) +
-                    shrinkVertically(
-                        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                        shrinkTowards = Alignment.Top,
-                    ),
+                enter = if (motionEnabled) {
+                    fadeIn(tween(DdMotion.FAST)) +
+                        expandVertically(
+                            animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                            expandFrom = Alignment.Top,
+                        )
+                } else {
+                    fadeIn(snap())
+                },
+                exit = if (motionEnabled) {
+                    fadeOut(tween(DdMotion.FAST)) +
+                        shrinkVertically(
+                            animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                            shrinkTowards = Alignment.Top,
+                        )
+                } else {
+                    fadeOut(snap())
+                },
             ) {
                 Row(
                     modifier = Modifier
@@ -600,7 +592,7 @@ private fun ChatComposerExpandedContent(
                         onClick = actions.onClearQuote,
                         contentDescription = stringResource(R.string.assistant_quote_remove),
                         modifier = Modifier.testTag("assistant_quote_clear"),
-                        size = 30.dp,
+                        size = 44.dp,
                         iconSize = 14.dp,
                         tint = colors.inkTertiary,
                     )
@@ -634,16 +626,24 @@ private fun ChatComposerExpandedContent(
             val failure = voice.failure
             AnimatedVisibility(
                 visible = failure != null,
-                enter = fadeIn(tween(DdMotion.FAST)) +
-                    expandVertically(
-                        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                        expandFrom = Alignment.Top,
-                    ),
-                exit = fadeOut(tween(DdMotion.FAST)) +
-                    shrinkVertically(
-                        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                        shrinkTowards = Alignment.Top,
-                    ),
+                enter = if (motionEnabled) {
+                    fadeIn(tween(DdMotion.FAST)) +
+                        expandVertically(
+                            animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                            expandFrom = Alignment.Top,
+                        )
+                } else {
+                    fadeIn(snap())
+                },
+                exit = if (motionEnabled) {
+                    fadeOut(tween(DdMotion.FAST)) +
+                        shrinkVertically(
+                            animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                            shrinkTowards = Alignment.Top,
+                        )
+                } else {
+                    fadeOut(snap())
+                },
             ) {
                 if (failure != null) {
                     Text(
@@ -672,33 +672,42 @@ private fun ChatComposerExpandedContent(
                 onClick = actions.onPickAttachment,
                 contentDescription = stringResource(R.string.assistant_attach_add),
                 modifier = Modifier.testTag("assistant_attach"),
-                size = 34.dp,
-                iconSize = 17.dp,
+                size = 44.dp,
+                iconSize = 18.dp,
                 tint = colors.inkTertiary,
             )
         }
-        if (state.modelControlsVisible) {
-            ComposerChip(
-                text = label,
-                onClick = {
-                    if (state.configured || state.providers.isNotEmpty()) {
-                        actions.onModelsOpenChange(true)
-                    } else {
-                        actions.onManageProviders()
-                    }
-                },
-                contentDescription = stringResource(R.string.assistant_model_chip, label),
-                testTag = "assistant_model",
-                maxWidth = 150.dp,
-            )
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (state.modelControlsVisible) {
+                val thinkingBadge = if (
+                    state.thinkingLevel != ThinkingLevel.OFF &&
+                    state.thinkingLevels.any { it != ThinkingLevel.OFF }
+                ) {
+                    thinkingLabel(state.thinkingLevel)
+                } else {
+                    null
+                }
+                ComposerChip(
+                    text = label,
+                    onClick = {
+                        if (state.configured || state.providers.isNotEmpty()) {
+                            actions.onModelsOpenChange(true)
+                        } else {
+                            actions.onManageProviders()
+                        }
+                    },
+                    contentDescription = stringResource(R.string.assistant_model_chip, label),
+                    testTag = "assistant_model",
+                    maxWidth = 172.dp,
+                    thinking = thinkingBadge,
+                )
+            }
         }
-        Spacer(Modifier.weight(1f))
         if (state.inputEnabled) {
             ComposerMicButton(onClick = onStartVoice)
-        }
-        if (state.sending && !stops) {
-            Spacer(Modifier.width(6.dp))
-            ComposerStopButton(onClick = actions.onStop)
         }
         Spacer(Modifier.width(6.dp))
         ComposerSendButton(
@@ -731,23 +740,6 @@ private fun ComposerMicButton(
 }
 
 @Composable
-private fun ComposerStopButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = superPiColors()
-    DdPressable(
-        onClick = onClick,
-        modifier = modifier.size(34.dp).testTag("assistant_stop"),
-        shape = CircleShape,
-        background = colors.accent,
-        contentDescription = stringResource(R.string.assistant_stop),
-    ) {
-        StopSquare(size = 10.dp, color = colors.onAccent)
-    }
-}
-
-@Composable
 private fun StopSquare(
     size: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
@@ -771,35 +763,30 @@ private fun ComposerSendButton(
     onStop: () -> Unit = {},
 ) {
     val colors = superPiColors()
-    val haptic = rememberHapticFeedback()
+    val motionEnabled = LocalDdMotionEnabled.current
     val enabled = canSend || stops
-    Box(
-        modifier = modifier
-            .size(ComposerMetrics.ActionButtonSize)
-            .clip(CircleShape)
-            .background(
-                when {
-                    stops -> colors.accent
-                    canSend -> colors.accent
-                    else -> colors.wash
-                },
-            )
-            .clickable(
-                enabled = enabled,
-                role = Role.Button,
-                onClick = {
-                    haptic(HapticFeedbackType.Confirm)
-                    if (stops) onStop() else onClick()
-                },
-            )
-            .semantics { this.contentDescription = contentDescription }
-            .testTag("assistant_send"),
-        contentAlignment = Alignment.Center,
+    DdPressable(
+        onClick = { if (stops) onStop() else onClick() },
+        interactionSource = remember { MutableInteractionSource() },
+        modifier = modifier.size(ComposerMetrics.ActionButtonSize).testTag("assistant_send"),
+        shape = CircleShape,
+        background = when {
+            stops -> colors.accent
+            canSend -> colors.accent
+            else -> colors.wash
+        },
+        enabled = enabled,
+        hapticFeedbackType = HapticFeedbackType.Confirm,
+        contentDescription = contentDescription,
     ) {
         AnimatedContent(
             targetState = stops,
             transitionSpec = {
-                fadeIn(tween(DdMotion.FAST)) togetherWith fadeOut(tween(DdMotion.FAST))
+                if (motionEnabled) {
+                    fadeIn(tween(DdMotion.FAST)) togetherWith fadeOut(tween(DdMotion.FAST))
+                } else {
+                    fadeIn(snap()) togetherWith fadeOut(snap())
+                }
             },
             label = "composer-primary-icon",
         ) { stopping ->
@@ -851,8 +838,8 @@ internal fun QueuedInputBuffer(
                     onClick = { onRemove(input) },
                     contentDescription = stringResource(R.string.assistant_ux_queue_remove),
                     modifier = Modifier.testTag("assistant_queue_remove"),
-                    size = 28.dp,
-                    iconSize = 13.dp,
+                    size = 44.dp,
+                    iconSize = 14.dp,
                     tint = colors.inkTertiary,
                 )
                 DdIconButton(
@@ -860,8 +847,8 @@ internal fun QueuedInputBuffer(
                     onClick = { onSend(input) },
                     contentDescription = stringResource(R.string.assistant_ux_queue_send),
                     modifier = Modifier.testTag("assistant_queue_send"),
-                    size = 28.dp,
-                    iconSize = 13.dp,
+                    size = 44.dp,
+                    iconSize = 14.dp,
                     tint = colors.accent,
                 )
             }
@@ -876,26 +863,40 @@ internal fun ComposerChip(
     contentDescription: String,
     testTag: String,
     maxWidth: Dp,
+    thinking: String? = null,
 ) {
     val colors = superPiColors()
     DdPressable(
         onClick = onClick,
-        modifier = Modifier.height(32.dp).testTag(testTag),
-        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.heightIn(min = 44.dp).testTag(testTag),
+        shape = DdShapes.Small,
         contentDescription = contentDescription,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = DdSpacing.Sm).widthIn(max = maxWidth),
+            modifier = Modifier
+                .padding(horizontal = DdSpacing.Sm)
+                .widthIn(max = maxWidth),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(
                 text = text,
+                modifier = Modifier.weight(1f, fill = false),
                 style = DdType.chip,
                 color = colors.inkSecondary,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (!thinking.isNullOrBlank()) {
+                Text(
+                    text = "· $thinking",
+                    style = DdType.chip,
+                    color = colors.accent,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
             DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 12.dp)
         }
     }

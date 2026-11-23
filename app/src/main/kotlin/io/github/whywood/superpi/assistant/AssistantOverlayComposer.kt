@@ -3,6 +3,7 @@ package io.github.whywood.superpi.assistant
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -64,6 +65,7 @@ import io.github.whywood.superpi.design.DdNoticeTone
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.ui.common.ComposerVoice
 import io.github.whywood.superpi.ui.common.VoiceRecordingBar
@@ -102,7 +104,8 @@ internal fun AssistantOverlayComposer(
     val inputEnabled = remoteControls.inputEnabled
     val modelControlsVisible = remoteControls.modelControlsVisible
     val blockedReason = if (inputEnabled) null else stringResource(R.string.assistant_remote_offline)
-    val canSend = inputEnabled && value.isNotBlank() && state.conversation.loaded
+    val canSend = inputEnabled && value.isNotBlank() && state.conversation.loaded && !state.importingAttachment
+    val stops = busy && !canSend
     var showModelSheet by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     var pendingExpand by remember { mutableStateOf(false) }
@@ -124,7 +127,11 @@ internal fun AssistantOverlayComposer(
     val micDescription = stringResource(R.string.assistant_overlay_mic)
     val attachDescription = stringResource(R.string.assistant_attach_add)
     val sendDescription = stringResource(
-        if (busy) R.string.assistant_send_steer else R.string.assistant_overlay_send,
+        when {
+            stops -> R.string.assistant_overlay_stop
+            busy -> R.string.assistant_send_steer
+            else -> R.string.assistant_overlay_send
+        },
     )
     val collapsedInset =
         ComposerMetrics.CollapsedHorizontalPadding - ComposerMetrics.ExpandedHorizontalPadding
@@ -220,6 +227,7 @@ internal fun AssistantOverlayComposer(
                                     onValueChange = onValueChange,
                                     busy = busy,
                                     canSend = canSend,
+                                    stops = stops,
                                     micDescription = micDescription,
                                     attachDescription = attachDescription,
                                     sendDescription = sendDescription,
@@ -294,6 +302,7 @@ private fun AssistantOverlayExpandedContent(
     onValueChange: (String) -> Unit,
     busy: Boolean,
     canSend: Boolean,
+    stops: Boolean,
     micDescription: String,
     attachDescription: String,
     sendDescription: String,
@@ -371,16 +380,20 @@ private fun AssistantOverlayExpandedContent(
                     tint = colors.inkTertiary,
                 )
             }
-            if (modelControlsVisible) {
-                ComposerChip(
-                    text = modelLabel,
-                    onClick = onOpenModels,
-                    contentDescription = stringResource(R.string.assistant_model_sheet),
-                    testTag = "assistant_overlay_model_chip",
-                    maxWidth = 150.dp,
-                )
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (modelControlsVisible) {
+                    ComposerChip(
+                        text = modelLabel,
+                        onClick = onOpenModels,
+                        contentDescription = stringResource(R.string.assistant_model_sheet),
+                        testTag = "assistant_overlay_model_chip",
+                        maxWidth = 150.dp,
+                    )
+                }
             }
-            Spacer(Modifier.weight(1f))
             if (inputEnabled) {
                 OverlayMicButton(
                     contentDescription = micDescription,
@@ -388,16 +401,14 @@ private fun AssistantOverlayExpandedContent(
                     modifier = Modifier.testTag("assistant_overlay_mic"),
                 )
             }
-            if (busy) {
-                Spacer(Modifier.width(6.dp))
-                OverlayStopButton(onClick = actions.onStop)
-            }
             Spacer(Modifier.width(6.dp))
             OverlaySendButton(
                 canSend = canSend,
                 busy = busy,
+                stops = stops,
                 contentDescription = sendDescription,
                 onSubmit = onSubmit,
+                onStop = actions.onStop,
             )
         }
     }
@@ -494,52 +505,58 @@ private fun OverlayMicButton(
 }
 
 @Composable
-private fun OverlayStopButton(onClick: () -> Unit) {
-    val colors = superPiColors()
-    DdPressable(
-        onClick = onClick,
-        modifier = Modifier.size(34.dp).testTag("assistant_overlay_stop"),
-        shape = CircleShape,
-        background = colors.accent,
-        contentDescription = stringResource(R.string.assistant_overlay_stop),
-    ) {
-        Box(
-            Modifier
-                .size(12.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(colors.onAccent),
-        )
-    }
-}
-
-@Composable
 private fun OverlaySendButton(
     canSend: Boolean,
     busy: Boolean,
     contentDescription: String,
     onSubmit: (Boolean) -> Unit,
+    stops: Boolean = false,
+    onStop: () -> Unit = {},
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
+    val enabled = canSend || stops
     Box(
         modifier = Modifier
             .size(ComposerMetrics.ActionButtonSize)
             .clip(CircleShape)
-            .background(if (canSend) colors.accent else colors.wash)
+            .background(if (enabled) colors.accent else colors.wash)
             .combinedClickable(
-                enabled = canSend,
+                enabled = enabled,
                 role = Role.Button,
-                onClick = { onSubmit(false) },
-                onLongClick = { if (busy) onSubmit(true) },
+                onClick = { if (stops) onStop() else onSubmit(false) },
+                onLongClick = { if (!stops && busy && canSend) onSubmit(true) },
             )
             .semantics { this.contentDescription = contentDescription }
             .testTag("assistant_overlay_send"),
         contentAlignment = Alignment.Center,
     ) {
-        DdIcon(
-            icon = DdIcons.ArrowUp,
-            tint = if (canSend) colors.onAccent else colors.inkTertiary,
-            size = ComposerMetrics.ActionIconSize,
-        )
+        AnimatedContent(
+            targetState = stops,
+            transitionSpec = {
+                if (motionEnabled) {
+                    fadeIn(tween(DdMotion.FAST)) togetherWith fadeOut(tween(DdMotion.FAST))
+                } else {
+                    fadeIn(snap()) togetherWith fadeOut(snap())
+                }
+            },
+            label = "overlay-primary-icon",
+        ) { stopping ->
+            if (stopping) {
+                Box(
+                    Modifier
+                        .size(12.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(colors.onAccent),
+                )
+            } else {
+                DdIcon(
+                    icon = DdIcons.ArrowUp,
+                    tint = if (canSend) colors.onAccent else colors.inkTertiary,
+                    size = ComposerMetrics.ActionIconSize,
+                )
+            }
+        }
     }
 }
 

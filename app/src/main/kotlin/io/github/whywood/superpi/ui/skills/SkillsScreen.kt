@@ -8,19 +8,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -58,12 +56,13 @@ import io.github.whywood.superpi.data.SkillArchiveResult
 import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdEmptyState
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdRadius
-import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSegmented
 import io.github.whywood.superpi.design.DdShapes
@@ -73,7 +72,6 @@ import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
-import io.github.whywood.superpi.design.LocalDdRowHorizontalPadding
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.market.MarketEntryType
 import io.github.whywood.superpi.market.MarketRepository
@@ -188,18 +186,8 @@ private fun SkillsContent(
     var deleteTarget by remember { mutableStateOf<InstalledSkill?>(null) }
     val showMarket = tab == MARKET_TAB_MARKET
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("skills_screen"),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -232,7 +220,9 @@ private fun SkillsContent(
             } else {
                 MarketRefreshButton(repository = marketRepository)
             }
-        }
+        },
+        modifier = modifier.testTag("skills_screen"),
+    ) {
         DdSegmented(
             options = listOf(
                 stringResource(R.string.market_tab_market),
@@ -411,6 +401,7 @@ private fun SkillsErrorRow(
             color = colors.danger,
         )
         if (error.retryable) {
+            Spacer(Modifier.width(DdSpacing.Sm))
             DdTextAction(
                 text = stringResource(R.string.skills_retry),
                 onClick = onRetry,
@@ -450,23 +441,42 @@ private fun SkillCardRow(
         first && last -> DdShapes.Row
         first -> RoundedCornerShape(topStart = DdRadius.Row, topEnd = DdRadius.Row)
         last -> RoundedCornerShape(bottomStart = DdRadius.Row, bottomEnd = DdRadius.Row)
-        else -> RoundedCornerShape(0.dp)
+        else -> RectangleShape
     }
     Column(modifier) {
-        if (!first) DdHairline()
-        CompositionLocalProvider(LocalDdRowHorizontalPadding provides 16.dp) {
-            DdListRow(
-                title = skill.name,
-                subtitle = skill.description.takeIf { it.isNotBlank() },
-                subtitleMaxLines = 1,
-                onClick = onOpen,
+        if (!first) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+        DdPressable(
+            onClick = onOpen,
+            modifier = Modifier.fillMaxWidth().testTag("skill_${skill.id}"),
+            shape = shape,
+            background = colors.surface,
+            contentDescription = skill.name,
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(shape)
-                    .background(colors.surface)
                     .heightIn(min = 64.dp)
-                    .testTag("skill_${skill.id}"),
-            )
+                    .padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Md),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = skill.name,
+                    style = DdType.body,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                skill.description.takeIf { it.isNotBlank() }?.let { subtitle ->
+                    Spacer(Modifier.height(DdSpacing.Xxs))
+                    Text(
+                        text = subtitle,
+                        style = DdType.bodySmall,
+                        color = colors.inkTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -476,13 +486,10 @@ private fun ManualTag() {
     val colors = superPiColors()
     Text(
         text = stringResource(R.string.skills_manual),
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(colors.wash)
-            .padding(horizontal = 6.dp, vertical = DdSpacing.Xxs),
-        style = DdType.chip,
+        style = DdType.micro,
         color = colors.inkTertiary,
         maxLines = 1,
+        softWrap = false,
     )
 }
 

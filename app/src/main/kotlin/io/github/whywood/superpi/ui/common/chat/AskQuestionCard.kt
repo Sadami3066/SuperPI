@@ -3,6 +3,7 @@ package io.github.whywood.superpi.ui.common.chat
 import android.os.Bundle
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -36,8 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -59,6 +63,7 @@ import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdTextArea
 import io.github.whywood.superpi.design.DdTextField
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.QuestionAnswer
 import io.github.whywood.superpi.runtime.QuestionOption
@@ -149,14 +154,15 @@ fun AskQuestionCard(
     } else {
         answeredCount
     }
+    val motionEnabled = LocalDdMotionEnabled.current
     val progress by animateFloatAsState(
         targetValue = resolvedCount.toFloat() / count,
-        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "ask-card-progress",
     )
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "ask-card-chevron",
     )
     val state = stringResource(
@@ -264,16 +270,21 @@ fun AskQuestionCard(
                 overflow = TextOverflow.Ellipsis,
             )
             if (answers == null) {
+                Spacer(Modifier.width(DdSpacing.Sm))
                 Text(
                     text = stringResource(R.string.ask_progress, safeIndex + 1, count),
                     style = DdType.numeric,
                     color = colors.inkTertiary,
+                    maxLines = 1,
+                    softWrap = false,
                 )
                 Spacer(Modifier.width(6.dp))
+            } else {
+                Spacer(Modifier.width(DdSpacing.Sm))
             }
             DdIcon(
                 icon = DdIcons.ChevronRight,
-                modifier = Modifier.rotate(rotation),
+                modifier = Modifier.graphicsLayer { rotationZ = rotation },
                 tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary),
                 size = 13.dp,
             )
@@ -282,13 +293,13 @@ fun AskQuestionCard(
         AnimatedVisibility(
             visible = expanded,
             enter = expandVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
                 expandFrom = Alignment.Top,
-            ) + fadeIn(tween(DdMotion.FAST)),
+            ) + fadeIn(if (motionEnabled) tween(DdMotion.FAST) else snap()),
             exit = shrinkVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
                 shrinkTowards = Alignment.Top,
-            ) + fadeOut(tween(DdMotion.FAST)),
+            ) + fadeOut(if (motionEnabled) tween(DdMotion.FAST) else snap()),
         ) {
             Column(Modifier.fillMaxWidth().padding(top = DdSpacing.Sm)) {
                 ProgressLine(progress)
@@ -333,18 +344,18 @@ fun AskQuestionCard(
                         Spacer(Modifier.height(DdSpacing.Md))
                         DdTextField(
                             value = custom,
-                            onValueChange = { updateCustom(it) },
+                            onValueChange = { if (!locked) updateCustom(it) },
                             placeholder = stringResource(R.string.ask_card_custom_hint),
-                            modifier = Modifier.alpha(if (locked) 0.55f else 1f),
+                            modifier = Modifier.lockedInput(locked),
                             testTag = "ask_custom",
                         )
                     } else {
                         Spacer(Modifier.height(DdSpacing.Md))
                         DdTextArea(
                             value = custom,
-                            onValueChange = { updateCustom(it) },
+                            onValueChange = { if (!locked) updateCustom(it) },
                             placeholder = stringResource(R.string.ask_card_custom_hint),
-                            modifier = Modifier.alpha(if (locked) 0.55f else 1f),
+                            modifier = Modifier.lockedInput(locked),
                             minHeight = 96.dp,
                             maxHeight = 180.dp,
                             testTag = "ask_custom",
@@ -373,7 +384,7 @@ fun AskQuestionCard(
                             DdTextAction(
                                 text = stringResource(R.string.ask_skip),
                                 onClick = { skip() },
-                                modifier = Modifier.testTag("ask_skip"),
+                                modifier = Modifier.weight(1f, fill = false).testTag("ask_skip"),
                                 color = colors.inkSecondary,
                             )
                             Spacer(Modifier.weight(1f))
@@ -384,7 +395,7 @@ fun AskQuestionCard(
                                         showValidation = false
                                         draft = draft.copy(index = safeIndex - 1)
                                     },
-                                    modifier = Modifier.testTag("ask_previous"),
+                                    modifier = Modifier.weight(1f, fill = false).testTag("ask_previous"),
                                     color = colors.inkSecondary,
                                 )
                                 Spacer(Modifier.width(DdSpacing.Xs))
@@ -393,7 +404,7 @@ fun AskQuestionCard(
                                 text = stringResource(if (last) R.string.ask_submit else R.string.ask_next),
                                 onClick = { advance() },
                                 modifier = Modifier
-                                    .height(40.dp)
+                                    .height(44.dp)
                                     .widthIn(min = 96.dp)
                                     .testTag(if (last) "ask_submit" else "ask_next"),
                             )
@@ -465,7 +476,7 @@ private fun OptionRow(
     val label = displayLabel(option.label)
     DdPressable(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).testTag(testTag),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag(testTag),
         shape = shape,
         background = if (selected) colors.accentSoft else Color.Transparent,
         enabled = enabled,
@@ -474,24 +485,23 @@ private fun OptionRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 44.dp)
                 .border(
-                    width = 1.dp,
+                    width = if (selected) 1.5.dp else 1.dp,
                     color = if (selected) colors.accent else colors.hairline.copy(alpha = DdAlpha.Border),
                     shape = shape,
                 )
                 .padding(horizontal = DdSpacing.Md, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(18.dp)) {
-                if (multiSelect) {
-                    if (selected) {
-                        DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 15.dp)
-                    }
-                } else {
+            Box(Modifier.width(18.dp), contentAlignment = Alignment.Center) {
+                if (selected) {
+                    DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 15.dp)
+                } else if (!multiSelect) {
                     Text(
                         text = number.toString(),
                         style = DdType.numeric,
-                        color = if (selected) colors.accent else colors.inkTertiary,
+                        color = colors.inkTertiary,
                     )
                 }
             }
@@ -538,6 +548,7 @@ private fun RecommendedTag() {
         style = DdType.chip,
         color = colors.accent,
         maxLines = 1,
+        softWrap = false,
     )
 }
 
@@ -558,3 +569,20 @@ internal fun answerText(answer: QuestionAnswer?, separator: String): String? {
 
 private fun <T> List<T>.replaced(index: Int, value: T): List<T> =
     toMutableList().also { it[index] = value }
+
+private fun Modifier.lockedInput(locked: Boolean): Modifier = if (!locked) {
+    this
+} else {
+    this
+        .alpha(0.55f)
+        .focusProperties { canFocus = false }
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    awaitPointerEvent(PointerEventPass.Initial)
+                        .changes
+                        .forEach { it.consume() }
+                }
+            }
+        }
+}

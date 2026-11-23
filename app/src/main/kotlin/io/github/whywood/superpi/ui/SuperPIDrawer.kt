@@ -1,10 +1,16 @@
 package io.github.whywood.superpi.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -42,7 +49,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -54,6 +60,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpOffset
@@ -74,6 +81,7 @@ import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
@@ -518,7 +526,8 @@ fun SuperPIDrawer(
                 Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(if (colors.dark) colors.ink.copy(alpha = 0.92f) else colors.surface)
+                    .border(1.dp, colors.hairline, CircleShape)
                     .testTag("drawer_brand"),
                 contentAlignment = Alignment.Center,
             ) {
@@ -551,7 +560,7 @@ fun SuperPIDrawer(
                 onClick = onOpenSearch,
                 contentDescription = stringResource(R.string.drawer_search),
                 modifier = Modifier.testTag("drawer_search"),
-                size = 40.dp,
+                size = 44.dp,
                 iconSize = 20.dp,
                 tint = colors.inkSecondary,
             )
@@ -588,35 +597,50 @@ fun SuperPIDrawer(
                 testTag = "drawer_more",
                 trailing = { DrawerMoreChevron(expanded = moreExpanded) },
             )
-            if (moreExpanded) {
-                DrawerNavItem(
-                    icon = DdIcons.Brain,
-                    label = stringResource(R.string.drawer_nav_memory),
-                    onClick = onOpenMemory,
-                    testTag = "drawer_memory",
-                    modifier = Modifier.padding(start = 14.dp),
-                )
-                DrawerNavItem(
-                    icon = DdIcons.Phone,
-                    label = stringResource(R.string.drawer_nav_relay),
-                    onClick = onOpenRelay,
-                    testTag = "drawer_relay",
-                    modifier = Modifier.padding(start = 14.dp),
-                )
-                DrawerNavItem(
-                    icon = DdIcons.Plug,
-                    label = stringResource(R.string.drawer_nav_mcp),
-                    onClick = onOpenMcp,
-                    testTag = "drawer_mcp",
-                    modifier = Modifier.padding(start = 14.dp),
-                )
-                DrawerNavItem(
-                    icon = DdIcons.Clock,
-                    label = stringResource(R.string.drawer_nav_timer),
-                    onClick = onOpenTimers,
-                    testTag = "drawer_timer",
-                    modifier = Modifier.padding(start = 14.dp),
-                )
+            val motionEnabled = LocalDdMotionEnabled.current
+            AnimatedVisibility(
+                visible = moreExpanded,
+                enter = fadeIn(if (motionEnabled) tween(DdMotion.FAST) else snap()) +
+                    expandVertically(
+                        animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
+                        expandFrom = Alignment.Top,
+                    ),
+                exit = fadeOut(if (motionEnabled) tween(DdMotion.FAST) else snap()) +
+                    shrinkVertically(
+                        animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
+                        shrinkTowards = Alignment.Top,
+                    ),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    DrawerNavItem(
+                        icon = DdIcons.Brain,
+                        label = stringResource(R.string.drawer_nav_memory),
+                        onClick = onOpenMemory,
+                        testTag = "drawer_memory",
+                        modifier = Modifier.padding(start = 14.dp),
+                    )
+                    DrawerNavItem(
+                        icon = DdIcons.Phone,
+                        label = stringResource(R.string.drawer_nav_relay),
+                        onClick = onOpenRelay,
+                        testTag = "drawer_relay",
+                        modifier = Modifier.padding(start = 14.dp),
+                    )
+                    DrawerNavItem(
+                        icon = DdIcons.Plug,
+                        label = stringResource(R.string.drawer_nav_mcp),
+                        onClick = onOpenMcp,
+                        testTag = "drawer_mcp",
+                        modifier = Modifier.padding(start = 14.dp),
+                    )
+                    DrawerNavItem(
+                        icon = DdIcons.Clock,
+                        label = stringResource(R.string.drawer_nav_timer),
+                        onClick = onOpenTimers,
+                        testTag = "drawer_timer",
+                        modifier = Modifier.padding(start = 14.dp),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -657,6 +681,7 @@ fun SuperPIDrawer(
                         workspace = entry.workspace,
                         meta = workspaceRowMeta(entry.workspace),
                         first = entry.first,
+                        active = entry.workspace.id == activeWorkspaceId,
                         pinned = entry.workspace.id in pinnedWorkspaceIds,
                         expanded = entry.workspace.id in expandedWorkspaceIds,
                         supportsBotManage = entry.workspace.id in remoteBotManageWorkspaceIds,
@@ -854,7 +879,7 @@ private fun DrawerWorkspacesHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(36.dp)
+            .heightIn(min = 44.dp)
             .padding(start = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -867,7 +892,10 @@ private fun DrawerWorkspacesHeader(
         )
         DdPressable(
             onClick = onCreate,
-            modifier = Modifier.testTag("drawer_workspace_create").padding(end = DdSpacing.Xs),
+            modifier = Modifier
+                .heightIn(min = 44.dp)
+                .padding(end = DdSpacing.Xs)
+                .testTag("drawer_workspace_create"),
             shape = DdShapes.Small,
             contentDescription = stringResource(R.string.drawer_workspace_create_short),
         ) {
@@ -877,6 +905,7 @@ private fun DrawerWorkspacesHeader(
                 style = DdType.bodySmall.copy(fontSize = 12.sp),
                 color = colors.inkTertiary,
                 maxLines = 1,
+                softWrap = false,
             )
         }
     }
@@ -890,56 +919,66 @@ private fun DrawerRemoteDeviceHeaderRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
-    Row(
+    val toggleCd = stringResource(R.string.drawer_remote_device_toggle, entry.deviceName)
+    DdPressable(
+        onClick = onToggle,
         modifier = modifier
             .fillMaxWidth()
             .padding(top = DdSpacing.Sm)
             .heightIn(min = 44.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(
-                onClickLabel = stringResource(R.string.drawer_remote_device_toggle, entry.deviceName),
-                onClick = onToggle,
-            )
-            .testTag("drawer_remote_device_${entry.deviceId}")
-            .padding(start = 10.dp, end = DdSpacing.Xxs),
-        verticalAlignment = Alignment.CenterVertically,
+            .testTag("drawer_remote_device_${entry.deviceId}"),
+        shape = RoundedCornerShape(10.dp),
+        contentDescription = toggleCd,
     ) {
-        DdIcon(
-            icon = if (entry.expanded) DdIcons.ChevronDown else DdIcons.ChevronRight,
-            tint = colors.inkTertiary,
-            size = 13.dp,
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = entry.deviceName,
-            modifier = Modifier.weight(1f),
-            style = DdType.chip,
-            color = if (entry.online) colors.inkSecondary else colors.inkTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (!entry.online) {
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = stringResource(R.string.drawer_remote_device_offline_badge),
-                modifier = Modifier
-                    .clip(DdShapes.Small)
-                    .background(colors.wash)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
-                color = colors.inkTertiary,
-                maxLines = 1,
-            )
-        } else if (entry.canCreateBot) {
-            DdIconButton(
-                icon = DdIcons.Plus,
-                onClick = onCreateBot,
-                contentDescription = stringResource(R.string.drawer_remote_device_add_bot, entry.deviceName),
-                modifier = Modifier.testTag("drawer_remote_device_add_${entry.deviceId}"),
-                size = 44.dp,
-                iconSize = 15.dp,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 10.dp, end = DdSpacing.Xxs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DdIcon(
+                icon = if (entry.expanded) DdIcons.ChevronDown else DdIcons.ChevronRight,
                 tint = colors.inkTertiary,
+                size = 13.dp,
             )
+            Spacer(Modifier.width(6.dp))
+            if (entry.online) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(colors.success),
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                text = entry.deviceName,
+                modifier = Modifier.weight(1f),
+                style = DdType.chip,
+                color = if (entry.online) colors.inkSecondary else colors.inkTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!entry.online) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.drawer_remote_device_offline_badge),
+                    style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            } else if (entry.canCreateBot) {
+                DdIconButton(
+                    icon = DdIcons.Plus,
+                    onClick = onCreateBot,
+                    contentDescription = stringResource(R.string.drawer_remote_device_add_bot, entry.deviceName),
+                    modifier = Modifier.testTag("drawer_remote_device_add_${entry.deviceId}"),
+                    size = 44.dp,
+                    iconSize = 15.dp,
+                    tint = colors.inkTertiary,
+                )
+            }
         }
     }
 }
@@ -947,25 +986,33 @@ private fun DrawerRemoteDeviceHeaderRow(
 @Composable
 private fun DrawerNewChatButton(onClick: () -> Unit) {
     val colors = superPiColors()
-    Row(
+    val label = stringResource(R.string.drawer_new_chat)
+    DdPressable(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(DdShapes.Segmented)
-            .background(colors.accent)
-            .clickable(onClick = onClick)
-            .testTag("drawer_new_chat")
-            .padding(horizontal = DdSpacing.Lg),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .heightIn(min = 48.dp)
+            .testTag("drawer_new_chat"),
+        shape = DdShapes.Segmented,
+        background = colors.accent,
+        contentDescription = label,
     ) {
-        DdIcon(icon = DdIcons.Compose, tint = colors.onAccent, size = 17.dp)
-        Text(
-            text = stringResource(R.string.drawer_new_chat),
-            style = DdType.label.copy(fontSize = 15.5.sp),
-            color = colors.onAccent,
-            maxLines = 1,
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = DdSpacing.Lg, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            DdIcon(icon = DdIcons.Compose, tint = colors.onAccent, size = 17.dp)
+            Text(
+                text = label,
+                style = DdType.label.copy(fontSize = 15.5.sp),
+                color = colors.onAccent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -974,6 +1021,7 @@ private fun DrawerWorkspaceRow(
     workspace: RuntimeWorkspace,
     meta: WorkspaceRowMeta,
     first: Boolean,
+    active: Boolean,
     pinned: Boolean,
     expanded: Boolean,
     supportsBotManage: Boolean,
@@ -993,12 +1041,18 @@ private fun DrawerWorkspaceRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val wash by animateFloatAsState(
         targetValue = if (pressed) 0.05f else 0f,
-        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        animationSpec = if (pressed || !motionEnabled) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
         label = "workspace-row-wash",
+    )
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
+        label = "workspace-chevron",
     )
     var menuOpen by remember { mutableStateOf(false) }
     val menuActions = workspaceMenuActions(
@@ -1037,7 +1091,7 @@ private fun DrawerWorkspaceRow(
                 )
                 .graphicsLayer { alpha = if (meta.offline) DdAlpha.Disabled else 1f }
                 .testTag("workspace_${workspace.id}")
-                .padding(start = 10.dp, end = DdSpacing.Xxs),
+                .padding(start = 10.dp, end = DdSpacing.None),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BotAvatar(workspace = workspace, size = 30.dp)
@@ -1045,8 +1099,16 @@ private fun DrawerWorkspaceRow(
             Column(Modifier.weight(1f)) {
                 Text(
                     text = workspace.name,
-                    style = DdType.label.copy(fontSize = 15.sp, lineHeight = 20.sp),
-                    color = if (meta.offline) colors.inkTertiary else colors.ink,
+                    style = DdType.label.copy(
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                    color = when {
+                        meta.offline -> colors.inkTertiary
+                        active -> colors.accent
+                        else -> colors.ink
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1065,12 +1127,21 @@ private fun DrawerWorkspaceRow(
                     )
                 }
             }
+            if (meta.selectable) {
+                Spacer(Modifier.width(DdSpacing.Sm))
+                DdIcon(
+                    icon = DdIcons.ChevronRight,
+                    modifier = Modifier.graphicsLayer { rotationZ = chevronRotation },
+                    tint = if (active) colors.accent else colors.inkTertiary,
+                    size = 13.dp,
+                )
+            }
             DdIconButton(
                 icon = DdIcons.More,
                 onClick = { menuOpen = true },
                 contentDescription = stringResource(R.string.drawer_workspace_more),
                 modifier = Modifier.testTag("workspace_more_${workspace.id}"),
-                size = 32.dp,
+                size = 44.dp,
                 iconSize = 18.dp,
                 tint = colors.inkTertiary,
             )
@@ -1189,30 +1260,36 @@ private fun DrawerSessionsToggleRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
-    Row(
+    DdPressable(
+        onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .height(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .testTag(testTag)
-            .padding(start = 34.dp, end = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .heightIn(min = 44.dp)
+            .testTag(testTag),
+        shape = RoundedCornerShape(10.dp),
+        contentDescription = text,
     ) {
-        DdIcon(
-            icon = icon,
-            tint = colors.inkTertiary,
-            size = 13.dp,
-            modifier = Modifier.graphicsLayer { rotationZ = rotation },
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = text,
-            style = DdType.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 18.sp),
-            color = colors.inkTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 34.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DdIcon(
+                icon = icon,
+                tint = colors.inkTertiary,
+                size = 13.dp,
+                modifier = Modifier.graphicsLayer { rotationZ = rotation },
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = text,
+                style = DdType.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 18.sp),
+                color = colors.inkTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1319,13 +1396,14 @@ private fun DrawerRemoteSessionRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val haptic = LocalHapticFeedback.current
     val hapticsEnabled = LocalHapticsEnabled.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val wash by animateFloatAsState(
         targetValue = if (pressed) 0.06f else 0f,
-        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        animationSpec = if (pressed || !motionEnabled) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
         label = "remote-session-row-wash",
     )
     val relativeTime = remember(session.updatedAt) { session.updatedAt }.let { updatedAt ->
@@ -1338,43 +1416,53 @@ private fun DrawerRemoteSessionRow(
             title
         }
     }
-    Box(modifier.fillMaxWidth()) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .pointerInput(manageable, session.id) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        val press = PressInteraction.Press(offset)
+                        interaction.emit(press)
+                        if (tryAwaitRelease()) {
+                            interaction.emit(PressInteraction.Release(press))
+                        } else {
+                            interaction.emit(PressInteraction.Cancel(press))
+                        }
+                    },
+                    onTap = { onClick() },
+                    onLongPress = if (manageable) {
+                        { offset ->
+                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongClick(offset)
+                        }
+                    } else {
+                        null
+                    },
+                )
+            }
+            .testTag(testTag),
+        contentAlignment = Alignment.CenterStart,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
-                .clip(DdShapes.Medium)
-                .background(colors.ink.copy(alpha = if (selected) 0.06f else wash))
-                .pointerInput(manageable, session.id) {
-                    detectTapGestures(
-                        onPress = { offset ->
-                            val press = PressInteraction.Press(offset)
-                            interaction.emit(press)
-                            if (tryAwaitRelease()) {
-                                interaction.emit(PressInteraction.Release(press))
-                            } else {
-                                interaction.emit(PressInteraction.Cancel(press))
-                            }
-                        },
-                        onTap = { onClick() },
-                        onLongPress = if (manageable) {
-                            { offset ->
-                                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onLongClick(offset)
-                            }
-                        } else {
-                            null
-                        },
-                    )
-                }
-                .testTag(testTag)
-                .padding(start = 34.dp, end = 10.dp),
+                .padding(start = 24.dp, end = 2.dp, top = 3.dp, bottom = 3.dp)
+                .heightIn(min = 36.dp)
+                .clip(DdShapes.Small)
+                .background(if (selected) colors.wash else colors.ink.copy(alpha = wash))
+                .padding(start = 10.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = displayTitle,
                 modifier = Modifier.weight(1f),
-                style = DdType.bodySmall.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
+                style = DdType.bodySmall.copy(
+                    fontSize = 13.5.sp,
+                    lineHeight = 18.sp,
+                    fontWeight = if (selected) FontWeight.Medium else null,
+                ),
                 color = when {
                     selected -> colors.ink
                     session.archived -> colors.inkTertiary
@@ -1390,6 +1478,7 @@ private fun DrawerRemoteSessionRow(
                     style = DdType.micro,
                     color = colors.inkTertiary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
             if (session.busy) {
@@ -1414,6 +1503,7 @@ private fun DrawerRemoteSessionRow(
                     style = DdType.bodySmall.copy(fontSize = 10.5.sp),
                     color = colors.inkTertiary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -1440,9 +1530,10 @@ private fun DrawerRemoteSessionRow(
 @Composable
 private fun DrawerMoreChevron(expanded: Boolean) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "drawer-more-chevron",
     )
     DdIcon(
@@ -1463,31 +1554,37 @@ private fun DrawerNavItem(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = superPiColors()
-    Row(
+    DdPressable(
+        onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(DdShapes.Medium)
-            .clickable(onClick = onClick)
-            .testTag(testTag)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+            .heightIn(min = 48.dp)
+            .testTag(testTag),
+        shape = DdShapes.Medium,
+        contentDescription = label,
     ) {
-        DdIcon(
-            icon = icon,
-            tint = colors.inkTertiary,
-            size = 20.dp,
-        )
-        Text(
-            text = label,
-            modifier = Modifier.weight(1f),
-            style = DdType.body.copy(fontSize = 15.5.sp, lineHeight = 21.sp),
-            color = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        trailing?.invoke()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            DdIcon(
+                icon = icon,
+                tint = colors.inkTertiary,
+                size = 20.dp,
+            )
+            Text(
+                text = label,
+                modifier = Modifier.weight(1f),
+                style = DdType.body.copy(fontSize = 15.5.sp, lineHeight = 21.sp),
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            trailing?.invoke()
+        }
     }
 }
 
@@ -1508,51 +1605,64 @@ private fun DrawerSessionRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val haptic = LocalHapticFeedback.current
     val hapticsEnabled = LocalHapticsEnabled.current
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val wash by animateFloatAsState(
         targetValue = if (pressed) 0.06f else 0f,
-        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        animationSpec = if (pressed || !motionEnabled) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
         label = "session-row-wash",
     )
     val relativeTime = rememberRelativeTime(conversation.updatedAt)
     val timerMark = stringResource(R.string.drawer_session_has_timer)
     val jobMark = stringResource(R.string.drawer_session_has_job)
-    Box(modifier.fillMaxWidth()) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .pointerInput(conversation.id) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        val press = PressInteraction.Press(offset)
+                        interaction.emit(press)
+                        if (tryAwaitRelease()) {
+                            interaction.emit(PressInteraction.Release(press))
+                        } else {
+                            interaction.emit(PressInteraction.Cancel(press))
+                        }
+                    },
+                    onTap = { currentOnClick() },
+                    onLongPress = { offset ->
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        currentOnLongClick(offset)
+                    },
+                )
+            }
+            .testTag(testTag),
+        contentAlignment = Alignment.CenterStart,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
-                .clip(DdShapes.Medium)
-                .background(colors.ink.copy(alpha = if (selected) 0.06f else wash))
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = { offset ->
-                            val press = PressInteraction.Press(offset)
-                            interaction.emit(press)
-                            if (tryAwaitRelease()) {
-                                interaction.emit(PressInteraction.Release(press))
-                            } else {
-                                interaction.emit(PressInteraction.Cancel(press))
-                            }
-                        },
-                        onTap = { onClick() },
-                        onLongPress = { offset ->
-                            if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onLongClick(offset)
-                        },
-                    )
-                }
-                .testTag(testTag)
-                .padding(start = 34.dp, end = 10.dp),
+                .padding(start = 24.dp, end = 2.dp, top = 3.dp, bottom = 3.dp)
+                .heightIn(min = 36.dp)
+                .clip(DdShapes.Small)
+                .background(if (selected) colors.wash else colors.ink.copy(alpha = wash))
+                .padding(start = 10.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = conversation.title,
                 modifier = Modifier.weight(1f),
-                style = DdType.bodySmall.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
+                style = DdType.bodySmall.copy(
+                    fontSize = 13.5.sp,
+                    lineHeight = 18.sp,
+                    fontWeight = if (selected) FontWeight.Medium else null,
+                ),
                 color = if (selected) colors.ink else colors.inkSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1587,7 +1697,7 @@ private fun DrawerSessionRow(
                     when {
                         busy -> DdSpinner(
                             modifier = Modifier.testTag("session_busy_${conversation.id}"),
-                            color = colors.inkTertiary,
+                            color = colors.accent,
                             size = 12.dp,
                             strokeWidth = 1.5.dp,
                         )
@@ -1603,6 +1713,7 @@ private fun DrawerSessionRow(
                             style = DdType.bodySmall.copy(fontSize = 10.5.sp),
                             color = colors.inkTertiary,
                             maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }
@@ -1626,47 +1737,55 @@ private fun DrawerAccountRow(
     onClick: () -> Unit,
 ) {
     val colors = superPiColors()
-    Row(
+    DdPressable(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
-            .clip(DdShapes.Segmented)
-            .clickable(onClick = onClick)
-            .testTag("drawer_account")
-            .padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .heightIn(min = 56.dp)
+            .testTag("drawer_account"),
+        shape = DdShapes.Segmented,
+        contentDescription = userName,
     ) {
-        AvatarBadge(avatar = avatar, name = userName, size = 36.dp)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = userName,
-                style = DdType.label,
-                color = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = stringResource(R.string.drawer_account_hint),
-                style = DdType.micro.copy(letterSpacing = 0.2.sp),
-                color = colors.inkTertiary,
-                maxLines = 1,
-            )
-        }
-        Box(Modifier.size(18.dp)) {
-            DdIcon(
-                icon = DdIcons.Settings,
-                tint = colors.inkTertiary,
-                size = 16.dp,
-                modifier = Modifier.align(Alignment.Center).testTag("drawer_account_settings"),
-            )
-            if (hasUpdate) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .size(6.dp)
-                        .background(colors.accent, CircleShape),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AvatarBadge(avatar = avatar, name = userName, size = 36.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = userName,
+                    style = DdType.label,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                Text(
+                    text = stringResource(R.string.drawer_account_hint),
+                    style = DdType.micro.copy(letterSpacing = 0.2.sp),
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(DdSpacing.Sm))
+            Box(Modifier.size(18.dp)) {
+                DdIcon(
+                    icon = DdIcons.Settings,
+                    tint = colors.inkTertiary,
+                    size = 16.dp,
+                    modifier = Modifier.align(Alignment.Center).testTag("drawer_account_settings"),
+                )
+                if (hasUpdate) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .size(6.dp)
+                            .background(colors.accent, CircleShape),
+                    )
+                }
             }
         }
     }

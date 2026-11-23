@@ -30,6 +30,7 @@
     <string name="assistant_greeting_afternoon">Good afternoon</string>
     <string name="assistant_greeting_evening">Good evening</string>
     <string name="assistant_greeting_morning">Good morning</string>
+    <string name="assistant_greeting_named">%1$s, %2$s</string>
     <string name="assistant_hint">How can I help?</string>
     <string name="assistant_home_prompt">Where would you like to start?</string>
     <string name="assistant_image_failed">Could not load image</string>

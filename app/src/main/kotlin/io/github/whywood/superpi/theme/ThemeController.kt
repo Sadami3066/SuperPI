@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class HostThemeState(
     val choice: ThemeChoice,
+    val appearance: ThemeAppearanceMode,
     val colors: SuperPIColors?,
     val label: String,
 )
@@ -33,12 +34,11 @@ data class ThemeOption(
 )
 
 object ThemePalettes {
-    fun of(choice: ThemeChoice, systemDark: Boolean): SuperPIColors = when (choice) {
-        ThemeChoice.Pi -> if (systemDark) DdTheme.darkPi() else DdTheme.lightPi()
-        ThemeChoice.ClassicBlue -> DdTheme.lightClassicBlue()
-        ThemeChoice.Santorini -> DdTheme.lightSantorini()
-        ThemeChoice.Oceanic -> DdTheme.darkOceanic()
-        is ThemeChoice.Pack -> if (systemDark) DdTheme.darkPi() else DdTheme.lightPi()
+    fun of(choice: ThemeChoice, dark: Boolean): SuperPIColors = when (choice) {
+        ThemeChoice.Pi -> if (dark) DdTheme.darkPi() else DdTheme.lightPi()
+        ThemeChoice.Paper -> if (dark) DdTheme.darkPaper() else DdTheme.lightPaper()
+        ThemeChoice.Slate -> if (dark) DdTheme.darkSlate() else DdTheme.lightSlate()
+        is ThemeChoice.Pack -> if (dark) DdTheme.darkPi() else DdTheme.lightPi()
     }
 }
 
@@ -59,53 +59,69 @@ class ThemeController(
 
     init {
         HostThemeRuntime.dark = _state.value.colors?.dark
-            ?: ThemePalettes.of(_state.value.choice, systemDark()).dark
+            ?: ThemePalettes.of(
+                _state.value.choice,
+                _state.value.appearance.resolveDark(systemDark()),
+            ).dark
     }
 
     fun refresh() {
         catalog.refresh(pluginSources())
         catalog.packs()
-        resolve(_state.value.choice)
+        resolve(_state.value.choice, _state.value.appearance)
     }
 
     fun setChoice(choice: ThemeChoice) {
         if (choice is ThemeChoice.Pack && catalog.find(choice.pluginId, choice.themeId) == null) return
-        resolve(choice)
+        resolve(choice, _state.value.appearance)
     }
 
-    fun builtInOptions(): List<ThemeOption> =
-        catalog.builtInOptions(label = ::builtInLabel, systemDark = systemDark())
+    fun setAppearance(mode: ThemeAppearanceMode) {
+        val current = _state.value
+        if (current.choice is ThemeChoice.Pack) {
+            preferences.write(current.choice, mode, current.colors, current.label)
+            _state.value = current.copy(appearance = mode)
+            return
+        }
+        applyBuiltIn(current.choice, mode)
+    }
+
+    fun builtInOptions(systemDark: Boolean = systemDark()): List<ThemeOption> =
+        catalog.builtInOptions(
+            label = ::builtInLabel,
+            systemDark = _state.value.appearance.resolveDark(systemDark),
+        )
 
     fun pluginOptions(): List<ThemeOption> = catalog.pluginOptions(language())
 
-    private fun resolve(choice: ThemeChoice) {
+    private fun resolve(choice: ThemeChoice, appearance: ThemeAppearanceMode) {
         when (choice) {
             is ThemeChoice.Pack -> {
                 val theme = catalog.find(choice.pluginId, choice.themeId)
-                if (theme == null) fallbackToDefault() else applyPack(choice, theme)
+                if (theme == null) fallbackToDefault(appearance) else applyPack(choice, appearance, theme)
             }
 
-            else -> applyBuiltIn(choice)
+            else -> applyBuiltIn(choice, appearance)
         }
     }
 
-    private fun applyPack(choice: ThemeChoice.Pack, theme: ThemePackTheme) {
+    private fun applyPack(choice: ThemeChoice.Pack, appearance: ThemeAppearanceMode, theme: ThemePackTheme) {
         val label = theme.name.resolve(language())
         HostThemeRuntime.dark = theme.dark
-        preferences.write(choice, theme.colors, label)
-        _state.value = HostThemeState(choice, theme.colors, label)
+        preferences.write(choice, appearance, theme.colors, label)
+        _state.value = HostThemeState(choice, appearance, theme.colors, label)
     }
 
-    private fun applyBuiltIn(choice: ThemeChoice) {
-        HostThemeRuntime.dark = ThemePalettes.of(choice, systemDark()).dark
-        preferences.write(choice, null, null)
-        _state.value = HostThemeState(choice, null, builtInLabel(choice))
+    private fun applyBuiltIn(choice: ThemeChoice, appearance: ThemeAppearanceMode) {
+        HostThemeRuntime.dark = ThemePalettes.of(choice, appearance.resolveDark(systemDark())).dark
+        preferences.write(choice, appearance, null, null)
+        _state.value = HostThemeState(choice, appearance, null, builtInLabel(choice))
     }
 
-    private fun fallbackToDefault() {
-        HostThemeRuntime.dark = ThemePalettes.of(ThemeChoice.Pi, systemDark()).dark
-        preferences.write(ThemeChoice.Pi, null, null)
-        _state.value = HostThemeState(ThemeChoice.Pi, null, builtInLabel(ThemeChoice.Pi))
+    private fun fallbackToDefault(appearance: ThemeAppearanceMode) {
+        HostThemeRuntime.dark = ThemePalettes.of(ThemeChoice.Pi, appearance.resolveDark(systemDark())).dark
+        preferences.write(ThemeChoice.Pi, appearance, null, null)
+        _state.value = HostThemeState(ThemeChoice.Pi, appearance, null, builtInLabel(ThemeChoice.Pi))
     }
 
     private fun initialState(): HostThemeState {
@@ -113,20 +129,20 @@ class ThemeController(
         return when (val choice = selection.choice) {
             is ThemeChoice.Pack -> HostThemeState(
                 choice = choice,
+                appearance = selection.appearance,
                 colors = selection.palette,
                 label = selection.label ?: choice.themeId,
             )
 
-            else -> HostThemeState(choice, null, builtInLabel(choice))
+            else -> HostThemeState(choice, selection.appearance, null, builtInLabel(choice))
         }
     }
 
     private fun builtInLabel(choice: ThemeChoice): String = context.getString(
         when (choice) {
             ThemeChoice.Pi -> R.string.settings_theme_preset_pi
-            ThemeChoice.ClassicBlue -> R.string.settings_theme_preset_classic
-            ThemeChoice.Santorini -> R.string.settings_theme_preset_santorini
-            ThemeChoice.Oceanic -> R.string.settings_theme_preset_oceanic
+            ThemeChoice.Paper -> R.string.settings_theme_preset_paper
+            ThemeChoice.Slate -> R.string.settings_theme_preset_slate
             is ThemeChoice.Pack -> R.string.settings_theme
         },
     )

@@ -34,6 +34,7 @@ internal val RELAY_CAPABILITIES = listOf(
     "sync-events",
     "bot-capabilities",
     "present-artifacts",
+    "memory-v2",
 )
 
 internal val RELAY_CAPABILITIES_READONLY = listOf(
@@ -43,6 +44,7 @@ internal val RELAY_CAPABILITIES_READONLY = listOf(
     "bot-approval",
     "bot-live-sync",
     "sync-events",
+    "memory-v2",
 )
 
 data class RelayBot(

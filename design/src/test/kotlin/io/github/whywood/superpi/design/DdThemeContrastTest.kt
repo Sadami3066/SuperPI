@@ -7,32 +7,36 @@ import kotlin.math.pow
 
 class DdThemeContrastTest {
     @Test
-    fun lightPiKeepsTextReadable() {
-        val colors = DdTheme.lightPi()
-        assertContrast(colors.ink, colors.paper, 7f)
-        assertContrast(colors.inkSecondary, colors.paper, 4.5f)
-        assertContrast(colors.inkTertiary, colors.paper, 4.5f)
-        assertContrast(colors.onAccent, colors.accent, 4.5f)
-        assertContrast(colors.danger, colors.paper, 4.5f)
-        assertContrast(colors.success, colors.paper, 4.5f)
-        assertContrast(colors.warning, colors.paper, 4.5f)
+    fun allPalettesKeepTextAndSurfacesReadable() {
+        val palettes = listOf(
+            "lightPi" to DdTheme.lightPi(),
+            "darkPi" to DdTheme.darkPi(),
+            "lightPaper" to DdTheme.lightPaper(),
+            "darkPaper" to DdTheme.darkPaper(),
+            "lightSlate" to DdTheme.lightSlate(),
+            "darkSlate" to DdTheme.darkSlate(),
+            "lightClassicBlue" to DdTheme.lightClassicBlue(),
+            "lightSantorini" to DdTheme.lightSantorini(),
+            "darkOceanic" to DdTheme.darkOceanic(),
+        )
+        palettes.forEach { (name, colors) ->
+            assertContrast("$name ink/paper", colors.ink, colors.paper, 7f)
+            assertContrast("$name ink/surface", colors.ink, colors.surface, 7f)
+            assertContrast("$name inkSecondary/paper", colors.inkSecondary, colors.paper, 4.5f)
+            assertContrast("$name inkTertiary/paper", colors.inkTertiary, colors.paper, 4.5f)
+            assertContrast("$name accent/surface", colors.accent, colors.surface, 4.5f)
+            assertContrast("$name onAccent/accent", colors.onAccent, colors.accent, 4.5f)
+            assertContrast("$name danger/paper", colors.danger, colors.paper, 4.5f)
+            assertContrast("$name success/paper", colors.success, colors.paper, 4.5f)
+            assertContrast("$name warning/paper", colors.warning, colors.paper, 4.5f)
+            assertContrast("$name codeComment/codeBackground", colors.codeComment, colors.codeBackground, 4.5f)
+            assertContrast("$name wash/raised", colors.wash, colors.raised, 1.12f)
+        }
     }
 
-    @Test
-    fun darkPiKeepsTextReadable() {
-        val colors = DdTheme.darkPi()
-        assertContrast(colors.ink, colors.paper, 7f)
-        assertContrast(colors.inkSecondary, colors.paper, 4.5f)
-        assertContrast(colors.inkTertiary, colors.paper, 4.5f)
-        assertContrast(colors.onAccent, colors.accent, 4.5f)
-        assertContrast(colors.danger, colors.paper, 4.5f)
-        assertContrast(colors.success, colors.paper, 4.5f)
-        assertContrast(colors.warning, colors.paper, 4.5f)
-    }
-
-    private fun assertContrast(foreground: Color, background: Color, minimum: Float) {
+    private fun assertContrast(label: String, foreground: Color, background: Color, minimum: Float) {
         val ratio = ratio(foreground, background)
-        assertTrue("contrast $ratio is below $minimum", ratio >= minimum)
+        assertTrue("$label contrast $ratio is below $minimum", ratio >= minimum)
     }
 
     private fun ratio(a: Color, b: Color): Float {

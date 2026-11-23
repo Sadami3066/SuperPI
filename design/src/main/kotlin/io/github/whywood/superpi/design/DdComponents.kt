@@ -1,10 +1,13 @@
 package io.github.whywood.superpi.design
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -31,10 +35,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -49,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 val LocalDdRowHorizontalPadding = staticCompositionLocalOf { 0.dp }
+internal val LocalDdRowShape = staticCompositionLocalOf<Shape> { DdShapes.Row }
 
 @Composable
 fun DdPressable(
@@ -85,10 +94,13 @@ fun DdPressable(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
+    val hapticsEnabled = LocalDdHapticsEnabled.current
     val pressed by interactionSource.collectIsPressedAsState()
+    val feedbackColor = if (background.alpha > 0.2f && background.luminance() < 0.45f) Color.White else colors.ink
     val wash = animateFloatAsState(
         targetValue = if (pressed && enabled) DdAlpha.Press else 0f,
-        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        animationSpec = if (!motionEnabled || pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
         label = "press-wash",
     )
     val haptics = LocalHapticFeedback.current
@@ -105,11 +117,11 @@ fun DdPressable(
             .background(background)
             .clickable(
                 interactionSource = interactionSource,
-                indication = ripple(color = colors.ink.copy(alpha = DdAlpha.Ripple)),
+                indication = ripple(color = feedbackColor.copy(alpha = DdAlpha.Ripple)),
                 enabled = enabled,
                 role = Role.Button,
                 onClick = {
-                    if (hapticType != null) {
+                    if (hapticsEnabled && hapticType != null) {
                         haptics.performHapticFeedback(hapticType)
                     }
                     onClick()
@@ -117,15 +129,15 @@ fun DdPressable(
             ),
         contentAlignment = Alignment.Center,
     ) {
+        content()
         Box(
             Modifier
                 .matchParentSize()
                 .drawBehind {
                     val alpha = wash.value
-                    if (alpha > 0f) drawRect(colors.ink.copy(alpha = alpha))
+                    if (alpha > 0f) drawRect(feedbackColor.copy(alpha = alpha))
                 },
         )
-        content()
     }
 }
 
@@ -178,7 +190,7 @@ fun DdWordmark(
 @Composable
 fun DdHairline(
     modifier: Modifier = Modifier,
-    color: Color = superPiColors().hairline.copy(alpha = 0.45f),
+    color: Color = superPiColors().hairline.copy(alpha = 0.68f),
 ) {
     Box(modifier.fillMaxWidth().height(1.dp).background(color))
 }
@@ -187,7 +199,7 @@ fun DdHairline(
 fun DdRowDivider(
     modifier: Modifier = Modifier,
     leadingInset: Dp = 0.dp,
-    color: Color = superPiColors().hairline.copy(alpha = 0.4f),
+    color: Color = superPiColors().hairline.copy(alpha = 0.68f),
 ) {
     Box(
         modifier
@@ -229,6 +241,36 @@ fun DdTextAction(
             style = DdType.label,
             color = if (enabled) color else color.copy(alpha = 0.38f),
             maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun DdListRowContainer(
+    modifier: Modifier,
+    shape: Shape,
+    onClick: (() -> Unit)?,
+    enabled: Boolean,
+    contentDescription: String,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    if (onClick != null) {
+        DdPressable(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth(),
+            shape = shape,
+            enabled = enabled,
+            contentDescription = contentDescription,
+            content = content,
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(shape),
+            content = content,
         )
     }
 }
@@ -248,12 +290,13 @@ fun DdListRow(
 ) {
     val colors = superPiColors()
     val alpha = if (enabled) 1f else 0.42f
-    DdPressable(
-        onClick = onClick ?: {},
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        enabled = onClick != null && enabled,
-        contentDescription = title,
+    val description = listOfNotNull(title, subtitle, value).joinToString(", ")
+    DdListRowContainer(
+        modifier = modifier,
+        shape = LocalDdRowShape.current,
+        onClick = onClick,
+        enabled = enabled,
+        contentDescription = description,
     ) {
         Row(
             modifier = Modifier
@@ -285,14 +328,17 @@ fun DdListRow(
                 }
             }
             if (trailing != null) {
+                Spacer(Modifier.width(DdSpacing.Md))
                 trailing()
             } else if (value != null) {
                 Text(
                     text = value,
-                    modifier = Modifier.padding(start = 12.dp),
+                    modifier = Modifier.padding(start = 12.dp).widthIn(max = 140.dp),
                     style = DdType.bodySmall,
                     color = colors.inkTertiary.copy(alpha = alpha),
                     maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (showChevron) {
@@ -322,12 +368,13 @@ fun DdListRow(
 ) {
     val colors = superPiColors()
     val alpha = if (enabled) 1f else DdAlpha.Disabled
-    DdPressable(
-        onClick = onClick ?: {},
-        modifier = modifier.fillMaxWidth(),
-        shape = DdShapes.Row,
-        enabled = onClick != null && enabled,
-        contentDescription = title,
+    val description = listOfNotNull(title, subtitle).joinToString(", ")
+    DdListRowContainer(
+        modifier = modifier,
+        shape = LocalDdRowShape.current,
+        onClick = onClick,
+        enabled = enabled,
+        contentDescription = description,
     ) {
         Row(
             modifier = Modifier
@@ -361,6 +408,7 @@ fun DdListRow(
                 }
             }
             if (trailing != null) {
+                Spacer(Modifier.width(DdSpacing.Md))
                 trailing()
             }
             if (showChevron) {
@@ -385,32 +433,75 @@ fun DdChip(
     enabled: Boolean = true,
 ) {
     val colors = superPiColors()
-    val semantics = if (selected) Modifier.semantics { this.selected = true } else Modifier
-    DdPressable(
-        onClick = onClick,
-        modifier = modifier.height(36.dp).then(semantics),
-        shape = CircleShape,
-        background = if (selected) colors.accentSoft else colors.wash,
-        enabled = enabled,
-        contentDescription = text,
+    val motionEnabled = LocalDdMotionEnabled.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val chipBackground = if (selected && enabled) colors.accent else colors.wash
+    val chipContent = if (selected && enabled) colors.onAccent else colors.inkSecondary
+    val feedbackColor = if (chipBackground.alpha > 0.2f && chipBackground.luminance() < 0.45f) Color.White else colors.ink
+    val wash = animateFloatAsState(
+        targetValue = if (pressed && enabled) DdAlpha.Press else 0f,
+        animationSpec = if (!motionEnabled || pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        label = "chip-press-wash",
+    )
+    val semantics = if (selected) {
+        Modifier.semantics {
+            this.selected = true
+            this.contentDescription = text
+        }
+    } else {
+        Modifier.semantics { this.contentDescription = text }
+    }
+    Box(
+        modifier = modifier
+            .heightIn(min = 44.dp)
+            .then(semantics)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier
+                .height(36.dp)
+                .alpha(if (enabled) 1f else DdAlpha.Disabled)
+                .clip(CircleShape)
+                .background(chipBackground)
+                .then(
+                    if (!selected || !enabled) {
+                        Modifier.border(1.dp, colors.hairline.copy(alpha = 0.7f), CircleShape)
+                    } else {
+                        Modifier
+                    },
+                )
+                .indication(interaction, ripple(color = feedbackColor.copy(alpha = DdAlpha.Ripple)))
+                .drawWithContent {
+                    drawContent()
+                    val alpha = wash.value
+                    if (alpha > 0f) drawRect(feedbackColor.copy(alpha = alpha))
+                }
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (icon != null) {
                 DdIcon(
                     icon = icon,
-                    tint = if (selected) colors.accent else colors.inkSecondary,
+                    tint = chipContent,
                     size = 15.dp,
                 )
             }
             Text(
                 text = text,
                 style = DdType.chip,
-                color = if (selected) colors.accent else colors.inkSecondary,
+                color = chipContent,
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -424,11 +515,34 @@ fun DdPrimaryButton(
     enabled: Boolean = true,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val buttonScale by animateFloatAsState(
+        targetValue = if (pressed && enabled && motionEnabled) 0.985f else 1f,
+        animationSpec = if (motionEnabled) DdMotion.SwitchSpring else snap(),
+        label = "primary-button-scale",
+    )
+    val background by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.wash
+            pressed -> colors.accentPressed
+            else -> colors.accent
+        },
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
+        label = "primary-button-bg",
+    )
     DdPressable(
         onClick = onClick,
-        modifier = modifier.height(52.dp),
+        interactionSource = interaction,
+        modifier = modifier
+            .height(52.dp)
+            .graphicsLayer {
+                scaleX = buttonScale
+                scaleY = buttonScale
+            },
         shape = RoundedCornerShape(16.dp),
-        background = if (enabled) colors.accent else colors.wash,
+        background = background,
         enabled = enabled,
         contentDescription = text,
     ) {
@@ -437,6 +551,9 @@ fun DdPrimaryButton(
             modifier = Modifier.padding(horizontal = DdSpacing.Lg),
             style = DdType.button,
             color = if (enabled) colors.onAccent else colors.inkTertiary,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -471,7 +588,10 @@ fun DdSheetHeader(
             modifier = Modifier.weight(1f),
             style = DdType.heading,
             color = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
+        Spacer(Modifier.width(DdSpacing.Sm))
         DdIconButton(
             icon = DdIcons.Close,
             onClick = onClose,

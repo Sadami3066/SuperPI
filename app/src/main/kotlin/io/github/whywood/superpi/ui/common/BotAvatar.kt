@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -39,9 +40,13 @@ internal fun BotAvatar(
     val avatar by produceState<ImageBitmap?>(initialValue = null, path) {
         value = loadAvatarFile(path)
     }
+    val colors = superPiColors()
     val image = avatar ?: rememberAppIcon(context)
     Box(
-        modifier = modifier.size(size).clip(CircleShape),
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .border(1.dp, colors.hairline, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         if (image != null) {

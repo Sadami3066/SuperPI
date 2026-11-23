@@ -1,13 +1,13 @@
 package io.github.whywood.superpi.design
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -32,7 +33,6 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlin.math.roundToInt
 
 @Composable
 fun DdDropdown(
@@ -43,12 +43,13 @@ fun DdDropdown(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val density = LocalDensity.current
     var anchorWidth by remember { mutableIntStateOf(0) }
     var anchorHeight by remember { mutableIntStateOf(0) }
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(expanded) {
-        if (expanded) shown = true
+    var shown by remember { mutableStateOf(!motionEnabled) }
+    LaunchedEffect(expanded, motionEnabled) {
+        shown = expanded
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     if (expanded) {
@@ -62,7 +63,7 @@ fun DdDropdown(
     }
     val progress by animateFloatAsState(
         targetValue = if (expanded && shown) 1f else 0f,
-        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "dd-dropdown-progress",
     )
     Column(
@@ -86,7 +87,10 @@ fun DdDropdown(
                         .width(with(density) { anchorWidth.toDp() })
                         .graphicsLayer {
                             alpha = progress
-                            translationY = (1f - progress) * -6.dp.toPx()
+                            val scale = 0.96f + 0.04f * progress
+                            scaleX = scale
+                            scaleY = scale
+                            transformOrigin = TransformOrigin(0.5f, 0f)
                         }
                         .clip(RoundedCornerShape(14.dp))
                         .background(colors.raised)

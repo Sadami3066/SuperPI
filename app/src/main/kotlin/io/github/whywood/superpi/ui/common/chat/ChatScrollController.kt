@@ -10,12 +10,16 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 
 data class ScrollAnchor(val index: Int, val offset: Int, val atBottom: Boolean = false)
 
@@ -23,6 +27,7 @@ data class ScrollAnchor(val index: Int, val offset: Int, val atBottom: Boolean =
 internal class ChatScrollController(
     private val listState: LazyListState,
     private val thresholdPx: Float,
+    private val maxSmoothOverflowPx: Float,
 ) {
     var following by mutableStateOf(true)
         private set
@@ -51,6 +56,7 @@ internal class ChatScrollController(
     }
 
     suspend fun jumpToBottom(animate: Boolean) {
+        dragSeen = false
         following = true
         awaitSettled()
         val lastIndex = listState.layoutInfo.totalItemsCount - 1
@@ -92,14 +98,33 @@ internal class ChatScrollController(
         if (!listState.canScrollForward) onBottomChanged(true)
     }
 
-    suspend fun followContent() {
-        if (!following || dragging) return
-        val info = listState.layoutInfo
-        val last = info.visibleItemsInfo.lastOrNull() ?: return
-        if (last.index != info.totalItemsCount - 1) return
-        val viewportBottom = info.viewportEndOffset - info.afterContentPadding
-        val overflow = (last.offset + last.size - viewportBottom).toFloat()
-        if (overflow != 0f) listState.scrollBy(overflow)
+    fun needsFollow(): Boolean =
+        following && !dragging && !dragSeen && listState.canScrollForward && overflowToBottom() > 0.5f
+
+    suspend fun followUntilSettled(smooth: Boolean) {
+        var lastNanos = Long.MIN_VALUE
+        while (currentCoroutineContext().isActive) {
+            val dt = withFrameNanos { now ->
+                val elapsed = if (lastNanos == Long.MIN_VALUE) {
+                    1f / 60f
+                } else {
+                    (now - lastNanos) / 1_000_000_000f
+                }
+                lastNanos = now
+                elapsed
+            }
+            if (!following || dragging || dragSeen || listState.isScrollInProgress) return
+            val overflow = overflowToBottom()
+            val step = ScrollFollowPolicy.followStepPx(
+                overflowPx = overflow,
+                deltaSeconds = dt,
+                maxSmoothOverflowPx = maxSmoothOverflowPx,
+                smooth = smooth,
+            )
+            if (step <= 0f) return
+            val consumed = listState.scrollBy(step)
+            if (consumed <= 0.1f || overflow - consumed <= 0.5f) return
+        }
     }
 
     suspend fun settleScroll() {
@@ -148,12 +173,16 @@ internal class ChatScrollController(
 internal fun rememberChatScrollController(listState: LazyListState): ChatScrollController {
     val density = LocalDensity.current
     val thresholdPx = with(density) { ScrollFollowPolicy.NearBottomThresholdDp.dp.toPx() }
-    val controller = remember(listState, thresholdPx) {
-        ChatScrollController(listState, thresholdPx)
+    val maxSmoothOverflowPx = with(density) { ScrollFollowPolicy.MaxSmoothOverflowDp.dp.toPx() }
+    val controller = remember(listState, thresholdPx, maxSmoothOverflowPx) {
+        ChatScrollController(listState, thresholdPx, maxSmoothOverflowPx)
     }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(controller, dragged) {
         controller.onDraggingChanged(dragged)
+        if (!dragged && !listState.isScrollInProgress) {
+            controller.settleScroll()
+        }
     }
     LaunchedEffect(controller, listState) {
         snapshotFlow { listState.isScrollInProgress }
@@ -166,4 +195,34 @@ internal fun rememberChatScrollController(listState: LazyListState): ChatScrollC
             .collect { atEnd -> controller.onBottomChanged(atEnd) }
     }
     return controller
+}
+
+@Composable
+internal fun ChatScrollFollowEffect(
+    controller: ChatScrollController,
+    sessionKey: Any?,
+    sending: Boolean,
+    smooth: Boolean,
+    onStreamingStopped: () -> Unit = {},
+) {
+    var hadSending by remember(sessionKey) { mutableStateOf(sending) }
+    val currentOnStopped = rememberUpdatedState(onStreamingStopped)
+    LaunchedEffect(controller, sessionKey, sending, smooth) {
+        if (sending) {
+            hadSending = true
+            while (isActive) {
+                snapshotFlow { controller.needsFollow() }.first { it }
+                controller.followUntilSettled(smooth = smooth)
+            }
+        } else {
+            currentOnStopped.value.invoke()
+            if (hadSending) {
+                hadSending = false
+                if (controller.following) {
+                    withFrameNanos { }
+                    controller.followUntilSettled(smooth = smooth)
+                }
+            }
+        }
+    }
 }

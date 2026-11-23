@@ -427,7 +427,7 @@ private fun SessionRow(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .heightIn(min = 44.dp)
             .testTag("assistant_overlay_switcher_session_${session.id}"),
         shape = RoundedCornerShape(14.dp),
         background = if (selected) colors.wash else Color.Transparent,
@@ -452,6 +452,7 @@ private fun SessionRow(
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
                     color = colors.inkTertiary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
             if (selected) {
@@ -469,7 +470,7 @@ private fun NewSessionRow(onClick: () -> Unit) {
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .heightIn(min = 44.dp)
             .testTag("assistant_overlay_switcher_new_session"),
         shape = RoundedCornerShape(14.dp),
         contentDescription = stringResource(R.string.drawer_workspace_new_session),
@@ -485,6 +486,7 @@ private fun NewSessionRow(onClick: () -> Unit) {
                 style = DdType.label.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
                 color = colors.inkSecondary,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

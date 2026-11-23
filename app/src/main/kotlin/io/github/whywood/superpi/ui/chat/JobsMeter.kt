@@ -33,7 +33,7 @@ fun JobsMeter(
     val colors = superPiColors()
     DdPressable(
         onClick = onClick,
-        modifier = modifier.sizeIn(minWidth = 31.dp, minHeight = 31.dp).testTag("jobs_meter"),
+        modifier = modifier.sizeIn(minWidth = 44.dp, minHeight = 44.dp).testTag("jobs_meter"),
         shape = DdShapes.Small,
         contentDescription = stringResource(R.string.jobs_meter_description, count),
     ) {
@@ -48,6 +48,7 @@ fun JobsMeter(
                 style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
                 color = colors.inkTertiary,
                 maxLines = 1,
+                softWrap = false,
             )
         }
     }

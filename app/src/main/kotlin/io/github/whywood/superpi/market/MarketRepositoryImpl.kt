@@ -14,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -122,44 +123,46 @@ class MarketRepositoryImpl(
         return true
     }
 
-    override suspend fun install(entry: MarketEntry, apiKey: String?): Result<Unit> = installMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val blocked = entry.takeIf { it.type == MarketEntryType.Plugin }?.let(::pluginCompatibility)
-            if (blocked != null && blocked != MarketPluginCompatibility.Compatible) {
-                val message = blockedMessage(entry, blocked)
-                setInstallState(entry.id, MarketInstallState.Failed(message))
-                return@withContext Result.failure(IllegalStateException(message))
-            }
-            setInstallState(entry.id, MarketInstallState.Installing(null))
-            try {
-                when (entry.type) {
-                    MarketEntryType.Plugin -> installPlugin(entry)
-                    MarketEntryType.Skill -> installSkill(entry)
-                    MarketEntryType.Mcp -> installMcp(entry, apiKey)
+    override suspend fun install(entry: MarketEntry, apiKey: String?): Result<Unit> = scope.async {
+        installMutex.withLock {
+            withContext(Dispatchers.IO) {
+                val blocked = entry.takeIf { it.type == MarketEntryType.Plugin }?.let(::pluginCompatibility)
+                if (blocked != null && blocked != MarketPluginCompatibility.Compatible) {
+                    val message = blockedMessage(entry, blocked)
+                    setInstallState(entry.id, MarketInstallState.Failed(message))
+                    return@withContext Result.failure(IllegalStateException(message))
                 }
-                refreshInstalled(clearInstallingId = entry.id)
-                when (_installStates.value[entry.id]) {
-                    is MarketInstallState.Installed,
-                    is MarketInstallState.UpdateAvailable,
-                    -> Result.success(Unit)
-
-                    else -> {
-                        setInstallState(entry.id, MarketInstallState.Failed("Install failed. Try again later"))
-                        Result.failure(IllegalStateException("Install failed. Try again later"))
+                setInstallState(entry.id, MarketInstallState.Installing(null))
+                try {
+                    when (entry.type) {
+                        MarketEntryType.Plugin -> installPlugin(entry)
+                        MarketEntryType.Skill -> installSkill(entry)
+                        MarketEntryType.Mcp -> installMcp(entry, apiKey)
                     }
+                    refreshInstalled(clearInstallingId = entry.id)
+                    when (_installStates.value[entry.id]) {
+                        is MarketInstallState.Installed,
+                        is MarketInstallState.UpdateAvailable,
+                        -> Result.success(Unit)
+
+                        else -> {
+                            setInstallState(entry.id, MarketInstallState.Failed("Install failed. Try again later"))
+                            Result.failure(IllegalStateException("Install failed. Try again later"))
+                        }
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (failure: Exception) {
+                    Log.w(TAG, "install ${entry.id} failed: ${failure.message}")
+                    if (entry.type == MarketEntryType.Plugin) {
+                        runCatching { pluginManager.refreshNow() }
+                    }
+                    setInstallState(entry.id, MarketInstallState.Failed(failure.message ?: "Install failed. Try again later"))
+                    Result.failure(failure)
                 }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (failure: Exception) {
-                Log.w(TAG, "install ${entry.id} failed: ${failure.message}")
-                if (entry.type == MarketEntryType.Plugin) {
-                    runCatching { pluginManager.refreshNow() }
-                }
-                setInstallState(entry.id, MarketInstallState.Failed(failure.message ?: "Install failed. Try again later"))
-                Result.failure(failure)
             }
         }
-    }
+    }.await()
 
     private suspend fun refreshInstalled(clearInstallingId: String? = null) {
         val skillVersions = readSkillVersions()

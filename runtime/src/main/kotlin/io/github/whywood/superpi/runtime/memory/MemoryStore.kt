@@ -1,40 +1,39 @@
 package io.github.whywood.superpi.runtime.memory
 
-import io.github.whywood.superpi.runtime.MemoryBackend
-import io.github.whywood.superpi.runtime.MemoryWriteMode
-import io.github.whywood.superpi.runtime.MemoryWriteOutcome
+import io.github.whywood.superpi.runtime.DreamRunSummary
+import io.github.whywood.superpi.runtime.EntityKind
+import io.github.whywood.superpi.runtime.MemoryConfidence
+import io.github.whywood.superpi.runtime.MemoryDraft
+import io.github.whywood.superpi.runtime.MemoryEntity
+import io.github.whywood.superpi.runtime.MemoryEntityRef
+import io.github.whywood.superpi.runtime.MemoryExportLabels
+import io.github.whywood.superpi.runtime.MemoryFilter
+import io.github.whywood.superpi.runtime.MemoryItemStatus
+import io.github.whywood.superpi.runtime.MemoryKind
+import io.github.whywood.superpi.runtime.MemoryOverview
+import io.github.whywood.superpi.runtime.MemoryRecord
+import io.github.whywood.superpi.runtime.MemorySearchHit
+import io.github.whywood.superpi.runtime.MemoryTagCount
 import io.github.whywood.superpi.runtime.logWarn
 import io.github.whywood.superpi.sdk.coding.session.SessionEntry
-
 import java.io.File
-import java.time.LocalDate
-import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-
-internal data class MemoryDoc(
-    val label: String,
-    val fileName: String,
-    val section: String?,
-    val text: String,
-)
-
-internal data class MemoryHit(
-    val label: String,
-    val fileName: String,
-    val section: String?,
-    val score: Double,
-    val snippet: String,
-)
-
-internal data class MemorySearchOutcome(
-    val hits: List<MemoryHit>,
-    val chunks: Int,
-    val elapsedMs: Long,
-)
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 internal data class CapturedTranscript(
     val sessionId: String,
@@ -42,83 +41,83 @@ internal data class CapturedTranscript(
     val entries: List<SessionEntry>,
 )
 
-internal data class PendingRecap(
-    val sessionId: String,
-    val sessionFile: String?,
-    val transcript: String,
-    val lastEntryId: String?,
-    val reason: String,
+internal data class IngestionItemMutation(
+    val draft: MemoryDraft,
+    val supersedesId: String? = null,
 )
 
-data class MemoryStatus(
-    val rootDir: String,
-    val profileChars: Int,
-    val contextChars: Int,
-    val cookbookChars: Int,
-    val todayChars: Int,
-    val monthChars: Int,
-    val yearChars: Int,
-    val dayCount: Int,
-    val totalBytes: Long,
-    val indexedChunks: Int,
-    val indexBuildMs: Long,
-    val snapshotChars: Int,
-    val snapshotAt: String?,
-    val snapshotReason: String,
-    val dirty: Boolean,
+internal data class DreamContextSnapshot(
+    val lastDreamAt: Long?,
+    val newSinceLastDream: Int,
+    val coreRecords: List<MemoryRecord>,
+    val recentEpisodic: List<MemoryRecord>,
+    val entities: List<MemoryEntity>,
 )
 
-class MemoryStore(private val rootDir: File) {
+internal data class DreamEntityMergeOp(
+    val keepName: String,
+    val mergeNames: List<String>,
+    val summary: String? = null,
+)
+
+internal data class DreamMutationBatch(
+    val promotions: List<MemoryDraft> = emptyList(),
+    val supersessions: List<Pair<String, MemoryDraft>> = emptyList(),
+    val expirations: List<String> = emptyList(),
+    val archives: List<String> = emptyList(),
+    val entityMerges: List<DreamEntityMergeOp> = emptyList(),
+)
+
+internal data class PauseWindow(
+    val startMs: Long,
+    val endMs: Long? = null,
+)
+
+class MemoryStore(
+    rootDir: File,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     private val mutex = Mutex()
-
-    @Volatile
-    private var backend: MemoryBackend? = null
-
-    fun attachBackend(value: MemoryBackend?) {
-        backend = value
-    }
+    private val db = MemoryDatabase(rootDir)
+    private val retriever = FtsEntityRetriever(db = db, clock = clock)
     private val captured = ConcurrentHashMap<String, CapturedTranscript>()
+    private val mutableChanges = MutableStateFlow(0L)
 
-    private val profileFile = File(rootDir, "profile.md")
-    private val contextFile = File(rootDir, "context.md")
-    private val cookbookFile = File(rootDir, "cookbook.md")
-    private val dailyDir = File(rootDir, "daily")
-    private val pendingDir = File(rootDir, "pending")
-    private val summaryLogFile = File(rootDir, "summaries.log")
-
-    private var cacheValid = false
-    private var cachedSection: String? = null
-    private var cachedChars = 0
-    private var cachedAt: String? = null
-    private var cachedReason = "init"
-    private var cachedDay = ""
-
-    @Volatile
-    private var dirty = true
-
-    private var corpusCache: List<MemoryDoc>? = null
+    val changes: StateFlow<Long> = mutableChanges.asStateFlow()
 
     suspend fun ensure() = withContext(Dispatchers.IO) {
-        mutex.withLock { ensureLocked() }
+        mutex.withLock {
+            db.ensure()
+        }
     }
 
-    suspend fun section(): String? {
-        refreshShared()
-        return withContext(Dispatchers.IO) {
-            mutex.withLock {
-                val today = MemoryText.todayKey()
-                if (cacheValid && !dirty && cachedDay == today) return@withLock cachedSection
-                buildSectionLocked(if (cacheValid) "refresh" else "session_start")
-            }
+    suspend fun close() = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.close()
+        }
+    }
+
+    suspend fun section(): String? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            runCatching {
+                db.ensure()
+                val cached = db.read { conn -> MemoryStorage.readSnapshot(conn) }
+                if (cached != null) {
+                    cached.renderedText.takeIf { it.isNotBlank() }
+                } else {
+                    rebuildSnapshotLocked("session_start").takeIf { it.isNotBlank() }
+                }
+            }.onFailure { logWarn(TAG, "read memory section failed", it) }.getOrNull()
         }
     }
 
     suspend fun refresh(reason: String): String? = withContext(Dispatchers.IO) {
-        mutex.withLock { buildSectionLocked(reason) }
-    }
-
-    fun markDirty() {
-        dirty = true
+        mutex.withLock {
+            runCatching {
+                db.ensure()
+                rebuildSnapshotLocked(reason).takeIf { it.isNotBlank() }
+            }.onFailure { logWarn(TAG, "refresh memory snapshot failed", it) }.getOrNull()
+        }
     }
 
     internal fun capture(sessionId: String, sessionFile: String?, entries: List<SessionEntry>?) {
@@ -128,619 +127,893 @@ class MemoryStore(private val rootDir: File) {
 
     internal fun takeCaptured(sessionId: String): CapturedTranscript? = captured.remove(sessionId)
 
-    internal suspend fun write(
-        target: String,
+    suspend fun save(draft: MemoryDraft, supersedesId: String? = null): MemoryRecord = withContext(Dispatchers.IO) {
+        val saved = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val targetSupersedes = supersedesId?.trim()?.takeIf { it.isNotEmpty() }
+                    ?.takeIf { MemoryStorage.findById(conn, it) != null }
+                val created = MemoryStorage.insertMemory(conn, draft, nowMs, targetSupersedes)
+                rebuildSnapshotInConn(conn, "save", nowMs)
+                created
+            }
+        }
+        notifyChanged()
+        saved
+    }
+
+    suspend fun update(
+        id: String,
         content: String,
-        mode: MemoryWriteMode,
-        section: String?,
-        sessionId: String?,
-        date: String?,
-    ): String = withContext(Dispatchers.IO) {
-        val body = MemoryText.normalize(content)
-        if (body.isBlank()) return@withContext "Nothing written: content is empty."
-        val shared = backend?.let { it.writeShared(target, body, mode, section, date) }
-        if (shared != null) {
-            if (shared.writeLocal) {
-                mutex.withLock { localWriteLocked(target, body, mode, section, sessionId, date) }
+        kind: MemoryKind,
+        tags: List<String>,
+        confidence: MemoryConfidence,
+        pinned: Boolean,
+        validUntil: Long?,
+    ): MemoryRecord? = withContext(Dispatchers.IO) {
+        val updated = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val result = MemoryStorage.updateMemory(
+                    conn = conn,
+                    id = id,
+                    content = content,
+                    kind = kind,
+                    tags = tags,
+                    confidence = confidence,
+                    pinned = pinned,
+                    validUntil = validUntil,
+                    nowMs = nowMs,
+                )
+                if (result != null) rebuildSnapshotInConn(conn, "edit", nowMs)
+                result
             }
-            mutex.withLock { invalidateLocked() }
-            return@withContext shared.message
         }
-        mutex.withLock { localWriteLocked(target, body, mode, section, sessionId, date) }
+        if (updated != null) notifyChanged()
+        updated
     }
 
-    private suspend fun MemoryBackend.writeShared(
-        target: String,
-        body: String,
-        mode: MemoryWriteMode,
-        section: String?,
-        date: String?,
-    ): SharedWrite? {
-        val zone = target.trim().lowercase()
-        if (zone == "today" || zone == "daily" || zone == "diary") {
-            if (mode != MemoryWriteMode.APPEND) return null
-            val day = normalizedDay(date)
-            return when (val outcome = append(dayPath(day), null, body)) {
-                MemoryWriteOutcome.Applied, MemoryWriteOutcome.Inactive ->
-                    if (outcome == MemoryWriteOutcome.Inactive) null else SharedWrite(
-                        "Appended to diary $day:\n\n" + MemoryText.preview(body),
-                        writeLocal = false,
+    suspend fun confirm(id: String): MemoryRecord? = withContext(Dispatchers.IO) {
+        val confirmed = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val result = MemoryStorage.confirmMemory(conn, id, nowMs)
+                if (result != null) rebuildSnapshotInConn(conn, "confirm", nowMs)
+                result
+            }
+        }
+        if (confirmed != null) notifyChanged()
+        confirmed
+    }
+
+    suspend fun softDelete(id: String): Boolean = withContext(Dispatchers.IO) {
+        val deleted = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val removed = MemoryStorage.softDelete(conn, id, nowMs)
+                if (removed) rebuildSnapshotInConn(conn, "delete", nowMs)
+                removed
+            }
+        }
+        if (deleted) notifyChanged()
+        deleted
+    }
+
+    suspend fun restore(id: String): MemoryRecord? = withContext(Dispatchers.IO) {
+        val restored = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val record = MemoryStorage.restore(conn, id, nowMs)
+                if (record != null) rebuildSnapshotInConn(conn, "restore", nowMs)
+                record
+            }
+        }
+        if (restored != null) notifyChanged()
+        restored
+    }
+
+    suspend fun deleteByTag(tag: String): Int = withContext(Dispatchers.IO) {
+        val removed = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val count = MemoryStorage.softDeleteByTag(conn, tag, nowMs)
+                if (count > 0) rebuildSnapshotInConn(conn, "delete_tag", nowMs)
+                count
+            }
+        }
+        if (removed > 0) notifyChanged()
+        removed
+    }
+
+    suspend fun deleteBySession(sessionId: String): Int = withContext(Dispatchers.IO) {
+        val removed = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                val count = MemoryStorage.softDeleteBySession(conn, sessionId, nowMs)
+                if (count > 0) rebuildSnapshotInConn(conn, "delete_session", nowMs)
+                count
+            }
+        }
+        if (removed > 0) notifyChanged()
+        removed
+    }
+
+    suspend fun countBySession(sessionId: String): Int = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.countBySession(conn, sessionId) }
+        }
+    }
+
+    suspend fun get(id: String): MemoryRecord? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.findById(conn, id) }
+        }
+    }
+
+    suspend fun list(filter: MemoryFilter = MemoryFilter()): List<MemoryRecord> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.queryRecords(conn, filter) }
+        }
+    }
+
+    suspend fun search(
+        queries: List<String>,
+        filter: MemoryFilter = MemoryFilter(),
+    ): List<MemorySearchHit> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            retriever.search(queries, filter)
+        }
+    }
+
+    suspend fun listTags(): List<MemoryTagCount> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.listTags(conn) }
+        }
+    }
+
+    suspend fun listEntities(): List<MemoryEntity> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.listActiveEntities(conn) }
+        }
+    }
+
+    suspend fun overview(): MemoryOverview = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.overview(conn) }
+        }
+    }
+
+    suspend fun exportMarkdown(labels: MemoryExportLabels = MemoryExportLabels.ENGLISH): String =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val nowMs = clock()
+                db.read { conn ->
+                    val all = MemoryStorage.queryRecords(
+                        conn,
+                        MemoryFilter(includeHistory = true, limit = 10_000),
                     )
-
-                MemoryWriteOutcome.Queued -> SharedWrite(
-                    "Saved to diary $day on this phone; it will sync when the connection returns.",
-                    writeLocal = true,
-                )
-
-                is MemoryWriteOutcome.Rejected -> throw MemoryWriteRejected(outcome.message)
+                    val entities = MemoryStorage.listActiveEntities(conn)
+                    MemorySnapshotRenderer.exportMarkdown(all, entities, nowMs, labels)
+                }
             }
         }
-        val file = zoneFile(target) ?: return null
-        val title = zoneTitle(target) ?: return null
-        val heading = section?.takeIf { it.isNotBlank() }?.trimStart('#', ' ')
-        val message = when (mode) {
-            MemoryWriteMode.APPEND -> submit(
-                append(file.name, heading, body),
-                "Wrote ${file.name} (${
-                    if (heading == null) "append" else "append to \"$heading\""
-                }):\n\n" + MemoryText.preview(body),
-            )
 
-            MemoryWriteMode.REPLACE_SECTION -> {
-                val required = heading
-                    ?: return null
-                submit(
-                    replaceSection(file.name, required, body),
-                    "Wrote ${file.name} (replace_section \"$required\"):\n\n" + MemoryText.preview(body),
+    internal suspend fun readWatermark(sessionId: String): IngestionWatermark? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.readWatermark(conn, sessionId) }
+        }
+    }
+
+    internal suspend fun listPendingIngestions(maxAttempts: Int = 5): List<PendingIngestionRecord> =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                db.read { conn -> MemoryStorage.listPendingIngestions(conn, maxAttempts) }
+            }
+        }
+
+    internal suspend fun savePendingIngestion(pending: PendingIngestionRecord) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn -> MemoryStorage.savePendingIngestion(conn, pending) }
+        }
+    }
+
+    internal suspend fun hasPendingIngestion(sessionId: String): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> MemoryStorage.hasPendingIngestion(conn, sessionId) }
+        }
+    }
+
+    internal suspend fun deletePendingIngestion(sessionId: String) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn -> MemoryStorage.deletePendingIngestion(conn, sessionId) }
+        }
+    }
+
+    internal suspend fun pruneExhaustedPendingIngestions(maxAttempts: Int) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn -> MemoryStorage.pruneExhaustedPendingIngestions(conn, maxAttempts) }
+        }
+    }
+
+    internal suspend fun activeCoreSummary(limit: Int = 60): List<MemoryRecord> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn ->
+                MemoryStorage.queryRecords(
+                    conn,
+                    MemoryFilter(
+                        kinds = setOf(MemoryKind.IDENTITY, MemoryKind.ACTIVE, MemoryKind.HABIT),
+                        includeHistory = false,
+                        limit = limit,
+                    ),
                 )
             }
-
-            MemoryWriteMode.OVERWRITE -> submit(
-                overwrite(file.name, ensureZoneHeading(title, body)),
-                "Wrote ${file.name} (overwrite):\n\n" + MemoryText.preview(body),
-            )
         }
-        if (message == null) return null
-        return message
     }
 
-    private fun submit(outcome: MemoryWriteOutcome, appliedMessage: String): SharedWrite? = when (outcome) {
-        MemoryWriteOutcome.Applied -> SharedWrite(appliedMessage, writeLocal = false)
-        MemoryWriteOutcome.Queued -> SharedWrite(
-            "Saved on this phone; it will sync when the connection returns.",
-            writeLocal = true,
-        )
-
-        MemoryWriteOutcome.Inactive -> null
-        is MemoryWriteOutcome.Rejected -> throw MemoryWriteRejected(outcome.message)
+    internal suspend fun applyIngestionBatch(
+        mutations: List<IngestionItemMutation>,
+        watermark: IngestionWatermark,
+    ): Int = withContext(Dispatchers.IO) {
+        val written = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                var inserted = 0
+                for (mutation in mutations) {
+                    val existingSupersede = mutation.supersedesId?.trim()?.takeIf { it.isNotEmpty() }
+                        ?.takeIf { MemoryStorage.findById(conn, it)?.pinned == false }
+                    if (existingSupersede == null && isDuplicateInStore(conn, mutation.draft)) {
+                        continue
+                    }
+                    MemoryStorage.insertMemory(conn, mutation.draft, nowMs, existingSupersede)
+                    inserted++
+                }
+                MemoryStorage.saveWatermark(conn, watermark)
+                if (inserted > 0) rebuildSnapshotInConn(conn, "ingest", nowMs)
+                inserted
+            }
+        }
+        if (written > 0) notifyChanged()
+        written
     }
 
-    private fun localWriteLocked(
-        target: String,
-        body: String,
-        mode: MemoryWriteMode,
-        section: String?,
-        sessionId: String?,
-        date: String?,
-    ): String = when (target.trim().lowercase()) {
-        "today", "daily", "diary" -> {
-            if (mode != MemoryWriteMode.APPEND) return "Diary only supports append mode."
-            val day = normalizedDay(date)
-            appendDayLocked(day, MemoryText.marker(sessionId) + "\n" + body)
-            invalidateLocked()
-            "Appended to diary $day:\n\n" + MemoryText.preview(body)
+    internal suspend fun markWatermarkOnly(watermark: IngestionWatermark) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn -> MemoryStorage.saveWatermark(conn, watermark) }
         }
+    }
 
-        "profile", "context", "cookbook" -> {
-            val file = zoneFile(target) ?: return unknownTarget(target)
-            val title = zoneTitle(target) ?: return unknownTarget(target)
-            val current = file.readTextOrEmpty()
-            val updated = when (mode) {
-                MemoryWriteMode.APPEND -> appendZone(current, title, body, section)
-                MemoryWriteMode.REPLACE_SECTION -> {
-                    val heading = section?.takeIf { it.isNotBlank() }
-                        ?: return "replace_section requires a section (the heading of the part to replace)."
-                    if (current.isBlank()) {
-                        "# $title\n\n## ${heading.trimStart('#', ' ')}\n\n$body\n"
+    internal suspend fun readPauseWindows(): List<PauseWindow> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn -> parsePauseWindows(MemoryStorage.readSyncState(conn, SYNC_KEY_PAUSE_WINDOWS)) }
+        }
+    }
+
+    internal suspend fun openPauseWindow(startMs: Long): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn ->
+                val current = parsePauseWindows(MemoryStorage.readSyncState(conn, SYNC_KEY_PAUSE_WINDOWS))
+                if (current.any { it.endMs == null }) return@writeTransaction false
+                val updated = prunePauseWindows(current + PauseWindow(startMs = startMs, endMs = null), startMs)
+                MemoryStorage.writeSyncState(conn, SYNC_KEY_PAUSE_WINDOWS, encodePauseWindows(updated))
+                true
+            }
+        }
+    }
+
+    internal suspend fun closePauseWindow(endMs: Long): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn ->
+                val current = parsePauseWindows(MemoryStorage.readSyncState(conn, SYNC_KEY_PAUSE_WINDOWS))
+                if (current.none { it.endMs == null }) return@writeTransaction false
+                val closed = current.map { window ->
+                    if (window.endMs == null) window.copy(endMs = maxOf(window.startMs, endMs)) else window
+                }
+                val updated = prunePauseWindows(closed, endMs)
+                MemoryStorage.writeSyncState(conn, SYNC_KEY_PAUSE_WINDOWS, encodePauseWindows(updated))
+                true
+            }
+        }
+    }
+
+    internal suspend fun runDeterministicCleanup(staleInferredDays: Long = 45L): Pair<Int, Int> =
+        withContext(Dispatchers.IO) {
+            val counts = mutex.withLock {
+                db.writeTransaction { conn ->
+                    val nowMs = nextWriteTimestampLocked(conn)
+                    val staleCutoff = nowMs - staleInferredDays * MS_PER_DAY
+                    val expired = MemoryStorage.expireOutdatedActive(conn, nowMs)
+                    val archived = MemoryStorage.archiveStaleInferred(conn, staleCutoff, nowMs) +
+                        MemoryStorage.deduplicateExactActiveMemories(conn, nowMs)
+                    if (expired > 0 || archived > 0) rebuildSnapshotInConn(conn, "cleanup", nowMs)
+                    MemoryStorage.pruneDreamRuns(conn)
+                    val linkedAccount = MemoryStorage.readSyncState(conn, SYNC_KEY_ACCOUNT)
+                    if (linkedAccount == null) {
+                        MemoryStorage.pruneSyncOps(conn, maxSeqToPrune = Long.MAX_VALUE)
                     } else {
-                        MemorySections.replace(current, heading, body)
+                        val pushedSeq = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ)?.toLongOrNull() ?: 0L
+                        if (pushedSeq > 0L) {
+                            MemoryStorage.pruneSyncOps(conn, maxSeqToPrune = pushedSeq)
+                        }
+                    }
+                    expired to archived
+                }
+            }
+            if (counts.first > 0 || counts.second > 0) notifyChanged()
+            counts
+        }
+
+    internal suspend fun loadDreamContext(): DreamContextSnapshot = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.read { conn ->
+                val localDream = MemoryStorage.lastSuccessfulDreamAt(conn)
+                val remoteDream = MemoryStorage.readSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT)?.toLongOrNull()
+                val lastDream = listOfNotNull(localDream, remoteDream).maxOrNull()
+                val newCount = MemoryStorage.countMemoriesCreatedAfter(conn, lastDream ?: 0L)
+                val core = MemoryStorage.queryRecords(
+                    conn,
+                    MemoryFilter(
+                        kinds = setOf(MemoryKind.IDENTITY, MemoryKind.ACTIVE, MemoryKind.HABIT),
+                        includeHistory = false,
+                        limit = 120,
+                    ),
+                )
+                val episodicSince = lastDream ?: (clock() - 30L * MS_PER_DAY)
+                val episodic = MemoryStorage.queryRecords(
+                    conn,
+                    MemoryFilter(
+                        kinds = setOf(MemoryKind.EPISODIC),
+                        sinceEpochMs = episodicSince,
+                        includeHistory = false,
+                        limit = 120,
+                    ),
+                )
+                val entities = MemoryStorage.listActiveEntities(conn)
+                DreamContextSnapshot(
+                    lastDreamAt = lastDream,
+                    newSinceLastDream = newCount,
+                    coreRecords = core,
+                    recentEpisodic = episodic,
+                    entities = entities,
+                )
+            }
+        }
+    }
+
+    internal suspend fun applyDreamBatch(
+        batch: DreamMutationBatch,
+        runId: String,
+        startedAt: Long,
+        modelRef: String?,
+    ): DreamRunSummary = withContext(Dispatchers.IO) {
+        val summary = mutex.withLock {
+            db.writeTransaction { conn ->
+                val nowMs = nextWriteTimestampLocked(conn)
+                var promoted = 0
+                var superseded = 0
+                var expired = 0
+                var mergedEntities = 0
+
+                for (draft in batch.promotions) {
+                    if (!isDuplicateInStore(conn, draft)) {
+                        MemoryStorage.insertMemory(conn, draft, nowMs)
+                        promoted++
                     }
                 }
 
-                MemoryWriteMode.OVERWRITE -> ensureZoneHeading(title, body)
-            }
-            writeAtomically(file, updated)
-            dirty = true
-            invalidateLocked()
-            val action = when (mode) {
-                MemoryWriteMode.APPEND -> if (section.isNullOrBlank()) "append" else "append to \"$section\""
-                MemoryWriteMode.REPLACE_SECTION -> "replace_section \"$section\""
-                MemoryWriteMode.OVERWRITE -> "overwrite"
-            }
-            "Wrote ${file.name} ($action):\n\n" + MemoryText.preview(body)
-        }
-
-        else -> unknownTarget(target)
-    }
-
-    suspend fun read(target: String, section: String?, date: String?): String = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            when (target.trim().lowercase()) {
-                "today", "daily", "diary" -> {
-                    val day = normalizedDay(date)
-                    readDayLocked(day).trim().ifEmpty { "No diary entries for $day." }
+                for ((oldId, replacement) in batch.supersessions) {
+                    val existing = MemoryStorage.findById(conn, oldId) ?: continue
+                    if (existing.pinned || existing.status != MemoryItemStatus.ACTIVE) continue
+                    MemoryStorage.insertMemory(conn, replacement, nowMs, existing.id)
+                    superseded++
                 }
 
-                "month" -> {
-                    val month = normalizedMonth(date)
-                    readMonthLocked(month).trim().ifEmpty { "No summary for $month yet." }
+                for (id in batch.expirations) {
+                    val existing = MemoryStorage.findById(conn, id) ?: continue
+                    if (existing.pinned || existing.confidence == MemoryConfidence.CONFIRMED) continue
+                    if (existing.status == MemoryItemStatus.ACTIVE) {
+                        if (MemoryStorage.markStatus(conn, id, MemoryItemStatus.EXPIRED, null, nowMs)) expired++
+                    }
                 }
 
-                "year" -> {
-                    val year = normalizedYear(date)
-                    readYearLocked(year).trim().ifEmpty { "No summary for $year yet." }
+                for (id in batch.archives) {
+                    val existing = MemoryStorage.findById(conn, id) ?: continue
+                    if (existing.pinned || existing.confidence == MemoryConfidence.CONFIRMED) continue
+                    if (existing.status == MemoryItemStatus.ACTIVE) {
+                        if (MemoryStorage.markStatus(conn, id, MemoryItemStatus.ARCHIVED, null, nowMs)) expired++
+                    }
                 }
 
-                "profile", "context", "cookbook" -> {
-                    val file = zoneFile(target) ?: return@withLock unknownTarget(target)
-                    val whole = file.readTextOrEmpty().trim()
-                    if (whole.isEmpty()) return@withLock "${file.name} is empty."
-                    if (section.isNullOrBlank()) return@withLock whole
-                    MemorySections.body(whole, section)?.takeIf { it.isNotBlank() }
-                        ?: "No section \"$section\" in ${file.name}."
+                for (merge in batch.entityMerges) {
+                    if (merge.keepName.isNotBlank() && merge.mergeNames.isNotEmpty()) {
+                        mergedEntities += MemoryStorage.mergeEntities(
+                            conn = conn,
+                            keepName = merge.keepName,
+                            mergeNames = merge.mergeNames,
+                            summary = merge.summary,
+                            nowMs = nowMs,
+                        )
+                    }
                 }
 
-                else -> unknownTarget(target)
+                rebuildSnapshotInConn(conn, "dream", nowMs)
+                val recorded = DreamRunSummary(
+                    id = runId,
+                    startedAt = startedAt,
+                    finishedAt = nowMs,
+                    status = "DONE",
+                    modelRef = modelRef,
+                    promotedCount = promoted,
+                    supersededCount = superseded,
+                    expiredCount = expired,
+                    mergedEntities = mergedEntities,
+                    error = null,
+                )
+                MemoryStorage.recordDreamRun(conn, recorded)
+                recorded
+            }
+        }
+        notifyChanged()
+        summary
+    }
+
+    internal suspend fun recordDreamRun(summary: DreamRunSummary) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn -> MemoryStorage.recordDreamRun(conn, summary) }
+        }
+    }
+
+    suspend fun readSyncCursor(accountKey: String): MemorySyncCursor = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn ->
+                ensureAccountCursorLocked(conn, accountKey)
+                readCursorLocked(conn, accountKey)
             }
         }
     }
 
-    suspend fun recentDayKeys(limit: Int = 7): List<String> = withContext(Dispatchers.IO) {
-        mutex.withLock { dayKeysLocked().sortedDescending().take(limit.coerceIn(1, 60)) }
-    }
-
-    suspend fun fileText(target: String, date: String? = null): String? = withContext(Dispatchers.IO) {
+    suspend fun collectPendingPushBatch(
+        accountKey: String,
+        deviceId: String,
+        limit: Int = 100,
+    ): MemoryPendingPushBatch = withContext(Dispatchers.IO) {
         mutex.withLock {
-            when (target.trim().lowercase()) {
-                "today", "daily", "diary" -> readDayLocked(normalizedDay(date)).trim().takeIf { it.isNotEmpty() }
-                "month" -> readMonthLocked(normalizedMonth(date)).trim().takeIf { it.isNotEmpty() }
-                "year" -> readYearLocked(normalizedYear(date)).trim().takeIf { it.isNotEmpty() }
-                "profile", "context", "cookbook" -> zoneFile(target)?.readTextOrEmpty()?.trim()?.takeIf { it.isNotEmpty() }
-                else -> null
+            db.writeTransaction { conn ->
+                ensureAccountCursorLocked(conn, accountKey)
+                val initialPushDone = MemoryStorage.readSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE) == "1"
+                val cutoffSeq = MemoryStorage.readSyncState(conn, SYNC_KEY_BASELINE_CUTOFF_SEQ)?.toLongOrNull() ?: 0L
+                if (!initialPushDone) {
+                    val stage = MemoryStorage.readSyncState(conn, SYNC_KEY_BASELINE_STAGE) ?: STAGE_ENTITY
+                    val cursorId = MemoryStorage.readSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID).orEmpty()
+                    if (stage == STAGE_ENTITY) {
+                        val rawEntities = MemoryStorage.exportBaselineEntities(conn, cursorId, deviceId, limit + 1)
+                        val entityHasMore = rawEntities.size > limit
+                        val entities = if (entityHasMore) rawEntities.take(limit) else rawEntities
+                        if (entities.isNotEmpty()) {
+                            val nextCursor = entities.last().entity?.id ?: cursorId
+                            return@writeTransaction MemoryPendingPushBatch(
+                                ops = entities,
+                                isBaseline = true,
+                                nextBaselineStage = if (entityHasMore) STAGE_ENTITY else STAGE_MEMORY,
+                                nextBaselineCursorId = if (entityHasMore) nextCursor else "",
+                                nextInitialPushDone = false,
+                                maxLocalSyncSeq = 0L,
+                                baselineCutoffSeq = cutoffSeq,
+                            )
+                        }
+                    }
+                    val memoryCursor = if (stage == STAGE_ENTITY) "" else cursorId
+                    val rawMemories = MemoryStorage.exportBaselineMemories(conn, memoryCursor, deviceId, limit + 1)
+                    val memoryHasMore = rawMemories.size > limit
+                    val memories = if (memoryHasMore) rawMemories.take(limit) else rawMemories
+                    val memoryDone = !memoryHasMore
+                    val nextMemoryCursor = memories.lastOrNull()?.memory?.id ?: memoryCursor
+                    if (memories.isEmpty()) {
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_STAGE, STAGE_DONE)
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID, "")
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE, "1")
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ, cutoffSeq.toString())
+                    }
+                    return@writeTransaction MemoryPendingPushBatch(
+                        ops = memories,
+                        isBaseline = true,
+                        nextBaselineStage = if (memoryDone) STAGE_DONE else STAGE_MEMORY,
+                        nextBaselineCursorId = if (memoryDone) "" else nextMemoryCursor,
+                        nextInitialPushDone = memoryDone,
+                        maxLocalSyncSeq = 0L,
+                        baselineCutoffSeq = cutoffSeq,
+                    )
+                }
+
+                val lastPushedSeq = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ)?.toLongOrNull() ?: 0L
+                val (maxSeq, ops) = MemoryStorage.exportIncrementalOps(conn, lastPushedSeq, deviceId, limit)
+                if (ops.isEmpty() && maxSeq > lastPushedSeq) {
+                    MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ, maxSeq.toString())
+                }
+                MemoryPendingPushBatch(
+                    ops = ops,
+                    isBaseline = false,
+                    nextBaselineStage = STAGE_DONE,
+                    nextBaselineCursorId = "",
+                    nextInitialPushDone = true,
+                    maxLocalSyncSeq = maxSeq,
+                    baselineCutoffSeq = cutoffSeq,
+                )
             }
         }
     }
 
-    internal suspend fun search(query: String, limit: Int): MemorySearchOutcome = withContext(Dispatchers.IO) {
-        mutex.withLock { MemorySearch.search(corpusLocked(), query, limit) }
-    }
-
-    suspend fun status(): MemoryStatus = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val docs = corpusLocked()
-            val measured = MemorySearch.measure(docs)
-            val today = MemoryText.todayKey()
-            val month = MemoryText.monthKey()
-            val year = MemoryText.yearKey()
-            MemoryStatus(
-                rootDir = rootDir.absolutePath,
-                profileChars = profileFile.readTextOrEmpty().length,
-                contextChars = contextFile.readTextOrEmpty().length,
-                cookbookChars = cookbookFile.readTextOrEmpty().length,
-                todayChars = readDayLocked(today).length,
-                monthChars = readMonthLocked(month).length,
-                yearChars = readYearLocked(year).length,
-                dayCount = dayKeysLocked().size,
-                totalBytes = rootDir.walkTopDown().filter { it.isFile }.sumOf { it.length() },
-                indexedChunks = measured.chunks,
-                indexBuildMs = measured.elapsedMs,
-                snapshotChars = if (cacheValid) cachedChars else 0,
-                snapshotAt = cachedAt,
-                snapshotReason = cachedReason,
-                dirty = dirty,
-            )
-        }
-    }
-
-    suspend fun rebuildIndex(): Int = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            corpusCache = null
-            MemorySearch.measure(corpusLocked()).chunks
-        }
-    }
-
-    internal suspend fun appendDayBlock(day: String, block: String) = withContext(Dispatchers.IO) {
-        val shared = backend
-        if (shared != null) {
-            val written = shared.appendBlock(dayPath(normalizedDay(day)), null, block)
-            if (written) {
-                mutex.withLock { invalidateLocked() }
-                return@withContext
-            }
-        }
-        mutex.withLock { appendDayLocked(normalizedDay(day), block) }
-    }
-
-    internal suspend fun readDay(day: String): String? = withContext(Dispatchers.IO) {
-        mutex.withLock { readDayLocked(day).takeIf { it.isNotBlank() } }
-    }
-
-    internal suspend fun readMonth(month: String): String? = withContext(Dispatchers.IO) {
-        mutex.withLock { readMonthLocked(month).takeIf { it.isNotBlank() } }
-    }
-
-    internal suspend fun readYear(year: String): String? = withContext(Dispatchers.IO) {
-        mutex.withLock { readYearLocked(year).takeIf { it.isNotBlank() } }
-    }
-
-    internal suspend fun dayKeys(): List<String> = withContext(Dispatchers.IO) {
-        mutex.withLock { dayKeysLocked() }
-    }
-
-    internal suspend fun monthKeys(): List<String> = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            dailyDir.walkTopDown()
-                .filter { it.isFile && it.name.matches(MONTH_FILE) }
-                .map { it.name.removeSuffix(".md") }
-                .sorted()
-                .toList()
-        }
-    }
-
-    internal fun monthHasDay(dayKey: String): Boolean = runCatching {
-        val monthFile = monthFile(dayKey)
-        monthFile.isFile && Regex("(?m)^##\\s+${Regex.escape(dayKey)}\\s*$").containsMatchIn(monthFile.readText())
-    }.getOrDefault(false)
-
-    internal fun yearHasMonth(monthKey: String): Boolean = runCatching {
-        val yearFile = yearFile(monthKey)
-        yearFile.isFile && Regex("(?m)^##\\s+${Regex.escape(monthKey)}\\s*$").containsMatchIn(yearFile.readText())
-    }.getOrDefault(false)
-
-    internal suspend fun appendMonthBlock(dayKey: String, block: String) = withContext(Dispatchers.IO) {
-        val shared = backend
-        if (shared != null) {
-            val written = shared.appendBlock(monthPath(dayKey.take(7)), dayKey, block)
-            if (written) {
-                mutex.withLock { invalidateLocked() }
-                return@withContext
-            }
-        }
-        mutex.withLock {
-            val month = dayKey.take(7)
-            val file = monthFile(dayKey)
-            val current = file.readTextOrEmpty().trimEnd()
-            val heading = "# $month"
-            val head = if (current.isBlank()) heading else current
-            val updated = head + "\n\n## $dayKey\n\n" + block.trim() + "\n"
-            writeAtomically(file, updated)
-            invalidateLocked()
-        }
-    }
-
-    internal suspend fun appendYearBlock(monthKey: String, block: String) = withContext(Dispatchers.IO) {
-        val shared = backend
-        if (shared != null) {
-            val written = shared.appendBlock(yearPath(monthKey.take(4)), monthKey, block)
-            if (written) {
-                mutex.withLock { invalidateLocked() }
-                return@withContext
-            }
-        }
-        mutex.withLock {
-            val year = monthKey.take(4)
-            val file = yearFile(monthKey)
-            val current = file.readTextOrEmpty().trimEnd()
-            val heading = "# $year"
-            val head = if (current.isBlank()) heading else current
-            val updated = head + "\n\n## $monthKey\n\n" + block.trim() + "\n"
-            writeAtomically(file, updated)
-            invalidateLocked()
-        }
-    }
-
-    internal suspend fun savePendingRecap(
-        sessionId: String,
-        sessionFile: String?,
-        transcript: String,
-        lastEntryId: String?,
-        reason: String,
+    suspend fun markPushAcked(
+        accountKey: String,
+        batch: MemoryPendingPushBatch,
+        serverSeq: Long,
+        remoteLastDreamAt: Long?,
     ) = withContext(Dispatchers.IO) {
-        runCatching {
-            pendingDir.mkdirs()
-            val encoder = Base64.getEncoder()
-            fun encode(value: String?): String =
-                encoder.encodeToString((value.orEmpty()).toByteArray(Charsets.UTF_8))
-            val header = listOf(encode(sessionFile), encode(lastEntryId), encode(reason)).joinToString("\n")
-            pendingFile(sessionId).writeText(header + "\n\n" + transcript)
-            prunePendingLocked()
-        }.onFailure { logWarn(TAG, "save pending recap failed", it) }
-        Unit
+        mutex.withLock {
+            db.writeTransaction { conn ->
+                if (MemoryStorage.readSyncState(conn, SYNC_KEY_ACCOUNT) != accountKey) return@writeTransaction
+                if (batch.isBaseline) {
+                    MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_STAGE, batch.nextBaselineStage)
+                    MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID, batch.nextBaselineCursorId)
+                    if (batch.nextInitialPushDone) {
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE, "1")
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ, batch.baselineCutoffSeq.toString())
+                        MemoryStorage.pruneSyncOps(conn, maxSeqToPrune = batch.baselineCutoffSeq)
+                    }
+                } else if (batch.maxLocalSyncSeq > 0L) {
+                    val existingSeq = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ)?.toLongOrNull() ?: 0L
+                    val ackedSeq = maxOf(existingSeq, batch.maxLocalSyncSeq)
+                    MemoryStorage.writeSyncState(
+                        conn,
+                        SYNC_KEY_LAST_PUSHED_SEQ,
+                        ackedSeq.toString(),
+                    )
+                    MemoryStorage.pruneSyncOps(conn, maxSeqToPrune = ackedSeq)
+                }
+                if (remoteLastDreamAt != null) {
+                    updateRemoteLastDreamLocked(conn, remoteLastDreamAt)
+                }
+                val currentPulled = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ)?.toLongOrNull() ?: 0L
+                if (batch.ops.isEmpty() && serverSeq > currentPulled) {
+                    val maxRemoteTs = MemoryStorage.readSyncState(conn, SYNC_KEY_MAX_REMOTE_TS)?.toLongOrNull() ?: 0L
+                    if (remoteLastDreamAt != null && remoteLastDreamAt > maxRemoteTs) {
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_MAX_REMOTE_TS, remoteLastDreamAt.toString())
+                    }
+                }
+            }
+        }
     }
 
-    internal suspend fun pendingRecaps(): List<PendingRecap> = withContext(Dispatchers.IO) {
-        runCatching {
-            pendingDir.listFiles().orEmpty()
-                .filter { it.isFile && it.name.endsWith(".txt") }
-                .sortedBy { it.lastModified() }
-                .mapNotNull { file -> parsePending(file) }
+    suspend fun inspectAccountSwitch(accountIdentity: String): MemoryAccountSwitchCheck =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                db.writeTransaction { conn ->
+                    val previousIdentity = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY)
+                        ?: MemoryStorage.readSyncState(conn, SYNC_KEY_ACCOUNT)
+                            ?.let(::extractAccountIdentity)
+                            ?.also { MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY, it) }
+                    if (previousIdentity == null || previousIdentity == accountIdentity) {
+                        return@writeTransaction MemoryAccountSwitchCheck.Ready
+                    }
+                    val localCount = MemoryStorage.countLocalMemories(conn)
+                    if (localCount == 0) {
+                        MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY, accountIdentity)
+                        MemoryStorage.deleteSyncState(conn, SYNC_KEY_ACCOUNT)
+                        MemoryAccountSwitchCheck.Ready
+                    } else {
+                        MemoryAccountSwitchCheck.NeedsDecision(localCount)
+                    }
+                }
+            }
+        }
+
+    suspend fun resolveAccountSwitch(
+        accountKey: String,
+        accountIdentity: String,
+        mode: MemoryAccountSwitchMode,
+    ) {
+        var wiped = false
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                db.writeTransaction { conn ->
+                    when (mode) {
+                        MemoryAccountSwitchMode.MERGE_ALL -> {
+                            MemoryStorage.markAllLocalDataOwnedForMerge(conn)
+                            val cutoffSeq = MemoryStorage.currentMaxSyncSeq(conn)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY, accountIdentity)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_ACCOUNT, accountKey)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ, "0")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ, "0")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE, "0")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_STAGE, STAGE_ENTITY)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID, "")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CUTOFF_SEQ, cutoffSeq.toString())
+                            MemoryStorage.deleteSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT)
+                            MemoryStorage.writeSyncState(
+                                conn,
+                                SYNC_KEY_HAD_LOCAL_PRE_MERGE,
+                                if (MemoryStorage.countLocalMemories(conn) > 0) "1" else "0",
+                            )
+                            MemoryStorage.deleteSyncState(conn, SYNC_KEY_POST_MERGE_CONSOLIDATED)
+                        }
+
+                        MemoryAccountSwitchMode.REPLACE_WITH_REMOTE -> {
+                            MemoryStorage.wipeAllMemoryDataForAccountSwitch(conn)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY, accountIdentity)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_ACCOUNT, accountKey)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ, "0")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ, "0")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE, "1")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_STAGE, STAGE_DONE)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID, "")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CUTOFF_SEQ, "0")
+                            MemoryStorage.deleteSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT)
+                            MemoryStorage.deleteSyncState(conn, SYNC_KEY_MAX_REMOTE_TS)
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_HAD_LOCAL_PRE_MERGE, "0")
+                            MemoryStorage.writeSyncState(conn, SYNC_KEY_POST_MERGE_CONSOLIDATED, "1")
+                            rebuildSnapshotInConn(conn, "account_switch", clock())
+                            wiped = true
+                        }
+                    }
+                }
+            }
+        }
+        if (wiped) notifyChanged()
+    }
+
+    suspend fun applyRemotePullBatch(
+        accountKey: String,
+        selfDeviceId: String,
+        entries: List<MemoryRemotePullEntry>,
+        nextSince: Long,
+        serverSeq: Long,
+        remoteLastDreamAt: Long?,
+    ): MemoryRemoteMergeResult = withContext(Dispatchers.IO) {
+        val result = mutex.withLock {
+            val nowMs = clock()
+            db.writeTransaction { conn ->
+                ensureAccountCursorLocked(conn, accountKey)
+                var applied = 0
+                var maxRemoteTs = MemoryStorage.readSyncState(conn, SYNC_KEY_MAX_REMOTE_TS)?.toLongOrNull() ?: 0L
+                var receivedPeerMemory = false
+
+                for (entry in entries) {
+                    if (entry.kind == MemorySyncOpKind.ENTITY && entry.entity != null) {
+                        maxRemoteTs = maxOf(maxRemoteTs, entry.entity.updatedAt)
+                        if (MemoryStorage.applyRemoteEntity(conn, entry.entity, nowMs)) {
+                            applied++
+                        }
+                    }
+                }
+                for (entry in entries) {
+                    if (entry.kind == MemorySyncOpKind.MEMORY && entry.memory != null) {
+                        maxRemoteTs = maxOf(maxRemoteTs, entry.memory.updatedAt)
+                        if (MemoryStorage.applyRemoteMemory(conn, entry.memory, nowMs)) {
+                            applied++
+                        }
+                        if (entry.deviceId != selfDeviceId && entry.memory.deletedAt == null) {
+                            receivedPeerMemory = true
+                        }
+                    }
+                }
+
+                if (maxRemoteTs > 0L) {
+                    MemoryStorage.writeSyncState(conn, SYNC_KEY_MAX_REMOTE_TS, maxRemoteTs.toString())
+                }
+                val currentPulled = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ)?.toLongOrNull() ?: 0L
+                MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ, maxOf(currentPulled, nextSince).toString())
+                if (remoteLastDreamAt != null) {
+                    updateRemoteLastDreamLocked(conn, remoteLastDreamAt)
+                }
+
+                val hadLocalPreMerge = MemoryStorage.readSyncState(conn, SYNC_KEY_HAD_LOCAL_PRE_MERGE) == "1"
+                val consolidated = MemoryStorage.readSyncState(conn, SYNC_KEY_POST_MERGE_CONSOLIDATED) == "1"
+                val overlap = hadLocalPreMerge && receivedPeerMemory && !consolidated
+                if (overlap) {
+                    MemoryStorage.writeSyncState(conn, SYNC_KEY_POST_MERGE_CONSOLIDATED, "1")
+                }
+                if (applied > 0) {
+                    rebuildSnapshotInConn(conn, "sync_pull", nowMs)
+                }
+                MemoryRemoteMergeResult(
+                    appliedCount = applied,
+                    hadLocalAndRemoteOverlap = overlap,
+                    serverSeq = serverSeq,
+                )
+            }
+        }
+        if (result.appliedCount > 0) notifyChanged()
+        result
+    }
+
+    suspend fun updateRemoteLastDreamAt(accountKey: String, remoteLastDreamAt: Long) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            db.writeTransaction { conn ->
+                if (MemoryStorage.readSyncState(conn, SYNC_KEY_ACCOUNT) != accountKey) return@writeTransaction
+                updateRemoteLastDreamLocked(conn, remoteLastDreamAt)
+            }
+        }
+    }
+
+    private fun nextWriteTimestampLocked(conn: androidx.sqlite.SQLiteConnection): Long {
+        val maxRemote = MemoryStorage.readSyncState(conn, SYNC_KEY_MAX_REMOTE_TS)?.toLongOrNull() ?: 0L
+        val localClock = clock()
+        if (maxRemote > 0L && localClock <= maxRemote) {
+            val next = maxRemote + 1L
+            MemoryStorage.writeSyncState(conn, SYNC_KEY_MAX_REMOTE_TS, next.toString())
+            return next
+        }
+        return localClock
+    }
+
+    private fun ensureAccountCursorLocked(conn: androidx.sqlite.SQLiteConnection, accountKey: String) {
+        val current = MemoryStorage.readSyncState(conn, SYNC_KEY_ACCOUNT)
+        val identity = extractAccountIdentity(accountKey)
+        if (current == accountKey) {
+            if (MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY) == null) {
+                MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY, identity)
+            }
+            return
+        }
+        val previousIdentity = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY)
+            ?: current?.let(::extractAccountIdentity)
+        val sameAccountReEnroll = previousIdentity == identity
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_ACCOUNT_IDENTITY, identity)
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_ACCOUNT, accountKey)
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ, "0")
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ, "0")
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE, "0")
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_STAGE, STAGE_ENTITY)
+        MemoryStorage.writeSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID, "")
+        MemoryStorage.writeSyncState(
+            conn,
+            SYNC_KEY_BASELINE_CUTOFF_SEQ,
+            MemoryStorage.currentMaxSyncSeq(conn).toString(),
+        )
+        MemoryStorage.deleteSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT)
+        if (sameAccountReEnroll) {
+            MemoryStorage.writeSyncState(conn, SYNC_KEY_HAD_LOCAL_PRE_MERGE, "0")
+        } else {
+            MemoryStorage.writeSyncState(
+                conn,
+                SYNC_KEY_HAD_LOCAL_PRE_MERGE,
+                if (MemoryStorage.countLocalMemories(conn) > 0) "1" else "0",
+            )
+            MemoryStorage.deleteSyncState(conn, SYNC_KEY_POST_MERGE_CONSOLIDATED)
+        }
+    }
+
+    private fun extractAccountIdentity(accountKey: String): String {
+        val parts = accountKey.split('|')
+        return if (parts.size >= 2) "${parts[0]}|${parts[1]}" else accountKey
+    }
+
+    private fun parsePauseWindows(raw: String?): List<PauseWindow> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = Json.parseToJsonElement(raw) as? JsonArray ?: return emptyList()
+            array.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                val startMs = (obj["startMs"] as? JsonPrimitive)?.longOrNull ?: return@mapNotNull null
+                val endMs = (obj["endMs"] as? JsonPrimitive)?.longOrNull
+                PauseWindow(startMs = startMs, endMs = endMs)
+            }
         }.getOrDefault(emptyList())
     }
 
-    internal suspend fun deletePendingRecap(sessionId: String) = withContext(Dispatchers.IO) {
-        runCatching { pendingFile(sessionId).delete() }
-        Unit
+    private fun prunePauseWindows(windows: List<PauseWindow>, nowMs: Long): List<PauseWindow> {
+        val cutoff = nowMs - PAUSE_WINDOW_RETENTION_DAYS * MS_PER_DAY
+        val open = windows.filter { it.endMs == null }
+        val closed = windows
+            .filter { it.endMs != null && it.endMs >= cutoff }
+            .takeLast(MAX_CLOSED_PAUSE_WINDOWS)
+        return closed + open
     }
 
-    internal fun isSummaryDuplicate(sessionId: String, hash: String): Boolean =
-        runCatching {
-            summaryLogFile.isFile && summaryLogFile.readLines().any { line ->
-                val parts = line.split('|')
-                parts.size >= 2 && parts[0] == sessionId && parts[1] == hash
-            }
-        }.getOrDefault(false)
-
-    internal fun lastSummarizedEntryId(sessionId: String): String? =
-        runCatching {
-            if (!summaryLogFile.isFile) return@runCatching null
-            summaryLogFile.readLines()
-                .map { it.split('|') }
-                .filter { it.size >= 3 && it[0] == sessionId && it[2].isNotBlank() }
-                .lastOrNull()
-                ?.get(2)
-        }.getOrNull()
-
-    internal fun commitSummary(sessionId: String, hash: String, lastEntryId: String?) {
-        runCatching {
-            if (!summaryLogFile.exists()) summaryLogFile.createNewFile()
-            summaryLogFile.appendText(buildString {
-                append(sessionId).append('|').append(hash)
-                if (!lastEntryId.isNullOrBlank()) append('|').append(lastEntryId)
-                append('\n')
-            })
-        }
-    }
-
-    fun fileForTarget(target: String): File? = zoneFile(target)
-
-    private fun ensureLocked() {
-        rootDir.mkdirs()
-        dailyDir.mkdirs()
-        pendingDir.mkdirs()
-        listOf(
-            profileFile to ZONE_PROFILE,
-            contextFile to ZONE_CONTEXT,
-            cookbookFile to ZONE_COOKBOOK,
-        ).forEach { (file, title) ->
-            if (!file.isFile || file.readTextOrEmpty().isBlank()) {
-                runCatching { file.writeText("# $title\n") }
-            }
-        }
-    }
-
-    private suspend fun refreshShared() {
-        val shared = backend ?: return
-        val changed = runCatching { shared.refreshIfStale() }.getOrDefault(false)
-        if (changed) markDirty()
-    }
-
-    private suspend fun MemoryBackend.appendBlock(path: String, section: String?, block: String): Boolean =
-        when (val outcome = append(path, section, block)) {
-            MemoryWriteOutcome.Applied -> true
-            MemoryWriteOutcome.Inactive -> false
-            MemoryWriteOutcome.Queued -> false
-            is MemoryWriteOutcome.Rejected -> {
-                logWarn(TAG, "shared memory write rejected: ${outcome.message}")
-                false
-            }
-        }
-
-    private fun dayPath(day: String): String {
-        val date = runCatching { LocalDate.parse(day) }.getOrElse { MemoryText.today() }
-        val year = date.year.toString()
-        val month = "%02d".format(date.monthValue)
-        return "daily/$year/$month/$year-$month/${MemoryText.dayKey(date)}.md"
-    }
-
-    private fun monthPath(month: String): String =
-        "daily/${month.take(4)}/${month.takeLast(2)}/$month.md"
-
-    private fun yearPath(year: String): String = "daily/$year/$year.md"
-
-    private data class SharedWrite(
-        val message: String,
-        val writeLocal: Boolean,
-    )
-
-    private fun zoneFile(target: String): File? = when (target.trim().lowercase()) {
-        "profile" -> profileFile
-        "context" -> contextFile
-        "cookbook" -> cookbookFile
-        else -> null
-    }
-
-    private fun appendZone(current: String, title: String, body: String, section: String?): String {
-        if (current.isBlank()) {
-            return if (section.isNullOrBlank()) {
-                "# $title\n\n$body\n"
-            } else {
-                "# $title\n\n## ${section.trimStart('#', ' ')}\n\n$body\n"
-            }
-        }
-        return if (section.isNullOrBlank()) {
-            current.trimEnd() + "\n\n" + body + "\n"
-        } else {
-            MemorySections.append(current, section, body)
-        }
-    }
-
-    private fun ensureZoneHeading(title: String, body: String): String {
-        val text = body.trimStart()
-        return if (text.startsWith("# ")) text.trimEnd() + "\n"
-        else "# $title\n\n" + text.trimEnd() + "\n"
-    }
-
-    private fun normalizedDay(date: String?): String =
-        date?.trim()?.takeIf { MemoryText.isValidDay(it) } ?: MemoryText.todayKey()
-
-    private fun normalizedMonth(date: String?): String {
-        val raw = date?.trim().orEmpty()
-        if (raw.matches(Regex("\\d{4}-\\d{2}"))) return raw
-        if (MemoryText.isValidDay(raw)) return raw.take(7)
-        return MemoryText.monthKey()
-    }
-
-    private fun normalizedYear(date: String?): String {
-        val raw = date?.trim().orEmpty()
-        if (raw.matches(Regex("\\d{4}"))) return raw
-        return MemoryText.yearKey()
-    }
-
-    private fun buildSectionLocked(reason: String): String? {
-        val today = MemoryText.todayKey()
-        val month = MemoryText.monthKey()
-        val year = MemoryText.yearKey()
-        val takenAt = MemoryText.nowStamp()
-        runCatching { ensureLocked() }
-        val section = runCatching {
-            renderMemorySection(
-                profile = profileFile.readTextOrEmpty(),
-                context = contextFile.readTextOrEmpty(),
-                cookbook = cookbookFile.readTextOrEmpty(),
-                todayText = readDayLocked(today),
-                todayLabel = today,
-                monthText = readMonthLocked(month),
-                monthLabel = month,
-                yearText = readYearLocked(year),
-                yearLabel = year,
+    private fun encodePauseWindows(windows: List<PauseWindow>): String = buildJsonArray {
+        for (window in windows) {
+            add(
+                buildJsonObject {
+                    put("startMs", window.startMs)
+                    window.endMs?.let { put("endMs", it) }
+                },
             )
-        }.onFailure { logWarn(TAG, "render memory section failed", it) }.getOrNull()
-        cachedSection = section
-        cachedChars = section?.length ?: 0
-        cachedAt = takenAt
-        cachedReason = reason
-        cachedDay = today
-        cacheValid = true
-        dirty = false
-        return section
-    }
+        }
+    }.toString()
 
-    private fun invalidateLocked() {
-        corpusCache = null
-        dirty = true
-    }
-
-    private fun corpusLocked(): List<MemoryDoc> {
-        corpusCache?.let { return it }
-        val docs = ArrayList<MemoryDoc>()
-        docs += MemorySearch.chunk("profile.md", profileFile.readTextOrEmpty())
-        docs += MemorySearch.chunk("context.md", contextFile.readTextOrEmpty())
-        docs += MemorySearch.chunk("cookbook.md", cookbookFile.readTextOrEmpty())
-        dailyDir.walkTopDown()
-            .filter { it.isFile && it.name.endsWith(".md") }
-            .sortedBy { it.path }
-            .forEach { file ->
-                val label = file.relativeTo(rootDir).invariantSeparatorsPath
-                docs += MemorySearch.chunk(label, file.readTextOrEmpty())
-            }
-        corpusCache = docs
-        return docs
-    }
-
-    private fun dayKeysLocked(): List<String> =
-        dailyDir.walkTopDown()
-            .filter { it.isFile && DAY_FILE.matches(it.name) }
-            .map { it.name.removeSuffix(".md") }
-            .sorted()
-            .toList()
-
-    private fun readDayLocked(day: String): String = dayFile(day).readTextOrEmpty()
-
-    private fun readMonthLocked(month: String): String = monthFileFor(month).readTextOrEmpty()
-
-    private fun readYearLocked(year: String): String = yearFileFor(year).readTextOrEmpty()
-
-    private fun appendDayLocked(day: String, block: String) {
-        if (block.isBlank()) return
-        val file = dayFile(day)
-        val current = file.readTextOrEmpty().trimEnd()
-        val head = if (current.isBlank()) "# $day" else current
-        val updated = head + "\n\n" + block.trim() + "\n"
-        writeAtomically(file, updated)
-    }
-
-    private fun dayFile(day: String): File {
-        val date = runCatching { LocalDate.parse(day) }.getOrElse { MemoryText.today() }
-        val year = date.year.toString()
-        val month = "%02d".format(date.monthValue)
-        return File(dailyDir, "$year/$month/$year-$month/${MemoryText.dayKey(date)}.md")
-    }
-
-    private fun monthFile(dayKey: String): File = monthFileFor(dayKey.take(7))
-
-    private fun monthFileFor(month: String): File {
-        val year = month.take(4)
-        val mm = month.takeLast(2)
-        return File(dailyDir, "$year/$mm/$month.md")
-    }
-
-    private fun yearFile(monthKey: String): File = yearFileFor(monthKey.take(4))
-
-    private fun yearFileFor(year: String): File = File(dailyDir, "$year/$year.md")
-
-    private fun pendingFile(sessionId: String): File =
-        File(pendingDir, sessionId.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".txt")
-
-    private fun prunePendingLocked() {
-        val files = pendingDir.listFiles().orEmpty()
-            .filter { it.isFile && it.name.endsWith(".txt") }
-            .sortedBy { it.lastModified() }
-        if (files.size <= MAX_PENDING_RECAPS) return
-        files.take(files.size - MAX_PENDING_RECAPS).forEach { it.delete() }
-    }
-
-    private fun parsePending(file: File): PendingRecap? = runCatching {
-        val parts = file.readText().split("\n\n", limit = 2)
-        if (parts.size < 2) return@runCatching null
-        val header = parts[0].split('\n')
-        if (header.size < 3) return@runCatching null
-        val decoder = Base64.getDecoder()
-        fun decode(value: String): String = String(decoder.decode(value), Charsets.UTF_8)
-        PendingRecap(
-            sessionId = file.name.removeSuffix(".txt"),
-            sessionFile = decode(header[0]).takeIf { it.isNotBlank() },
-            transcript = parts[1],
-            lastEntryId = decode(header[1]).takeIf { it.isNotBlank() },
-            reason = decode(header[2]).ifBlank { "auto" },
+    private fun readCursorLocked(conn: androidx.sqlite.SQLiteConnection, accountKey: String): MemorySyncCursor =
+        MemorySyncCursor(
+            accountKey = accountKey,
+            lastPulledServerSeq = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PULLED_SEQ)?.toLongOrNull() ?: 0L,
+            lastPushedLocalSeq = MemoryStorage.readSyncState(conn, SYNC_KEY_LAST_PUSHED_SEQ)?.toLongOrNull() ?: 0L,
+            initialPushDone = MemoryStorage.readSyncState(conn, SYNC_KEY_INITIAL_PUSH_DONE) == "1",
+            baselineStage = MemoryStorage.readSyncState(conn, SYNC_KEY_BASELINE_STAGE) ?: STAGE_ENTITY,
+            baselineCursorId = MemoryStorage.readSyncState(conn, SYNC_KEY_BASELINE_CURSOR_ID).orEmpty(),
+            remoteLastDreamAt = MemoryStorage.readSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT)?.toLongOrNull(),
+            postMergeConsolidated = MemoryStorage.readSyncState(conn, SYNC_KEY_POST_MERGE_CONSOLIDATED) == "1",
         )
-    }.getOrNull()
 
-    private fun File.readTextOrEmpty(): String = runCatching { if (isFile) readText() else "" }.getOrDefault("")
+    private fun updateRemoteLastDreamLocked(conn: androidx.sqlite.SQLiteConnection, remoteLastDreamAt: Long) {
+        if (remoteLastDreamAt <= 0L) return
+        val existing = MemoryStorage.readSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT)?.toLongOrNull() ?: 0L
+        if (remoteLastDreamAt > existing) {
+            MemoryStorage.writeSyncState(conn, SYNC_KEY_REMOTE_LAST_DREAM_AT, remoteLastDreamAt.toString())
+        }
+    }
 
-    private fun writeAtomically(file: File, text: String) {
-        runCatching {
-            file.parentFile?.mkdirs()
-            val temp = File(file.parentFile, ".${file.name}.tmp")
-            temp.writeText(text)
-            if (!temp.renameTo(file)) {
-                file.delete()
-                if (!temp.renameTo(file)) {
-                    file.writeText(text)
-                    temp.delete()
-                }
-            }
-        }.onFailure { logWarn(TAG, "write memory file failed", it) }
+    private fun isDuplicateInStore(conn: androidx.sqlite.SQLiteConnection, draft: MemoryDraft): Boolean {
+        val candidates = MemoryStorage.queryRecords(
+            conn,
+            MemoryFilter(kinds = setOf(draft.kind), includeHistory = false, limit = 60),
+        )
+        return candidates.any { existing ->
+            MemoryTokenizer.bigramJaccard(existing.content, draft.content) > INGEST_DUPLICATE_THRESHOLD
+        }
+    }
+
+    private fun rebuildSnapshotLocked(reason: String): String {
+        val nowMs = clock()
+        return db.writeTransaction { conn -> rebuildSnapshotInConn(conn, reason, nowMs) }
+    }
+
+    private fun rebuildSnapshotInConn(
+        conn: androidx.sqlite.SQLiteConnection,
+        reason: String,
+        nowMs: Long,
+    ): String {
+        val identity = MemoryStorage.queryRecords(
+            conn,
+            MemoryFilter(kinds = setOf(MemoryKind.IDENTITY), includeHistory = false, limit = 120),
+        )
+        val habit = MemoryStorage.queryRecords(
+            conn,
+            MemoryFilter(kinds = setOf(MemoryKind.HABIT), includeHistory = false, limit = 100),
+        )
+        val active = MemoryStorage.queryRecords(
+            conn,
+            MemoryFilter(kinds = setOf(MemoryKind.ACTIVE), includeHistory = false, limit = 120),
+        )
+        val episodic = MemoryStorage.queryRecords(
+            conn,
+            MemoryFilter(
+                kinds = setOf(MemoryKind.EPISODIC),
+                sinceEpochMs = nowMs - 14L * MS_PER_DAY,
+                includeHistory = false,
+                limit = 80,
+            ),
+        )
+        val combined = identity + habit + active + episodic
+        val entities = MemoryStorage.listActiveEntities(conn)
+        val rendered = MemorySnapshotRenderer.render(combined, entities, nowMs)
+        val revision = MemoryStorage.currentMaxRevision(conn)
+        MemoryStorage.saveSnapshot(conn, rendered, revision, nowMs, reason)
+        return rendered
+    }
+
+    private fun notifyChanged() {
+        mutableChanges.update { it + 1L }
     }
 
     private companion object {
         private const val TAG = "SuperPIMemory"
-        private const val MAX_PENDING_RECAPS = 30
-        private val DAY_FILE = Regex("\\d{4}-\\d{2}-\\d{2}\\.md")
-        private val MONTH_FILE = Regex("\\d{4}-\\d{2}\\.md")
+        private const val MS_PER_DAY = 86_400_000L
+        private const val INGEST_DUPLICATE_THRESHOLD = 0.85
+        private const val SYNC_KEY_ACCOUNT = "account_key"
+        private const val SYNC_KEY_LAST_PULLED_SEQ = "last_pulled_server_seq"
+        private const val SYNC_KEY_LAST_PUSHED_SEQ = "last_pushed_local_seq"
+        private const val SYNC_KEY_INITIAL_PUSH_DONE = "initial_push_done"
+        private const val SYNC_KEY_BASELINE_STAGE = "baseline_stage"
+        private const val SYNC_KEY_BASELINE_CURSOR_ID = "baseline_cursor_id"
+        private const val SYNC_KEY_BASELINE_CUTOFF_SEQ = "baseline_cutoff_seq"
+        private const val SYNC_KEY_MAX_REMOTE_TS = "max_seen_timestamp"
+        private const val SYNC_KEY_REMOTE_LAST_DREAM_AT = "remote_last_dream_at"
+        private const val SYNC_KEY_HAD_LOCAL_PRE_MERGE = "had_local_pre_merge"
+        private const val SYNC_KEY_POST_MERGE_CONSOLIDATED = "post_merge_consolidated"
+        private const val SYNC_KEY_LAST_ACCOUNT_IDENTITY = "last_account_identity"
+        private const val SYNC_KEY_PAUSE_WINDOWS = "pause_windows"
+        private const val MAX_CLOSED_PAUSE_WINDOWS = 50
+        private const val PAUSE_WINDOW_RETENTION_DAYS = 90L
+        private const val STAGE_ENTITY = "ENTITY"
+        private const val STAGE_MEMORY = "MEMORY"
+        private const val STAGE_DONE = "DONE"
     }
 }
-
-internal class MemoryWriteRejected(message: String) : Exception(message)
-
-private fun unknownTarget(target: String): String =
-    "Unknown target: $target (write: profile / context / cookbook / today; read: also month / year)."

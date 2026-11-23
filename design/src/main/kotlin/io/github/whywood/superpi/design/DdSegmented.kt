@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.design
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -20,10 +21,11 @@ fun DdSegmented(
 ) {
     if (options.isEmpty()) return
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val index = selectedIndex.coerceIn(0, options.size - 1)
     val indicatorColor by animateColorAsState(
-        targetValue = if (colors.dark) colors.ink.copy(alpha = DdAlpha.IndicatorDark) else colors.surface,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        targetValue = if (colors.dark) colors.raised else colors.surface,
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "segmented-indicator",
     )
     DdSegmentedCore(

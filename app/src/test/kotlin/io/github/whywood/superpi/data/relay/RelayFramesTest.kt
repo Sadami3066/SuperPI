@@ -198,13 +198,14 @@ class RelayFramesTest {
 
     @Test
     fun parsesAndEncodesCapabilitiesSyncEventsFileEntriesAndPaths() {
-        assertTrue(RELAY_CAPABILITIES.containsAll(listOf("bot-live-sync", "bot-manage", "session-manage", "workspace-files", "bot-controls", "session-controls", "sync-events")))
+        assertTrue(RELAY_CAPABILITIES.containsAll(listOf("bot-live-sync", "bot-manage", "session-manage", "workspace-files", "bot-controls", "session-controls", "sync-events", "memory-v2")))
         assertFalse(RELAY_CAPABILITIES.contains("workspace-git"))
         assertFalse(RELAY_CAPABILITIES.contains("session-fork"))
         assertFalse(RELAY_CAPABILITIES_READONLY.contains("bot-manage"))
         assertFalse(RELAY_CAPABILITIES_READONLY.contains("bot-controls"))
         assertFalse(RELAY_CAPABILITIES_READONLY.contains("session-controls"))
         assertTrue(RELAY_CAPABILITIES_READONLY.contains("sync-events"))
+        assertTrue(RELAY_CAPABILITIES_READONLY.contains("memory-v2"))
 
         val modelSyncJson = RelayFrames.syncEvent(
             kind = "model_changed",

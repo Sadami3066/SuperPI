@@ -7,12 +7,26 @@ import org.junit.Test
 
 class ThemeChoiceTest {
     @Test
-    fun parsesBuiltInChoices() {
+    fun parsesBuiltInChoicesAndMigratesLegacy() {
         assertEquals(ThemeChoice.Pi, ThemeChoice.parse("pi"))
         assertEquals(ThemeChoice.Pi, ThemeChoice.parse("system"))
-        assertEquals(ThemeChoice.ClassicBlue, ThemeChoice.parse("classic"))
-        assertEquals(ThemeChoice.Santorini, ThemeChoice.parse("santorini"))
-        assertEquals(ThemeChoice.Oceanic, ThemeChoice.parse("oceanic"))
+        assertEquals(ThemeChoice.Paper, ThemeChoice.parse("paper"))
+        assertEquals(ThemeChoice.Slate, ThemeChoice.parse("slate"))
+        assertEquals(ThemeChoice.Slate, ThemeChoice.parse("classic"))
+        assertEquals(ThemeChoice.Slate, ThemeChoice.parse("santorini"))
+        assertEquals(ThemeChoice.Slate, ThemeChoice.parse("oceanic"))
+    }
+
+    @Test
+    fun parsesAppearanceModesAndResolvesDark() {
+        assertEquals(ThemeAppearanceMode.SYSTEM, ThemeAppearanceMode.parse(null))
+        assertEquals(ThemeAppearanceMode.SYSTEM, ThemeAppearanceMode.parse("unknown"))
+        assertEquals(ThemeAppearanceMode.LIGHT, ThemeAppearanceMode.parse("light"))
+        assertEquals(ThemeAppearanceMode.DARK, ThemeAppearanceMode.parse("dark"))
+        assertEquals(true, ThemeAppearanceMode.SYSTEM.resolveDark(true))
+        assertEquals(false, ThemeAppearanceMode.SYSTEM.resolveDark(false))
+        assertEquals(false, ThemeAppearanceMode.LIGHT.resolveDark(true))
+        assertEquals(true, ThemeAppearanceMode.DARK.resolveDark(false))
     }
 
     @Test
@@ -45,7 +59,7 @@ class ThemeChoiceTest {
     @Test
     fun builtInChoicesExcludeFollowSystem() {
         assertEquals(
-            listOf(ThemeChoice.Pi, ThemeChoice.ClassicBlue, ThemeChoice.Santorini, ThemeChoice.Oceanic),
+            listOf(ThemeChoice.Pi, ThemeChoice.Paper, ThemeChoice.Slate),
             ThemeChoice.builtIn,
         )
         assertEquals(null, ThemeChoice.fromKey("system"))

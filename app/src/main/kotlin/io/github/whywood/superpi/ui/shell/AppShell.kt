@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.R
@@ -42,8 +43,12 @@ import io.github.whywood.superpi.data.session.SessionExporter
 import io.github.whywood.superpi.data.UiPreferences
 import io.github.whywood.superpi.data.exportShareIntent
 import io.github.whywood.superpi.data.update.hasUpdate
+import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdFontStyle
 import io.github.whywood.superpi.design.DdFonts
+import io.github.whywood.superpi.design.DdText
+import io.github.whywood.superpi.design.DdTextAction
+import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.host.services.PluginUiBridge
 import io.github.whywood.superpi.remote.RemoteAdminResult
@@ -254,6 +259,7 @@ internal fun AppShell(
     val timerSessionIds = remember(timers) { sessionIdsWithEnabledTimers(timers) }
     val jobSessionIds = remember(allJobs) { sessionIdsWithRunningJobs(allJobs) }
     var modelsOpen by remember { mutableStateOf(false) }
+    var excludeConfirmSession by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var exportSummary by remember { mutableStateOf<ConversationSummary?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -285,6 +291,15 @@ internal fun AppShell(
     }
     var expandedWorkspaceIds by rememberSaveable(stateSaver = expandedWorkspacesSaver) {
         mutableStateOf(emptySet<String>())
+    }
+    var manuallyCollapsedWorkspaceIds by rememberSaveable(stateSaver = expandedWorkspacesSaver) {
+        mutableStateOf(emptySet<String>())
+    }
+    LaunchedEffect(state.currentWorkspaceId) {
+        val activeId = state.currentWorkspaceId
+        if (activeId.isNotBlank() && activeId !in manuallyCollapsedWorkspaceIds && activeId !in expandedWorkspaceIds) {
+            expandedWorkspaceIds = expandedWorkspaceIds + activeId
+        }
     }
     var remoteDrawerStates by remember {
         mutableStateOf<Map<String, RemoteDrawerState>>(emptyMap())
@@ -804,6 +819,17 @@ internal fun AppShell(
 
     ShellNavigationBackHandler(navigator = navigator, drawerOpen = drawerOpen, onBack = ::back)
     ShellNavigationChrome(navigator = navigator)
+    val keyboard = LocalSoftwareKeyboardController.current
+    val drawerController = rememberShellDrawerController(
+        open = drawerOpen,
+        onOpen = { drawerOpen = true },
+        onDismiss = { drawerOpen = false },
+        onSwipeStart = { keyboard?.hide() },
+    )
+    val canSwipeOpenDrawer = navigator.current == AppDestination.Chat &&
+        !drawerOpen &&
+        !modelsOpen &&
+        !overlays.anyModalOpen
 
     CompositionLocalProvider(LocalHapticsEnabled provides true) {
     Box(Modifier.fillMaxSize().background(colors.paper)) {
@@ -815,7 +841,12 @@ internal fun AppShell(
         }
         AnimatedScreenHost(
             navigator = navigator,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .drawerOpenSwipeGesture(
+                    enabled = canSwipeOpenDrawer,
+                    controller = drawerController,
+                ),
             predictiveBackEnabled = !drawerOpen,
             base = { baseFrozen ->
                 val frozenState = rememberFrozenChatState(state, baseFrozen)
@@ -899,6 +930,10 @@ internal fun AppShell(
                         frozenState.copy(configured = frozenState.providerId in configuredProviders)
                     }
                 }
+                val activeMemoryExcluded = state.conversations
+                    .firstOrNull { it.id == state.conversationId }
+                    ?.memoryExcluded == true
+                val memoryToggleVisible = remoteWs == null && state.conversationId != null
                 ChatScreen(
                     state = effectiveState,
                     nickname = nickname,
@@ -1151,6 +1186,9 @@ internal fun AppShell(
                         onResumeGoal = {
                                                 state.conversationId?.let { id -> scope.launch { graph.goalService.resume(id) } }
                                             },
+                        onEndGoal = {
+                                                state.conversationId?.let { id -> scope.launch { graph.goalService.clear(id) } }
+                                            },
                         onOpenJobs = {
                                                 overlays.selectedJobId = null
                                                 overlays.jobOutput = null
@@ -1255,6 +1293,35 @@ internal fun AppShell(
                         onSendQueued = chatViewModel::sendQueuedNow,
                         onScrollAnchorChange = chatViewModel::updateScrollAnchor,
                         onOpenBotSettings = { id -> navigator.push(AppDestination.WorkspaceSettings(id)) },
+                        onToggleMemoryExcluded = {
+                            val sid = state.conversationId
+                            if (sid != null && remoteWs == null) {
+                                val nextExcluded = !activeMemoryExcluded
+                                chatViewModel.setSessionMemoryExcluded(sid, nextExcluded)
+                                if (!nextExcluded) {
+                                    Toast.makeText(
+                                        context,
+                                        R.string.memory_session_resumed_toast,
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                } else {
+                                    scope.launch {
+                                        val count = withContext(Dispatchers.IO) {
+                                            runCatching { graph.memory.countBySession(sid) }.getOrDefault(0)
+                                        }
+                                        if (count > 0) {
+                                            excludeConfirmSession = sid to count
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                R.string.memory_session_excluded_toast,
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     ),
                     overlay = ChatScreenOverlay(
                         reminderCount = reminderCount,
@@ -1266,6 +1333,8 @@ internal fun AppShell(
                         modelsOpen = modelsOpen,
                         pendingQuestions = activeQuestions,
                         foreignQuestion = foreignQuestion,
+                        memoryExcluded = activeMemoryExcluded,
+                        memoryToggleVisible = memoryToggleVisible,
                     ),
                     scrollAnchorFor = chatViewModel::scrollAnchorFor,
                     autoCollapseProcess = uiPreferences.autoCollapseProcess,
@@ -1371,6 +1440,7 @@ internal fun AppShell(
         val drawerActions = ShellDrawerActions(
             onNavigate = { destination -> drawerOpen = false; navigator.push(destination) },
             onDismiss = { drawerOpen = false },
+            onOpen = { drawerOpen = true },
             onCreateWorkspace = {
                 drawerOpen = false
                 overlays.remoteOpSubmitting = false
@@ -1386,7 +1456,13 @@ internal fun AppShell(
                 overlays.workspaceCreateOpen = true
             },
             onToggleWorkspaceExpanded = { id ->
-                expandedWorkspaceIds = if (id in expandedWorkspaceIds) expandedWorkspaceIds - id else expandedWorkspaceIds + id
+                if (id in expandedWorkspaceIds) {
+                    expandedWorkspaceIds = expandedWorkspaceIds - id
+                    manuallyCollapsedWorkspaceIds = manuallyCollapsedWorkspaceIds + id
+                } else {
+                    expandedWorkspaceIds = expandedWorkspaceIds + id
+                    manuallyCollapsedWorkspaceIds = manuallyCollapsedWorkspaceIds - id
+                }
             },
             onToggleWorkspacePinned = { id ->
                 val pinned = id in uiPreferences.pinnedWorkspaceIds
@@ -1612,7 +1688,45 @@ internal fun AppShell(
             overlays = overlays,
             remoteTargets = remoteTargets,
             remoteBotNamesByDevice = remoteBotNamesByDevice,
+            drawerController = drawerController,
         )
+
+        excludeConfirmSession?.let { (sid, count) ->
+            DdDialog(
+                onDismissRequest = { excludeConfirmSession = null },
+                title = stringResource(R.string.memory_session_exclude_dialog_title),
+                content = {
+                    DdText(
+                        text = stringResource(R.string.memory_session_exclude_dialog_body, count),
+                        style = DdType.body,
+                        color = colors.inkSecondary,
+                    )
+                },
+                actions = {
+                    DdTextAction(
+                        text = stringResource(R.string.memory_session_keep_existing),
+                        onClick = { excludeConfirmSession = null },
+                    )
+                    DdTextAction(
+                        text = stringResource(R.string.memory_session_clear_existing),
+                        color = colors.danger,
+                        onClick = {
+                            excludeConfirmSession = null
+                            scope.launch {
+                                val cleared = withContext(Dispatchers.IO) {
+                                    runCatching { graph.memory.deleteBySession(sid) }.getOrDefault(0)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    appResources.getString(R.string.memory_session_cleared_toast, cleared),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                    )
+                },
+            )
+        }
 
     }
     }

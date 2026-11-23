@@ -2,33 +2,23 @@ package io.github.whywood.superpi.ui.sessions
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -49,16 +38,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
-import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdEmptyState
+import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.ui.chat.SessionSearchHit
 import io.github.whywood.superpi.ui.common.rememberRelativeTime
@@ -75,6 +68,7 @@ fun SessionSearchScreen(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     var loading by remember { mutableStateOf(true) }
@@ -116,17 +110,8 @@ fun SessionSearchScreen(
         ordered.groupBy { hit -> hit.workspaceName }.toList()
     }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .testTag("session_search"),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -140,14 +125,16 @@ fun SessionSearchScreen(
                 query = query,
                 onQueryChange = { query = it },
                 placeholder = stringResource(R.string.search_placeholder),
-                modifier = Modifier.weight(1f).padding(end = DdSpacing.Xs),
+                modifier = Modifier.weight(1f).padding(end = DdSpacing.Sm),
                 focusRequester = focusRequester,
                 clearContentDescription = stringResource(R.string.search_clear),
                 onEscape = onBack,
                 fieldTestTag = "search_field",
                 clearTestTag = "search_clear",
             )
-        }
+        },
+        modifier = modifier.testTag("session_search"),
+    ) {
         if (loading) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 DdSpinner(
@@ -161,11 +148,15 @@ fun SessionSearchScreen(
             AnimatedVisibility(
                 visible = revealed,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                enter = fadeIn(tween(DdMotion.FAST)) +
-                    slideInVertically(
-                        animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                        initialOffsetY = { it / 24 },
-                    ),
+                enter = if (motionEnabled) {
+                    fadeIn(tween(DdMotion.FAST)) +
+                        slideInVertically(
+                            animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                            initialOffsetY = { it / 24 },
+                        )
+                } else {
+                    EnterTransition.None
+                },
             ) {
                 if (ordered.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -187,8 +178,11 @@ fun SessionSearchScreen(
                                     modifier = Modifier.padding(start = DdSpacing.Md, top = 14.dp, bottom = 6.dp),
                                 )
                             }
-                            items(hits, key = { hit -> hit.conversation.id }) { hit ->
-                                Box(Modifier.animateItem()) {
+                            itemsIndexed(hits, key = { _, hit -> hit.conversation.id }) { index, hit ->
+                                Column(Modifier.animateItem()) {
+                                    if (index > 0) {
+                                        DdHairline(Modifier.padding(horizontal = DdSpacing.Md))
+                                    }
                                     SearchSessionRow(
                                         hit = hit,
                                         onClick = {
@@ -210,50 +204,50 @@ internal fun sessionSearchSubtitle(hit: SessionSearchHit, relativeTime: String):
     listOfNotNull(hit.workspaceDevice, hit.workspaceName.takeIf { it.isNotBlank() }, relativeTime.takeIf { it.isNotBlank() })
         .joinToString(" · ")
 
+private fun searchRowSubtitle(hit: SessionSearchHit, relativeTime: String): String =
+    listOfNotNull(hit.workspaceDevice, relativeTime.takeIf { it.isNotBlank() })
+        .joinToString(" · ")
+
 @Composable
 private fun SearchSessionRow(
     hit: SessionSearchHit,
     onClick: () -> Unit,
 ) {
     val colors = superPiColors()
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val wash by animateFloatAsState(
-        targetValue = if (pressed) 0.06f else 0f,
-        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
-        label = "search-row-wash",
-    )
     val relativeTime = rememberRelativeTime(hit.conversation.updatedAt)
-    val subtitle = sessionSearchSubtitle(hit, relativeTime)
-    Column(
+    val subtitle = searchRowSubtitle(hit, relativeTime)
+    DdPressable(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 60.dp)
-            .clip(DdShapes.Medium)
-            .background(colors.ink.copy(alpha = wash))
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            )
-            .testTag("search_result_${hit.conversation.id}")
-            .padding(horizontal = DdSpacing.Md, vertical = 9.dp),
-        verticalArrangement = Arrangement.Center,
+            .testTag("search_result_${hit.conversation.id}"),
+        shape = DdShapes.Medium,
+        contentDescription = hit.conversation.title,
     ) {
-        Text(
-            text = hit.conversation.title,
-            style = DdType.body.copy(fontSize = 16.sp, lineHeight = 23.sp),
-            color = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(DdSpacing.Xxs))
-        Text(
-            text = subtitle,
-            style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp),
-            color = colors.inkTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(horizontal = DdSpacing.Md, vertical = 9.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = hit.conversation.title,
+                style = DdType.body.copy(fontSize = 16.sp, lineHeight = 23.sp),
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotEmpty()) {
+                Spacer(Modifier.height(DdSpacing.Xxs))
+                Text(
+                    text = subtitle,
+                    style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp),
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }

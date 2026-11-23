@@ -17,6 +17,11 @@ internal class CatalogSessionDirectory(
 
     override suspend fun setArchived(id: String, archived: Boolean) = catalog.setArchived(id, archived)
 
+    override suspend fun setMemoryExcluded(id: String, excluded: Boolean) =
+        catalog.setMemoryExcluded(id, excluded)
+
+    override suspend fun isMemoryExcluded(id: String): Boolean = catalog.isMemoryExcluded(id)
+
     override suspend fun removeMeta(id: String) = catalog.removeMeta(id)
 }
 

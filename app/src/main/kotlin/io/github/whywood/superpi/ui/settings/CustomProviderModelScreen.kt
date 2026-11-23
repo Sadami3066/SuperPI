@@ -29,13 +29,13 @@ import io.github.whywood.superpi.data.CustomProviderModel
 import io.github.whywood.superpi.design.DdChip
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdInfoTooltip
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdTextAction
@@ -158,19 +158,21 @@ fun CustomProviderModelScreen(
             DdGroupCard {
                 DdListRow(
                     title = stringResource(R.string.settings_custom_provider_model_images),
+                    onClick = { supportsImages = !supportsImages },
                     trailing = {
                         DdSwitch(checked = supportsImages, onCheckedChange = { supportsImages = it })
                     },
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 DdListRow(
                     title = stringResource(R.string.settings_custom_provider_model_reasoning),
+                    onClick = { reasoning = !reasoning },
                     trailing = {
                         DdSwitch(checked = reasoning, onCheckedChange = { reasoning = it })
                     },
                 )
                 if (reasoning) {
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     ThinkingLevelPicker(
                         selected = thinkingLevels,
                         onToggle = { level ->

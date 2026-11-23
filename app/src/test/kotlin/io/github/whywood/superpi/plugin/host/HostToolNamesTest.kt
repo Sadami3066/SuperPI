@@ -14,7 +14,7 @@ class HostToolNamesTest {
         "timer_create", "timer_list", "timer_update", "timer_delete",
         "miniapp_create", "miniapp_load", "miniapp_list", "miniapp_delete", "miniapp_edit",
         "todo_write",
-        "memory_write", "memory_read", "memory_search", "memory_status",
+        "memory_search", "memory_save", "memory_forget", "memory_overview",
         "web_search", "web_fetch", "calendar", "virtual_screen",
         "screen_status", "screen_observe", "screen_screenshot", "screen_tap", "screen_swipe",
         "screen_scroll", "screen_type", "screen_key", "screen_wait", "screen_list_apps", "screen_launch",

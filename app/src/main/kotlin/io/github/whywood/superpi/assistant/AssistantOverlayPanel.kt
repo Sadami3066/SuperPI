@@ -35,7 +35,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,16 +60,17 @@ import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.PendingQuestion
 import io.github.whywood.superpi.runtime.RuntimeActivity
+import io.github.whywood.superpi.ui.common.chat.ChatScrollFollowEffect
 import io.github.whywood.superpi.ui.common.chat.ChatTurn
 import io.github.whywood.superpi.ui.common.chat.presentedCardLookup
 import io.github.whywood.superpi.ui.common.chat.rememberChatScrollController
 import io.github.whywood.superpi.ui.common.chat.AskQuestionCard
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 
 
 
@@ -167,19 +167,12 @@ internal fun AssistantOverlayPanel(
         if (!contentClamped) return@LaunchedEffect
         snapshotFlow { panelHeight.value }.collect { scroll.anchorToBottom() }
     }
-    LaunchedEffect(scroll, state.conversation.sending) {
-        if (!state.conversation.sending) {
-            if (scroll.following) {
-                delay(80)
-                scroll.jumpToBottom(animate = false)
-            }
-            return@LaunchedEffect
-        }
-        while (isActive) {
-            withFrameNanos { }
-            scroll.followContent()
-        }
-    }
+    ChatScrollFollowEffect(
+        controller = scroll,
+        sessionKey = state.sessionId,
+        sending = state.conversation.sending,
+        smooth = LocalDdMotionEnabled.current,
+    )
 
     val copyOutput: (String) -> Unit = { text ->
         val clipboard = context.getSystemService(ClipboardManager::class.java)

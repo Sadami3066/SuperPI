@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
@@ -84,7 +86,6 @@ import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdPressable
-import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
@@ -92,6 +93,7 @@ import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.DdWordmark
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.host.HostAccess
 import io.github.whywood.superpi.runtime.ProviderCatalog
@@ -104,16 +106,22 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun WelcomeStep(modifier: Modifier = Modifier) {
     val colors = superPiColors()
-    val transition = rememberInfiniteTransition(label = "onboarding-welcome-float")
-    val floatOffset by transition.animateFloat(
-        initialValue = 5f,
-        targetValue = -5f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3200, easing = DdMotion.EaseInOut),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "onboarding-welcome-offset",
-    )
+    val motionEnabled = LocalDdMotionEnabled.current
+    val floatOffset = if (motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "onboarding-welcome-float")
+        val animatedOffset by transition.animateFloat(
+            initialValue = 5f,
+            targetValue = -5f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(3200, easing = DdMotion.EaseInOut),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "onboarding-welcome-offset",
+        )
+        animatedOffset
+    } else {
+        0f
+    }
     Column(
         modifier.fillMaxSize().padding(horizontal = DdSpacing.Xxl).testTag("onboarding_step_welcome"),
     ) {
@@ -151,12 +159,14 @@ internal fun WelcomeStep(modifier: Modifier = Modifier) {
                 )
             }
             val markSize = minOf(maxHeight, 260.dp, maxWidth * 0.72f)
+            val medallionColor = if (colors.dark) Color(0xFFEBEAEF) else colors.surface
             Box(
                 Modifier
                     .size(markSize)
                     .graphicsLayer { translationY = floatOffset.dp.toPx() }
                     .clip(CircleShape)
-                    .background(Color.White),
+                    .background(medallionColor)
+                    .border(1.dp, colors.hairline.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -303,7 +313,7 @@ internal fun ProviderStep(
                     badge = null,
                     subtitle = stringResource(R.string.onboarding_provider_models, otherProvider.modelCount),
                     selected = true,
-                    onClick = {},
+                    onClick = { sheetOpen = true },
                     testTag = "onboarding_provider_selected",
                 )
             }
@@ -700,7 +710,7 @@ private fun EnvironmentRow(
             .fillMaxWidth()
             .testTag("onboarding_environment_${bundle.id}")
             .semantics { this.selected = selected && !installed },
-        shape = DdShapes.Card,
+        shape = RectangleShape,
     ) {
         Row(
             Modifier
@@ -712,14 +722,19 @@ private fun EnvironmentRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = stringResource(bundle.titleRes),
+                        modifier = Modifier.weight(1f, fill = false),
                         style = DdType.body,
                         color = colors.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.width(DdSpacing.Sm))
                     Text(
                         text = bundle.sizeLabel,
                         style = DdType.bodySmall,
                         color = colors.inkTertiary,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
                 bundle.bodyRes?.let { body ->
@@ -737,6 +752,8 @@ private fun EnvironmentRow(
                     text = stringResource(R.string.dev_installed),
                     style = DdType.bodySmall,
                     color = colors.success,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             } else {
                 SelectionMark(selected = selected)
@@ -877,7 +894,7 @@ private fun ProviderOption(
     DdPressable(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().testTag(testTag),
-        shape = DdShapes.Card,
+        shape = RectangleShape,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Lg, vertical = 14.dp),
@@ -887,16 +904,36 @@ private fun ProviderOption(
             Spacer(Modifier.width(DdSpacing.Md))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = name, style = DdType.body, color = colors.ink)
+                    Text(
+                        text = name,
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = DdType.body,
+                        color = colors.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     if (badge != null) {
                         Spacer(Modifier.width(DdSpacing.Sm))
-                        Text(text = badge, style = DdType.bodySmall, color = colors.accent)
+                        Text(
+                            text = badge,
+                            style = DdType.bodySmall,
+                            color = colors.accent,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                 }
                 if (subtitle != null) {
-                    Text(text = subtitle, style = DdType.bodySmall, color = colors.inkTertiary)
+                    Text(
+                        text = subtitle,
+                        style = DdType.bodySmall,
+                        color = colors.inkTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
+            Spacer(Modifier.width(DdSpacing.Md))
             SelectionCheck(visible = selected)
         }
     }
@@ -921,9 +958,8 @@ private fun ProviderLink(
             Text(text = text, style = DdType.label, color = colors.accent)
             Spacer(Modifier.width(6.dp))
             DdIcon(
-                icon = DdIcons.ArrowLeft,
+                icon = DdIcons.ChevronRight,
                 tint = colors.accent,
-                modifier = Modifier.graphicsLayer { rotationZ = 180f },
                 size = 14.dp,
             )
         }

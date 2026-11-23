@@ -23,8 +23,9 @@ class ToolPresentationTest {
 
     @Test
     fun toolIconKindMapsPrefixedTools() {
-        assertEquals(ToolIconKind.Brain, toolIconKind("memory_read"))
+        assertEquals(ToolIconKind.Brain, toolIconKind("memory_save"))
         assertEquals(ToolIconKind.Brain, toolIconKind("memory_search"))
+        assertEquals(ToolIconKind.Brain, toolIconKind("memory_forget"))
         assertEquals(ToolIconKind.Apps, toolIconKind("miniapp_load"))
         assertEquals(ToolIconKind.Clock, toolIconKind("job_start"))
         assertEquals(ToolIconKind.Clock, toolIconKind("timer_create"))

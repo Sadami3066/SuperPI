@@ -101,6 +101,11 @@ internal fun SelectableMessageText(
     }
 }
 
+private class SelectionGeometry {
+    var coordinates: LayoutCoordinates? = null
+    var bounds: Rect = Rect.Zero
+}
+
 @Composable
 private fun SelectableMessageTextImpl(
     messageId: Long,
@@ -110,14 +115,16 @@ private fun SelectableMessageTextImpl(
     content: @Composable () -> Unit,
 ) {
     val controller = remember { SelectionMenuController() }
-    var containerCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var selectionBounds by remember { mutableStateOf(Rect.Zero) }
+    val geometry = remember { SelectionGeometry() }
+    var activeCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     LaunchedEffect(controller.state) {
         if (controller.state != null) {
-            coordinator?.activate(messageId, selectionBounds)
+            activeCoordinates = geometry.coordinates
+            coordinator?.activate(messageId, geometry.bounds)
             coordinator?.updateMenuDismisser(messageId) { controller.dismiss() }
         } else {
+            activeCoordinates = null
             coordinator?.deactivate(messageId)
         }
     }
@@ -128,9 +135,13 @@ private fun SelectableMessageTextImpl(
 
     Box(
         Modifier.onGloballyPositioned { coordinates ->
-            containerCoordinates = coordinates
-            selectionBounds = coordinates.boundsInWindow()
-            coordinator?.updateBounds(messageId, selectionBounds)
+            geometry.coordinates = coordinates
+            val bounds = coordinates.boundsInWindow()
+            geometry.bounds = bounds
+            if (controller.state != null) {
+                activeCoordinates = coordinates
+                coordinator?.updateBounds(messageId, bounds)
+            }
         },
     ) {
         CompositionLocalProvider(LocalTextContextMenuToolbarProvider provides controller) {
@@ -140,7 +151,7 @@ private fun SelectableMessageTextImpl(
         }
         SelectionActionsMenu(
             controller = controller,
-            containerCoordinates = containerCoordinates,
+            containerCoordinates = activeCoordinates,
             onQuote = onQuote,
             onSpeak = onSpeak,
         )

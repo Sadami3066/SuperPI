@@ -1,31 +1,50 @@
 package io.github.whywood.superpi.design
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 internal sealed interface MarkdownBlock {
+    @Immutable
     data class Heading(val level: Int, val text: String) : MarkdownBlock
+    @Immutable
     data class Paragraph(val text: String) : MarkdownBlock
+    @Immutable
     data class Code(val language: String?, val code: String) : MarkdownBlock
+    @Immutable
     data class Quote(val blocks: List<MarkdownBlock>) : MarkdownBlock
+    @Immutable
     data class Image(val alt: String, val source: String, val title: String?) : MarkdownBlock
+    @Immutable
     data class ListBlock(val items: List<MarkdownListItem>) : MarkdownBlock
+    @Immutable
     data class Table(val header: List<String>, val rows: List<List<String>>) : MarkdownBlock
+    @Immutable
     data class Math(val text: String) : MarkdownBlock
+    @Immutable
     data object Rule : MarkdownBlock
 }
 
+@Immutable
 internal sealed interface MarkdownMarker {
+    @Immutable
     data object Bullet : MarkdownMarker
+    @Immutable
     data class Ordered(val number: Int) : MarkdownMarker
+    @Immutable
     data class Task(val checked: Boolean) : MarkdownMarker
 }
 
+@Immutable
 internal data class MarkdownListItem(
     val marker: MarkdownMarker,
     val text: String,
     val children: List<MarkdownListItem> = emptyList(),
 )
 
+@Immutable
 internal data class MarkdownFootnote(val number: Int, val text: String)
 
+@Immutable
 internal data class MarkdownDocument(
     val blocks: List<MarkdownBlock>,
     val links: Map<String, String>,

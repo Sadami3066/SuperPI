@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
@@ -99,7 +102,7 @@ private fun AttachmentSourceItem(
     val colors = superPiColors()
     DdPressable(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.border(1.dp, colors.hairline, DdShapes.Card),
         shape = DdShapes.Card,
         background = colors.raised,
         contentDescription = label,
@@ -122,8 +125,12 @@ private fun AttachmentSourceItem(
             Spacer(Modifier.height(9.dp))
             Text(
                 text = label,
+                modifier = Modifier.padding(horizontal = DdSpacing.Xs),
                 style = DdType.label.copy(fontSize = 13.sp, lineHeight = 17.sp),
                 color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
         }
     }

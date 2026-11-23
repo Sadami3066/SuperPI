@@ -1,26 +1,30 @@
 package io.github.whywood.superpi.ui.goal
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
-import io.github.whywood.superpi.design.DdHairline
-import io.github.whywood.superpi.design.DdIcon
-import io.github.whywood.superpi.design.DdIcons
+import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
@@ -34,23 +38,37 @@ fun GoalBar(
     onPause: () -> Unit,
     onResume: () -> Unit,
     modifier: Modifier = Modifier,
+    onEnd: (() -> Unit)? = null,
 ) {
     val colors = superPiColors()
     val goal = view.goal
     val phase = if (goal.phase == GoalPhase.ACTIVE && !view.armed) GoalPhase.PAUSED else goal.phase
-    Column(modifier.fillMaxWidth().testTag("goal_bar")) {
-        DdHairline()
+    val dotColor = when (phase) {
+        GoalPhase.ACTIVE -> colors.accent
+        GoalPhase.BLOCKED -> colors.danger
+        GoalPhase.PAUSED, GoalPhase.COMPLETE -> colors.inkTertiary
+    }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = DdSpacing.Xs)
+            .clip(DdShapes.Card)
+            .background(colors.surface)
+            .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Card)
+            .padding(start = DdSpacing.Md, end = DdSpacing.Xs, top = DdSpacing.Sm, bottom = DdSpacing.Xxs)
+            .testTag("goal_bar"),
+    ) {
         Row(
-            Modifier
+            modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp)
-                .padding(start = 18.dp, end = 6.dp),
+                .padding(end = DdSpacing.Sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            DdIcon(
-                icon = DdIcons.Target,
-                tint = colors.inkTertiary,
-                size = 16.dp,
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(dotColor),
             )
             Spacer(Modifier.width(DdSpacing.Sm))
             Text(
@@ -61,27 +79,39 @@ fun GoalBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = goalPhaseLabel(phase),
-                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
-                color = goalPhaseColor(phase),
-                maxLines = 1,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = if (goal.maxRounds > 0) {
-                    stringResource(R.string.goal_round, goal.roundsStarted, goal.maxRounds)
-                } else {
-                    stringResource(R.string.goal_round_unbounded, goal.roundsStarted)
-                },
-                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
-                color = colors.inkTertiary,
-                maxLines = 1,
-            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = goalPhaseLabel(phase),
+                    style = DdType.micro,
+                    color = goalPhaseColor(phase),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text(
+                    text = if (goal.maxRounds > 0) {
+                        stringResource(R.string.goal_round, goal.roundsStarted, goal.maxRounds)
+                    } else {
+                        stringResource(R.string.goal_round_unbounded, goal.roundsStarted)
+                    },
+                    style = DdType.micro,
+                    color = colors.inkTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             when (phase) {
                 GoalPhase.ACTIVE -> {
-                    Spacer(Modifier.width(6.dp))
                     DdTextAction(
                         text = stringResource(R.string.goal_pause),
                         onClick = onPause,
@@ -91,7 +121,6 @@ fun GoalBar(
                 }
 
                 GoalPhase.PAUSED, GoalPhase.BLOCKED -> {
-                    Spacer(Modifier.width(6.dp))
                     DdTextAction(
                         text = stringResource(R.string.goal_resume),
                         onClick = onResume,
@@ -101,6 +130,14 @@ fun GoalBar(
                 }
 
                 GoalPhase.COMPLETE -> Unit
+            }
+            if (onEnd != null) {
+                DdTextAction(
+                    text = stringResource(R.string.goal_end),
+                    onClick = onEnd,
+                    modifier = Modifier.testTag("goal_end"),
+                    color = colors.danger,
+                )
             }
         }
     }

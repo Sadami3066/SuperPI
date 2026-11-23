@@ -13,6 +13,9 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,6 +29,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -57,10 +61,12 @@ import io.github.whywood.superpi.data.LanguagePreferences
 import io.github.whywood.superpi.data.OnboardingPreferences
 import io.github.whywood.superpi.data.ProfileAvatarStore
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.DdPrimaryButton
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.DdWordmark
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.host.HostAccess
 import io.github.whywood.superpi.shell.LinuxInstallState
@@ -275,10 +281,10 @@ fun OnboardingScreen(
         }
     }
 
+    val motionEnabled = LocalDdMotionEnabled.current
     val primaryLabel = when (step) {
         STEP_WELCOME -> stringResource(R.string.onboarding_primary_start)
         STEP_PROVIDER -> stringResource(R.string.onboarding_primary_connect)
-        STEP_ENVIRONMENT -> stringResource(R.string.onboarding_primary_start_use)
         STEP_ACCESS -> stringResource(R.string.onboarding_primary_done)
         else -> stringResource(R.string.onboarding_primary_continue)
     }
@@ -303,7 +309,7 @@ fun OnboardingScreen(
     Column(
         modifier
             .fillMaxSize()
-            .background(colors.surface)
+            .background(colors.paper)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
@@ -314,17 +320,21 @@ fun OnboardingScreen(
             targetState = step,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             transitionSpec = {
-                val forward = targetState > initialState
-                val direction = if (forward) 1 else -1
-                val enter = slideInHorizontally(
-                    animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseOut),
-                ) { width -> direction * width / 8 } +
-                    fadeIn(tween(DdMotion.SCREEN, easing = DdMotion.EaseOut))
-                val exit = slideOutHorizontally(
-                    animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseInOut),
-                ) { width -> -direction * width / 8 } +
-                    fadeOut(tween(DdMotion.FAST, easing = DdMotion.EaseOut))
-                enter togetherWith exit
+                if (!motionEnabled) {
+                    EnterTransition.None togetherWith ExitTransition.None
+                } else {
+                    val forward = targetState > initialState
+                    val direction = if (forward) 1 else -1
+                    val enter = slideInHorizontally(
+                        animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseOut),
+                    ) { width -> direction * width / 8 } +
+                        fadeIn(tween(DdMotion.SCREEN, easing = DdMotion.EaseOut))
+                    val exit = slideOutHorizontally(
+                        animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseInOut),
+                    ) { width -> -direction * width / 8 } +
+                        fadeOut(tween(DdMotion.FAST, easing = DdMotion.EaseOut))
+                    enter togetherWith exit
+                }
             },
             label = "onboarding-step",
         ) { target ->
@@ -432,13 +442,13 @@ private fun OnboardingFooter(
             .padding(horizontal = DdSpacing.Xxl)
             .padding(top = 6.dp, bottom = 10.dp),
     ) {
-        OnboardingPrimaryButton(
+        DdPrimaryButton(
             text = primaryLabel,
             onClick = onPrimary,
             enabled = primaryEnabled,
             modifier = Modifier.fillMaxWidth().testTag(primaryTestTag),
         )
-        Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 44.dp), contentAlignment = Alignment.Center) {
             if (hint != null) {
                 Text(
                     text = hint,
@@ -461,15 +471,16 @@ private fun OnboardingFooter(
 @Composable
 fun OnboardingSplash(modifier: Modifier = Modifier) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
     Box(
-        modifier.fillMaxSize().background(colors.surface),
+        modifier.fillMaxSize().background(colors.paper),
         contentAlignment = Alignment.Center,
     ) {
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(tween(DdMotion.ENTER, easing = DdMotion.EaseOut)),
+            enter = fadeIn(if (motionEnabled) tween(DdMotion.ENTER, easing = DdMotion.EaseOut) else snap()),
         ) {
             DdWordmark()
         }

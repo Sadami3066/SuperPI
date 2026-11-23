@@ -25,23 +25,28 @@ fun DdSpinner(
     size: Dp = 16.dp,
     strokeWidth: Dp = 1.5.dp,
 ) {
-    val transition = rememberInfiniteTransition(label = "dd-spinner")
-    val angle = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "dd-spinner-angle",
-    )
+    val motionEnabled = LocalDdMotionEnabled.current
+    val angle = if (motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "dd-spinner")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "dd-spinner-angle",
+        )
+    } else {
+        null
+    }
     Canvas(modifier.size(size)) {
         val stroke = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
         val inset = stroke.width / 2f
         val arcSize = Size(this.size.width - stroke.width, this.size.height - stroke.width)
         drawArc(
             color = color,
-            startAngle = angle.value - 90f,
+            startAngle = (angle?.value ?: 0f) - 90f,
             sweepAngle = 260f,
             useCenter = false,
             topLeft = Offset(inset, inset),

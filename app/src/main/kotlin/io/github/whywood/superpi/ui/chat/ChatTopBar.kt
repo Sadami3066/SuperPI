@@ -1,18 +1,16 @@
 package io.github.whywood.superpi.ui.chat
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,7 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -33,6 +31,7 @@ import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMenu
 import io.github.whywood.superpi.design.DdMenuItem
+import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
@@ -48,6 +47,8 @@ data class ChatTopBarState(
     val jobCount: Int,
     val remoteFilesVisible: Boolean = false,
     val reloadVisible: Boolean = true,
+    val memoryExcluded: Boolean = false,
+    val memoryToggleVisible: Boolean = false,
 )
 
 data class ChatTopBarActions(
@@ -59,10 +60,11 @@ data class ChatTopBarActions(
     val onOpenFiles: () -> Unit = {},
     val onExportSession: () -> Unit = {},
     val onOpenBotSettings: (String) -> Unit = {},
+    val onToggleMemoryExcluded: () -> Unit = {},
 )
 
 private val TopBarEdge = 6.dp
-private val TopBarIconButtonSize = 42.dp
+private val TopBarIconButtonSize = 44.dp
 
 @Composable
 internal fun ChatTopBar(
@@ -80,93 +82,99 @@ internal fun ChatTopBar(
     ) {
         val compact = maxWidth < 370.dp || LocalDensity.current.fontScale > 1.15f
         val crowded = state.jobCount > 0 || state.reminderCount > 0
-        val botTitleMaxWidth = maxWidth * 0.52f
-        Box(Modifier.fillMaxSize()) {
-            if (activeBot != null) {
-                val remote = activeBot.remote
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .widthIn(max = botTitleMaxWidth)
-                        .clip(RoundedCornerShape(50))
-                        .then(
+        TopBarLayout(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = TopBarEdge),
+            leading = {
+                DdIconButton(
+                    icon = DdIcons.Menu,
+                    onClick = actions.onMenu,
+                    contentDescription = stringResource(R.string.assistant_menu),
+                    modifier = Modifier.testTag("assistant_menu"),
+                    size = TopBarIconButtonSize,
+                    iconSize = 20.dp,
+                    tint = colors.inkSecondary,
+                )
+            },
+            center = {
+                if (activeBot != null) {
+                    val remote = activeBot.remote
+                    val headerContent: @Composable () -> Unit = {
+                        Row(
+                            modifier = Modifier.padding(horizontal = DdSpacing.Sm, vertical = DdSpacing.Xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            BotAvatar(workspace = activeBot, size = 24.dp)
                             if (remote == null) {
-                                Modifier.clickable { actions.onOpenBotSettings(activeBot.id) }
+                                Text(
+                                    text = activeBot.name,
+                                    style = DdType.label.copy(fontSize = 16.sp),
+                                    color = colors.ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             } else {
-                                Modifier
-                            },
-                        )
-                        .testTag("assistant_bot"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    BotAvatar(workspace = activeBot, size = 24.dp)
+                                Column {
+                                    Text(
+                                        text = remote.botName,
+                                        style = DdType.label.copy(fontSize = 15.sp, lineHeight = 19.sp),
+                                        color = if (remote.online) colors.ink else colors.inkTertiary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = if (remote.online) {
+                                            remote.deviceName
+                                        } else {
+                                            stringResource(R.string.workspace_remote_offline_annotation, remote.deviceName)
+                                        },
+                                        style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                                        color = colors.inkTertiary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     if (remote == null) {
-                        Text(
-                            text = activeBot.name,
-                            style = DdType.label.copy(fontSize = 16.sp),
-                            color = colors.ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        DdPressable(
+                            onClick = { actions.onOpenBotSettings(activeBot.id) },
+                            modifier = Modifier.heightIn(min = 44.dp).testTag("assistant_bot"),
+                            shape = CircleShape,
+                            contentDescription = activeBot.name,
+                        ) {
+                            headerContent()
+                        }
                     } else {
-                        Column {
-                            Text(
-                                text = remote.botName,
-                                style = DdType.label.copy(fontSize = 15.sp, lineHeight = 19.sp),
-                                color = if (remote.online) colors.ink else colors.inkTertiary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = if (remote.online) {
-                                    remote.deviceName
-                                } else {
-                                    stringResource(R.string.workspace_remote_offline_annotation, remote.deviceName)
-                                },
-                                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
-                                color = colors.inkTertiary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        Box(
+                            modifier = Modifier.heightIn(min = 44.dp).testTag("assistant_bot"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            headerContent()
                         }
                     }
                 }
-            }
-            Row(
-                Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = TopBarEdge),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            },
+            trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    DdIconButton(
-                        icon = DdIcons.Menu,
-                        onClick = actions.onMenu,
-                        contentDescription = stringResource(R.string.assistant_menu),
-                        modifier = Modifier.testTag("assistant_menu"),
-                        size = TopBarIconButtonSize,
-                        iconSize = 20.dp,
-                        tint = colors.inkSecondary,
-                    )
-                    JobsMeter(
-                        count = state.jobCount,
-                        onClick = actions.onOpenJobs,
-                    )
                     if (state.reminderCount > 0) {
                         DdIconButton(
                             icon = DdIcons.Clock,
                             onClick = actions.onOpenTimers,
                             contentDescription = stringResource(R.string.assistant_reminders),
                             modifier = Modifier.testTag("assistant_reminders"),
-                            size = 36.dp,
-                            iconSize = 16.dp,
+                            size = TopBarIconButtonSize,
+                            iconSize = 17.dp,
                             tint = colors.inkSecondary,
                         )
                     }
-                }
-                Spacer(Modifier.weight(1f))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                    JobsMeter(
+                        count = state.jobCount,
+                        onClick = actions.onOpenJobs,
+                    )
                     if (state.reloading) {
                         DdSpinner(
                             modifier = Modifier.padding(end = DdSpacing.Xs).testTag("assistant_reloading"),
@@ -196,7 +204,7 @@ internal fun ChatTopBar(
                         DdMenu(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false },
-                            menuWidth = 148.dp,
+                            menuWidth = 172.dp,
                         ) {
                             if (activeBot?.remote == null || state.remoteFilesVisible) {
                                 DdMenuItem(
@@ -218,6 +226,24 @@ internal fun ChatTopBar(
                                 },
                                 testTag = "chat_export",
                             )
+                            if (state.memoryToggleVisible) {
+                                DdMenuItem(
+                                    text = stringResource(
+                                        if (state.memoryExcluded) {
+                                            R.string.memory_session_resume
+                                        } else {
+                                            R.string.memory_session_exclude
+                                        },
+                                    ),
+                                    icon = DdIcons.Privacy,
+                                    selected = state.memoryExcluded,
+                                    onClick = {
+                                        menuOpen = false
+                                        actions.onToggleMemoryExcluded()
+                                    },
+                                    testTag = "chat_memory_toggle",
+                                )
+                            }
                             if (state.reloadVisible) {
                                 DdMenuItem(
                                     text = stringResource(R.string.assistant_reload),
@@ -232,6 +258,55 @@ internal fun ChatTopBar(
                         }
                     }
                 }
+            },
+        )
+    }
+}
+
+@Composable
+private fun TopBarLayout(
+    leading: @Composable () -> Unit,
+    center: @Composable () -> Unit,
+    trailing: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val gap = DdSpacing.Xs
+    Layout(
+        contents = listOf(leading, center, trailing),
+        modifier = modifier,
+    ) { (leadingMeasurables, centerMeasurables, trailingMeasurables), constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val leadingPlaceables = leadingMeasurables.map { it.measure(loose) }
+        val leadingWidth = leadingPlaceables.maxOfOrNull { it.width } ?: 0
+        val trailingConstraints = loose.copy(maxWidth = (constraints.maxWidth - leadingWidth).coerceAtLeast(0))
+        val trailingPlaceables = trailingMeasurables.map { it.measure(trailingConstraints) }
+        val trailingWidth = trailingPlaceables.maxOfOrNull { it.width } ?: 0
+        val gapPx = gap.roundToPx()
+        val leftEdge = leadingWidth + gapPx
+        val rightEdge = (constraints.maxWidth - trailingWidth - gapPx).coerceAtLeast(leftEdge)
+        val maxCenterWidth = (rightEdge - leftEdge).coerceAtLeast(0)
+        val centerConstraints = loose.copy(maxWidth = maxCenterWidth)
+        val centerPlaceables = centerMeasurables.map { it.measure(centerConstraints) }
+        val centerWidth = centerPlaceables.maxOfOrNull { it.width } ?: 0
+        val height = maxOf(
+            constraints.minHeight,
+            leadingPlaceables.maxOfOrNull { it.height } ?: 0,
+            centerPlaceables.maxOfOrNull { it.height } ?: 0,
+            trailingPlaceables.maxOfOrNull { it.height } ?: 0,
+        ).coerceIn(constraints.minHeight, constraints.maxHeight)
+        val centeredX = (constraints.maxWidth - centerWidth) / 2
+        val maxCenterX = (rightEdge - centerWidth).coerceAtLeast(leftEdge)
+        val centerX = centeredX.coerceIn(leftEdge, maxCenterX)
+        val trailingX = (constraints.maxWidth - trailingWidth).coerceAtLeast(0)
+        layout(constraints.maxWidth, height) {
+            leadingPlaceables.forEach { placeable ->
+                placeable.placeRelative(0, (height - placeable.height) / 2)
+            }
+            centerPlaceables.forEach { placeable ->
+                placeable.placeRelative(centerX, (height - placeable.height) / 2)
+            }
+            trailingPlaceables.forEach { placeable ->
+                placeable.placeRelative(trailingX, (height - placeable.height) / 2)
             }
         }
     }

@@ -1,8 +1,7 @@
 package io.github.whywood.superpi.ui.common.chat
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -52,6 +53,7 @@ import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.TurnSource
@@ -71,6 +73,7 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -233,8 +236,11 @@ private fun MessageSummaryCard(messageId: Long, summary: MessageSummary) {
             Spacer(Modifier.width(DdSpacing.Sm))
             Text(
                 text = title,
+                modifier = Modifier.weight(1f, fill = false),
                 style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp),
                 color = colors.inkSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (tokens != null) {
                 Spacer(Modifier.width(DdSpacing.Sm))
@@ -242,9 +248,12 @@ private fun MessageSummaryCard(messageId: Long, summary: MessageSummary) {
                     text = tokens,
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 16.sp),
                     color = colors.inkTertiary,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
             Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(DdSpacing.Xs))
             DdIcon(
                 icon = DdIcons.ChevronRight,
                 modifier = Modifier.rotate(if (expanded) 90f else 0f),
@@ -536,12 +545,14 @@ private fun AssistantTurn(
     remotePresentContext: RemotePresentContext?,
 ) {
     val colors = superPiColors()
-    val blocks = remember(message.steps, pendingQuestions) {
+    val startedStreaming = remember(message.id) { message.streaming }
+    val blocks = remember(message.steps, message.streaming, pendingQuestions) {
         turnBlocks(message, pendingQuestions)
     }
     val answer = remember(message.text, blocks) { answerText(message, blocks) }
-    val lastActivityKey = blocks.lastOrNull { it is TurnBlock.Activity }?.key
-    val hasActivity = blocks.any { it is TurnBlock.Activity }
+    val lastBlockKey = blocks.lastOrNull()?.key
+    val activityCount = blocks.count { it is TurnBlock.Activity }
+    val lastBlockIsActivity = blocks.lastOrNull() is TurnBlock.Activity
     Column(
         Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(DdSpacing.Sm),
@@ -557,7 +568,8 @@ private fun AssistantTurn(
                         is TurnBlock.Activity -> ActivitySection(
                             steps = block.steps,
                             message = message,
-                            isLastActivity = block.key == lastActivityKey,
+                            isTrailingBlock = block.key == lastBlockKey,
+                            showTotalDuration = activityCount == 1,
                             autoCollapseProcess = autoCollapseProcess,
                             processDetail = processDetail,
                             onToggleStep = onToggleStep,
@@ -600,21 +612,28 @@ private fun AssistantTurn(
             }
         }
         if (!message.streaming && answer.isNotEmpty()) {
-            MessageFooter(
-                message = message,
-                answer = answer,
-                onCopyOutput = onCopyOutput,
-            )
+            ContentEntrance(key = "footer-${message.id}", animate = startedStreaming) {
+                MessageFooter(
+                    message = message,
+                    answer = answer,
+                    onCopyOutput = onCopyOutput,
+                    onQuote = { onQuote(message.id, answer) },
+                )
+            }
         }
         when (message.status) {
-            MessageStatus.STOPPED -> if (!hasActivity) {
+            MessageStatus.STOPPED -> if (!lastBlockIsActivity) {
                 StatusMark(
                     text = stringResource(R.string.assistant_stopped),
                     color = colors.inkTertiary,
                 )
             }
 
-            MessageStatus.FAILED -> FailedMark(message = message, retryAttempt = retryAttempt)
+            MessageStatus.FAILED -> FailedMark(
+                message = message,
+                retryAttempt = retryAttempt,
+                onRetry = { onRetry(message.id) },
+            )
 
             else -> Unit
         }
@@ -627,15 +646,20 @@ private fun ContentEntrance(
     animate: Boolean,
     content: @Composable () -> Unit,
 ) {
-    if (!animate) {
-        content()
-        return
+    val motionEnabled = LocalDdMotionEnabled.current
+    val shouldFade = remember(key) { animate && motionEnabled }
+    val alpha = remember(key) { Animatable(if (shouldFade) 0f else 1f) }
+    LaunchedEffect(key, shouldFade) {
+        if (shouldFade && alpha.value < 1f) {
+            alpha.animateTo(1f, tween(DdMotion.BASE, easing = DdMotion.EaseOut))
+        } else if (!shouldFade && alpha.value != 1f) {
+            alpha.snapTo(1f)
+        }
     }
-    var shown by remember(key) { mutableStateOf(false) }
-    LaunchedEffect(key) { shown = true }
-    AnimatedVisibility(
-        visible = shown,
-        enter = fadeIn(tween(DdMotion.BASE, easing = DdMotion.EaseOut)),
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { this.alpha = alpha.value },
     ) {
         content()
     }
@@ -721,20 +745,38 @@ private fun MessageFooter(
     message: AssistantMessage,
     answer: String,
     onCopyOutput: (String) -> Unit,
+    onQuote: () -> Unit,
 ) {
     val colors = superPiColors()
     val context = LocalContext.current
     val time = rememberMessageTime(message.startedAt)
+    var copied by remember(message.id, answer) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500L)
+            copied = false
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
     ) {
         DdIconButton(
-            icon = DdIcons.Copy,
-            onClick = { onCopyOutput(answer) },
+            icon = if (copied) DdIcons.Check else DdIcons.Copy,
+            onClick = {
+                copied = true
+                onCopyOutput(answer)
+            },
             contentDescription = stringResource(R.string.chat_message_copy),
-            size = 28.dp,
+            size = 44.dp,
+            iconSize = 15.dp,
+            tint = if (copied) colors.accent else colors.inkTertiary,
+        )
+        DdIconButton(
+            icon = DdIcons.Quote,
+            onClick = onQuote,
+            contentDescription = stringResource(R.string.assistant_quote),
+            size = 44.dp,
             iconSize = 15.dp,
             tint = colors.inkTertiary,
         )
@@ -742,11 +784,12 @@ private fun MessageFooter(
             icon = DdIcons.Share,
             onClick = { sharePlainText(context, answer) },
             contentDescription = stringResource(R.string.chat_message_share),
-            size = 28.dp,
+            size = 44.dp,
             iconSize = 15.dp,
             tint = colors.inkTertiary,
         )
         if (time != null) {
+            Spacer(Modifier.width(DdSpacing.Xs))
             Text(
                 text = time,
                 style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
@@ -757,14 +800,18 @@ private fun MessageFooter(
 }
 
 @Composable
-private fun FailedMark(message: AssistantMessage, retryAttempt: Int?) {
+private fun FailedMark(
+    message: AssistantMessage,
+    retryAttempt: Int?,
+    onRetry: () -> Unit,
+) {
     val colors = superPiColors()
     val rawDetails = rawErrorDetails(message.rawError)
     var detailsExpanded by rememberSaveable(message.id, message.rawError) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(top = DdSpacing.Sm)) {
         if (message.retrying) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(44.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DdSpinner(
@@ -802,12 +849,19 @@ private fun FailedMark(message: AssistantMessage, retryAttempt: Int?) {
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (rawDetails != null) {
-                    Spacer(Modifier.height(DdSpacing.Xxs))
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(36.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                Spacer(Modifier.height(DdSpacing.Xxs))
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(DdSpacing.Md),
+                ) {
+                    DdTextAction(
+                        text = stringResource(R.string.assistant_retry),
+                        onClick = onRetry,
+                        color = colors.accent,
+                        modifier = Modifier.testTag("assistant_error_retry"),
+                    )
+                    if (rawDetails != null) {
                         DdTextAction(
                             text = stringResource(
                                 if (detailsExpanded) {
@@ -821,20 +875,20 @@ private fun FailedMark(message: AssistantMessage, retryAttempt: Int?) {
                             modifier = Modifier.testTag("assistant_error_details_toggle"),
                         )
                     }
-                    if (detailsExpanded) {
-                        Text(
-                            text = rawDetails,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp)
-                                .clip(DdShapes.Small)
-                                .background(colors.codeBackground)
-                                .padding(horizontal = 10.dp, vertical = DdSpacing.Sm)
-                                .testTag("assistant_error_details"),
-                            style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 17.sp),
-                            color = colors.inkSecondary,
-                        )
-                    }
+                }
+                if (rawDetails != null && detailsExpanded) {
+                    Text(
+                        text = rawDetails,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp)
+                            .clip(DdShapes.Small)
+                            .background(colors.codeBackground)
+                            .padding(horizontal = 10.dp, vertical = DdSpacing.Sm)
+                            .testTag("assistant_error_details"),
+                        style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 17.sp),
+                        color = colors.inkSecondary,
+                    )
                 }
             }
         }

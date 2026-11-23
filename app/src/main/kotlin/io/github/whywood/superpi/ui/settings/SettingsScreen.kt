@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -64,6 +66,8 @@ import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdSegmentedControl
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
+import io.github.whywood.superpi.design.DdSpacing
+import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
@@ -286,7 +290,10 @@ fun SettingsScreen(
                                 text = stringResource(R.string.settings_update_available, updateVersion),
                                 style = DdType.bodySmall,
                                 color = colors.accent,
+                                modifier = Modifier.widthIn(max = 140.dp),
                                 maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     } else {
@@ -349,9 +356,12 @@ private fun CrashLogSheet(
     val context = LocalContext.current
     val relativeTime = rememberRelativeTime(entry.recordedAt)
     val shareLabel = stringResource(R.string.settings_crash_log_share)
+    var loading by remember(entry) { mutableStateOf(true) }
     var text by remember(entry) { mutableStateOf("") }
     LaunchedEffect(entry) {
+        loading = true
         text = withContext(Dispatchers.IO) { store.read(entry) }
+        loading = false
     }
     DdSheet(onDismiss = onClose) {
         DdSheetHeader(stringResource(R.string.settings_crash_log_title), onClose)
@@ -367,15 +377,24 @@ private fun CrashLogSheet(
                     .fillMaxWidth()
                     .heightIn(max = 340.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(colors.raised)
+                    .background(colors.codeBackground)
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp),
             ) {
-                Text(
-                    text = text.ifBlank { stringResource(R.string.settings_crash_log_empty) },
-                    style = DdType.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = colors.inkSecondary,
-                )
+                if (loading) {
+                    Box(
+                        Modifier.fillMaxWidth().padding(vertical = DdSpacing.Xl),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        DdSpinner(size = 20.dp, strokeWidth = 2.dp)
+                    }
+                } else {
+                    Text(
+                        text = text.ifBlank { stringResource(R.string.settings_crash_log_empty) },
+                        style = DdType.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = colors.inkSecondary,
+                    )
+                }
             }
             Spacer(Modifier.height(10.dp))
             Row(
@@ -447,11 +466,11 @@ private fun AccountCard(
         DdPressable(
             onClick = onClick,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = RectangleShape,
             contentDescription = userName,
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                Modifier.fillMaxWidth().padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Lg),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AvatarBadge(avatar = avatar, name = userName, size = 44.dp)
@@ -462,6 +481,8 @@ private fun AccountCard(
                         style = DdType.body,
                         color = colors.ink,
                         maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = modelLabel,
@@ -525,38 +546,26 @@ private fun LanguageRow(
         expanded = expanded,
         onDismissRequest = { expanded = false },
         anchor = {
-            DdPressable(
+            DdListRow(
+                icon = DdIcons.Globe,
+                title = stringResource(R.string.settings_language),
                 onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth().testTag("settings_language"),
-                shape = RoundedCornerShape(20.dp),
-                contentDescription = stringResource(R.string.settings_language),
-            ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 60.dp)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    DdIcon(icon = DdIcons.Globe, tint = colors.inkSecondary, size = 20.dp)
-                    Spacer(Modifier.width(14.dp))
-                    Text(
-                        text = stringResource(R.string.settings_language),
-                        modifier = Modifier.weight(1f),
-                        style = DdType.body,
-                        color = colors.ink,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = languageLabel(language),
-                        style = DdType.bodySmall,
-                        color = colors.inkTertiary,
-                        maxLines = 1,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
-                }
-            }
+                modifier = Modifier.testTag("settings_language"),
+                trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = languageLabel(language),
+                            style = DdType.bodySmall,
+                            color = colors.inkTertiary,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
+                    }
+                },
+            )
         },
     ) {
         AppLanguage.entries.forEach { option ->
@@ -602,38 +611,43 @@ private fun LicenseSheet(onClose: () -> Unit) {
     val uriHandler = LocalUriHandler.current
     DdSheet(onDismiss = onClose) {
         DdSheetHeader(stringResource(R.string.settings_license_title), onClose)
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = DdSpacing.Xs),
+        ) {
             Spacer(Modifier.height(8.dp))
             LicenseRow(
                 title = stringResource(R.string.settings_license_open_runde),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(OPEN_RUNDE_URL) },
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             LicenseRow(
                 title = stringResource(R.string.settings_license_fredoka),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(FREDOKA_URL) },
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             LicenseRow(
                 title = stringResource(R.string.settings_license_manrope),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(MANROPE_URL) },
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             LicenseRow(
                 title = stringResource(R.string.settings_license_lora),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(LORA_URL) },
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             LicenseRow(
                 title = stringResource(R.string.settings_license_icons),
                 subtitle = stringResource(R.string.settings_license_mit),
                 onClick = { uriHandler.openUri(TABLER_ICONS_URL) },
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             LicenseRow(
                 title = stringResource(R.string.settings_license_provider_icons),
                 subtitle = stringResource(R.string.settings_license_provider_icons_body),
@@ -647,22 +661,13 @@ private fun LicenseSheet(onClose: () -> Unit) {
 @Composable
 private fun LicenseRow(title: String, subtitle: String, onClick: () -> Unit) {
     val colors = superPiColors()
-    DdPressable(
+    DdListRow(
+        title = title,
+        subtitle = subtitle,
+        subtitleMaxLines = 2,
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        contentDescription = title,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(text = title, style = DdType.body, color = colors.ink)
-                Text(text = subtitle, style = DdType.bodySmall, color = colors.inkTertiary)
-            }
+        trailing = {
             DdIcon(icon = DdIcons.External, tint = colors.inkTertiary, size = 16.dp)
-        }
-    }
+        },
+    )
 }

@@ -122,6 +122,5 @@ internal fun WorkspaceSettingsRoute(
             onUpdateProfile(workspaceId, workspace.avatar, intro.trim().takeIf { it.isNotEmpty() })
         },
         onBack = onBack,
-        onOpenSkills = { navigator.push(AppDestination.Skills) },
     )
 }

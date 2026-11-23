@@ -1,20 +1,16 @@
 package io.github.whywood.superpi.ui.mcp
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -41,11 +37,12 @@ import io.github.whywood.superpi.sdk.mcp.config.McpServerConfig
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
 import io.github.whywood.superpi.design.DdEmptyState
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSegmented
 import io.github.whywood.superpi.design.DdShapes
@@ -205,18 +202,8 @@ private fun McpScreenContent(
         }.orEmpty()
     }
     val iconLoader = rememberMarketIconLoader()
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("mcp_screen"),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -251,7 +238,9 @@ private fun McpScreenContent(
             } else {
                 MarketRefreshButton(repository = marketRepository)
             }
-        }
+        },
+        modifier = modifier.testTag("mcp_screen"),
+    ) {
         DdSegmented(
             options = listOf(
                 stringResource(R.string.market_tab_market),
@@ -340,7 +329,7 @@ private fun McpScreenContent(
                         }
                         itemsIndexed(visibleServers, key = { _, entry -> entry.name }) { index, entry ->
                             Column(Modifier.animateItem()) {
-                                if (index > 0) DdHairline()
+                                if (index > 0) DdRowDivider(leadingInset = 52.dp)
                                 McpServerRow(
                                     entry = entry,
                                     probeResult = state.probes[entry.name],
@@ -461,8 +450,9 @@ private fun McpServerRow(
                 style = DdType.bodySmall,
                 color = status.color,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 96.dp),
+                modifier = Modifier.widthIn(max = 120.dp),
             )
             Spacer(Modifier.width(DdSpacing.Sm))
         }

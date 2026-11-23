@@ -9,6 +9,12 @@ enum class ThemeBase(val wire: String) {
     PI("pi") {
         override fun colors(dark: Boolean): SuperPIColors = if (dark) DdTheme.darkPi() else DdTheme.lightPi()
     },
+    PAPER("paper") {
+        override fun colors(dark: Boolean): SuperPIColors = if (dark) DdTheme.darkPaper() else DdTheme.lightPaper()
+    },
+    SLATE("slate") {
+        override fun colors(dark: Boolean): SuperPIColors = if (dark) DdTheme.darkSlate() else DdTheme.lightSlate()
+    },
     CLASSIC_BLUE("classic") {
         override fun colors(dark: Boolean): SuperPIColors = DdTheme.lightClassicBlue()
     },

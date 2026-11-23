@@ -2,9 +2,12 @@ package io.github.whywood.superpi.design
 
 import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -113,7 +116,11 @@ internal fun DdSheetContent(
                 initialValue = dragOffset,
                 targetValue = target,
                 initialVelocity = initialVelocity,
-                animationSpec = tween(DdMotion.SHEET, easing = DdMotion.EaseInOut),
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                    visibilityThreshold = 2f,
+                ),
             ) { value, _ -> dragOffset = value }
             finish?.invoke()
         }
@@ -205,6 +212,7 @@ internal fun DdSheetContent(
         }
     }
     val scrimInteraction = remember { MutableInteractionSource() }
+    val dragInteraction = remember { MutableInteractionSource() }
 
     LaunchedEffect(Unit) {
         if (motionEnabled) {
@@ -271,11 +279,18 @@ internal fun DdSheetContent(
                                 state = dragState,
                                 orientation = Orientation.Vertical,
                                 enabled = !dismissing,
-                                interactionSource = scrimInteraction,
+                                interactionSource = dragInteraction,
                                 onDragStarted = { motionJob?.cancel() },
                                 onDragStopped = { velocity -> settle(velocity) },
                             )
                             .clip(SheetTopShape)
+                            .then(
+                                if (!fullBleed) {
+                                    Modifier.border(1.dp, colors.hairline.copy(alpha = 0.55f), SheetTopShape)
+                                } else {
+                                    Modifier
+                                },
+                            )
                             .background(panelColor),
                     ) {
                         if (!fullBleed) {

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Typeface
 import android.graphics.fonts.Font as PlatformFont
 import android.graphics.fonts.FontFamily as PlatformFontFamily
+import android.graphics.fonts.FontStyle as PlatformFontStyle
 import android.graphics.fonts.FontVariationAxis
 import androidx.annotation.FontRes
 import androidx.compose.runtime.Immutable
@@ -13,7 +14,6 @@ import androidx.compose.ui.text.font.FontLoadingStrategy
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,7 +25,7 @@ class DdCompositeFont(
     override val weight: FontWeight,
     internal val variable: Boolean,
 ) : AndroidFont(
-    loadingStrategy = FontLoadingStrategy.Async,
+    loadingStrategy = FontLoadingStrategy.Blocking,
     typefaceLoader = DdCompositeTypefaceLoader,
     variationSettings = FontVariation.Settings(),
 ) {
@@ -36,8 +36,6 @@ internal const val SYSTEM_LATIN_RES = 0
 
 internal object DdCompositeTypefaceLoader : AndroidFont.TypefaceLoader {
     private val cache = ConcurrentHashMap<Int, Typeface>()
-    private val files = ConcurrentHashMap<Int, File>()
-    private val systemLatin = File("/system/fonts/Roboto-Regular.ttf")
     private val lock = Any()
 
     override fun loadBlocking(context: Context, font: AndroidFont): Typeface? {
@@ -71,42 +69,26 @@ internal object DdCompositeTypefaceLoader : AndroidFont.TypefaceLoader {
     }
 
     private fun build(context: Context, font: DdCompositeFont): Typeface = runCatching {
-        val file = if (font.latinRes == SYSTEM_LATIN_RES) systemLatin else fontFile(context, font.latinRes)
-        val platformFont = PlatformFont.Builder(file)
+        if (font.latinRes == SYSTEM_LATIN_RES) {
+            return@runCatching Typeface.create(Typeface.SANS_SERIF, font.weight.weight, false)
+        }
+        val platformFont = PlatformFont.Builder(context.resources, font.latinRes)
             .setWeight(font.weight.weight)
+            .setSlant(PlatformFontStyle.FONT_SLANT_UPRIGHT)
             .apply {
                 if (font.variable) setFontVariationSettings(variation(font.weight.weight))
             }
             .build()
-        val typeface = compositeTypeface(PlatformFontFamily.Builder(platformFont).build())
-        if (font.weight.weight >= 600 && font.latinRes == SYSTEM_LATIN_RES) {
-            Typeface.create(typeface, Typeface.BOLD)
-        } else {
-            typeface
-        }
+        compositeTypeface(PlatformFontFamily.Builder(platformFont).build(), font.weight.weight)
     }.getOrElse {
-        Typeface.create("sans-serif", Typeface.NORMAL)
+        Typeface.create(Typeface.SANS_SERIF, font.weight.weight, false)
     }
 
-    private fun compositeTypeface(latin: PlatformFontFamily): Typeface =
-        Typeface.CustomFallbackBuilder(latin).setSystemFallback("sans-serif").build()
-
-    private fun fontFile(context: Context, resId: Int): File {
-        files[resId]?.let { return it }
-        val dir = File(context.cacheDir, "fonts")
-        if (!dir.exists()) dir.mkdirs()
-        val target = File(dir, context.resources.getResourceEntryName(resId) + ".ttf")
-        val temp = File(dir, target.name + ".tmp")
-        context.resources.openRawResource(resId).use { input ->
-            temp.outputStream().use { output -> input.copyTo(output) }
-        }
-        if (!temp.renameTo(target)) {
-            temp.copyTo(target, overwrite = true)
-            temp.delete()
-        }
-        files[resId] = target
-        return target
-    }
+    private fun compositeTypeface(latin: PlatformFontFamily, weight: Int): Typeface =
+        Typeface.CustomFallbackBuilder(latin)
+            .setStyle(PlatformFontStyle(weight, PlatformFontStyle.FONT_SLANT_UPRIGHT))
+            .setSystemFallback("sans-serif")
+            .build()
 
     private fun variation(weight: Int): Array<FontVariationAxis> =
         arrayOf(FontVariationAxis("wght", weight.toFloat()))

@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.ui.navigation.routes
 import androidx.compose.runtime.getValue
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -147,10 +148,13 @@ internal fun AndroidSettingsRoute(dependencies: AppDependencies, scope: Coroutin
 @Composable
 internal fun ThemeRoute(dependencies: AppDependencies, onBack: () -> Unit) {
     val state by dependencies.themeController.state.collectAsStateWithLifecycle()
+    val systemDark = isSystemInDarkTheme()
     ThemeScreen(
-        builtIn = dependencies.themeController.builtInOptions(),
+        builtIn = dependencies.themeController.builtInOptions(systemDark),
         fromPlugins = dependencies.themeController.pluginOptions(),
         current = state.choice,
+        appearance = state.appearance,
+        onSelectAppearance = dependencies.themeController::setAppearance,
         onBack = onBack,
         onSelect = dependencies.themeController::setChoice,
     )

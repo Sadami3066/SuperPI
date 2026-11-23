@@ -34,10 +34,10 @@ import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
 import io.github.whywood.superpi.design.DdDatePicker
 import io.github.whywood.superpi.design.DdDialog
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
@@ -277,7 +277,14 @@ private fun EditorRow(
 
 @Composable
 private fun EnableRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(vertical = DdSpacing.Md), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .heightIn(min = 52.dp)
+            .padding(vertical = DdSpacing.Md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(stringResource(R.string.timers_enabled_label), Modifier.weight(1f), style = DdType.body, color = superPiColors().ink)
         DdSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
@@ -285,7 +292,14 @@ private fun EnableRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
 
 @Composable
 private fun RepeatRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = DdSpacing.Md), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .heightIn(min = 52.dp)
+            .padding(vertical = DdSpacing.Md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(stringResource(R.string.timers_repeat_label), Modifier.weight(1f), style = DdType.body, color = superPiColors().ink)
         DdSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
@@ -347,7 +361,7 @@ private fun ConversationPickerSheet(
                             }
                             if (session.id == selectedId) DdIcon(DdIcons.Check, colors.accent, size = 18.dp)
                         }
-                        if (index != conversations.lastIndex) DdHairline()
+                        if (index != conversations.lastIndex) DdRowDivider()
                     }
                     Spacer(Modifier.height(DdSpacing.Xxl))
                 }

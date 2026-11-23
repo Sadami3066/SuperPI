@@ -69,7 +69,7 @@ enum class DdFontStyle(val id: String, val displayName: String) {
     ;
 
     companion object {
-        fun fromId(id: String?): DdFontStyle = entries.firstOrNull { it.id == id } ?: FREDOKA
+        fun fromId(id: String?): DdFontStyle = entries.firstOrNull { it.id == id } ?: MANROPE
     }
 }
 
@@ -86,6 +86,7 @@ object DdFonts {
         DdCompositeFont(SYSTEM_LATIN_RES, FontWeight.Normal, variable = false),
         DdCompositeFont(SYSTEM_LATIN_RES, FontWeight.Medium, variable = false),
         DdCompositeFont(SYSTEM_LATIN_RES, FontWeight.SemiBold, variable = false),
+        DdCompositeFont(SYSTEM_LATIN_RES, FontWeight.Bold, variable = false),
     )
 
     private val families = mapOf(
@@ -95,7 +96,7 @@ object DdFonts {
         DdFontStyle.MANROPE to FontFamily(manropeFonts),
         DdFontStyle.SYSTEM to FontFamily(systemFonts),
     )
-    private val selectedStyle = mutableStateOf(DdFontStyle.FREDOKA)
+    private val selectedStyle = mutableStateOf(DdFontStyle.MANROPE)
     var style: DdFontStyle
         get() = selectedStyle.value
         private set(value) {
@@ -127,6 +128,7 @@ object DdFonts {
         DdCompositeFont(resId, FontWeight.Normal, variable = true),
         DdCompositeFont(resId, FontWeight.Medium, variable = true),
         DdCompositeFont(resId, FontWeight.SemiBold, variable = true),
+        DdCompositeFont(resId, FontWeight.Bold, variable = true),
     )
 }
 
@@ -212,6 +214,7 @@ object DdType {
             fontSize = 13.sp,
             lineHeight = 18.sp,
             letterSpacing = 0.2.sp,
+            fontFeatureSettings = "tnum",
         )
 }
 
@@ -268,9 +271,9 @@ private fun SuperPIColors.materialScheme() = if (dark) {
         outlineVariant = hairline,
         inverseSurface = ink,
         inverseOnSurface = paper,
-        error = inkSecondary,
+        error = danger,
         onError = paper,
-        scrim = Color.Black,
+        scrim = scrim,
     )
 } else {
     lightColorScheme(
@@ -295,9 +298,9 @@ private fun SuperPIColors.materialScheme() = if (dark) {
         outlineVariant = hairline,
         inverseSurface = ink,
         inverseOnSurface = paper,
-        error = inkSecondary,
+        error = danger,
         onError = paper,
-        scrim = Color.Black,
+        scrim = scrim,
     )
 }
 @Composable

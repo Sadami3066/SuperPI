@@ -43,6 +43,11 @@ class SessionCatalog(
 
     suspend fun setArchived(id: String, archived: Boolean) = metaStore.update(id) { it.copy(archived = archived) }
 
+    suspend fun setMemoryExcluded(id: String, excluded: Boolean) =
+        metaStore.update(id) { it.copy(memoryExcluded = excluded) }
+
+    suspend fun isMemoryExcluded(id: String): Boolean = metaStore.read()[id]?.memoryExcluded == true
+
     suspend fun removeMeta(id: String) = metaStore.remove(id)
 
     private fun IndexedSession.toSummary(meta: SessionMeta?): ConversationSummary = ConversationSummary(
@@ -53,6 +58,7 @@ class SessionCatalog(
         cwd = cwd,
         pinned = meta?.pinned ?: false,
         archived = meta?.archived ?: false,
+        memoryExcluded = meta?.memoryExcluded ?: false,
     )
 
     private companion object {

@@ -80,7 +80,7 @@
     <string name="bot_tools">工具</string>
     <string name="bot_tools_screen">屏幕工具</string>
     <string name="bot_tools_miniapp">小程序工具</string>
-    <string name="bot_tools_screen_permission">需要系统访问的 ADB 或 Root 档</string>
+    <string name="bot_tools_screen_permission">需要在“系统访问”中开启更高级别的控制权限</string>
     <string name="bot_instructions">设定</string>
     <string name="bot_created_toast">已创建，能力默认关闭，可在 Bot 设置里打开。</string>
     <string name="drawer_remote_loading">正在加载会话…</string>

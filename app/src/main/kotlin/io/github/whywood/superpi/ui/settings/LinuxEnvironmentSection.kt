@@ -40,12 +40,12 @@ import io.github.whywood.superpi.data.StorageMount
 import io.github.whywood.superpi.data.isSharedStorageGranted
 import io.github.whywood.superpi.data.mountDisplayPath
 import io.github.whywood.superpi.design.DdDialog
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
@@ -152,11 +152,11 @@ internal fun LinuxEnvironmentSection(
         if (!supported) {
             Text(
                 text = stringResource(R.string.settings_linux_unsupported),
-                modifier = Modifier.padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Md),
+                modifier = Modifier.padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Md),
                 style = DdType.bodySmall,
                 color = colors.inkTertiary,
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
         }
         val retryAvailable = supported && !installed && !installing
         DdListRow(
@@ -176,10 +176,11 @@ internal fun LinuxEnvironmentSection(
                 null
             },
         )
-        DdHairline()
+        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
         DdListRow(
             title = stringResource(R.string.settings_linux_enable),
             enabled = installed && supported,
+            onClick = { onEnabledChange(!enabled) },
             trailing = {
                 DdSwitch(
                     checked = enabled && installed,
@@ -196,7 +197,7 @@ internal fun LinuxEnvironmentSection(
                 )
             },
         )
-        DdHairline()
+        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
         SharedStorageRow(
             granted = sharedStorageGranted,
             checked = sharedStorageEnabled,
@@ -204,9 +205,9 @@ internal fun LinuxEnvironmentSection(
             onCheckedChange = onSharedStorageChange,
         )
         if (available) {
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             Row(
-                Modifier.fillMaxWidth().padding(start = DdSpacing.Lg, end = DdSpacing.Lg, top = 14.dp, bottom = DdSpacing.Xs),
+                Modifier.fillMaxWidth().padding(start = DdSpacing.RowHorizontal, end = DdSpacing.RowHorizontal, top = 14.dp, bottom = DdSpacing.Xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DdSectionLabel(
@@ -214,17 +215,20 @@ internal fun LinuxEnvironmentSection(
                     modifier = Modifier.weight(1f),
                 )
                 if (mounts.isNotEmpty()) {
+                    Spacer(Modifier.width(DdSpacing.Sm))
                     Text(
                         text = stringResource(R.string.settings_linux_mount_count, mounts.size),
                         style = DdType.bodySmall,
                         color = colors.inkTertiary,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
             if (mounts.isEmpty()) {
                 Text(
                     text = stringResource(R.string.settings_linux_mounts_empty),
-                    modifier = Modifier.padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Xs),
+                    modifier = Modifier.padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Xs),
                     style = DdType.bodySmall,
                     color = colors.inkTertiary,
                 )
@@ -250,7 +254,7 @@ internal fun LinuxEnvironmentSection(
             )
         }
         if (installedState != null) {
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             val sizeBytes = installedState.sizeBytes
             DdListRow(
                 title = stringResource(R.string.settings_linux_size_label),
@@ -260,7 +264,7 @@ internal fun LinuxEnvironmentSection(
                     stringResource(R.string.settings_linux_size_value, (sizeBytes / (1024 * 1024)).toInt())
                 },
             )
-            DdHairline()
+            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
             DdListRow(
                 icon = DdIcons.Refresh,
                 title = stringResource(R.string.settings_linux_reset),
@@ -365,6 +369,7 @@ internal fun LinuxEnvironmentSection(
                             )
                         }
                     }
+                    Spacer(Modifier.width(DdSpacing.Sm))
                     DdTextAction(
                         text = stringResource(
                             if (draftPath.isEmpty()) {
@@ -465,7 +470,7 @@ private fun SharedStorageRow(
         subtitle = if (granted) null else stringResource(R.string.settings_linux_shared_storage_grant),
         subtitleMaxLines = 2,
         enabled = available,
-        onClick = if (granted) null else ({ openSharedStorageSettings(context) }),
+        onClick = if (granted) ({ onCheckedChange(!checked) }) else ({ openSharedStorageSettings(context) }),
         showChevron = !granted,
         modifier = Modifier.testTag("linux_shared_storage"),
         trailing = if (granted) {

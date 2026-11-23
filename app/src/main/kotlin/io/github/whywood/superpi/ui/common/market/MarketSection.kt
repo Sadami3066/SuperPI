@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -52,13 +53,13 @@ import io.github.whywood.superpi.design.DdChip
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdEmptyState
 import io.github.whywood.superpi.design.DdSpacing
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdLoadingBlock
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
@@ -80,16 +81,11 @@ import io.github.whywood.superpi.market.MarketState
 import io.github.whywood.superpi.runtime.host.HostAccess
 import io.github.whywood.superpi.ui.common.DelayedLoadingBlock
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 internal const val MARKET_TAB_MARKET = 0
 
 internal const val MARKET_TAB_MINE = 1
-
-private val marketInstallScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -136,7 +132,7 @@ internal fun MarketTab(
     }
 
     fun install(entry: MarketEntry, apiKey: String? = null) {
-        marketInstallScope.launch {
+        scope.launch {
             repository.install(entry, apiKey).onSuccess {
                 haptic(HapticFeedbackType.Confirm)
                 onInstalled()
@@ -216,15 +212,27 @@ internal fun MarketTab(
             is MarketState.Ready -> {
                 if (current.source != MarketSource.Network) {
                     item {
-                        Text(
-                            text = stringResource(R.string.market_offline_notice),
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Sm)
-                                .testTag("${testTagPrefix}_market_offline"),
-                            style = DdType.bodySmall,
-                            color = colors.inkTertiary,
-                        )
+                                .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.market_offline_notice),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("${testTagPrefix}_market_offline"),
+                                style = DdType.bodySmall,
+                                color = colors.inkTertiary,
+                            )
+                            DdTextAction(
+                                text = stringResource(R.string.market_refresh),
+                                onClick = { scope.launch { repository.refresh(force = true) } },
+                                color = colors.accent,
+                                modifier = Modifier.testTag("${testTagPrefix}_market_refresh"),
+                            )
+                        }
                     }
                 }
                 if (categories.isNotEmpty()) {
@@ -275,7 +283,7 @@ internal fun MarketTab(
 
                     else -> itemsIndexed(visible, key = { _, entry -> entry.id }) { index, entry ->
                         Column(Modifier.animateItem().padding(horizontal = DdSpacing.Lg)) {
-                            if (index > 0) DdHairline(Modifier.padding(start = DdSpacing.Xl))
+                            if (index > 0) DdRowDivider(leadingInset = DdSpacing.Xl)
                             val installState = installStates[entry.id]
                             MarketRow(
                                 entry = entry,
@@ -517,13 +525,16 @@ private fun MarketRow(
             Spacer(Modifier.width(8.dp))
             Text(
                 text = statusLabel(status, progress),
-                style = DdType.label,
+                modifier = Modifier.widthIn(max = 120.dp),
+                style = DdType.chip,
                 color = when (status) {
                     MarketEntryStatus.Install, MarketEntryStatus.Update -> colors.accent
                     MarketEntryStatus.Failed -> colors.danger
                     MarketEntryStatus.Installed, MarketEntryStatus.Installing -> colors.inkTertiary
                 },
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -635,8 +646,11 @@ private fun MarketDetailSheet(
                         if (subtitle.isNotEmpty()) {
                             Text(
                                 text = subtitle,
+                                modifier = Modifier.weight(1f, fill = false),
                                 style = DdType.bodySmall,
                                 color = colors.inkTertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                         if (requiredAccess != null) {

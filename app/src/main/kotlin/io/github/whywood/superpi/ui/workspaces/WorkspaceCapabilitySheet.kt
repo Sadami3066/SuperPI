@@ -25,10 +25,11 @@ import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.design.DdEmptyState
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
+import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
@@ -125,35 +126,39 @@ internal fun WorkspaceCapabilitySheet(
                     DdSpinner(size = 22.dp, strokeWidth = 2.dp)
                 }
 
-                items.isEmpty() -> DdEmptyState(
-                    text = stringResource(
-                        when (kind) {
-                            WorkspaceCapabilityKind.Skills -> R.string.bot_capabilities_empty_skills
-                            WorkspaceCapabilityKind.Plugins -> R.string.bot_capabilities_empty_plugins
-                            WorkspaceCapabilityKind.Mcp -> R.string.bot_capabilities_empty_mcp
-                        },
-                    ),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                )
+                items.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    DdEmptyState(
+                        text = stringResource(
+                            when (kind) {
+                                WorkspaceCapabilityKind.Skills -> R.string.bot_capabilities_empty_skills
+                                WorkspaceCapabilityKind.Plugins -> R.string.bot_capabilities_empty_plugins
+                                WorkspaceCapabilityKind.Mcp -> R.string.bot_capabilities_empty_mcp
+                            },
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
 
                 else -> LazyColumn(
                     Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(horizontal = 24.dp),
+                        .padding(horizontal = DdSpacing.Xs),
                 ) {
                     itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
+                        val checked = item.id in selected
                         DdListRow(
                             title = item.label,
+                            onClick = { toggle(item.id, !checked) },
                             trailing = {
                                 DdSwitch(
-                                    checked = item.id in selected,
-                                    onCheckedChange = { checked -> toggle(item.id, checked) },
+                                    checked = checked,
+                                    onCheckedChange = { value -> toggle(item.id, value) },
                                     modifier = Modifier.testTag("bot_capability_${item.id}"),
                                 )
                             },
                         )
-                        if (index != items.lastIndex) DdHairline()
+                        if (index != items.lastIndex) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     }
                 }
             }

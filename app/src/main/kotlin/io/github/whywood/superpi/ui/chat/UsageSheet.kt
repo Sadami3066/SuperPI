@@ -2,12 +2,16 @@ package io.github.whywood.superpi.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -16,11 +20,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdPrimaryButton
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
@@ -32,7 +39,11 @@ import java.util.Locale
 private const val COMPACTION_RESERVE_TOKENS = 16_384L
 
 @Composable
-fun UsageSheet(usage: SessionUsage, onDismiss: () -> Unit) {
+fun UsageSheet(
+    usage: SessionUsage,
+    onDismiss: () -> Unit,
+    onCompact: (() -> Unit)? = null,
+) {
     val colors = superPiColors()
     val progress = if (usage.contextWindow > 0L) {
         (usage.contextTokens.toDouble() / usage.contextWindow.toDouble()).coerceIn(0.0, 1.0).toFloat()
@@ -40,6 +51,16 @@ fun UsageSheet(usage: SessionUsage, onDismiss: () -> Unit) {
         0f
     }
     val threshold = (usage.contextWindow - COMPACTION_RESERVE_TOKENS).coerceAtLeast(0L)
+    val thresholdFraction = if (usage.contextWindow > 0L) {
+        (threshold.toDouble() / usage.contextWindow.toDouble()).coerceIn(0.0, 1.0).toFloat()
+    } else {
+        0.80f
+    }
+    val fillColor = when {
+        progress >= 0.90f -> colors.danger
+        progress >= 0.75f -> colors.warning
+        else -> colors.accent
+    }
     DdSheet(onDismiss = onDismiss) {
         DdSheetHeader(
             title = stringResource(R.string.usage_title),
@@ -58,7 +79,10 @@ fun UsageSheet(usage: SessionUsage, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f),
                     style = DdType.label,
                     color = colors.inkSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.width(DdSpacing.Sm))
                 Text(
                     text = stringResource(
                         R.string.usage_context_value,
@@ -68,22 +92,42 @@ fun UsageSheet(usage: SessionUsage, onDismiss: () -> Unit) {
                     style = DdType.numeric,
                     color = colors.ink,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Box(
+            BoxWithConstraints(
                 Modifier
                     .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(CircleShape)
-                    .background(colors.wash),
+                    .height(10.dp),
+                contentAlignment = Alignment.CenterStart,
             ) {
-                if (progress > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(colors.wash),
+                ) {
+                    if (progress > 0f) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(progress)
+                                .height(4.dp)
+                                .background(fillColor),
+                        )
+                    }
+                }
+                if (usage.contextWindow > 0L && thresholdFraction in 0.05f..0.98f) {
+                    val tickOffset = (maxWidth * thresholdFraction - 1.dp)
+                        .coerceIn(0.dp, (maxWidth - 2.dp).coerceAtLeast(0.dp))
                     Box(
                         Modifier
-                            .fillMaxWidth(progress)
-                            .height(3.dp)
-                            .background(colors.accent),
+                            .offset(x = tickOffset)
+                            .width(2.dp)
+                            .height(10.dp)
+                            .clip(CircleShape)
+                            .background(colors.inkTertiary),
                     )
                 }
             }
@@ -128,6 +172,14 @@ fun UsageSheet(usage: SessionUsage, onDismiss: () -> Unit) {
                 value = stringResource(R.string.usage_cost_value, formatCost(usage.cost)),
             )
             Spacer(Modifier.height(DdSpacing.Xl))
+            if (onCompact != null) {
+                DdPrimaryButton(
+                    text = stringResource(R.string.usage_compact_now),
+                    onClick = onCompact,
+                    modifier = Modifier.fillMaxWidth().testTag("usage_compact_now"),
+                )
+                Spacer(Modifier.height(DdSpacing.Md))
+            }
             Text(
                 text = stringResource(R.string.usage_footnote),
                 style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 17.sp),
@@ -142,20 +194,24 @@ fun UsageSheet(usage: SessionUsage, onDismiss: () -> Unit) {
 private fun UsageStatRow(label: String, value: String) {
     val colors = superPiColors()
     Row(
-        Modifier.fillMaxWidth().height(44.dp),
+        Modifier.fillMaxWidth().heightIn(min = 44.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
+            modifier = Modifier.weight(1f),
             style = DdType.bodySmall,
             color = colors.inkSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(DdSpacing.Md))
         Text(
             text = value,
             style = DdType.numeric,
             color = colors.ink,
             maxLines = 1,
+            softWrap = false,
         )
     }
 }

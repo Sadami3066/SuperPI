@@ -787,6 +787,13 @@ class ChatViewModel(
         }
     }
 
+    fun setSessionMemoryExcluded(id: String, excluded: Boolean) {
+        viewModelScope.launch {
+            runCatching { withContext(ioDispatcher) { runtime.setSessionMemoryExcluded(id, excluded) } }
+            refreshSessions()
+        }
+    }
+
     fun deleteSession(id: String) {
         viewModelScope.launch {
             val wasActive = mutableState.value.conversationId == id

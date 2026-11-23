@@ -6,17 +6,16 @@
     <string name="onboarding_primary_continue">Continue</string>
     <string name="onboarding_primary_connect">Connect and continue</string>
     <string name="onboarding_primary_done">Start chatting</string>
-    <string name="onboarding_primary_start_use">Get started</string>
     <string name="onboarding_skip">Set up later</string>
     <string name="onboarding_later">Later</string>
 
     <string name="onboarding_welcome_title">Hello,\nI\'m PI.</string>
     <string name="onboarding_welcome_lead">Your everyday AI assistant.\nFrom daily chores to new ideas.</string>
-    <string name="onboarding_welcome_note">A few steps now; you can adjust them anytime.</string>
+    <string name="onboarding_welcome_note">Adjustable anytime in Settings</string>
 
     <string name="onboarding_account_title">A little about you</string>
     <string name="onboarding_account_subtitle">Tell me how you\'d like to be addressed.</string>
-    <string name="onboarding_account_note">You can adjust these in Settings anytime.</string>
+    <string name="onboarding_account_note">You can update these in Settings anytime.</string>
     <string name="onboarding_avatar_pick">Choose avatar</string>
     <string name="onboarding_avatar_failed">Couldn\'t save the avatar.</string>
     <string name="onboarding_nickname_label">Your name</string>
@@ -79,11 +78,11 @@
     <string name="onboarding_access_title">System access</string>
     <string name="onboarding_access_note">You can change this later in Settings → System access.</string>
     <string name="onboarding_access_local">Standard</string>
-    <string name="onboarding_access_local_body">No extra permission needed; bash runs in the app\'s Linux environment.</string>
+    <string name="onboarding_access_local_body">Runs in an isolated workspace with no extra permissions.</string>
     <string name="onboarding_access_adb">Wireless debugging (ADB)</string>
     <string name="onboarding_access_adb_body">Turn on wireless debugging and pair first; you can finish later in Settings → System access.</string>
     <string name="onboarding_access_root">Root</string>
-    <string name="onboarding_access_root_body">Requires system authorization; Root Linux is prepared on first use, with progress in Settings → System access.</string>
+    <string name="onboarding_access_root_body">Requires root permission; view setup status in Settings → System access.</string>
 
     <string name="personalization_avatar_title">Avatar</string>
     <string name="personalization_avatar_empty">Used when unset</string>

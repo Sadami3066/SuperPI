@@ -6,20 +6,18 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,17 +49,20 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
+import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdEmptyState
-import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMenu
 import io.github.whywood.superpi.design.DdMenuItem
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSegmented
 import io.github.whywood.superpi.design.DdShapes
@@ -136,6 +137,7 @@ internal fun PluginsScreen(
 
     val unreadableMessage = stringResource(R.string.plugins_import_unreadable)
     val invalidMessage = stringResource(R.string.plugins_import_invalid)
+    val importFailedMessage = stringResource(R.string.plugins_import_failed)
     LaunchedEffect(pendingImportUri) {
         val uri = pendingImportUri?.let(Uri::parse) ?: return@LaunchedEffect
         val file = withContext(Dispatchers.IO) { copyToCache(context, uri) }
@@ -219,7 +221,7 @@ internal fun PluginsScreen(
                         result.requiresConfirmation -> trustPublisher = true
                         else -> {
                             haptic(HapticFeedbackType.Reject)
-                            importError = result.error ?: result.toString()
+                            importError = result.error?.takeIf { it.isNotBlank() } ?: importFailedMessage
                         }
                     }
                 }
@@ -300,18 +302,8 @@ private fun PluginsContent(
     val interactive = pluginListInteractive(state)
     val showMarket = tab == MARKET_TAB_MARKET
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("plugins_screen"),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -338,7 +330,9 @@ private fun PluginsContent(
             } else {
                 MarketRefreshButton(repository = marketRepository)
             }
-        }
+        },
+        modifier = modifier.testTag("plugins_screen"),
+    ) {
         DdSegmented(
             options = listOf(
                 stringResource(R.string.market_tab_market),
@@ -409,7 +403,7 @@ private fun PluginsContent(
 
                     else -> itemsIndexed(visible, key = { _, snapshot -> snapshot.id }) { index, snapshot ->
                         Column(Modifier.animateItem()) {
-                            if (index > 0) DdHairline()
+                            if (index > 0) DdRowDivider(leadingInset = 42.dp)
                             PluginRow(
                                 snapshot = snapshot,
                                 pluginsRoot = pluginsRoot,
@@ -582,10 +576,8 @@ private fun PluginRow(
                     icon = DdIcons.More,
                     onClick = { menuOpen = true },
                     contentDescription = stringResource(R.string.plugins_menu_more),
-                    modifier = Modifier
-                        .size(36.dp)
-                        .testTag("plugin_menu_${snapshot.id}"),
-                    size = 36.dp,
+                    modifier = Modifier.testTag("plugin_menu_${snapshot.id}"),
+                    size = 44.dp,
                     iconSize = 18.dp,
                     tint = colors.inkTertiary,
                     enabled = interactive,
@@ -713,7 +705,7 @@ private fun PluginDetailSheet(
                     )
                     Spacer(Modifier.height(DdSpacing.Md))
                 }
-                PluginGroup {
+                DdGroupCard {
                     DdListRow(
                         title = stringResource(R.string.plugins_info_status),
                         value = stringResource(pluginPhaseLabelRes(snapshot.phase)),
@@ -723,28 +715,28 @@ private fun PluginDetailSheet(
                             null
                         },
                     )
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         title = stringResource(R.string.plugins_info_version),
                         value = snapshot.version,
                     )
                     if (snapshot.installedVersion != null && snapshot.installedVersion != snapshot.version) {
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_info_installed_version),
                             value = snapshot.installedVersion,
                         )
                     }
                     if (publisher != null) {
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_info_publisher),
-                            subtitle = publisher.keyId.ifBlank { null },
-                            subtitleMaxLines = 2,
-                            value = publisher.name.ifBlank { publisher.keyId.take(12) },
+                            value = publisher.name.ifBlank {
+                                stringResource(R.string.plugins_info_source_external)
+                            },
                         )
                     }
-                    DdHairline()
+                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         title = stringResource(R.string.plugins_info_source),
                         value = stringResource(
@@ -756,14 +748,14 @@ private fun PluginDetailSheet(
                         ),
                     )
                     if (snapshot.installedSizeBytes != null) {
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_info_size),
                             value = formatPluginSize(context, snapshot.installedSizeBytes),
                         )
                     }
                     if (snapshot.skills.isNotEmpty()) {
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_info_skills),
                             subtitle = snapshot.skills.joinToString(stringResource(R.string.list_separator)),
@@ -771,7 +763,7 @@ private fun PluginDetailSheet(
                         )
                     }
                     if (snapshot.capabilities.isNotEmpty()) {
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.plugins_info_capabilities),
                             subtitle = capabilitySummary(snapshot.capabilities),
@@ -786,7 +778,8 @@ private fun PluginDetailSheet(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(colors.raised)
+                            .background(colors.surface)
+                            .border(1.dp, colors.hairline.copy(alpha = DdAlpha.Secondary), RoundedCornerShape(14.dp))
                             .padding(16.dp),
                     ) {
                         Text(
@@ -801,6 +794,7 @@ private fun PluginDetailSheet(
                             ),
                             enabled = !applyingUpdate,
                             onClick = onApplyUpdate,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }

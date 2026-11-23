@@ -1,9 +1,12 @@
 package io.github.whywood.superpi.ui.onboarding
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -50,7 +53,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +72,7 @@ import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.ui.common.ProviderIcon
@@ -98,6 +101,7 @@ internal fun OnboardingHeader(step: Int, onBack: () -> Unit) {
                 iconSize = 23.dp,
             )
         }
+        val motionEnabled = LocalDdMotionEnabled.current
         Row(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -109,7 +113,7 @@ internal fun OnboardingHeader(step: Int, onBack: () -> Unit) {
                 val active = index == step
                 val width by animateDpAsState(
                     targetValue = if (active) 24.dp else 6.dp,
-                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                    animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
                     label = "onboarding-progress-width-$index",
                 )
                 val color by animateColorAsState(
@@ -118,7 +122,7 @@ internal fun OnboardingHeader(step: Int, onBack: () -> Unit) {
                         index < step -> superPiColors().accent.copy(alpha = 0.32f)
                         else -> superPiColors().hairline
                     },
-                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                    animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
                     label = "onboarding-progress-color-$index",
                 )
                 Box(Modifier.width(width).height(6.dp).clip(CircleShape).background(color))
@@ -147,9 +151,7 @@ internal fun OnboardingCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth().border(1.dp, superPiColors().hairline, DdShapes.Card)) {
-        DdGroupCard(modifier = modifier, content = content)
-    }
+    DdGroupCard(modifier = modifier, content = content)
 }
 
 @Composable
@@ -164,11 +166,12 @@ internal fun UnderlineField(
     testTag: String? = null,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val underline by animateColorAsState(
         targetValue = if (focused) colors.accent else colors.hairline,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "onboarding-underline",
     )
     val textStyle = DdType.body.copy(fontSize = 20.sp, lineHeight = 28.sp)
@@ -234,7 +237,14 @@ internal fun SettingRow(
                 Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = text, modifier = Modifier.weight(1f), style = DdType.body, color = colors.ink)
+                Text(
+                    text = text,
+                    modifier = Modifier.weight(1f),
+                    style = DdType.body,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Spacer(Modifier.width(DdSpacing.Sm))
                 DdIcon(icon = DdIcons.ChevronRight, tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary), size = 16.dp)
             }
@@ -244,44 +254,22 @@ internal fun SettingRow(
 }
 
 @Composable
-internal fun OnboardingPrimaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    val colors = superPiColors()
-    val background = if (enabled) colors.accent else colors.accent.copy(alpha = 0.32f)
-    val contentColor = if (enabled) colors.onAccent else colors.onAccent.copy(alpha = 0.85f)
-    DdPressable(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(54.dp),
-        shape = DdShapes.Button,
-        background = background,
-        enabled = enabled,
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = text,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Xl),
-                style = DdType.button,
-                color = contentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-@Composable
 internal fun SelectionCheck(visible: Boolean) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     AnimatedVisibility(
         visible = visible,
-        enter = scaleIn(spring(dampingRatio = 0.55f, stiffness = 520f)) +
-            fadeIn(tween(DdMotion.FAST, easing = DdMotion.EaseOut)),
-        exit = scaleOut(tween(120)) + fadeOut(tween(120)),
+        enter = if (motionEnabled) {
+            scaleIn(spring(dampingRatio = 0.55f, stiffness = 520f)) +
+                fadeIn(tween(DdMotion.FAST, easing = DdMotion.EaseOut))
+        } else {
+            EnterTransition.None
+        },
+        exit = if (motionEnabled) {
+            scaleOut(tween(120)) + fadeOut(tween(120))
+        } else {
+            ExitTransition.None
+        },
     ) {
         Box(
             Modifier.size(20.dp).clip(CircleShape).background(colors.accent),
@@ -295,17 +283,26 @@ internal fun SelectionCheck(visible: Boolean) {
 @Composable
 internal fun GrantStatus(granted: Boolean) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val color by animateColorAsState(
         targetValue = if (granted) colors.success else colors.inkTertiary,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "grant-status-color",
     )
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
         AnimatedVisibility(
             visible = granted,
-            enter = scaleIn(spring(dampingRatio = 0.55f, stiffness = 520f)) +
-                fadeIn(tween(DdMotion.FAST, easing = DdMotion.EaseOut)),
-            exit = scaleOut(tween(120)) + fadeOut(tween(120)),
+            enter = if (motionEnabled) {
+                scaleIn(spring(dampingRatio = 0.55f, stiffness = 520f)) +
+                    fadeIn(tween(DdMotion.FAST, easing = DdMotion.EaseOut))
+            } else {
+                EnterTransition.None
+            },
+            exit = if (motionEnabled) {
+                scaleOut(tween(120)) + fadeOut(tween(120))
+            } else {
+                ExitTransition.None
+            },
         ) {
             DdIcon(icon = DdIcons.Check, tint = colors.success, size = 15.dp)
         }
@@ -315,6 +312,8 @@ internal fun GrantStatus(granted: Boolean) {
             ),
             style = DdType.bodySmall,
             color = color,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
@@ -322,14 +321,15 @@ internal fun GrantStatus(granted: Boolean) {
 @Composable
 internal fun RadioMark(checked: Boolean) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val borderColor by animateColorAsState(
         targetValue = if (checked) colors.accent else colors.hairline,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "radio-border",
     )
     val scale by animateFloatAsState(
         targetValue = if (checked) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.62f, stiffness = 620f),
+        animationSpec = if (motionEnabled) spring(dampingRatio = 0.62f, stiffness = 620f) else snap(),
         label = "radio-dot",
     )
     Box(

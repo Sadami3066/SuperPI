@@ -19,6 +19,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.AssistantStep
@@ -190,7 +191,6 @@ private const val GLOW_SWEEP_MS = 900
 private const val GLOW_ACTIVITY_MS = 320
 private const val GLOW_DONE_MS = 900
 private const val GLOW_STOP_MS = 480
-private const val FRAME_STEP_NANOS = 16_666_667L
 private const val MAX_FRAME_STEP_NANOS = 100_000_000L
 private const val NANOS_PER_SECOND = 1_000_000_000f
 
@@ -213,7 +213,8 @@ internal fun rememberOverlayGlow(
     entryPlayed: Boolean = true,
     entryStart: Boolean = true,
 ): OverlayGlow {
-    val time = rememberOverlayFrameTime()
+    val motionEnabled = LocalDdMotionEnabled.current
+    val time = rememberOverlayFrameTime(motionEnabled = motionEnabled)
     val entry = remember { Animatable(0f) }
     val activity = remember { Animatable(0f) }
     val startPulse = remember { Animatable(0f) }
@@ -300,24 +301,20 @@ private suspend fun motionScale(): Float =
     (coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f)
 
 @Composable
-private fun rememberOverlayFrameTime(): State<Float> {
+private fun rememberOverlayFrameTime(motionEnabled: Boolean): State<Float> {
     val time = remember { mutableFloatStateOf(0f) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
     val resumed = lifecycleState == Lifecycle.State.RESUMED
-    LaunchedEffect(lifecycleOwner, resumed) {
-        if (!resumed) return@LaunchedEffect
+    LaunchedEffect(lifecycleOwner, resumed, motionEnabled) {
+        if (!resumed || !motionEnabled) return@LaunchedEffect
         if (motionScale() == 0f) return@LaunchedEffect
         var lastFrame = Long.MIN_VALUE
-        var carry = 0L
         while (true) {
             withFrameNanos { now ->
                 if (lastFrame != Long.MIN_VALUE) {
-                    carry += (now - lastFrame).coerceAtMost(MAX_FRAME_STEP_NANOS)
-                    while (carry >= FRAME_STEP_NANOS) {
-                        carry -= FRAME_STEP_NANOS
-                        time.floatValue += FRAME_STEP_NANOS / NANOS_PER_SECOND
-                    }
+                    val deltaNanos = (now - lastFrame).coerceIn(0L, MAX_FRAME_STEP_NANOS)
+                    time.floatValue += deltaNanos / NANOS_PER_SECOND
                 }
                 lastFrame = now
             }

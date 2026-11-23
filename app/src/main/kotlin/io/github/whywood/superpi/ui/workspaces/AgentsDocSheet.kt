@@ -34,6 +34,7 @@ import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdPrimaryButton
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
+import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdTextArea
@@ -139,6 +140,7 @@ fun AgentsDocSheet(
                 Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.94f)
+                    .imePadding()
                     .testTag("agents_doc_sheet"),
             ) {
                 DdSheetHeader(
@@ -185,10 +187,13 @@ fun AgentsDocSheet(
                                 style = DdType.bodySmall,
                                 color = colors.inkTertiary,
                             )
+                            Spacer(Modifier.width(DdSpacing.Sm))
                             Text(
                                 text = stringResource(R.string.agents_doc_counter, draft.length),
                                 style = DdType.numeric,
                                 color = if (tooLarge) colors.danger else colors.inkTertiary,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                         }
                         if (tooLarge) {
@@ -453,10 +458,13 @@ fun RemoteAgentsDocSheet(
                                 style = DdType.bodySmall,
                                 color = colors.inkTertiary,
                             )
+                            Spacer(Modifier.width(DdSpacing.Sm))
                             Text(
                                 text = stringResource(R.string.agents_doc_counter, draft.length),
                                 style = DdType.numeric,
                                 color = if (tooLarge) colors.danger else colors.inkTertiary,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                         }
                         if (tooLarge) {

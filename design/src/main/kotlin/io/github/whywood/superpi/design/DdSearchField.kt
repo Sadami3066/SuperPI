@@ -1,5 +1,8 @@
 package io.github.whywood.superpi.design
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -16,11 +19,16 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -29,6 +37,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -103,6 +112,7 @@ private fun DdSearchFieldCore(
     trailing: (@Composable RowScope.() -> Unit)?,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val shape = RoundedCornerShape(14.dp)
     val focus = focusRequester
     val escape = onEscape
@@ -110,14 +120,20 @@ private fun DdSearchFieldCore(
     val clearTag = clearTestTag
     val search = onSearch
     val textStyle = DdType.bodySmall.copy(fontSize = 15.sp, lineHeight = 22.sp, color = colors.ink)
+    var focused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) colors.accent else colors.hairline.copy(alpha = DdAlpha.Border),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
+        label = "search-border",
+    )
     Row(
         modifier
             .fillMaxWidth()
             .height(44.dp)
             .clip(shape)
             .background(colors.raised)
-            .border(1.dp, colors.hairline.copy(alpha = DdAlpha.Border), shape)
-            .padding(start = 12.dp, end = 4.dp),
+            .border(1.dp, borderColor, shape)
+            .padding(start = 12.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         DdIcon(icon = DdIcons.Search, tint = colors.inkTertiary, size = 16.dp)
@@ -142,6 +158,7 @@ private fun DdSearchFieldCore(
                         }
                     },
                 )
+                .onFocusChanged { focused = it.isFocused }
                 .then(if (fieldTag == null) Modifier else Modifier.testTag(fieldTag)),
             textStyle = textStyle,
             cursorBrush = SolidColor(colors.accent),
@@ -155,6 +172,8 @@ private fun DdSearchFieldCore(
                             text = placeholder,
                             style = DdType.bodySmall.copy(fontSize = 15.sp, lineHeight = 22.sp),
                             color = colors.inkTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     inner()
@@ -171,7 +190,7 @@ private fun DdSearchFieldCore(
                 onClick = { onQueryChange("") },
                 contentDescription = clearContentDescription,
                 modifier = if (clearTag == null) Modifier else Modifier.testTag(clearTag),
-                size = 32.dp,
+                size = 44.dp,
                 iconSize = 15.dp,
                 tint = colors.inkTertiary,
             )

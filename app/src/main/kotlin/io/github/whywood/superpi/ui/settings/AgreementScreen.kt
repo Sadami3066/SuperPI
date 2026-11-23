@@ -1,20 +1,13 @@
 package io.github.whywood.superpi.ui.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -22,6 +15,7 @@ import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
@@ -32,17 +26,8 @@ fun AgreementScreen(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -50,7 +35,9 @@ fun AgreementScreen(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier,
+    ) {
         Column(
             Modifier
                 .weight(1f)

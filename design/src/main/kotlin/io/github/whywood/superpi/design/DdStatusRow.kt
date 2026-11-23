@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -70,9 +71,11 @@ public fun DdStatusRow(
         Spacer(Modifier.width(DdSpacing.Sm))
         DdText(
             text = value,
+            modifier = Modifier.widthIn(max = 160.dp),
             style = DdType.bodySmall.copy(fontWeight = FontWeight.Medium),
             color = colors.ink,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
         )
     }

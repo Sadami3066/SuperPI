@@ -1,5 +1,22 @@
 package io.github.whywood.superpi.theme
 
+enum class ThemeAppearanceMode(val key: String) {
+    SYSTEM("system"),
+    LIGHT("light"),
+    DARK("dark"),
+    ;
+
+    fun resolveDark(systemDark: Boolean): Boolean = when (this) {
+        SYSTEM -> systemDark
+        LIGHT -> false
+        DARK -> true
+    }
+
+    companion object {
+        fun parse(raw: String?): ThemeAppearanceMode = entries.firstOrNull { it.key == raw } ?: SYSTEM
+    }
+}
+
 sealed interface ThemeChoice {
     val key: String
 
@@ -7,16 +24,12 @@ sealed interface ThemeChoice {
         override val key: String = "pi"
     }
 
-    data object ClassicBlue : ThemeChoice {
-        override val key: String = "classic"
+    data object Paper : ThemeChoice {
+        override val key: String = "paper"
     }
 
-    data object Santorini : ThemeChoice {
-        override val key: String = "santorini"
-    }
-
-    data object Oceanic : ThemeChoice {
-        override val key: String = "oceanic"
+    data object Slate : ThemeChoice {
+        override val key: String = "slate"
     }
 
     data class Pack(val pluginId: String, val themeId: String) : ThemeChoice {
@@ -26,7 +39,7 @@ sealed interface ThemeChoice {
     companion object {
         const val PACK_PREFIX: String = "pack:"
 
-        val builtIn: List<ThemeChoice> = listOf(Pi, ClassicBlue, Santorini, Oceanic)
+        val builtIn: List<ThemeChoice> = listOf(Pi, Paper, Slate)
 
         fun parse(raw: String?): ThemeChoice = fromKey(raw) ?: Pi
 
@@ -34,9 +47,8 @@ sealed interface ThemeChoice {
             if (raw.isNullOrBlank()) return null
             return when (raw) {
                 Pi.key -> Pi
-                ClassicBlue.key -> ClassicBlue
-                Santorini.key -> Santorini
-                Oceanic.key -> Oceanic
+                Paper.key -> Paper
+                Slate.key, "classic", "santorini", "oceanic" -> Slate
                 else -> pack(raw)
             }
         }

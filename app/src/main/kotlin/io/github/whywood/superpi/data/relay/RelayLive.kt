@@ -66,7 +66,7 @@ class RelayLive(
     private val scope: CoroutineScope,
     private val accounts: RelayStore,
     private val host: AgentRuntime,
-    private val memorySync: RelayMemorySync,
+    private val onRemoteMemoryChanged: ((Long) -> Unit)? = null,
     private val appVersion: String,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     questionCenter: QuestionCenter? = null,
@@ -667,7 +667,7 @@ class RelayLive(
                         _state.value = RelayLiveState.Online
                     }
                 }
-                scope.launch(io) { runCatching { memorySync.refreshIfStale(0) } }
+                onRemoteMemoryChanged?.invoke(frame.memoryVersion)
             }
 
             is RelayServerFrame.Presence -> {
@@ -698,7 +698,8 @@ class RelayLive(
                 }
             }
 
-            is RelayServerFrame.MemoryChanged -> scope.launch(io) { runCatching { memorySync.refreshIfStale(0) } }
+            is RelayServerFrame.MemoryChanged ->
+                onRemoteMemoryChanged?.invoke(frame.version)
             is RelayServerFrame.SyncEvent -> {
                 val syncEvent = frame.toEvent()
                 if (!_syncEvents.tryEmit(syncEvent)) {

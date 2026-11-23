@@ -104,7 +104,13 @@ class ProviderCatalog(
 
     override fun modelReference(providerId: String, modelId: String): String = "$providerId/$modelId"
 
-    suspend fun complete(providerId: String, modelId: String, prompt: String): String? {
+    suspend fun complete(
+        providerId: String,
+        modelId: String,
+        prompt: String,
+        temperature: Double = 0.3,
+        timeoutMs: Long = 20_000L,
+    ): String? {
         val provider = providerMap[providerId] ?: run {
             android.util.Log.w("SessionTitle", "provider not found: $providerId")
             return null
@@ -120,8 +126,8 @@ class ProviderCatalog(
             ),
             options = StreamOptions(
                 maxTokens = 4096,
-                temperature = 0.3,
-                timeoutMs = 20_000,
+                temperature = temperature,
+                timeoutMs = timeoutMs,
                 sessionId = UUID.randomUUID().toString(),
             ),
         )

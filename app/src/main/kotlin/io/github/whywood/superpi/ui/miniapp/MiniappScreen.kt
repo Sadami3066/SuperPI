@@ -1,22 +1,17 @@
 package io.github.whywood.superpi.ui.miniapp
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,11 +30,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.R
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
@@ -49,6 +45,7 @@ import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.MiniappCreation
 import io.github.whywood.superpi.runtime.MiniappInvalid
 import io.github.whywood.superpi.runtime.MiniappStore
+import io.github.whywood.superpi.ui.common.DelayedLoadingBlock
 import kotlinx.coroutines.launch
 
 private const val ICON_FALLBACK = "✦"
@@ -94,18 +91,8 @@ internal fun MiniappContent(
     val colors = superPiColors()
     var invalidTarget by remember { mutableStateOf<MiniappInvalid?>(null) }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("miniapp_screen"),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -136,7 +123,9 @@ internal fun MiniappContent(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier.testTag("miniapp_screen"),
+    ) {
         DdSearchField(
             query = state.query,
             onQueryChange = onQueryChange,
@@ -146,64 +135,79 @@ internal fun MiniappContent(
             fieldTestTag = "miniapp_search_field",
             clearTestTag = "miniapp_search_clear",
         )
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = DdSpacing.Lg),
+                .weight(1f),
+            contentPadding = PaddingValues(
+                start = DdSpacing.Lg,
+                end = DdSpacing.Lg,
+                top = DdSpacing.Sm,
+                bottom = DdSpacing.Xxxl,
+            ),
         ) {
             state.error?.let { error ->
-                MiniappErrorRow(
-                    text = stringResource(error.messageRes),
-                    onRetry = if (error.retryable) onRetry else null,
-                )
+                item(key = "error") {
+                    MiniappErrorRow(
+                        text = stringResource(error.messageRes),
+                        onRetry = if (error.retryable) onRetry else null,
+                    )
+                }
             }
             when {
-                state.loading && state.isEmpty -> Unit
-
-                state.error != null && state.isEmpty -> Unit
-
-                state.isEmpty -> MiniappEmpty()
-
-                state.filtered.creations.isEmpty() && state.filtered.invalid.isEmpty() -> Box(
-                    Modifier.fillMaxWidth().padding(top = 72.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = stringResource(R.string.search_no_match),
-                        style = DdType.bodySmall,
-                        color = colors.inkTertiary,
+                state.loading && state.isEmpty -> item(key = "loading") {
+                    DelayedLoadingBlock(
+                        loading = true,
+                        modifier = Modifier.padding(top = 96.dp),
                     )
                 }
 
+                state.error != null && state.isEmpty -> Unit
+
+                state.isEmpty -> item(key = "empty") {
+                    MiniappEmpty(onCreate = onCreate)
+                }
+
+                state.filtered.creations.isEmpty() && state.filtered.invalid.isEmpty() -> item(key = "search_empty") {
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = 72.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.search_no_match),
+                            style = DdType.bodySmall,
+                            color = colors.inkTertiary,
+                        )
+                    }
+                }
+
                 else -> {
-                    Spacer(Modifier.height(DdSpacing.Sm))
-                    var first = true
-                    state.filtered.creations.forEach { creation ->
-                        if (!first) DdHairline()
-                        first = false
-                        MiniappAppRow(
-                            creation = creation,
-                            onClick = { onOpen(creation.manifest.id) },
-                        )
+                    val creations = state.filtered.creations
+                    val invalid = state.filtered.invalid
+                    itemsIndexed(creations, key = { _, creation -> creation.manifest.id }) { index, creation ->
+                        Column {
+                            if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                            MiniappAppRow(
+                                creation = creation,
+                                onClick = { onOpen(creation.manifest.id) },
+                            )
+                        }
                     }
-                    state.filtered.invalid.forEach { item ->
-                        if (!first) DdHairline()
-                        first = false
-                        MiniappRow(
-                            title = item.id,
-                            subtitle = invalidSubtitle(item),
-                            icon = null,
-                            showChevron = false,
-                            onClick = { invalidTarget = item },
-                            modifier = Modifier.testTag("miniapp_invalid_${item.id}"),
-                        )
+                    itemsIndexed(invalid, key = { _, item -> "invalid_${item.id}" }) { index, item ->
+                        Column {
+                            if (index > 0 || creations.isNotEmpty()) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                            MiniappRow(
+                                title = item.id,
+                                subtitle = invalidSubtitle(item),
+                                icon = null,
+                                showChevron = false,
+                                onClick = { invalidTarget = item },
+                                modifier = Modifier.testTag("miniapp_invalid_${item.id}"),
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(DdSpacing.Xxxl))
                 }
             }
-            Spacer(Modifier.height(DdSpacing.Xxl))
         }
     }
 
@@ -247,7 +251,7 @@ private fun MiniappErrorRow(
 }
 
 @Composable
-private fun MiniappEmpty() {
+private fun MiniappEmpty(onCreate: () -> Unit) {
     val colors = superPiColors()
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 96.dp),
@@ -266,6 +270,13 @@ private fun MiniappEmpty() {
             style = DdType.bodySmall,
             color = colors.inkTertiary,
             textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(DdSpacing.Md))
+        DdTextAction(
+            text = stringResource(R.string.miniapp_new),
+            onClick = onCreate,
+            color = colors.accent,
+            modifier = Modifier.testTag("miniapp_empty_new"),
         )
     }
 }
@@ -310,7 +321,11 @@ private fun MiniappRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                Text(text = icon, fontSize = 20.sp)
+                if (icon.isBlank() || icon == ICON_FALLBACK) {
+                    DdIcon(icon = DdIcons.Apps, tint = colors.inkSecondary, size = 20.dp)
+                } else {
+                    Text(text = icon, fontSize = 20.sp)
+                }
                 Spacer(Modifier.width(14.dp))
             }
             Column(Modifier.weight(1f)) {

@@ -16,10 +16,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,16 +42,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
-import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdEmptyState
+import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSpacing
-import io.github.whywood.superpi.ui.common.LocalHapticsEnabled
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ConversationSummary
+import io.github.whywood.superpi.ui.common.LocalHapticsEnabled
 
 @Composable
 fun ArchivedSessionsScreen(
@@ -76,21 +77,8 @@ fun ArchivedSessionsScreen(
         if (trimmed.isEmpty()) ordered else ordered.filter { it.title.contains(trimmed, ignoreCase = true) }
     }
     BackHandler(onBack = onBack)
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("archived_sessions"),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -104,22 +92,36 @@ fun ArchivedSessionsScreen(
                 modifier = Modifier.weight(1f),
                 style = DdType.heading,
                 color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (ordered.isNotEmpty()) {
+                Spacer(Modifier.width(DdSpacing.Sm))
                 Text(
                     text = "${ordered.size}",
                     modifier = Modifier.padding(end = DdSpacing.Lg),
                     style = DdType.numeric,
                     color = colors.inkTertiary,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
-        }
+        },
+        modifier = modifier.testTag("archived_sessions"),
+    ) {
         if (ordered.isEmpty()) {
-            DdEmptyState(
-                text = stringResource(R.string.drawer_archived_empty),
-                icon = DdIcons.Archive,
-                modifier = Modifier.padding(horizontal = DdSpacing.Xxl, vertical = DdSpacing.Xxl),
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = DdSpacing.Xxl),
+                contentAlignment = Alignment.Center,
+            ) {
+                DdEmptyState(
+                    text = stringResource(R.string.drawer_archived_empty),
+                    icon = DdIcons.Archive,
+                )
+            }
         } else {
             DdSearchField(
                 query = query,
@@ -133,38 +135,45 @@ fun ArchivedSessionsScreen(
                 clearTestTag = "archived_search_clear",
             )
             if (filtered.isEmpty()) {
-                DdEmptyState(
-                    text = stringResource(R.string.drawer_search_empty),
-                    icon = DdIcons.Search,
-                    modifier = Modifier.padding(horizontal = DdSpacing.Xxl, vertical = DdSpacing.Xxl),
-                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = DdSpacing.Xxl),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    DdEmptyState(
+                        text = stringResource(R.string.drawer_search_empty),
+                        icon = DdIcons.Search,
+                    )
+                }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = DdSpacing.Lg, vertical = DdSpacing.Sm),
                 ) {
                     items(filtered, key = { it.id }) { session ->
                         Box(Modifier.animateItem()) {
-                        ArchivedSessionRow(
-                            session = session,
-                            menuExpanded = menuTarget?.id == session.id,
-                            onClick = { onOpen(session.id) },
-                            onLongClick = { offset ->
-                                menuAnchor = offset
-                                menuTarget = session
-                            },
-                            menuAnchor = menuAnchor,
-                            onDismissMenu = { menuTarget = null },
-                            onAction = { action ->
-                                when (action) {
-                                    SessionAction.RENAME -> renameTarget = session
-                                    SessionAction.TOGGLE_PIN -> Unit
-                                    SessionAction.TOGGLE_ARCHIVE -> onUnarchive(session.id)
-                                    SessionAction.DELETE -> deleteTarget = session
-                                }
-                            },
-                            testTag = "archived_${session.id}",
-                        )
+                            ArchivedSessionRow(
+                                session = session,
+                                menuExpanded = menuTarget?.id == session.id,
+                                onClick = { onOpen(session.id) },
+                                onLongClick = { offset ->
+                                    menuAnchor = offset
+                                    menuTarget = session
+                                },
+                                menuAnchor = menuAnchor,
+                                onDismissMenu = { menuTarget = null },
+                                onAction = { action ->
+                                    when (action) {
+                                        SessionAction.RENAME -> renameTarget = session
+                                        SessionAction.TOGGLE_PIN -> Unit
+                                        SessionAction.TOGGLE_ARCHIVE -> onUnarchive(session.id)
+                                        SessionAction.DELETE -> deleteTarget = session
+                                    }
+                                },
+                                testTag = "archived_${session.id}",
+                            )
                         }
                     }
                 }
@@ -205,23 +214,26 @@ private fun ArchivedSessionRow(
     testTag: String,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val haptic = LocalHapticFeedback.current
     val hapticsEnabled = LocalHapticsEnabled.current
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val wash by animateFloatAsState(
         targetValue = if (pressed) 0.06f else 0f,
-        animationSpec = if (pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        animationSpec = if (pressed || !motionEnabled) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
         label = "archived-row-wash",
     )
     Box(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .heightIn(min = 52.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(colors.ink.copy(alpha = wash))
-                .pointerInput(Unit) {
+                .pointerInput(session.id) {
                     detectTapGestures(
                         onPress = { offset ->
                             val press = PressInteraction.Press(offset)
@@ -232,15 +244,15 @@ private fun ArchivedSessionRow(
                                 interaction.emit(PressInteraction.Cancel(press))
                             }
                         },
-                        onTap = { onClick() },
+                        onTap = { currentOnClick() },
                         onLongPress = { offset ->
                             if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onLongClick(offset)
+                            currentOnLongClick(offset)
                         },
                     )
                 }
                 .testTag(testTag)
-                .padding(horizontal = DdSpacing.Md),
+                .padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(

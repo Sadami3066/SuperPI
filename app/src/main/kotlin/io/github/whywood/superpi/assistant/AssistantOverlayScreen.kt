@@ -4,10 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,7 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imeAnimationTarget
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -245,7 +243,7 @@ internal fun AssistantOverlayScreen(
             .onSizeChanged { if (it.width > 0 && it.height > 0) laidOut = true }
             .testTag("assistant_overlay"),
     ) {
-        val imeBottomPx = with(density) { WindowInsets.imeAnimationTarget.getBottom(density) }
+        val imeBottomPx = with(density) { WindowInsets.ime.getBottom(density) }
         val navigationBottomPx = with(density) { WindowInsets.navigationBars.getBottom(density) }
         val statusTopPx = with(density) { WindowInsets.statusBars.getTop(density) }
         var stableNavigationBottomPx by remember { mutableIntStateOf(navigationBottomPx) }
@@ -254,15 +252,8 @@ internal fun AssistantOverlayScreen(
                 stableNavigationBottomPx = navigationBottomPx
             }
         }
-        val extraImeInset = remember { Animatable(0f) }
         val extraImeTargetPx =
             (maxOf(imeBottomPx, stableNavigationBottomPx) - stableNavigationBottomPx).toFloat()
-        LaunchedEffect(imeBottomPx, stableNavigationBottomPx) {
-            extraImeInset.animateTo(
-                targetValue = extraImeTargetPx,
-                animationSpec = tween(DdMotion.BASE + 80, easing = DdMotion.EaseInOut),
-            )
-        }
         val panelTopPx = statusTopPx.toFloat() + with(density) { 8.dp.toPx() }
         val composerBottomPaddingPx =
             stableNavigationBottomPx + with(density) { 8.dp.toPx() }
@@ -379,7 +370,7 @@ internal fun AssistantOverlayScreen(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .graphicsLayer {
-                        translationY = (1f - composerProgress) * size.height - extraImeInset.value
+                        translationY = (1f - composerProgress) * size.height - extraImeTargetPx
                     }
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp)
@@ -537,10 +528,13 @@ private fun RowActions(
     }
 }
 
-private fun answerText(message: io.github.whywood.superpi.runtime.AssistantMessage): String {
-    val trailing = message.steps.lastOrNull() as? io.github.whywood.superpi.runtime.AssistantStep.Text
-    return message.text.trim().ifBlank { trailing?.text?.trim().orEmpty() }
-}
+private fun answerText(message: io.github.whywood.superpi.runtime.AssistantMessage): String =
+    message.steps
+        .filterIsInstance<io.github.whywood.superpi.runtime.AssistantStep.Text>()
+        .map { it.text.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString("\n\n")
+        .ifBlank { message.text.trim() }
 
 @Composable
 private fun voiceErrorMessage(error: SpeechError): String = when (error) {

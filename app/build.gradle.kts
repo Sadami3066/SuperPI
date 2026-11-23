@@ -1,3 +1,4 @@
+import com.android.build.api.variant.HasUnitTest
 import java.util.Properties
 
 plugins {
@@ -65,6 +66,17 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        (variant as? HasUnitTest)?.unitTest?.let { unitTest ->
+            unitTest.runtimeConfiguration.resolutionStrategy.dependencySubstitution {
+                substitute(module("androidx.sqlite:sqlite-bundled"))
+                    .using(module("androidx.sqlite:sqlite-bundled-jvm:${libs.versions.sqlite.get()}"))
+            }
         }
     }
 }

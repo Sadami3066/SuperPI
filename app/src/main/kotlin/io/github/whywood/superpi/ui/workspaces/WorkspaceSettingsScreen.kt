@@ -4,16 +4,12 @@ import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -37,10 +33,12 @@ import io.github.whywood.superpi.data.AgentDocStore
 import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
-import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
@@ -50,7 +48,6 @@ import io.github.whywood.superpi.runtime.McpConfigStore
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.ui.common.AvatarCropDialog
 import io.github.whywood.superpi.ui.common.BotAvatar
-import io.github.whywood.superpi.ui.settings.SettingsGroup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +66,6 @@ fun WorkspaceSettingsScreen(
     onAvatarPicked: (Bitmap?) -> Unit,
     onIntroChange: (String) -> Unit,
     onBack: () -> Unit,
-    onOpenSkills: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
@@ -82,7 +78,10 @@ fun WorkspaceSettingsScreen(
     var showRenameDialog by rememberSaveable(workspace.id) { mutableStateOf(false) }
     var capabilityKind by rememberSaveable(workspace.id) { mutableStateOf<WorkspaceCapabilityKind?>(null) }
     var agentsDocSet by remember(workspace.id) { mutableStateOf<Boolean?>(null) }
-    var policy by remember(workspace.id) { mutableStateOf(effectivePolicy(workspace, workspaceToolPolicies)) }
+    var policy by remember(workspace.id) {
+        mutableStateOf(WorkspaceToolPolicy(allCapabilities = workspace.isHome))
+    }
+    var policyLoaded by remember(workspace.id) { mutableStateOf(false) }
     var skillCount by remember(workspace.id) { mutableStateOf<Int?>(null) }
     var pluginCount by remember(workspace.id) { mutableStateOf<Int?>(null) }
     var mcpCount by remember(workspace.id) { mutableStateOf<Int?>(null) }
@@ -108,6 +107,7 @@ fun WorkspaceSettingsScreen(
             )
         }
         policy = loaded.policy
+        policyLoaded = true
         agentsDocSet = loaded.agentsDocSet
         skillCount = loaded.skillCount
         pluginCount = loaded.pluginCount
@@ -118,23 +118,14 @@ fun WorkspaceSettingsScreen(
     }
 
     fun updatePolicy(block: (WorkspaceToolPolicy) -> WorkspaceToolPolicy) {
+        if (!policyLoaded) return
         val next = block(policy)
         policy = next
         scope.launch { workspaceToolPolicies.update(workspace.cwd, next) }
     }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("workspace_settings"),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -142,7 +133,9 @@ fun WorkspaceSettingsScreen(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier.testTag("workspace_settings"),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -186,7 +179,7 @@ fun WorkspaceSettingsScreen(
                 Spacer(Modifier.height(20.dp))
                 DdSectionLabel(stringResource(R.string.bot_identity))
                 Spacer(Modifier.height(8.dp))
-                SettingsGroup {
+                DdGroupCard {
                     DdListRow(
                         icon = DdIcons.Image,
                         title = stringResource(R.string.bot_avatar),
@@ -197,7 +190,7 @@ fun WorkspaceSettingsScreen(
                         showChevron = true,
                         modifier = Modifier.testTag("bot_settings_avatar"),
                     )
-                    DdHairline()
+                    DdRowDivider(leadingInset = 50.dp)
                     DdListRow(
                         icon = DdIcons.Pen,
                         title = stringResource(R.string.workspace_name_placeholder),
@@ -206,7 +199,7 @@ fun WorkspaceSettingsScreen(
                         showChevron = true,
                         modifier = Modifier.testTag("bot_settings_name"),
                     )
-                    DdHairline()
+                    DdRowDivider(leadingInset = 50.dp)
                     DdListRow(
                         icon = DdIcons.Info,
                         title = stringResource(R.string.bot_intro),
@@ -221,7 +214,7 @@ fun WorkspaceSettingsScreen(
             Spacer(Modifier.height(20.dp))
             DdSectionLabel(stringResource(R.string.bot_capabilities))
             Spacer(Modifier.height(8.dp))
-            SettingsGroup {
+            DdGroupCard {
                 DdListRow(
                     icon = DdIcons.Sparkles,
                     title = stringResource(R.string.bot_capabilities_skills),
@@ -230,7 +223,7 @@ fun WorkspaceSettingsScreen(
                     showChevron = true,
                     modifier = Modifier.testTag("bot_capabilities_skills"),
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = 50.dp)
                 DdListRow(
                     icon = DdIcons.Puzzle,
                     title = stringResource(R.string.bot_capabilities_plugins),
@@ -239,7 +232,7 @@ fun WorkspaceSettingsScreen(
                     showChevron = true,
                     modifier = Modifier.testTag("bot_capabilities_plugins"),
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = 50.dp)
                 DdListRow(
                     icon = DdIcons.Plug,
                     title = stringResource(R.string.bot_capabilities_mcp),
@@ -252,20 +245,22 @@ fun WorkspaceSettingsScreen(
             Spacer(Modifier.height(20.dp))
             DdSectionLabel(stringResource(R.string.bot_tools))
             Spacer(Modifier.height(8.dp))
-            SettingsGroup {
+            DdGroupCard {
                 DdListRow(
                     icon = DdIcons.Desktop,
                     title = stringResource(R.string.bot_tools_screen),
+                    enabled = policyLoaded,
                     onClick = { updatePolicy { it.copy(screenTools = !it.screenTools) } },
                     modifier = Modifier.testTag("bot_tools_screen"),
                     trailing = {
                         DdSwitch(
                             checked = policy.screenTools,
                             onCheckedChange = { checked -> updatePolicy { it.copy(screenTools = checked) } },
+                            enabled = policyLoaded,
                         )
                     },
                 )
-                if (policy.screenTools && !screenToolsReady) {
+                if (policyLoaded && policy.screenTools && !screenToolsReady) {
                     Text(
                         text = stringResource(R.string.bot_tools_screen_permission),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -273,22 +268,24 @@ fun WorkspaceSettingsScreen(
                         color = colors.danger,
                     )
                 }
-                DdHairline()
+                DdRowDivider(leadingInset = 50.dp)
                 DdListRow(
                     icon = DdIcons.Apps,
                     title = stringResource(R.string.bot_tools_miniapp),
+                    enabled = policyLoaded,
                     onClick = { updatePolicy { it.copy(miniappTools = !it.miniappTools) } },
                     modifier = Modifier.testTag("bot_tools_miniapp"),
                     trailing = {
                         DdSwitch(
                             checked = policy.miniappTools,
                             onCheckedChange = { checked -> updatePolicy { it.copy(miniappTools = checked) } },
+                            enabled = policyLoaded,
                         )
                     },
                 )
             }
             Spacer(Modifier.height(20.dp))
-            SettingsGroup {
+            DdGroupCard {
                 DdListRow(
                     icon = DdIcons.File,
                     title = stringResource(R.string.bot_instructions),

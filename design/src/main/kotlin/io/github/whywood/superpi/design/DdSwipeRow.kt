@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.gestures.snapTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,17 +35,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 val LocalDdHapticsEnabled = staticCompositionLocalOf { true }
 
@@ -76,6 +77,7 @@ fun DdSwipeRow(
     content: @Composable () -> Unit,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val hapticsEnabled = LocalDdHapticsEnabled.current
@@ -109,10 +111,14 @@ fun DdSwipeRow(
         }
     }
     SideEffect { state.updateAnchors(anchors) }
-    LaunchedEffect(openKey, actionWidthPx) {
+    LaunchedEffect(openKey, actionWidthPx, motionEnabled) {
         val target = if (openKey == key) DdSwipeValue.Open else DdSwipeValue.Closed
         if (state.settledValue != target && state.targetValue != target) {
-            state.animateTo(target, DdMotion.SheetSpring)
+            if (motionEnabled) {
+                state.animateTo(target, DdMotion.SheetSpring)
+            } else {
+                state.snapTo(target)
+            }
         }
     }
     var armed by remember(key) { mutableStateOf(false) }
@@ -133,7 +139,13 @@ fun DdSwipeRow(
         }
     }
     val close: () -> Unit = {
-        scope.launch { state.animateTo(DdSwipeValue.Closed, DdMotion.SheetSpring) }
+        scope.launch {
+            if (motionEnabled) {
+                state.animateTo(DdSwipeValue.Closed, DdMotion.SheetSpring)
+            } else {
+                state.snapTo(DdSwipeValue.Closed)
+            }
+        }
     }
     Box(modifier.fillMaxWidth().clipToBounds()) {
         if (actions.isNotEmpty()) {
@@ -158,9 +170,12 @@ fun DdSwipeRow(
                         Spacer(Modifier.height(DdSpacing.Xs))
                         Text(
                             text = action.label,
+                            modifier = Modifier.padding(horizontal = 4.dp),
                             style = DdType.chip,
                             color = action.tint,
                             maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -168,9 +183,9 @@ fun DdSwipeRow(
         }
         Box(
             modifier = Modifier
-                .offset {
+                .graphicsLayer {
                     val current = state.offset
-                    IntOffset(if (current.isNaN()) 0 else current.roundToInt(), 0)
+                    translationX = if (current.isNaN()) 0f else current
                 }
                 .anchoredDraggable(
                     state = state,

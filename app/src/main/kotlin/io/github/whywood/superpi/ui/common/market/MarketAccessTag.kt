@@ -39,5 +39,6 @@ internal fun MarketAccessTag(tier: MarketRequiredAccess, modifier: Modifier = Mo
         style = DdType.chip,
         color = tint,
         maxLines = 1,
+        softWrap = false,
     )
 }

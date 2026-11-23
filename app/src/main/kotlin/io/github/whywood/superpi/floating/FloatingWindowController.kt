@@ -194,7 +194,7 @@ class FloatingWindowController(
         if (!started) return
         refreshVirtualScreen()
         updatePreview()
-        val visible = enabled && Settings.canDrawOverlays(context)
+        val visible = enabled && !appForeground.value && Settings.canDrawOverlays(context)
         if (!visible) {
             showJob?.cancel()
             showJob = null
@@ -210,7 +210,7 @@ class FloatingWindowController(
             delay(SHOW_DELAY_MS)
             showJob = null
             if (!started) return@launch
-            if (!enabled || !Settings.canDrawOverlays(context)) return@launch
+            if (!enabled || appForeground.value || !Settings.canDrawOverlays(context)) return@launch
             showWindows()
         }
     }
@@ -429,7 +429,14 @@ class FloatingWindowController(
                 compose,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT),
             )
-            onTouch = { event -> event.actionMasked == MotionEvent.ACTION_OUTSIDE }
+            onTouch = { event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                    panelOpen.value = false
+                    true
+                } else {
+                    false
+                }
+            }
         }
         host.bindOwners(view)
         val params = WindowManager.LayoutParams(

@@ -1,26 +1,24 @@
 package io.github.whywood.superpi.ui.settings
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.whywood.superpi.R
@@ -33,6 +31,7 @@ import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdPrimaryButton
+import io.github.whywood.superpi.design.DdProgressBar
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
@@ -197,8 +196,11 @@ private fun UpToDateState(lastCheckedAt: Long?, onCheck: () -> Unit) {
                 text = stringResource(R.string.update_up_to_date),
                 style = DdType.body,
                 color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
+        Spacer(Modifier.width(DdSpacing.Sm))
         DdTextAction(
             text = stringResource(R.string.update_recheck),
             onClick = onCheck,
@@ -228,21 +230,10 @@ private fun DownloadingState(progress: Float) {
         color = colors.inkSecondary,
     )
     Spacer(Modifier.height(10.dp))
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(3.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(colors.wash),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(progress.coerceIn(0f, 1f))
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(colors.accent),
-        )
-    }
+    DdProgressBar(
+        progress = progress.coerceIn(0f, 1f),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

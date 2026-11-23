@@ -15,20 +15,27 @@ import io.github.whywood.superpi.ui.common.chat.SelectionCoordinator
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,8 +48,8 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -56,6 +63,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -75,9 +83,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -96,6 +108,9 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -104,6 +119,7 @@ import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.AppLanguage
 import io.github.whywood.superpi.data.AttachmentRef
 import io.github.whywood.superpi.data.ProcessDetail
+import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
@@ -114,6 +130,7 @@ import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.DdWordmark
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.GoalView
@@ -127,6 +144,7 @@ import io.github.whywood.superpi.ui.common.remoteChatControls
 import io.github.whywood.superpi.ui.common.chat.ChatComposer
 import io.github.whywood.superpi.ui.common.chat.ChatComposerActions
 import io.github.whywood.superpi.ui.common.chat.ChatComposerState
+import io.github.whywood.superpi.ui.common.chat.ChatScrollFollowEffect
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
 import io.github.whywood.superpi.ui.common.chat.ScrollAnchor
@@ -140,7 +158,6 @@ import java.io.File
 import java.time.LocalTime
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -187,6 +204,8 @@ data class ChatScreenActions(
     val onSendQueued: (QueuedInput) -> Unit,
     val onScrollAnchorChange: (sessionId: String, index: Int, offset: Int, atBottom: Boolean) -> Unit,
     val onOpenBotSettings: (String) -> Unit,
+    val onEndGoal: () -> Unit = {},
+    val onToggleMemoryExcluded: () -> Unit = {},
 )
 
 data class ChatScreenOverlay(
@@ -199,6 +218,8 @@ data class ChatScreenOverlay(
     val modelsOpen: Boolean = false,
     val pendingQuestions: List<PendingQuestion> = emptyList(),
     val foreignQuestion: PendingQuestion? = null,
+    val memoryExcluded: Boolean = false,
+    val memoryToggleVisible: Boolean = false,
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -232,13 +253,14 @@ fun ChatScreen(
         onPauseGoal, onResumeGoal, onOpenJobs, onModelsOpenChange, onOpenUsage,
         onAnswerQuestion, onOpenForeignQuestion, onOpenPresentFile, onSharePresentFile,
         onOpenMiniapp, onOpenPluginPage, onOpenFiles, onExportSession, onRemoveQueued, onSendQueued, onScrollAnchorChange,
-        onOpenBotSettings,
+        onOpenBotSettings, onEndGoal,
     ) = actions
     val (reminderCount, reloading, compacting, commandItems, goal, jobCount, modelsOpen, pendingQuestions, foreignQuestion) = overlay
     val attachments = state.attachments
     val queuedInputs = state.queuedInputs
     val importingAttachment = state.importingAttachment
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -249,7 +271,7 @@ fun ChatScreen(
     val chatDensity = remember(density, chatFontScale) {
         Density(density = density.density, fontScale = density.fontScale * chatFontScale)
     }
-    val imeBottomPx = with(density) { WindowInsets.imeAnimationTarget.getBottom(density) }
+    val imeInsets = WindowInsets.ime
     val navigationBottomPx = with(density) { WindowInsets.navigationBars.getBottom(density) }
     val statusTopPx = with(density) { WindowInsets.statusBars.getTop(density) }
     val windowFocused = LocalWindowInfo.current.isWindowFocused
@@ -261,16 +283,8 @@ fun ChatScreen(
             stableNavigationBottomPx = navigationBottomPx
         }
     }
-    val targetBottomInsetPx = maxOf(imeBottomPx, stableNavigationBottomPx).toFloat()
-    val animatedBottomInset = remember { Animatable(0f) }
-    LaunchedEffect(targetBottomInsetPx) {
-        animatedBottomInset.animateTo(
-            targetValue = targetBottomInsetPx,
-            animationSpec = tween(DdMotion.BASE + 80, easing = DdMotion.EaseInOut),
-        )
-    }
     val bottomInset = Modifier.layout { measurable, constraints ->
-        val inset = animatedBottomInset.value.roundToInt().coerceAtLeast(0)
+        val inset = maxOf(imeInsets.getBottom(this), stableNavigationBottomPx).coerceAtLeast(0)
         val available = constraints.maxHeight
         if (available == androidx.compose.ui.unit.Constraints.Infinity) {
             val placeable = measurable.measure(constraints)
@@ -459,24 +473,13 @@ fun ChatScreen(
 
     val latestChatState by rememberUpdatedState(state)
 
-    LaunchedEffect(controller, latestChatState.sending) {
-        if (latestChatState.sending) {
-            while (isActive) {
-                withFrameNanos { }
-                controller.followContent()
-            }
-        }
-    }
-
-    LaunchedEffect(state.sending) {
-        if (!state.sending) {
-            pendingLocalSend = false
-            if (controller.following) {
-                delay(80)
-                controller.jumpToBottom(animate = false)
-            }
-        }
-    }
+    ChatScrollFollowEffect(
+        controller = controller,
+        sessionKey = state.conversationId,
+        sending = state.sending,
+        smooth = motionEnabled,
+        onStreamingStopped = { pendingLocalSend = false },
+    )
 
     LaunchedEffect(pendingLocalSend) {
         if (!pendingLocalSend) return@LaunchedEffect
@@ -484,8 +487,8 @@ fun ChatScreen(
         if (!latestChatState.sending) pendingLocalSend = false
     }
 
-    LaunchedEffect(controller) {
-        snapshotFlow { animatedBottomInset.value to overlayHeightPx }.collect {
+    LaunchedEffect(controller, imeInsets) {
+        snapshotFlow { imeInsets.getBottom(density) to overlayHeightPx }.collect {
             controller.anchorToBottom()
         }
     }
@@ -512,22 +515,6 @@ fun ChatScreen(
                         selectionCoordinator.clear()
                     }
                 }
-            }
-            .pointerInput(onOpenDrawer) {
-                var total = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        total = 0f
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        total += dragAmount
-                        change.consume()
-                    },
-                    onDragEnd = {
-                        if (total > 80.dp.toPx()) onOpenDrawer()
-                    },
-                    onDragCancel = { total = 0f },
-                )
             },
     ) {
         CompositionLocalProvider(LocalSelectionCoordinator provides selectionCoordinator) {
@@ -544,6 +531,8 @@ fun ChatScreen(
                 jobCount = jobCount,
                 remoteFilesVisible = remoteFilesVisible,
                 reloadVisible = reloadVisible,
+                memoryExcluded = overlay.memoryExcluded,
+                memoryToggleVisible = overlay.memoryToggleVisible,
             ),
             actions = ChatTopBarActions(
                 onMenu = {
@@ -575,6 +564,10 @@ fun ChatScreen(
                     onExportSession()
                 },
                 onOpenBotSettings = onOpenBotSettings,
+                onToggleMemoryExcluded = {
+                    keyboard?.hide()
+                    actions.onToggleMemoryExcluded()
+                },
             ),
             modifier = Modifier.padding(top = with(density) { stableStatusTopPx.toDp() }),
         )
@@ -621,7 +614,7 @@ fun ChatScreen(
                         verticalArrangement = Arrangement.spacedBy(DdSpacing.Xxl),
                     ) {
                         if (hiddenMessageCount > 0) {
-                            item(key = "history-load-earlier") {
+                            item(key = "history-load-earlier", contentType = "history-load-earlier") {
                                 Box(
                                     Modifier.fillMaxWidth(),
                                     contentAlignment = Alignment.Center,
@@ -633,7 +626,11 @@ fun ChatScreen(
                                 }
                             }
                         }
-                        items(visibleMessages, key = { it.id }) { message ->
+                        items(
+                            items = visibleMessages,
+                            key = { it.id },
+                            contentType = { it.role },
+                        ) { message ->
                             Box(
                                 Modifier.fillMaxWidth(),
                                 contentAlignment = Alignment.TopCenter,
@@ -669,7 +666,7 @@ fun ChatScreen(
                         stablePendingQuestions
                             .firstOrNull()
                             ?.let { pending ->
-                                item(key = "pending-question-${pending.requestId}") {
+                                item(key = "pending-question-${pending.requestId}", contentType = "pending-question") {
                                     Box(
                                         Modifier.fillMaxWidth(),
                                         contentAlignment = Alignment.TopCenter,
@@ -687,16 +684,46 @@ fun ChatScreen(
                             }
                     }
                 }
+                val showTopFade by remember(listState) {
+                    derivedStateOf { listState.canScrollBackward }
+                }
+                val topFadeAlpha = animateFloatAsState(
+                    targetValue = if (showTopFade) 1f else 0f,
+                    animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
+                    label = "chat-top-fade",
+                )
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(14.dp)
+                        .graphicsLayer { alpha = topFadeAlpha.value }
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(colors.paper, colors.paper.copy(alpha = 0f)),
+                            ),
+                        ),
+                )
             }
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .onSizeChanged { overlayHeightPx = it.height },
+                    .fillMaxWidth(),
             ) {
-                if (controller.showJumpToBottom) {
+                val jumpSpec = if (motionEnabled) tween<Float>(DdMotion.FAST, easing = DdMotion.EaseOut) else snap()
+                AnimatedVisibility(
+                    visible = controller.showJumpToBottom,
+                    enter = fadeIn(jumpSpec) + scaleIn(
+                        initialScale = if (motionEnabled) 0.92f else 1f,
+                        animationSpec = jumpSpec,
+                    ),
+                    exit = fadeOut(jumpSpec) + scaleOut(
+                        targetScale = if (motionEnabled) 0.92f else 1f,
+                        animationSpec = jumpSpec,
+                    ),
+                ) {
                     Box(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = DdSpacing.Sm),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = DdSpacing.Xs),
                         contentAlignment = Alignment.Center,
                     ) {
                         JumpToBottomChip(
@@ -704,10 +731,34 @@ fun ChatScreen(
                         )
                     }
                 }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { overlayHeightPx = it.height },
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(24.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(colors.paper.copy(alpha = 0f), colors.paper),
+                                ),
+                            ),
+                    )
+                    Column(Modifier.fillMaxWidth().background(colors.paper)) {
                 AnimatedVisibility(
                     visible = compacting || state.compacting,
-                    enter = fadeIn(tween(DdMotion.FAST)) + expandVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut)),
-                    exit = fadeOut(tween(DdMotion.FAST)) + shrinkVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut)),
+                    enter = if (motionEnabled) {
+                        fadeIn(tween(DdMotion.FAST)) + expandVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut))
+                    } else {
+                        fadeIn(snap()) + expandVertically(snap())
+                    },
+                    exit = if (motionEnabled) {
+                        fadeOut(tween(DdMotion.FAST)) + shrinkVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut))
+                    } else {
+                        fadeOut(snap()) + shrinkVertically(snap())
+                    },
                 ) {
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Card, vertical = DdSpacing.Xs),
@@ -750,6 +801,7 @@ fun ChatScreen(
                         view = view,
                         onPause = onPauseGoal,
                         onResume = onResumeGoal,
+                        onEnd = onEndGoal,
                         modifier = Modifier.padding(horizontal = DdSpacing.Md),
                     )
                 }
@@ -763,8 +815,16 @@ fun ChatScreen(
                 }
                 AnimatedVisibility(
                     visible = paletteQuery != null && !state.sending,
-                    enter = fadeIn(tween(DdMotion.FAST)) + expandVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut)),
-                    exit = fadeOut(tween(DdMotion.FAST)) + shrinkVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut)),
+                    enter = if (motionEnabled) {
+                        fadeIn(tween(DdMotion.FAST)) + expandVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut))
+                    } else {
+                        fadeIn(snap()) + expandVertically(snap())
+                    },
+                    exit = if (motionEnabled) {
+                        fadeOut(tween(DdMotion.FAST)) + shrinkVertically(tween(DdMotion.BASE, easing = DdMotion.EaseOut))
+                    } else {
+                        fadeOut(snap()) + shrinkVertically(snap())
+                    },
                 ) {
                     SlashPalette(
                         items = commandItems,
@@ -829,6 +889,8 @@ fun ChatScreen(
                     voiceLanguage = voiceLanguage,
                     modifier = Modifier.padding(top = 6.dp, bottom = DdSpacing.Sm),
                 )
+                }
+                }
             }
             if (showMessageNav && !state.switchingConversation) {
                 MessageNavBar(
@@ -868,15 +930,21 @@ private fun EmptyState(
                 color = colors.inkTertiary,
             )
         } else {
-            var shown by remember { mutableStateOf(false) }
+            val motionEnabled = LocalDdMotionEnabled.current
+            var shown by remember { mutableStateOf(!motionEnabled) }
             LaunchedEffect(Unit) { shown = true }
             AnimatedVisibility(
                 visible = shown,
-                enter = fadeIn(tween(DdMotion.PAGE, easing = DdMotion.EaseOut)) +
-                    slideInVertically(
-                        animationSpec = tween(DdMotion.PAGE, easing = DdMotion.EaseOut),
-                        initialOffsetY = { it / 18 },
-                    ),
+                enter = if (motionEnabled) {
+                    fadeIn(tween(DdMotion.PAGE, easing = DdMotion.EaseOut)) +
+                        slideInVertically(
+                            animationSpec = tween(DdMotion.PAGE, easing = DdMotion.EaseOut),
+                            initialOffsetY = { it / 18 },
+                        )
+                } else {
+                    fadeIn(snap())
+                },
+                exit = ExitTransition.None,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (avatar != null) {
@@ -895,7 +963,8 @@ private fun EmptyState(
                             Modifier
                                 .size(148.dp)
                                 .clip(CircleShape)
-                                .background(Color.White),
+                                .background(if (colors.dark) colors.ink.copy(alpha = 0.92f) else colors.surface)
+                                .border(1.dp, colors.hairline, CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             Image(
@@ -934,7 +1003,7 @@ private fun greeting(nickname: String): String {
         in 11..17 -> stringResource(R.string.assistant_greeting_afternoon)
         else -> stringResource(R.string.assistant_greeting_evening)
     }
-    return if (nickname.isBlank()) base else "$base，$nickname"
+    return if (nickname.isBlank()) base else stringResource(R.string.assistant_greeting_named, base, nickname)
 }
 
 @Composable
@@ -943,26 +1012,51 @@ private fun JumpToBottomChip(
     onClick: () -> Unit,
 ) {
     val colors = superPiColors()
-    DdPressable(
-        onClick = onClick,
+    val motionEnabled = LocalDdMotionEnabled.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val feedbackColor = if (colors.surface.luminance() < 0.45f) Color.White else colors.ink
+    val wash by animateFloatAsState(
+        targetValue = if (pressed) DdAlpha.Press else 0f,
+        animationSpec = if (!motionEnabled || pressed) snap() else tween(DdMotion.PRESS_OUT, easing = DdMotion.EaseOut),
+        label = "jump-bottom-wash",
+    )
+    val label = stringResource(R.string.assistant_jump_bottom)
+    Box(
         modifier = modifier
-            .height(36.dp)
-            .border(1.dp, colors.hairline.copy(alpha = 0.65f), CircleShape)
+            .heightIn(min = 44.dp)
+            .semantics { contentDescription = label }
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
             .testTag("jump_to_bottom"),
-        shape = CircleShape,
-        background = colors.surface,
-        contentDescription = stringResource(R.string.assistant_jump_bottom),
+        contentAlignment = Alignment.Center,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp),
+            modifier = Modifier
+                .height(36.dp)
+                .clip(CircleShape)
+                .background(colors.surface)
+                .border(1.dp, colors.hairline.copy(alpha = 0.65f), CircleShape)
+                .indication(interaction, ripple(color = feedbackColor.copy(alpha = DdAlpha.Ripple)))
+                .drawWithContent {
+                    drawContent()
+                    if (wash > 0f) drawRect(feedbackColor.copy(alpha = wash))
+                }
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkSecondary, size = 13.dp)
             Text(
-                text = stringResource(R.string.assistant_jump_bottom),
+                text = label,
                 style = DdType.chip,
                 color = colors.inkSecondary,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
@@ -976,9 +1070,8 @@ private fun LoadEarlierPill(
     val colors = superPiColors()
     DdPressable(
         onClick = onClick,
-        modifier = Modifier.testTag("chat_load_earlier"),
-        shape = DdShapes.Pill,
-        background = colors.wash,
+        modifier = Modifier.heightIn(min = 44.dp).testTag("chat_load_earlier"),
+        shape = DdShapes.Small,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),

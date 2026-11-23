@@ -5,15 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -44,10 +40,11 @@ import io.github.whywood.superpi.data.DevPackagesState
 import io.github.whywood.superpi.data.StorageMount
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdSegmented
 import io.github.whywood.superpi.design.DdSpacing
@@ -104,18 +101,8 @@ fun SystemAccessScreen(
         onRefresh()
         onPauseOrDispose {}
     }
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("system_access"),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -123,7 +110,9 @@ fun SystemAccessScreen(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier.testTag("system_access"),
+    ) {
         Column(
             Modifier
                 .weight(1f)
@@ -136,9 +125,12 @@ fun SystemAccessScreen(
                 color = colors.ink,
             )
             Spacer(Modifier.height(DdSpacing.Xl))
-            DdSectionLabel(stringResource(R.string.access_section_permission))
+            DdSectionLabel(
+                stringResource(R.string.access_section_permission),
+                Modifier.padding(start = DdSpacing.Xs),
+            )
             Spacer(Modifier.height(DdSpacing.Sm))
-            SettingsGroup {
+            DdGroupCard {
                 AccessLevelRow(
                     access = HostAccess.LOCAL,
                     subtitle = stringResource(R.string.access_status_local),
@@ -146,7 +138,7 @@ fun SystemAccessScreen(
                     onSelect = onSelect,
                     testTag = "access_level_local",
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 AccessLevelRow(
                     access = HostAccess.ADB,
                     subtitle = adbStatusText(adb),
@@ -154,7 +146,7 @@ fun SystemAccessScreen(
                     onSelect = onSelect,
                     testTag = "access_level_adb",
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 AccessLevelRow(
                     access = HostAccess.ROOT,
                     subtitle = stringResource(
@@ -166,7 +158,7 @@ fun SystemAccessScreen(
                 )
             }
             Spacer(Modifier.height(DdSpacing.Md))
-            SettingsGroup {
+            DdGroupCard {
                 DdListRow(
                     title = stringResource(R.string.access_effective),
                     value = stringResource(accessLevelLabel(state.effective)),
@@ -184,7 +176,10 @@ fun SystemAccessScreen(
             Spacer(Modifier.height(DdSpacing.Xl))
             when (state.selected) {
                 HostAccess.ROOT -> {
-                    DdSectionLabel(stringResource(R.string.access_section_root))
+                    DdSectionLabel(
+                        stringResource(R.string.access_section_root),
+                        Modifier.padding(start = DdSpacing.Xs),
+                    )
                     Spacer(Modifier.height(DdSpacing.Sm))
                     DdGroupCard {
                         DdListRow(
@@ -194,7 +189,7 @@ fun SystemAccessScreen(
                             modifier = Modifier.testTag("access_root_state"),
                         )
                         if (rootfs.state is RootfsState.Failed) {
-                            DdHairline()
+                            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             DdListRow(
                                 title = stringResource(R.string.access_root_retry),
                                 showChevron = true,
@@ -203,7 +198,7 @@ fun SystemAccessScreen(
                             )
                         }
                         val rebuilding = rootfs.state is RootfsState.Preparing
-                        DdHairline()
+                        DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                         DdListRow(
                             title = stringResource(R.string.access_root_rebuild),
                             subtitle = if (rebuilding) {
@@ -218,7 +213,7 @@ fun SystemAccessScreen(
                             modifier = Modifier.testTag("access_root_rebuild"),
                         )
                         if (!state.rootReady) {
-                            DdHairline()
+                            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             DdListRow(
                                 icon = DdIcons.Shield,
                                 title = stringResource(R.string.access_action_root_check),
@@ -250,12 +245,12 @@ fun SystemAccessScreen(
                                         if (index == 1) AdbConnectMode.LOCAL else AdbConnectMode.WIRELESS,
                                     )
                                 },
-                                modifier = Modifier.padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Sm),
+                                modifier = Modifier.padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Sm),
                                 testTags = listOf("access_adb_mode_wireless", "access_adb_mode_local"),
                             )
-                            DdHairline()
+                            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                             if (adb.mode == AdbConnectMode.LOCAL) {
-                                Column(Modifier.padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Sm)) {
+                                Column(Modifier.padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Sm)) {
                                     DdTextField(
                                         value = localHost,
                                         onValueChange = { localHost = it },
@@ -271,6 +266,7 @@ fun SystemAccessScreen(
                                         testTag = "access_adb_local_port",
                                     )
                                 }
+                                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                                 AdbAction(
                                     title = stringResource(
                                         when {
@@ -281,23 +277,24 @@ fun SystemAccessScreen(
                                     ),
                                     onClick = { onAdbConnectLocal(localHost, localPort) },
                                     testTag = "access_adb_local_connect",
+                                    enabled = !adb.busy,
                                 )
                                 if (adb.busy) {
                                     Text(
                                         text = stringResource(R.string.access_status_adb_local_authorizing),
-                                        modifier = Modifier.padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Xs),
+                                        modifier = Modifier.padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Xs),
                                         style = DdType.bodySmall,
                                         color = colors.inkTertiary,
                                     )
                                 } else if (adb.error != null) {
                                     Text(
                                         text = adbErrorLabel(adb.error),
-                                        modifier = Modifier.padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Xs),
+                                        modifier = Modifier.padding(horizontal = DdSpacing.RowHorizontal, vertical = DdSpacing.Xs),
                                         style = DdType.bodySmall,
                                         color = colors.danger,
                                     )
                                 }
-                                DdHairline()
+                                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                                 AdbAction(
                                     title = stringResource(R.string.access_action_adb_settings),
                                     onClick = onOpenWirelessDebugging,
@@ -339,7 +336,7 @@ fun SystemAccessScreen(
                                     )
                                 }
                                 if (adb.paired || adb.daemon) {
-                                    DdHairline()
+                                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                                     AdbAction(
                                         title = stringResource(R.string.access_action_adb_repair),
                                         onClick = {
@@ -349,7 +346,7 @@ fun SystemAccessScreen(
                                         testTag = "access_adb_repair",
                                     )
                                 }
-                                DdHairline()
+                                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                                 AdbAction(
                                     title = stringResource(R.string.access_action_adb_settings),
                                     onClick = onOpenWirelessDebugging,
@@ -371,9 +368,12 @@ fun SystemAccessScreen(
                         )
                         Spacer(Modifier.height(DdSpacing.Xl))
                     }
-                    DdSectionLabel(stringResource(R.string.access_section_linux))
+                    DdSectionLabel(
+                        stringResource(R.string.access_section_linux),
+                        Modifier.padding(start = DdSpacing.Xs),
+                    )
                     Spacer(Modifier.height(DdSpacing.Sm))
-                    SettingsGroup {
+                    DdGroupCard {
                         LinuxEnvironmentSection(
                             state = linuxState,
                             supported = linuxSupported,
@@ -476,12 +476,18 @@ private fun AccessRadio(checked: Boolean) {
 }
 
 @Composable
-private fun AdbAction(title: String, onClick: () -> Unit, testTag: String) {
+private fun AdbAction(
+    title: String,
+    onClick: () -> Unit,
+    testTag: String,
+    enabled: Boolean = true,
+) {
     DdListRow(
         icon = DdIcons.Plug,
         title = title,
         onClick = onClick,
         showChevron = true,
+        enabled = enabled,
         modifier = Modifier.testTag(testTag),
     )
 }

@@ -11,6 +11,8 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 
+private val EmptyTextLayout: (TextLayoutResult) -> Unit = {}
+
 @Composable
 fun DdText(
     text: String,
@@ -32,7 +34,7 @@ fun DdText(
         overflow = overflow,
         textAlign = textAlign,
         softWrap = softWrap,
-        onTextLayout = onTextLayout ?: {},
+        onTextLayout = onTextLayout ?: EmptyTextLayout,
     )
 }
 
@@ -58,7 +60,7 @@ fun DdText(
         overflow = overflow,
         textAlign = textAlign,
         softWrap = softWrap,
-        onTextLayout = onTextLayout ?: {},
+        onTextLayout = onTextLayout ?: EmptyTextLayout,
         inlineContent = inlineContent,
     )
 }

@@ -37,6 +37,10 @@
     <string name="settings_access">System access</string>
     <string name="settings_android">Android settings</string>
     <string name="settings_theme">Theme</string>
+    <string name="settings_theme_appearance">Appearance</string>
+    <string name="settings_theme_appearance_system">Follow system</string>
+    <string name="settings_theme_appearance_light">Light</string>
+    <string name="settings_theme_appearance_dark">Dark</string>
     <string name="settings_theme_builtin">Built-in</string>
     <string name="settings_theme_from_plugins">From plugins</string>
     <string name="settings_theme_light">Light</string>
@@ -44,10 +48,11 @@
     <string name="settings_theme_current">Current</string>
     <string name="settings_theme_empty">Themes from installed and enabled plugins appear here.</string>
     <string name="settings_theme_preset_pi">PI</string>
-    <string name="settings_theme_pi_subtitle">Light and dark</string>
-    <string name="settings_theme_preset_classic">Classic Blue</string>
-    <string name="settings_theme_preset_santorini">Santorini</string>
-    <string name="settings_theme_preset_oceanic">Oceanic</string>
+    <string name="settings_theme_preset_paper">Paper</string>
+    <string name="settings_theme_preset_slate">Slate</string>
+    <string name="settings_theme_pi_subtitle">Monochrome</string>
+    <string name="settings_theme_paper_subtitle">Warm paper &amp; terracotta</string>
+    <string name="settings_theme_slate_subtitle">Cool slate &amp; crisp contrast</string>
     <string name="settings_version">Version</string>
     <string name="settings_license">Licenses</string>
     <string name="settings_license_title">Licenses</string>
@@ -118,7 +123,7 @@
 
     <string name="agreement_intro">By using this app, you agree to the following.</string>
     <string name="agreement_data_title">Data &amp; Privacy</string>
-    <string name="agreement_data_local">Conversations, bot files, API keys, and OAuth and connector credentials are stored only in the app\'s private directory and are never uploaded to PI\'s servers.</string>
+    <string name="agreement_data_local">Conversations, files, API keys, and OAuth and connector credentials are stored only in the app\'s private directory and are never uploaded to PI\'s servers.</string>
     <string name="agreement_data_provider">Conversation content is sent only to the model provider you choose; PI keeps no copy on its servers.</string>
     <string name="agreement_data_connectors">Content read through connectors becomes part of your chat history and may be sent to the model provider with the conversation.</string>
     <string name="agreement_data_tracking">No analytics, advertising, or third-party tracking SDKs are included.</string>
@@ -133,11 +138,13 @@
     <string name="agreement_disclaimer_output">Model output may be inaccurate, outdated, or incomplete and is not professional advice; use your own judgment and accept the risks.</string>
     <string name="agreement_license_title">Open source license</string>
     <string name="agreement_license_apache">The app is released under the Apache License 2.0; you may use, modify, and distribute it under the license terms.</string>
-    <string name="agreement_license_source">The full source code and license are available in the bot repository.</string>
+    <string name="agreement_license_source">The full source code and license are available in the project repository.</string>
 
     <string name="settings_font_title">Font</string>
     <string name="settings_font_current">Current</string>
-    <string name="settings_font_system">Roboto</string>
+    <string name="settings_font_system">System default</string>
+    <string name="settings_font_preview_primary">Clean reading</string>
+    <string name="settings_font_preview_secondary">Quick brown fox · 0123</string>
 
     <string name="dev_bundles_title_access">Install bundles (%1$s)</string>
     <string name="dev_install">Install</string>
@@ -186,8 +193,8 @@
     <string name="dev_package_git">Version control and repositories</string>
     <string name="dev_package_github_cli">Use GitHub from the command line</string>
     <string name="dev_package_build_base">C/C++ compiler toolchain</string>
-    <string name="dev_package_cmake">Build bots with CMake</string>
-    <string name="dev_package_make">Build bots with Make</string>
+    <string name="dev_package_cmake">Build projects with CMake</string>
+    <string name="dev_package_make">Build projects with Make</string>
     <string name="dev_package_pkgconf">Find libraries at build time</string>
     <string name="settings_background_job_wake">Wake when a background job finishes</string>
     <string name="settings_oauth_manual_hint">Browser did not return automatically? Paste the authorization code or redirect URL below.</string>
@@ -323,6 +330,7 @@
     <string name="settings_custom_provider_error_models">Add at least one model</string>
     <string name="settings_custom_provider_error_model_id">Model ID cannot be empty</string>
     <string name="settings_provider_custom_section">Custom providers</string>
+    <string name="settings_provider_configured_section">Configured</string>
     <string name="settings_custom_provider_discover">Fetch model list</string>
     <string name="settings_custom_provider_discovering">Fetching…</string>
     <string name="settings_custom_provider_discover_missing">Fill in the base URL and API key first</string>

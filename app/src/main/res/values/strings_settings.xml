@@ -40,6 +40,10 @@
     <string name="settings_access">系统访问</string>
     <string name="settings_android">安卓配置</string>
     <string name="settings_theme">主题</string>
+    <string name="settings_theme_appearance">外观模式</string>
+    <string name="settings_theme_appearance_system">跟随系统</string>
+    <string name="settings_theme_appearance_light">浅色</string>
+    <string name="settings_theme_appearance_dark">深色</string>
     <string name="settings_theme_builtin">内置主题</string>
     <string name="settings_theme_from_plugins">来自插件</string>
     <string name="settings_theme_light">浅色</string>
@@ -47,10 +51,11 @@
     <string name="settings_theme_current">当前</string>
     <string name="settings_theme_empty">安装并启用带主题的插件后，主题会显示在这里。</string>
     <string name="settings_theme_preset_pi">PI</string>
-    <string name="settings_theme_pi_subtitle">浅色与深色</string>
-    <string name="settings_theme_preset_classic">经典蓝</string>
-    <string name="settings_theme_preset_santorini">Santorini</string>
-    <string name="settings_theme_preset_oceanic">Oceanic</string>
+    <string name="settings_theme_preset_paper">纸墨</string>
+    <string name="settings_theme_preset_slate">石板</string>
+    <string name="settings_theme_pi_subtitle">黑白极简</string>
+    <string name="settings_theme_paper_subtitle">温润暖纸与陶红点缀</string>
+    <string name="settings_theme_slate_subtitle">理性蓝灰与清晰层级</string>
 
     <string name="settings_version">版本</string>
     <string name="settings_license">开源许可</string>
@@ -143,7 +148,9 @@
 
     <string name="settings_font_title">字体样式</string>
     <string name="settings_font_current">当前</string>
-    <string name="settings_font_system">Roboto</string>
+    <string name="settings_font_system">系统默认</string>
+    <string name="settings_font_preview_primary">清晰阅读体验</string>
+    <string name="settings_font_preview_secondary">AaBb · 012345</string>
 
     <string name="dev_bundles_title_access">安装组合（%1$s）</string>
     <string name="dev_install">安装</string>
@@ -329,6 +336,7 @@
     <string name="settings_custom_provider_error_models">至少添加一个模型</string>
     <string name="settings_custom_provider_error_model_id">模型 ID 不能为空</string>
     <string name="settings_provider_custom_section">自定义服务商</string>
+    <string name="settings_provider_configured_section">已配置</string>
     <string name="settings_custom_provider_discover">获取模型列表</string>
     <string name="settings_custom_provider_discovering">获取中…</string>
     <string name="settings_custom_provider_discover_missing">先填写接口地址与 API Key</string>

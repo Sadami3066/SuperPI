@@ -27,6 +27,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Job
@@ -69,17 +70,18 @@ fun AnimatedScreenHost(
 ) {
     val saveableState = rememberSaveableStateHolder()
     val scope = rememberCoroutineScope()
+    val motionEnabled = LocalDdMotionEnabled.current
     val covered = navigator.current != AppDestination.Chat
     var baseFrozen by remember { mutableStateOf(false) }
     var baseDrawSuspended by remember { mutableStateOf(false) }
-    LaunchedEffect(covered) {
+    LaunchedEffect(covered, motionEnabled) {
         if (covered) {
             baseFrozen = true
-            delay(DdMotion.SCREEN.toLong())
+            if (motionEnabled) delay(DdMotion.SCREEN.toLong())
             baseDrawSuspended = true
         } else {
             baseDrawSuspended = false
-            delay(DdMotion.SCREEN.toLong() + UNFREEZE_GRACE_MILLIS)
+            if (motionEnabled) delay(DdMotion.SCREEN.toLong() + UNFREEZE_GRACE_MILLIS)
             baseFrozen = false
         }
     }
@@ -132,7 +134,15 @@ fun AnimatedScreenHost(
             return@PredictiveBackHandler
         }
         if (predictive) {
-            previewFraction.floatValue = 1f
+            if (motionEnabled) {
+                animate(
+                    initialValue = previewFraction.floatValue,
+                    targetValue = 1f,
+                    animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+                ) { value, _ -> previewFraction.floatValue = value }
+            } else {
+                previewFraction.floatValue = 1f
+            }
             skipNextTransition = true
             if (!navigator.pop()) {
                 skipNextTransition = false
@@ -170,8 +180,12 @@ fun AnimatedScreenHost(
         direction = AppScreenTransition.direction(outgoing, target)
         back = outgoing.takeIf { it != AppDestination.Chat }
         front = target
-        progress.snapTo(0f)
-        progress.animateTo(1f, animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseOut))
+        if (motionEnabled) {
+            progress.snapTo(0f)
+            progress.animateTo(1f, animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseOut))
+        } else {
+            progress.snapTo(1f)
+        }
         back = null
         withFrameNanos { }
         pruneVisitedStates(navigator, saveableState, visited)
@@ -179,13 +193,42 @@ fun AnimatedScreenHost(
 
     Box(modifier) {
         val preview = previewTarget.takeIf { back == null }
+        val scrim = superPiColors().scrim
+        val baseReveal: () -> Float = {
+            when {
+                preview == AppDestination.Chat -> (1f - previewFraction.floatValue).coerceIn(0f, 1f)
+                covered && back == null -> progress.value
+                !covered && back != null -> (1f - progress.value).coerceIn(0f, 1f)
+                else -> 0f
+            }
+        }
         Box(
             Modifier
                 .fillMaxSize()
                 .drawWithContent {
-                    if (!covered || !baseDrawSuspended || preview == AppDestination.Chat) drawContent()
+                    if (!covered || !baseDrawSuspended || preview == AppDestination.Chat) {
+                        drawContent()
+                        val reveal = baseReveal()
+                        if (reveal > 0f) {
+                            drawRect(
+                                color = scrim,
+                                alpha = (reveal * AppScreenTransition.OUTGOING_DIM_ALPHA).coerceIn(
+                                    0f,
+                                    AppScreenTransition.OUTGOING_DIM_ALPHA,
+                                ),
+                            )
+                        }
+                    }
                 }
-                .graphicsLayer(),
+                .graphicsLayer {
+                    if (!covered || !baseDrawSuspended || preview == AppDestination.Chat) {
+                        val reveal = baseReveal()
+                        translationX = -reveal *
+                            AppScreenTransition.OUTGOING_PARALLAX_FRACTION *
+                            directionSign *
+                            size.width
+                    }
+                },
         ) {
             base(baseFrozen)
         }

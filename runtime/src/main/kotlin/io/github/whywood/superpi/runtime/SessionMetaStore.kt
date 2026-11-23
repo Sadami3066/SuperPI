@@ -17,6 +17,7 @@ data class SessionMeta(
     val titleOverride: String? = null,
     val pinned: Boolean = false,
     val archived: Boolean = false,
+    val memoryExcluded: Boolean = false,
     val updatedAt: Long = 0,
 )
 
@@ -59,6 +60,7 @@ class SessionMetaStore(context: Context) {
                     titleOverride = item.optString("title").takeIf { it.isNotBlank() },
                     pinned = item.optBoolean("pinned", false),
                     archived = item.optBoolean("archived", false),
+                    memoryExcluded = item.optBoolean("memoryExcluded", false),
                     updatedAt = item.optLong("updatedAt", 0),
                 )
             }
@@ -74,6 +76,7 @@ class SessionMetaStore(context: Context) {
                     .put("title", meta.titleOverride ?: "")
                     .put("pinned", meta.pinned)
                     .put("archived", meta.archived)
+                    .put("memoryExcluded", meta.memoryExcluded)
                     .put("updatedAt", meta.updatedAt),
             )
         }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -21,14 +22,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdDropdown
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMenuItem
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
@@ -94,9 +96,12 @@ internal fun ModelPickerSheet(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
                                             text = providerName,
+                                            modifier = Modifier.widthIn(max = 160.dp),
                                             style = DdType.bodySmall,
                                             color = colors.inkTertiary,
                                             maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
@@ -126,7 +131,7 @@ internal fun ModelPickerSheet(
                             )
                         }
                     }
-                    DdHairline()
+                    DdRowDivider()
                 }
 
                 if (!configured) {
@@ -135,7 +140,7 @@ internal fun ModelPickerSheet(
                         onClick = null,
                         enabled = false,
                     )
-                    DdHairline()
+                    DdRowDivider()
                 } else {
                     if (thinkingLevels.any { it != ThinkingLevel.OFF }) {
                         DdDropdown(
@@ -148,9 +153,12 @@ internal fun ModelPickerSheet(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
                                                 text = thinkingLabel(thinkingLevel),
+                                                modifier = Modifier.widthIn(max = 140.dp),
                                                 style = DdType.bodySmall,
                                                 color = colors.inkTertiary,
                                                 maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                             Spacer(Modifier.width(6.dp))
                                             DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
@@ -181,6 +189,7 @@ internal fun ModelPickerSheet(
                                 )
                             }
                         }
+                        DdRowDivider()
                     }
                     if (models.isEmpty()) {
                         DdListRow(
@@ -202,7 +211,7 @@ internal fun ModelPickerSheet(
                                     }
                                 },
                             )
-                            if (index != models.lastIndex) DdHairline()
+                            if (index != models.lastIndex) DdRowDivider()
                         }
                     }
                 }
@@ -210,7 +219,7 @@ internal fun ModelPickerSheet(
             Spacer(Modifier.height(28.dp))
         }
         if (manageProvidersVisible) {
-            DdHairline(Modifier.padding(horizontal = DdSpacing.Xxl))
+            DdRowDivider(Modifier.padding(horizontal = DdSpacing.Xxl))
             DdListRow(
                 title = stringResource(R.string.assistant_model_manage_providers),
                 onClick = {

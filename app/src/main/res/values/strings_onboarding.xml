@@ -6,17 +6,16 @@
     <string name="onboarding_primary_continue">继续</string>
     <string name="onboarding_primary_connect">连接并继续</string>
     <string name="onboarding_primary_done">开始聊天</string>
-    <string name="onboarding_primary_start_use">开始使用</string>
     <string name="onboarding_skip">稍后设置</string>
     <string name="onboarding_later">稍后</string>
 
     <string name="onboarding_welcome_title">你好，\n我是 PI。</string>
     <string name="onboarding_welcome_lead">你的随身 AI 助手。\n从日常小事，到新的想法。</string>
-    <string name="onboarding_welcome_note">只需几步，之后你随时可以调整</string>
+    <string name="onboarding_welcome_note">可在设置中随时更改</string>
 
     <string name="onboarding_account_title">先认识一下</string>
     <string name="onboarding_account_subtitle">告诉我该怎么称呼你。</string>
-    <string name="onboarding_account_note">这些设置之后都可以在设置中调整。</string>
+    <string name="onboarding_account_note">可在设置中随时更改</string>
     <string name="onboarding_avatar_pick">选择头像</string>
     <string name="onboarding_avatar_failed">头像保存失败</string>
     <string name="onboarding_nickname_label">你的称呼</string>
@@ -79,11 +78,11 @@
     <string name="onboarding_access_title">系统访问</string>
     <string name="onboarding_access_note">之后可以在设置 → 系统访问 调整。</string>
     <string name="onboarding_access_local">普通</string>
-    <string name="onboarding_access_local_body">无需额外授权，bash 在 App 内的 Linux 环境里运行。</string>
+    <string name="onboarding_access_local_body">在内置独立空间运行，无需额外授权。</string>
     <string name="onboarding_access_adb">无线调试 ADB</string>
     <string name="onboarding_access_adb_body">需要先在系统里开启无线调试并完成配对；可稍后在设置 → 系统访问 继续配置。</string>
     <string name="onboarding_access_root">Root</string>
-    <string name="onboarding_access_root_body">需要系统授权；首次会准备 Root Linux，可在设置 → 系统访问 查看进度。</string>
+    <string name="onboarding_access_root_body">需要系统 Root 权限，可在设置 → 系统访问 查看进度。</string>
 
     <string name="personalization_avatar_title">头像</string>
     <string name="personalization_avatar_empty">未设置时用这个</string>

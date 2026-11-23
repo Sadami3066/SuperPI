@@ -16,6 +16,8 @@ interface SessionDirectory {
     suspend fun rename(id: String, title: String)
     suspend fun setPinned(id: String, pinned: Boolean)
     suspend fun setArchived(id: String, archived: Boolean)
+    suspend fun setMemoryExcluded(id: String, excluded: Boolean) {}
+    suspend fun isMemoryExcluded(id: String): Boolean = false
     suspend fun removeMeta(id: String)
 }
 

@@ -190,7 +190,10 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
 
         AppDestination.Memory -> MemoryRoute(
             dependencies = dependencies,
-            conversationId = host.chat.conversationId,
+            chatViewModel = host.chatViewModel,
+            navigator = host.navigator,
+            configuredProviderIds = host.ui.configuredProviderIds,
+            defaultModelConfig = host.ui.modelConfig,
             onBack = onBack,
         )
 

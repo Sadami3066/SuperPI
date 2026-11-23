@@ -1,5 +1,7 @@
 package io.github.whywood.superpi.data.relay
 
+import io.github.whywood.superpi.runtime.memory.MemoryRemotePullEntry
+import io.github.whywood.superpi.runtime.memory.MemorySyncOpItem
 import java.io.IOException
 import java.net.URLEncoder
 import javax.net.ssl.SSLException
@@ -9,14 +11,38 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-data class RelayMemorySnapshot(
-    val version: Long,
-    val files: Map<String, String>,
-    val versions: Map<String, Long>,
+data class RelayMemoryRejectedOp(
+    val opId: String,
+    val reason: String,
+)
+
+data class RelayMemoryPushResponse(
+    val serverSeq: Long,
+    val appliedCount: Int,
+    val skippedCount: Int,
+    val lastDreamAt: Long?,
+    val rejectedCount: Int = 0,
+    val rejected: List<RelayMemoryRejectedOp> = emptyList(),
+)
+
+data class RelayMemoryPullResponse(
+    val serverSeq: Long,
+    val hasMore: Boolean,
+    val nextSince: Long,
+    val lastDreamAt: Long?,
+    val entries: List<MemoryRemotePullEntry>,
+)
+
+data class RelayMemoryDreamLease(
+    val acquired: Boolean,
+    val leaseId: String? = null,
+    val holderDeviceId: String? = null,
+    val expiresAt: Long = 0L,
+    val lastDreamAt: Long? = null,
+    val serverSeq: Long = 0L,
 )
 
 enum class RelayMemoryFailure {
-    Conflict,
     Unauthorized,
     NotFound,
     Unreachable,
@@ -30,25 +56,29 @@ class RelayMemoryException(
     cause: Throwable? = null,
 ) : Exception(detail ?: failure.name, cause)
 
-data class RelayMemoryRollupLease(
-    val acquired: Boolean,
-    val leaseId: String? = null,
-    val holderDeviceId: String? = null,
-    val expiresAt: Long = 0L,
-)
-
 interface RelayMemoryApi {
-    suspend fun snapshot(account: RelayAccount, token: String): RelayMemorySnapshot
+    suspend fun push(
+        account: RelayAccount,
+        token: String,
+        ops: List<MemorySyncOpItem>,
+        dreamCompletedAt: Long? = null,
+    ): RelayMemoryPushResponse
 
-    suspend fun write(account: RelayAccount, token: String, request: RelayMemoryWrite): Long
+    suspend fun pull(
+        account: RelayAccount,
+        token: String,
+        since: Long,
+        limit: Int = 200,
+    ): RelayMemoryPullResponse
 
-    suspend fun acquireRollupLease(
+    suspend fun acquireDreamLease(
         account: RelayAccount,
         token: String,
         ttlMs: Long,
-    ): RelayMemoryRollupLease? = null
+        minIntervalMs: Long = 0L,
+    ): RelayMemoryDreamLease? = null
 
-    suspend fun releaseRollupLease(
+    suspend fun releaseDreamLease(
         account: RelayAccount,
         token: String,
         leaseId: String?,
@@ -56,64 +86,61 @@ interface RelayMemoryApi {
 }
 
 class RelayMemoryClient : RelayMemoryApi {
-    override suspend fun snapshot(account: RelayAccount, token: String): RelayMemorySnapshot =
-        withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url("${account.origin}/v1/memory/snapshot")
-                .header("authorization", "Bearer $token")
-                .get()
-                .build()
-            execute(account, request) { body ->
-                RelayProtocol.parseMemorySnapshot(body) ?: failed(RelayMemoryFailure.BadResponse)
-            }
-        }
-
-    override suspend fun write(
+    override suspend fun push(
         account: RelayAccount,
         token: String,
-        request: RelayMemoryWrite,
-    ): Long = withContext(Dispatchers.IO) {
-        val body = RelayProtocol
-            .memoryWriteRequest(
-                op = request.op,
-                path = request.path,
-                text = request.text,
-                section = request.section,
-                baseVersion = request.baseVersion,
-                idempotencyKey = request.idempotencyKey,
-            )
-            .toRequestBody(JSON)
-        val http = Request.Builder()
-            .url("${account.origin}/v1/memory/write")
+        ops: List<MemorySyncOpItem>,
+        dreamCompletedAt: Long?,
+    ): RelayMemoryPushResponse = withContext(Dispatchers.IO) {
+        val body = RelayProtocol.memoryPushRequest(ops, dreamCompletedAt).toRequestBody(JSON)
+        val request = Request.Builder()
+            .url("${account.origin}/v2/memory/push")
             .header("authorization", "Bearer $token")
             .post(body)
             .build()
-        execute(account, http) { text ->
-            RelayProtocol.parseMemoryVersion(text) ?: failed(RelayMemoryFailure.BadResponse)
+        execute(account, request) { text ->
+            RelayProtocol.parseMemoryPushResponse(text) ?: failed(RelayMemoryFailure.BadResponse)
         }
     }
 
-    override suspend fun acquireRollupLease(
+    override suspend fun pull(
+        account: RelayAccount,
+        token: String,
+        since: Long,
+        limit: Int,
+    ): RelayMemoryPullResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${account.origin}/v2/memory/pull?since=$since&limit=$limit")
+            .header("authorization", "Bearer $token")
+            .get()
+            .build()
+        execute(account, request) { text ->
+            RelayProtocol.parseMemoryPullResponse(text) ?: failed(RelayMemoryFailure.BadResponse)
+        }
+    }
+
+    override suspend fun acquireDreamLease(
         account: RelayAccount,
         token: String,
         ttlMs: Long,
-    ): RelayMemoryRollupLease? = withContext(Dispatchers.IO) {
-        val body = RelayProtocol.memoryRollupLeaseRequest(ttlMs).toRequestBody(JSON)
+        minIntervalMs: Long,
+    ): RelayMemoryDreamLease? = withContext(Dispatchers.IO) {
+        val body = RelayProtocol.memoryDreamLeaseRequest(ttlMs, minIntervalMs).toRequestBody(JSON)
         val request = Request.Builder()
-            .url("${account.origin}/v1/memory/rollup-lease")
+            .url("${account.origin}/v2/memory/dream-lease")
             .header("authorization", "Bearer $token")
             .post(body)
             .build()
         try {
             execute(account, request) { text ->
-                RelayProtocol.parseMemoryRollupLease(text) ?: failed(RelayMemoryFailure.BadResponse)
+                RelayProtocol.parseMemoryDreamLeaseResponse(text) ?: failed(RelayMemoryFailure.BadResponse)
             }
         } catch (error: RelayMemoryException) {
             if (error.failure == RelayMemoryFailure.NotFound) null else throw error
         }
     }
 
-    override suspend fun releaseRollupLease(
+    override suspend fun releaseDreamLease(
         account: RelayAccount,
         token: String,
         leaseId: String?,
@@ -122,13 +149,13 @@ class RelayMemoryClient : RelayMemoryApi {
             "?leaseId=${URLEncoder.encode(it, Charsets.UTF_8.name())}"
         }.orEmpty()
         val request = Request.Builder()
-            .url("${account.origin}/v1/memory/rollup-lease$query")
+            .url("${account.origin}/v2/memory/dream-lease$query")
             .header("authorization", "Bearer $token")
             .delete()
             .build()
         runCatching {
             execute(account, request) { text ->
-                RelayProtocol.parseMemoryRollupLeaseRelease(text)
+                RelayProtocol.parseMemoryDreamLeaseRelease(text)
             }
         }.getOrDefault(false)
     }
@@ -142,7 +169,6 @@ class RelayMemoryClient : RelayMemoryApi {
                 return when {
                     response.isSuccessful -> parse(text)
                     response.code == 404 -> failed(RelayMemoryFailure.NotFound)
-                    response.code == 409 -> failed(RelayMemoryFailure.Conflict)
                     response.code == 401 || response.code == 403 ->
                         failed(RelayMemoryFailure.Unauthorized)
                     else -> failed(
@@ -167,12 +193,3 @@ class RelayMemoryClient : RelayMemoryApi {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }
-
-data class RelayMemoryWrite(
-    val op: String,
-    val path: String,
-    val text: String,
-    val section: String?,
-    val baseVersion: Long?,
-    val idempotencyKey: String,
-)

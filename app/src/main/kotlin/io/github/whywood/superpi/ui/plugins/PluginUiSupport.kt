@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,7 +20,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.LanguagePreferences
-import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.plugin.api.IconRef
@@ -154,11 +152,3 @@ internal fun formatPluginSize(context: Context, bytes: Long): String =
 private const val KIBIBYTE = 1024L
 
 private const val MEBIBYTE = 1024L * 1024L
-
-@Composable
-internal fun PluginGroup(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    DdGroupCard(modifier = modifier, content = content)
-}

@@ -2,6 +2,7 @@ package io.github.whywood.superpi.ui.common.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -25,7 +26,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -43,6 +43,7 @@ import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.AssistantStep
 
@@ -55,21 +56,16 @@ internal fun ReasoningCard(
     terminatedStatus: ProcessStatus? = null,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val expanded = step.expanded
     val rotation = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "reasoning-chevron",
     )
     val state = stringResource(
         if (expanded) R.string.assistant_step_expanded else R.string.assistant_step_collapsed,
     )
-    val shimmer = rememberShimmerBrush(
-        active = active,
-        base = colors.inkTertiary,
-        highlight = colors.inkSecondary,
-    )
-    val titleStyle = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp, brush = shimmer)
     val terminatedLabel = when (terminatedStatus) {
         ProcessStatus.Stopped -> stringResource(R.string.assistant_stopped)
         ProcessStatus.Failed -> stringResource(R.string.assistant_ux_process_failed)
@@ -89,7 +85,7 @@ internal fun ReasoningCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = ProcessRowMetrics.OuterInset)
-                .heightIn(min = 32.dp)
+                .heightIn(min = ProcessRowMetrics.HeaderMinHeight)
                 .clip(RoundedCornerShape(6.dp))
                 .semantics { stateDescription = state }
                 .clickable(role = Role.Button, onClick = onToggle)
@@ -106,18 +102,18 @@ internal fun ReasoningCard(
                 )
             }
             Spacer(Modifier.width(ProcessRowMetrics.IconGap))
+            val shimmerHighlight = colors.ink.copy(alpha = if (colors.dark) 0.9f else 0.7f)
             Text(
                 text = stringResource(
                     if (compact) R.string.assistant_reasoning_compact else R.string.assistant_reasoning,
                 ),
-                style = titleStyle,
-                color = if (shimmer != null) {
-                    Color.Unspecified
-                } else if (active) {
-                    colors.inkSecondary
-                } else {
-                    colors.inkTertiary
-                },
+                modifier = Modifier.textShimmer(
+                    active = active,
+                    base = colors.inkTertiary,
+                    highlight = shimmerHighlight,
+                ),
+                style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp),
+                color = if (active) colors.inkSecondary else colors.inkTertiary,
             )
             if (terminatedLabel != null) {
                 Spacer(Modifier.width(6.dp))
@@ -125,6 +121,8 @@ internal fun ReasoningCard(
                     text = terminatedLabel,
                     style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 18.sp),
                     color = terminatedColor,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
             val preview = remember(step.text, compact) {
@@ -153,30 +151,41 @@ internal fun ReasoningCard(
             )
             Spacer(Modifier.width(DdSpacing.Xxs))
         }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                expandFrom = Alignment.Top,
-            ) + fadeIn(tween(DdMotion.FAST)),
-            exit = shrinkVertically(
-                animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
-                shrinkTowards = Alignment.Top,
-            ) + fadeOut(tween(DdMotion.FAST)),
-        ) {
-            Text(
-                text = step.text.trim(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = DdSpacing.Md,
-                        end = DdSpacing.Md,
-                        top = DdSpacing.Xxs,
-                        bottom = 6.dp,
-                    ),
-                style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 19.sp),
-                color = colors.inkTertiary,
-            )
+        if (active || !motionEnabled) {
+            if (expanded) {
+                ReasoningBody(text = step.text.trim())
+            }
+        } else {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(
+                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                    expandFrom = Alignment.Top,
+                ) + fadeIn(tween(DdMotion.FAST)),
+                exit = shrinkVertically(
+                    animationSpec = tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+                    shrinkTowards = Alignment.Top,
+                ) + fadeOut(tween(DdMotion.FAST)),
+            ) {
+                ReasoningBody(text = step.text.trim())
+            }
         }
     }
+}
+
+@Composable
+private fun ReasoningBody(text: String) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = ProcessRowMetrics.BodyStartPadding,
+                end = DdSpacing.Md,
+                top = DdSpacing.Xxs,
+                bottom = 6.dp,
+            ),
+        style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 19.sp),
+        color = superPiColors().inkTertiary,
+    )
 }

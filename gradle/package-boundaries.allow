@@ -4,4 +4,3 @@
 ui/io/github/whywood/superpi/ui/chat/ChatScreen.kt|io.github.whywood.superpi.ui.goal.GoalBar
 ui/io/github/whywood/superpi/ui/sessions/FilterSessionSearch.kt|io.github.whywood.superpi.ui.chat.SessionSearchHit
 ui/io/github/whywood/superpi/ui/sessions/SessionSearchScreen.kt|io.github.whywood.superpi.ui.chat.SessionSearchHit
-ui/io/github/whywood/superpi/ui/workspaces/WorkspaceSettingsScreen.kt|io.github.whywood.superpi.ui.settings.SettingsGroup

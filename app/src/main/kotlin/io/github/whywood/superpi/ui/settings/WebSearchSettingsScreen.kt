@@ -23,10 +23,12 @@ import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.WebSearchSettingsStore
 import io.github.whywood.superpi.design.DdDialog
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdTextField
@@ -68,32 +70,25 @@ fun WebSearchSettingsScreen(
                 color = colors.ink,
             )
             Spacer(Modifier.height(DdSpacing.Xl))
-            SettingsGroup {
-                WebSearchProviderEntry(
-                    id = WebSearchSettingsStore.DEEPSEEK,
-                    configured = configured[WebSearchSettingsStore.DEEPSEEK] == true,
-                    onEdit = { editing = WebSearchSettingsStore.DEEPSEEK },
-                )
-                WebSearchProviderEntry(
-                    id = WebSearchSettingsStore.EXA,
-                    configured = configured[WebSearchSettingsStore.EXA] == true,
-                    onEdit = { editing = WebSearchSettingsStore.EXA },
-                )
-                WebSearchProviderEntry(
-                    id = WebSearchSettingsStore.TAVILY,
-                    configured = configured[WebSearchSettingsStore.TAVILY] == true,
-                    onEdit = { editing = WebSearchSettingsStore.TAVILY },
-                )
-                WebSearchProviderEntry(
-                    id = WebSearchSettingsStore.BRAVE,
-                    configured = configured[WebSearchSettingsStore.BRAVE] == true,
-                    onEdit = { editing = WebSearchSettingsStore.BRAVE },
-                )
-                WebSearchProviderEntry(
-                    id = WebSearchSettingsStore.SERPER,
-                    configured = configured[WebSearchSettingsStore.SERPER] == true,
-                    onEdit = { editing = WebSearchSettingsStore.SERPER },
-                )
+            val providers = listOf(
+                WebSearchSettingsStore.DEEPSEEK,
+                WebSearchSettingsStore.EXA,
+                WebSearchSettingsStore.TAVILY,
+                WebSearchSettingsStore.BRAVE,
+                WebSearchSettingsStore.SERPER,
+            )
+            DdGroupCard {
+                providers.forEachIndexed { index, id ->
+                    if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                    WebSearchProviderEntry(
+                        id = id,
+                        configured = configured[id] == true,
+                        onEdit = {
+                            draft = ""
+                            editing = id
+                        },
+                    )
+                }
             }
             Spacer(Modifier.height(DdSpacing.Huge))
         }
@@ -101,7 +96,10 @@ fun WebSearchSettingsScreen(
     val provider = editing
     if (provider != null) {
         DdDialog(
-            onDismissRequest = { editing = null },
+            onDismissRequest = {
+                draft = ""
+                editing = null
+            },
             title = stringResource(webSearchProviderName(provider)),
             content = {
                 Column {
@@ -122,6 +120,7 @@ fun WebSearchSettingsScreen(
                             text = stringResource(R.string.web_search_clear),
                             onClick = {
                                 onClear(provider)
+                                draft = ""
                                 editing = null
                             },
                             color = colors.warning,
@@ -132,7 +131,10 @@ fun WebSearchSettingsScreen(
             actions = {
                 DdTextAction(
                     text = stringResource(R.string.web_search_cancel),
-                    onClick = { editing = null },
+                    onClick = {
+                        draft = ""
+                        editing = null
+                    },
                     color = colors.inkSecondary,
                 )
                 DdTextAction(

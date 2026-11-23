@@ -1,17 +1,14 @@
 package io.github.whywood.superpi.ui.settings
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Slider
@@ -27,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
@@ -38,12 +36,14 @@ import io.github.whywood.superpi.data.UiPreferences
 import io.github.whywood.superpi.data.UiToggle
 import io.github.whywood.superpi.data.normalizeChatFontScale
 import kotlin.math.roundToInt
+import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMenu
 import io.github.whywood.superpi.design.DdMenuItem
-import io.github.whywood.superpi.design.DdHairline
+import io.github.whywood.superpi.design.DdPageScaffold
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
@@ -65,17 +65,8 @@ fun ChatSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
-    Column(
-        modifier
-            .fillMaxSize()
-            .background(colors.paper)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = DdSpacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    DdPageScaffold(
+        topBar = {
             DdIconButton(
                 icon = DdIcons.ArrowLeft,
                 onClick = onBack,
@@ -83,7 +74,9 @@ fun ChatSettingsScreen(
                 tint = colors.ink,
                 iconSize = 21.dp,
             )
-        }
+        },
+        modifier = modifier,
+    ) {
         Column(
             Modifier
                 .weight(1f)
@@ -96,40 +89,40 @@ fun ChatSettingsScreen(
                 color = colors.ink,
             )
             Spacer(Modifier.height(DdSpacing.Xl))
-            SettingsGroup {
+            DdGroupCard {
                 ChatFontSizeRow(
                     scale = preferences.chatFontScale,
                     onChange = onChatFontScaleChange,
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 SwitchRow(
                     title = R.string.settings_auto_collapse_process,
                     checked = preferences.autoCollapseProcess,
                     onCheckedChange = { onToggle(UiToggle.AUTO_COLLAPSE_PROCESS, it) },
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 ProcessDetailRow(
                     value = processDetail,
                     onChange = onProcessDetailChange,
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 SendWhileRunningRow(
                     value = sendWhileRunning,
                     onChange = onSendWhileRunningChange,
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 SwitchRow(
                     title = R.string.settings_auto_retry,
                     checked = preferences.autoRetry,
                     onCheckedChange = { onToggle(UiToggle.AUTO_RETRY, it) },
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 SwitchRow(
                     title = R.string.settings_background_job_wake,
                     checked = preferences.backgroundJobWake,
                     onCheckedChange = { onToggle(UiToggle.BACKGROUND_JOB_WAKE, it) },
                 )
-                DdHairline()
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 SwitchRow(
                     title = R.string.voice_setting_auto_speak,
                     checked = voiceAutoSpeak,
@@ -159,7 +152,7 @@ private fun SendWhileRunningRow(
         DdMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            menuWidth = 356.dp,
+            menuWidth = 240.dp,
         ) {
             SendWhileRunningMenuItem(
                 selected = value == SendWhileRunning.STEER,
@@ -223,7 +216,7 @@ private fun ProcessDetailRow(
         DdMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            menuWidth = 356.dp,
+            menuWidth = 240.dp,
         ) {
             ProcessDetail.entries.forEach { option ->
                 DdMenuItem(
@@ -288,11 +281,16 @@ private fun ChatFontSizeRow(scale: Float, onChange: (Float) -> Unit) {
                 modifier = Modifier.weight(1f),
                 style = DdType.body,
                 color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.width(DdSpacing.Sm))
             Text(
                 text = stringResource(R.string.chat_font_size_value, percent),
                 style = DdType.numeric,
                 color = colors.inkSecondary,
+                maxLines = 1,
+                softWrap = false,
             )
         }
         Slider(
@@ -305,6 +303,8 @@ private fun ChatFontSizeRow(scale: Float, onChange: (Float) -> Unit) {
                 thumbColor = colors.accent,
                 activeTrackColor = colors.accent,
                 inactiveTrackColor = colors.wash,
+                activeTickColor = colors.onAccent.copy(alpha = 0.5f),
+                inactiveTickColor = colors.hairline,
             ),
             modifier = Modifier.fillMaxWidth().testTag("chat_font_size_slider"),
         )

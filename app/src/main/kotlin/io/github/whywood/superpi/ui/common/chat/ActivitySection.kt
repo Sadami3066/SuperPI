@@ -2,9 +2,7 @@ package io.github.whywood.superpi.ui.common.chat
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -28,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,13 +36,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,7 +75,8 @@ import java.util.Locale
 internal fun ActivitySection(
     steps: List<AssistantStep>,
     message: AssistantMessage,
-    isLastActivity: Boolean,
+    isTrailingBlock: Boolean,
+    showTotalDuration: Boolean = true,
     autoCollapseProcess: Boolean,
     processDetail: ProcessDetail,
     onToggleStep: (Long) -> Unit,
@@ -81,19 +87,19 @@ internal fun ActivitySection(
     val motionEnabled = LocalDdMotionEnabled.current
     val firstStepId = steps.firstOrNull()?.id
     var expansionOverride by rememberSaveable(message.id, firstStepId) { mutableIntStateOf(-1) }
+    val running = message.streaming && (
+        isTrailingBlock ||
+            steps.any { it is AssistantStep.Tool && it.trace.status == ToolActivityStatus.RUNNING }
+        )
     val expanded = when {
         expansionOverride >= 0 -> expansionOverride == 1
         !autoCollapseProcess -> true
-        message.streaming && isLastActivity -> true
+        running -> true
         else -> false
     }
-    val running = message.streaming && (
-        isLastActivity ||
-            steps.any { it is AssistantStep.Tool && it.trace.status == ToolActivityStatus.RUNNING }
-        )
     val rotation = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "activity-chevron",
     )
     val state = stringResource(
@@ -102,7 +108,7 @@ internal fun ActivitySection(
     val semanticStatus = if (running) {
         ProcessStatus.Running
     } else {
-        processStatus(streaming = false, status = if (isLastActivity) message.status else MessageStatus.DONE)
+        processStatus(streaming = false, status = if (isTrailingBlock) message.status else MessageStatus.DONE)
     }
     val statusLabel = when (semanticStatus) {
         ProcessStatus.Running -> stringResource(R.string.assistant_ux_process_running)
@@ -112,9 +118,6 @@ internal fun ActivitySection(
     }
     fun <T> settleSpec(): AnimationSpec<T> =
         if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap()
-
-    fun <T> layoutSpec(): FiniteAnimationSpec<T> =
-        if (message.streaming || !motionEnabled) snap() else tween(DdMotion.BASE, easing = DdMotion.EaseOut)
 
     val statusColor by animateColorAsState(
         targetValue = when (semanticStatus) {
@@ -128,12 +131,17 @@ internal fun ActivitySection(
     val reasoningCount = steps.count { it is AssistantStep.Reasoning }
     val toolCount = steps.count { it is AssistantStep.Tool }
     val finishedAt = message.finishedAt
-    val duration = if (isLastActivity && !message.streaming && finishedAt != null && message.startedAt > 0 &&
-        finishedAt > message.startedAt
-    ) {
-        finishedAt - message.startedAt
-    } else {
-        null
+    val duration = when {
+        showTotalDuration && isTrailingBlock && !message.streaming && finishedAt != null &&
+            message.startedAt > 0 && finishedAt > message.startedAt -> finishedAt - message.startedAt
+
+        !showTotalDuration && !running -> steps
+            .filterIsInstance<AssistantStep.Tool>()
+            .mapNotNull { it.trace.durationMs?.takeIf { ms -> ms > 0L } }
+            .sum()
+            .takeIf { it >= 1000L }
+
+        else -> null
     }
     val reasoningLabel = if (reasoningCount > 0) {
         stringResource(R.string.assistant_process_reasoning, reasoningCount)
@@ -153,51 +161,21 @@ internal fun ActivitySection(
             stringResource(R.string.assistant_elapsed_seconds),
         )
     }
-    val activity = if (running) processActivity(message.steps, streaming = true) else null
-    val pulseAlpha = if (running && motionEnabled) {
+    val activity = if (running) processActivity(steps, streaming = true) else null
+    val pulseAlphaState = if (running && motionEnabled) {
         val pulse = rememberInfiniteTransition(label = "activity_text_pulse")
         pulse.animateFloat(
-            initialValue = 0.45f,
+            initialValue = 0.55f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
                 animation = tween(durationMillis = 1000, easing = DdMotion.EaseInOut),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "activity_text_alpha",
-        ).value
+        )
     } else {
-        1f
+        remember { mutableFloatStateOf(1f) }
     }
-    val textAlpha by animateFloatAsState(
-        targetValue = pulseAlpha,
-        animationSpec = if (running && motionEnabled) snap() else settleSpec(),
-        label = "activity_text_alpha_settle",
-    )
-    val summaryFontSize by animateFloatAsState(
-        targetValue = if (running) ActivityRunningFontSize else ActivityDoneFontSize,
-        animationSpec = layoutSpec(),
-        label = "activity_summary_font_size",
-    )
-    val summaryLineHeight by animateFloatAsState(
-        targetValue = if (running) ActivityRunningLineHeight else ActivityDoneLineHeight,
-        animationSpec = layoutSpec(),
-        label = "activity_summary_line_height",
-    )
-    val chevronSize by animateDpAsState(
-        targetValue = if (running) ActivityRunningChevronSize else ActivityDoneChevronSize,
-        animationSpec = layoutSpec(),
-        label = "activity_summary_chevron_size",
-    )
-    val activityIconAlpha by animateFloatAsState(
-        targetValue = if (running) 1f else 0f,
-        animationSpec = settleSpec(),
-        label = "activity_icon_alpha",
-    )
-    val activityIconWidth by animateDpAsState(
-        targetValue = if (running) ActivityIconRowWidth else 0.dp,
-        animationSpec = layoutSpec(),
-        label = "activity_icon_width",
-    )
     val activityLabel = when (activity) {
         ProcessActivity.Thinking -> stringResource(R.string.assistant_process_thinking)
         ProcessActivity.CallingTool -> stringResource(R.string.assistant_process_calling_tool)
@@ -236,83 +214,100 @@ internal fun ActivitySection(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (activityIconWidth > 0.dp) {
+                if (running) {
                     Box(
                         modifier = Modifier
-                            .width(activityIconWidth)
+                            .width(ActivityIconRowWidth)
                             .height(ActivityIconSize)
                             .clipToBounds(),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                        Box(Modifier.graphicsLayer { alpha = activityIconAlpha }) {
-                            ActivityGifIcon(size = ActivityIconSize)
-                        }
+                        ActivityGifIcon(size = ActivityIconSize)
                     }
                 }
                 Text(
                     text = summary,
-                    style = DdType.body.copy(
-                        fontSize = summaryFontSize.sp,
-                        lineHeight = summaryLineHeight.sp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer { alpha = pulseAlphaState.value },
+                    style = DdType.bodySmall.copy(
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
                     ),
-                    color = statusColor.copy(alpha = textAlpha),
+                    color = statusColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.weight(1f))
-                Spacer(Modifier.size(DdSpacing.Xxs))
+                Spacer(Modifier.size(DdSpacing.Xs))
                 DdIcon(
                     icon = DdIcons.ChevronRight,
                     modifier = Modifier.graphicsLayer { rotationZ = rotation.value },
                     tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary),
-                    size = chevronSize,
+                    size = ActivityChevronSize,
                 )
                 Spacer(Modifier.width(DdSpacing.Xxs))
             }
         }
             },
             content = {
+            val railColor = colors.hairline.copy(alpha = DdAlpha.Hairline)
             Column(
-                Modifier.fillMaxWidth().padding(top = DdSpacing.Xs, bottom = DdSpacing.Sm),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = DdSpacing.Xs, bottom = DdSpacing.Sm),
                 verticalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
             ) {
-                processNodes.forEach { node ->
-                    when (node) {
-                        is ProcessNode.Single -> when (val step = node.step) {
-                            is AssistantStep.Reasoning -> ReasoningCard(
-                                step = step,
-                                active = step.id == activeReasoningId,
-                                onToggle = { onToggleStep(step.id) },
-                                compact = processDetail == ProcessDetail.COMPACT,
-                                terminatedStatus = terminatedStatus.takeIf { step.id == lastReasoningId },
-                            )
+                processNodes.forEachIndexed { index, node ->
+                    val clearance = when (node) {
+                        is ProcessNode.Single -> if (node.step is AssistantStep.Tool) {
+                            ProcessRowMetrics.IconSize / 2 + 3.dp
+                        } else {
+                            ProcessRowMetrics.DotSize / 2 + 4.dp
+                        }
 
-                            is AssistantStep.Tool -> ProcessToolStep(
-                                step = step,
+                        is ProcessNode.ToolRun -> ProcessRowMetrics.DotSize / 2 + 4.dp
+                    }
+                    ProcessTimelineNode(
+                        connectTop = index > 0,
+                        connectBottom = index < processNodes.lastIndex,
+                        markerClearance = clearance,
+                        railColor = railColor,
+                    ) {
+                        when (node) {
+                            is ProcessNode.Single -> when (val step = node.step) {
+                                is AssistantStep.Reasoning -> ReasoningCard(
+                                    step = step,
+                                    active = step.id == activeReasoningId,
+                                    onToggle = { onToggleStep(step.id) },
+                                    compact = processDetail == ProcessDetail.COMPACT,
+                                    terminatedStatus = terminatedStatus.takeIf { step.id == lastReasoningId },
+                                )
+
+                                is AssistantStep.Tool -> ProcessToolStep(
+                                    step = step,
+                                    onToggleStep = onToggleStep,
+                                    onCopyOutput = onCopyOutput,
+                                    onFileClick = onFileClick,
+                                    processDetail = processDetail,
+                                )
+
+                                is AssistantStep.Text -> Unit
+
+                                is AssistantStep.Notice -> NoticeStep(step)
+
+                                is AssistantStep.CustomCard -> Unit
+                            }
+
+                            is ProcessNode.ToolRun -> ToolRunGroup(
+                                tools = node.tools,
+                                messageId = message.id,
+                                streaming = message.streaming,
                                 onToggleStep = onToggleStep,
                                 onCopyOutput = onCopyOutput,
                                 onFileClick = onFileClick,
                                 processDetail = processDetail,
                             )
-
-                            is AssistantStep.Text -> ChatMarkdown(
-                                text = step.text.trim(),
-                                modifier = Modifier.padding(start = DdSpacing.Xxs, top = DdSpacing.Xxs, bottom = DdSpacing.Xs),
-                                onFileClick = onFileClick,
-                            )
-
-                            is AssistantStep.Notice -> NoticeStep(step)
-
-                            is AssistantStep.CustomCard -> Unit
                         }
-
-                        is ProcessNode.ToolRun -> ToolRunGroup(
-                            tools = node.tools,
-                            messageId = message.id,
-                            streaming = message.streaming,
-                            onToggleStep = onToggleStep,
-                            onCopyOutput = onCopyOutput,
-                            onFileClick = onFileClick,
-                            processDetail = processDetail,
-                        )
                     }
                 }
             }
@@ -321,16 +316,66 @@ internal fun ActivitySection(
     }
 }
 
+@Composable
+private fun ProcessTimelineNode(
+    connectTop: Boolean,
+    connectBottom: Boolean,
+    markerClearance: Dp,
+    railColor: Color,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (connectTop || connectBottom) {
+                    Modifier.drawBehind {
+                        val strokeWidth = 1.dp.toPx()
+                        val inset = ProcessRowMetrics.MarkerCenterX.toPx()
+                        val railX = if (layoutDirection == LayoutDirection.Rtl) size.width - inset else inset
+                        val headerCenterY = maxOf(ProcessRowMetrics.HeaderMinHeight.toPx(), 18.sp.toPx()) / 2f
+                        val clearPx = markerClearance.toPx()
+                        val gapPx = DdSpacing.Xs.toPx()
+                        if (connectTop) {
+                            val topEnd = headerCenterY - clearPx
+                            if (topEnd > 0f) {
+                                drawLine(
+                                    color = railColor,
+                                    start = Offset(railX, 0f),
+                                    end = Offset(railX, topEnd),
+                                    strokeWidth = strokeWidth,
+                                    cap = StrokeCap.Butt,
+                                )
+                            }
+                        }
+                        if (connectBottom) {
+                            val bottomStart = headerCenterY + clearPx
+                            val bottomEnd = size.height + gapPx
+                            if (bottomEnd > bottomStart) {
+                                drawLine(
+                                    color = railColor,
+                                    start = Offset(railX, bottomStart),
+                                    end = Offset(railX, bottomEnd),
+                                    strokeWidth = strokeWidth,
+                                    cap = StrokeCap.Butt,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
+        content()
+    }
+}
+
 private const val ToolGroupMinCount = 3
 
 private val ActivityIconSize = 15.dp
 private val ActivityIconRowWidth = 21.dp
-private val ActivityRunningChevronSize = 13.dp
-private val ActivityDoneChevronSize = 12.dp
-private const val ActivityRunningFontSize = 16f
-private const val ActivityRunningLineHeight = 26f
-private const val ActivityDoneFontSize = 13f
-private const val ActivityDoneLineHeight = 18f
+private val ActivityChevronSize = 13.dp
 
 private sealed interface ProcessNode {
     data class Single(val step: AssistantStep) : ProcessNode
@@ -371,11 +416,12 @@ private fun ToolRunGroup(
     processDetail: ProcessDetail,
 ) {
     val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
     val firstToolId = tools.first().id
     var expanded by rememberSaveable(messageId, firstToolId) { mutableStateOf(false) }
     val rotation = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
         label = "tool-group-chevron",
     )
     val running = tools.any { it.trace.status == ToolActivityStatus.RUNNING }
@@ -397,7 +443,7 @@ private fun ToolRunGroup(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = ProcessRowMetrics.OuterInset)
-                .heightIn(min = 32.dp)
+                .heightIn(min = ProcessRowMetrics.HeaderMinHeight)
                 .clip(RoundedCornerShape(6.dp))
                 .semantics { stateDescription = state }
                 .clickable(role = Role.Button, onClick = { expanded = !expanded })
@@ -416,10 +462,12 @@ private fun ToolRunGroup(
             Spacer(Modifier.width(ProcessRowMetrics.IconGap))
             Text(
                 text = title,
+                modifier = Modifier.weight(1f),
                 style = DdType.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp),
                 color = colors.inkSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.weight(1f))
             Spacer(Modifier.width(DdSpacing.Xs))
             DdIcon(
                 icon = DdIcons.ChevronRight,
@@ -432,7 +480,12 @@ private fun ToolRunGroup(
         },
         content = {
             Column(
-                Modifier.fillMaxWidth().padding(top = DdSpacing.Xxs),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = ProcessRowMetrics.IconSize + ProcessRowMetrics.IconGap,
+                        top = DdSpacing.Xxs,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(DdSpacing.Xxs),
             ) {
                 tools.forEach { tool ->
@@ -460,17 +513,20 @@ private fun NoticeStep(step: AssistantStep.Notice) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 28.dp)
-            .padding(horizontal = DdSpacing.Xs),
+            .padding(horizontal = ProcessRowMetrics.OuterInset)
+            .heightIn(min = ProcessRowMetrics.HeaderMinHeight)
+            .padding(horizontal = ProcessRowMetrics.InnerInset),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(6.dp)
-                .clip(DdShapes.Pill)
-                .background(if (notice.failed) colors.danger else colors.inkTertiary.copy(alpha = DdAlpha.Muted)),
-        )
-        Spacer(Modifier.width(DdSpacing.Sm))
+        Box(Modifier.size(ProcessRowMetrics.IconSize), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(ProcessRowMetrics.DotSize)
+                    .clip(DdShapes.Pill)
+                    .background(if (notice.failed) colors.danger else colors.inkTertiary.copy(alpha = DdAlpha.Muted)),
+            )
+        }
+        Spacer(Modifier.width(ProcessRowMetrics.IconGap))
         Text(
             text = text,
             modifier = Modifier.weight(1f),

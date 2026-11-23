@@ -60,11 +60,11 @@ import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
-import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSpacing
@@ -504,7 +504,7 @@ private fun JsonEditorCard(
                 )
             }
         }
-        DdHairline()
+        DdRowDivider()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -523,12 +523,14 @@ private fun JsonEditorCard(
                     errorLine != null -> stringResource(R.string.mcp_json_invalid_line, errorLine)
                     else -> stringResource(R.string.mcp_json_invalid)
                 },
+                modifier = Modifier.weight(1f),
                 style = DdType.bodySmall,
                 color = if (valid) colors.inkSecondary else colors.danger,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(DdSpacing.Sm))
             DdTextAction(
                 text = stringResource(if (copied) R.string.mcp_copied else R.string.mcp_copy),
                 onClick = onCopy,
