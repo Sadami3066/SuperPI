@@ -1,37 +1,24 @@
-import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import type { MemoryWriteOp, MemoryWriteRequest } from '@superpi/protocol'
-import { isMemoryPath } from '@superpi/protocol'
-
-export interface MemorySnapshot {
-  version: number
-  files: Record<string, string>
-  versions: Record<string, number>
-}
-
-export interface MemoryFileContent {
-  version: number
-  fileVersion: number
-  path: string
-  content: string
-}
-
-export interface MemorySource {
-  deviceId: string
-  deviceName: string
-}
-
-export class MemoryConflictError extends Error {
-  readonly currentVersion: number
-
-  constructor(currentVersion: number) {
-    super(`memory version conflict: expected ${currentVersion}`)
-    this.name = 'MemoryConflictError'
-    this.currentVersion = currentVersion
-  }
-}
+import {
+  ENTITY_KINDS,
+  MEMORY_CONFIDENCES,
+  MEMORY_ITEM_STATUSES,
+  MEMORY_KINDS,
+  MEMORY_SOURCE_KINDS,
+  type EntityKindWire,
+  type EntitySyncRecord,
+  type MemoryConfidenceWire,
+  type MemoryItemStatusWire,
+  type MemoryKindWire,
+  type MemoryPullEntry,
+  type MemoryPullResponse,
+  type MemoryPushOp,
+  type MemoryPushRejectedOp,
+  type MemoryPushRequest,
+  type MemoryPushResponse,
+  type MemorySourceKindWire,
+  type MemorySyncRecord,
+} from '@superpi/protocol'
 
 export class MemoryRequestError extends Error {
   constructor(message: string) {
@@ -40,254 +27,187 @@ export class MemoryRequestError extends Error {
   }
 }
 
-const WRITE_OPS: readonly MemoryWriteOp[] = ['append', 'replace_section', 'overwrite']
-const MAX_MEMORY_FILE_BYTES = 512 * 1024
-const MAX_SECTION_LENGTH = 160
-const MAX_BACKUPS_PER_FILE = 20
+const MAX_PUSH_OPS = 200
+const MAX_PULL_LIMIT = 500
+const DEFAULT_PULL_LIMIT = 200
+const MAX_ID_LENGTH = 128
+const MAX_CONTENT_CHARS = 8_192
+const MAX_SUMMARY_CHARS = 2_048
+const MAX_QUOTE_CHARS = 1_024
+const MAX_NAME_CHARS = 128
+const MAX_TAGS_PER_MEMORY = 20
+const MAX_ENTITIES_PER_MEMORY = 20
+const MAX_ALIASES_PER_ENTITY = 32
+const MAX_IDEMPOTENCY_ROWS = 10_000
 
 export class MemoryStore {
-  private readonly rootDir: string
   private readonly db: DatabaseSync
 
-  constructor(rootDir: string, db: DatabaseSync) {
-    this.rootDir = rootDir
+  constructor(db: DatabaseSync) {
     this.db = db
-    mkdirSync(rootDir, { recursive: true })
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_meta (
+      CREATE TABLE IF NOT EXISTS memory_v2_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS memory_writes (
-        idempotency_key TEXT PRIMARY KEY,
-        path TEXT NOT NULL,
-        source_device TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        version INTEGER NOT NULL
+      CREATE TABLE IF NOT EXISTS memory_v2_items (
+        id TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        updated_by TEXT NOT NULL,
+        deleted_at INTEGER,
+        server_seq INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS memory_v2_entities (
+        canonical_key TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        updated_by TEXT NOT NULL,
+        deleted_at INTEGER,
+        server_seq INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS memory_v2_ops (
+        seq INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL,
+        target_key TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_v2_ops_target
+        ON memory_v2_ops(kind, target_key);
+      CREATE TABLE IF NOT EXISTS memory_v2_idempotency (
+        op_id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
       );
     `)
   }
 
-  snapshot(): MemorySnapshot {
-    const files = this.listFiles()
-    const versions: Record<string, number> = {}
-    for (const relative of Object.keys(files)) versions[relative] = this.fileVersion(relative)
-    return { version: this.version(), files, versions }
-  }
-
-  file(requested: string): MemoryFileContent {
-    const relative = this.normalizePath(requested)
-    return {
-      version: this.version(),
-      fileVersion: this.fileVersion(relative),
-      path: relative,
-      content: this.read(relative),
-    }
-  }
-
-  write(source: MemorySource, request: MemoryWriteRequest, now = Date.now()): { version: number; applied: boolean } {
-    if (!WRITE_OPS.includes(request.op)) throw new MemoryRequestError(`unknown memory op: ${request.op}`)
-    if (typeof request.text !== 'string' || request.text.trim() === '') {
-      throw new MemoryRequestError('text is required')
-    }
-    const section = normalizeSection(request.section)
-    const relative = this.normalizePath(request.path)
-    const key = typeof request.idempotencyKey === 'string' ? request.idempotencyKey.trim() : ''
-    if (key === '' || key.length > 128) throw new MemoryRequestError('idempotencyKey is required')
-
-    const previous = this.findWrite(key, relative, source.deviceId)
-    if (previous !== null) return { version: previous, applied: false }
-
-    const current = this.read(relative)
-    const currentVersion = this.fileVersion(relative)
-    const safeDeviceName = sanitizeCommentName(source.deviceName)
-    let next: string
-    switch (request.op) {
-      case 'append':
-        next = this.appendBlock(current, section, this.stamp(safeDeviceName, request.text, now))
-        break
-      case 'replace_section':
-        if (section === null) throw new MemoryRequestError('section is required for replace_section')
-        this.requireVersion(currentVersion, request.baseVersion)
-        next = replaceSection(current, section, this.stamp(safeDeviceName, request.text, now))
-        break
-      case 'overwrite':
-        this.requireVersion(currentVersion, request.baseVersion)
-        next = `${request.text.trimEnd()}\n\n<!-- updated by ${safeDeviceName} ${new Date(now).toISOString()} -->\n`
-        break
-      default:
-        throw new MemoryRequestError(`unknown memory op: ${request.op}`)
-    }
-
-    if (Buffer.byteLength(next, 'utf8') > MAX_MEMORY_FILE_BYTES) {
-      throw new MemoryRequestError('memory file exceeds size limit')
-    }
-
-    let backupTarget: string | null = null
-    if (request.op === 'overwrite' && current !== '') {
-      backupTarget = this.backupFile(relative, current, now)
-    }
-
-    let version: number
-    try {
-      version = this.commitAtomicWrite(relative, current, next, key, source.deviceId, now)
-    } catch (error) {
-      if (backupTarget) {
-        try {
-          rmSync(backupTarget, { force: true })
-        } catch {}
-      }
-      throw error
-    }
-    if (backupTarget) {
-      this.pruneBackups(path.dirname(backupTarget), `${path.basename(relative)}.`)
-    }
-    return { version, applied: true }
-  }
-
   version(): number {
-    return this.readMetaInt('version')
+    return this.readMetaInt('seq')
   }
 
-  private stamp(deviceName: string, text: string, now: number): string {
-    const stamp = `<!-- src: ${deviceName} ${new Date(now).toISOString()} -->`
-    return `${text.trimEnd()} ${stamp}`
+  lastDreamAt(): number | null {
+    const row = this.db.prepare('SELECT value FROM memory_v2_meta WHERE key = ?').get('last_dream_at') as
+      | { value: string }
+      | undefined
+    if (!row) return null
+    const parsed = Number.parseInt(row.value, 10)
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
   }
 
-  private appendBlock(content: string, section: string | null, block: string): string {
-    if (!section) {
-      const base = content.trimEnd()
-      return `${base === '' ? '' : `${base}\n\n`}${block}\n`
+  push(deviceId: string, rawRequest: MemoryPushRequest, now = Date.now()): { response: MemoryPushResponse; changed: boolean } {
+    if (typeof rawRequest !== 'object' || rawRequest === null || Array.isArray(rawRequest)) {
+      throw new MemoryRequestError('body must be an object')
     }
-    return appendSectionBlock(content, section, block)
-  }
-
-  private requireVersion(current: number, requested: number | undefined): void {
-    if (requested === undefined) throw new MemoryRequestError('baseVersion is required for this operation')
-    if (typeof requested !== 'number' || !Number.isSafeInteger(requested) || requested < 0) {
-      throw new MemoryRequestError('invalid baseVersion')
+    if (!Array.isArray(rawRequest.ops)) {
+      throw new MemoryRequestError('ops must be an array')
     }
-    if (requested !== current) throw new MemoryConflictError(current)
-  }
-
-  private normalizePath(requested: string): string {
-    if (typeof requested !== 'string' || requested.trim() === '') throw new MemoryRequestError('path is required')
-    if (/[\x00-\x1f\x7f]/.test(requested)) throw new MemoryRequestError('invalid memory path')
-    const normalized = requested.replaceAll('\\', '/').replace(/^\/+/, '')
-    if (normalized.includes('..') || normalized.startsWith('/')) throw new MemoryRequestError('invalid memory path')
-    if (!isMemoryPath(normalized)) throw new MemoryRequestError(`unsupported memory path: ${normalized}`)
-    return normalized
-  }
-
-  private resolve(relative: string): string {
-    const target = path.resolve(this.rootDir, relative)
-    if (!target.startsWith(path.resolve(this.rootDir) + path.sep)) throw new MemoryRequestError('invalid memory path')
-    return target
-  }
-
-  private read(relative: string): string {
-    const file = this.resolve(relative)
-    return existsSync(file) ? readFileSync(file, 'utf8') : ''
-  }
-
-  private backupFile(relative: string, content: string, now: number): string {
-    const backupRoot = path.resolve(this.rootDir, '.backup')
-    const baseTarget = path.resolve(backupRoot, `${relative}.${now}.bak`)
-    if (!baseTarget.startsWith(backupRoot + path.sep)) throw new MemoryRequestError('invalid memory path')
-    mkdirSync(path.dirname(baseTarget), { recursive: true })
-    let target = baseTarget
-    let suffix = 1
-    while (existsSync(target)) {
-      target = path.resolve(backupRoot, `${relative}.${now}.${suffix}.bak`)
-      suffix += 1
+    if (rawRequest.ops.length > MAX_PUSH_OPS) {
+      throw new MemoryRequestError(`too many ops in batch (max ${MAX_PUSH_OPS})`)
     }
-    writeFileSync(target, content, 'utf8')
-    return target
-  }
+    if (
+      rawRequest.dreamCompletedAt !== undefined &&
+      (typeof rawRequest.dreamCompletedAt !== 'number' || !Number.isSafeInteger(rawRequest.dreamCompletedAt) || rawRequest.dreamCompletedAt <= 0)
+    ) {
+      throw new MemoryRequestError('dreamCompletedAt must be a positive integer')
+    }
 
-  private pruneBackups(dir: string, prefix: string): void {
-    const backups = readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith('.bak'))
-      .map((entry) => {
-        const stem = entry.name.slice(prefix.length, -'.bak'.length)
-        const parts = stem.split('.')
-        const ts = Number(parts[0])
-        const suffix = parts.length > 1 ? Number(parts[1]) : 0
-        return {
-          name: entry.name,
-          ts: Number.isFinite(ts) ? ts : 0,
-          suffix: Number.isFinite(suffix) ? suffix : 0,
-        }
-      })
-      .sort((a, b) => a.ts - b.ts || a.suffix - b.suffix || a.name.localeCompare(b.name))
-    const excess = backups.length - MAX_BACKUPS_PER_FILE
-    if (excess <= 0) return
-    for (const obsolete of backups.slice(0, excess)) {
+    const validatedOps: MemoryPushOp[] = []
+    const rejected: MemoryPushRejectedOp[] = []
+    for (let index = 0; index < rawRequest.ops.length; index += 1) {
+      const rawOp = rawRequest.ops[index]
       try {
-        rmSync(path.join(dir, obsolete.name), { force: true })
-      } catch {}
+        validatedOps.push(validateOp(rawOp, deviceId))
+      } catch (error) {
+        if (!(error instanceof MemoryRequestError)) throw error
+        const rawObj = typeof rawOp === 'object' && rawOp !== null && !Array.isArray(rawOp)
+          ? (rawOp as Record<string, unknown>)
+          : null
+        const rawOpId = rawObj?.opId
+        const opId =
+          typeof rawOpId === 'string' && rawOpId.trim() !== ''
+            ? rawOpId.trim().slice(0, MAX_ID_LENGTH)
+            : `index:${index}`
+        rejected.push({ opId, reason: error.message })
+      }
     }
-  }
 
-  private listFiles(): Record<string, string> {
-    const files: Record<string, string> = {}
-    for (const file of this.walk(this.rootDir)) {
-      const relative = path.relative(this.rootDir, file).split(path.sep).join('/')
-      if (relative === '.backup' || relative.startsWith('.backup/')) continue
-      if (!relative.endsWith('.md') && relative !== 'summaries.log') continue
-      files[relative] = readFileSync(file, 'utf8')
-    }
-    return files
-  }
+    let appliedCount = 0
+    let skippedCount = 0
+    let dreamUpdated = false
 
-  private walk(dir: string): string[] {
-    const result: string[] = []
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isSymbolicLink()) continue
-      if (entry.isDirectory() && entry.name === '.backup') continue
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) result.push(...this.walk(full))
-      else if (entry.isFile()) result.push(full)
-    }
-    return result
-  }
-
-  private commitAtomicWrite(
-    relative: string,
-    previousContent: string,
-    nextContent: string,
-    key: string,
-    deviceId: string,
-    now: number,
-  ): number {
-    const file = this.resolve(relative)
-    const existedBefore = existsSync(file)
-    mkdirSync(path.dirname(file), { recursive: true })
-    const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
-    writeFileSync(temporary, nextContent, 'utf8')
-    let renamed = false
     this.db.exec('BEGIN IMMEDIATE')
     try {
-      const version = this.bumpVersion()
-      this.setFileVersion(relative, version)
-      this.db
-        .prepare('INSERT INTO memory_writes (idempotency_key, path, source_device, created_at, version) VALUES (?, ?, ?, ?, ?)')
-        .run(key, relative, deviceId, now, version)
-      renameSync(temporary, file)
-      renamed = true
-      this.db.exec('COMMIT')
-      return version
-    } catch (error) {
-      if (renamed) {
-        try {
-          if (existedBefore) writeFileSync(file, previousContent, 'utf8')
-          else rmSync(file, { force: true })
-        } catch {}
-      } else {
-        try {
-          rmSync(temporary, { force: true })
-        } catch {}
+      let currentSeq = this.version()
+
+      for (const op of validatedOps) {
+        const seen = this.db
+          .prepare('SELECT device_id FROM memory_v2_idempotency WHERE op_id = ?')
+          .get(op.opId) as { device_id: string } | undefined
+        if (seen) {
+          if (seen.device_id !== deviceId) {
+            throw new MemoryRequestError('opId was already used by another device')
+          }
+          skippedCount += 1
+          continue
+        }
+
+        if (op.kind === 'memory') {
+          const incoming = op.memory!
+          const applied = this.applyMemoryOp(incoming, deviceId, currentSeq + 1, now)
+          if (applied) {
+            currentSeq += 1
+            this.writeMetaInt('seq', currentSeq)
+            appliedCount += 1
+          } else {
+            skippedCount += 1
+          }
+        } else {
+          const incoming = op.entity!
+          const applied = this.applyEntityOp(incoming, deviceId, currentSeq + 1, now)
+          if (applied) {
+            currentSeq += 1
+            this.writeMetaInt('seq', currentSeq)
+            appliedCount += 1
+          } else {
+            skippedCount += 1
+          }
+        }
+
+        this.db
+          .prepare('INSERT INTO memory_v2_idempotency (op_id, device_id, seq, created_at) VALUES (?, ?, ?, ?)')
+          .run(op.opId, deviceId, currentSeq, now)
       }
+
+      this.pruneIdempotency()
+
+      if (rawRequest.dreamCompletedAt !== undefined) {
+        const bounded = Math.min(rawRequest.dreamCompletedAt, now)
+        const existingDream = this.lastDreamAt()
+        if (bounded > 0 && (existingDream === null || bounded > existingDream)) {
+          this.writeMetaInt('last_dream_at', bounded)
+          dreamUpdated = true
+        }
+      }
+
+      this.db.exec('COMMIT')
+      const response: MemoryPushResponse = {
+        serverSeq: currentSeq,
+        appliedCount,
+        skippedCount,
+        lastDreamAt: this.lastDreamAt(),
+      }
+      if (rejected.length > 0) {
+        response.rejectedCount = rejected.length
+        response.rejected = rejected
+      }
+      return {
+        response,
+        changed: appliedCount > 0 || dreamUpdated,
+      }
+    } catch (error) {
       try {
         this.db.exec('ROLLBACK')
       } catch {}
@@ -295,141 +215,432 @@ export class MemoryStore {
     }
   }
 
-  private findWrite(key: string, relative: string, deviceId: string): number | null {
-    const row = this.db
-      .prepare('SELECT path, source_device, version FROM memory_writes WHERE idempotency_key = ?')
-      .get(key) as { path: string; source_device: string; version: number } | undefined
-    if (!row) return null
-    if (row.path !== relative || row.source_device !== deviceId) {
-      throw new MemoryRequestError('idempotencyKey was already used for another write')
+  pull(sinceSeq = 0, requestedLimit = DEFAULT_PULL_LIMIT): MemoryPullResponse {
+    const since = Number.isSafeInteger(sinceSeq) && sinceSeq >= 0 ? sinceSeq : 0
+    const limit = Number.isSafeInteger(requestedLimit)
+      ? Math.min(MAX_PULL_LIMIT, Math.max(1, requestedLimit))
+      : DEFAULT_PULL_LIMIT
+
+    this.db.exec('BEGIN')
+    let committed = false
+    try {
+      const rows = this.db
+        .prepare(
+          'SELECT seq, kind, target_key, device_id FROM memory_v2_ops WHERE seq > ? ORDER BY seq ASC LIMIT ?',
+        )
+        .all(since, limit + 1) as Array<{ seq: number; kind: string; target_key: string; device_id: string }>
+
+      const hasMore = rows.length > limit
+      const page = hasMore ? rows.slice(0, limit) : rows
+      const entries: MemoryPullEntry[] = []
+
+      const selectMemory = this.db.prepare('SELECT payload_json FROM memory_v2_items WHERE id = ?')
+      const selectEntity = this.db.prepare('SELECT payload_json FROM memory_v2_entities WHERE canonical_key = ?')
+
+      for (const row of page) {
+        const seq = Number(row.seq)
+        if (row.kind === 'memory') {
+          const item = selectMemory.get(row.target_key) as { payload_json: string } | undefined
+          if (!item) continue
+          entries.push({
+            seq,
+            kind: 'memory',
+            deviceId: row.device_id,
+            memory: JSON.parse(item.payload_json) as MemorySyncRecord,
+          })
+        } else if (row.kind === 'entity') {
+          const entity = selectEntity.get(row.target_key) as { payload_json: string } | undefined
+          if (!entity) continue
+          entries.push({
+            seq,
+            kind: 'entity',
+            deviceId: row.device_id,
+            entity: JSON.parse(entity.payload_json) as EntitySyncRecord,
+          })
+        }
+      }
+
+      const nextSince = entries.length > 0 ? entries[entries.length - 1]!.seq : since
+      const response: MemoryPullResponse = {
+        serverSeq: this.version(),
+        hasMore,
+        nextSince,
+        lastDreamAt: this.lastDreamAt(),
+        entries,
+      }
+      this.db.exec('COMMIT')
+      committed = true
+      return response
+    } finally {
+      if (!committed) {
+        try {
+          this.db.exec('ROLLBACK')
+        } catch {}
+      }
     }
-    return Number(row.version)
   }
 
-  private fileVersion(relative: string): number {
-    return this.readMetaInt(`file:${relative}`)
-  }
+  private applyMemoryOp(incoming: MemorySyncRecord, deviceId: string, nextSeq: number, now: number): boolean {
+    const existingRow = this.db
+      .prepare('SELECT payload_json, updated_at, updated_by FROM memory_v2_items WHERE id = ?')
+      .get(incoming.id) as { payload_json: string; updated_at: number; updated_by: string } | undefined
 
-  private setFileVersion(relative: string, version: number): void {
+    if (existingRow) {
+      const existing = JSON.parse(existingRow.payload_json) as MemorySyncRecord
+      const wins = compareVersionTuple(
+        incoming.updatedAt,
+        deviceId,
+        incoming.revision,
+        Number(existingRow.updated_at),
+        existingRow.updated_by,
+        existing.revision,
+      )
+      if (!wins) return false
+    }
+
+    const stored: MemorySyncRecord = {
+      ...incoming,
+      updatedByDeviceId: deviceId,
+    }
     this.db
-      .prepare('INSERT INTO memory_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-      .run(`file:${relative}`, String(version))
+      .prepare(
+        `INSERT INTO memory_v2_items (id, payload_json, updated_at, updated_by, deleted_at, server_seq)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           payload_json = excluded.payload_json,
+           updated_at = excluded.updated_at,
+           updated_by = excluded.updated_by,
+           deleted_at = excluded.deleted_at,
+           server_seq = excluded.server_seq`,
+      )
+      .run(stored.id, JSON.stringify(stored), stored.updatedAt, deviceId, stored.deletedAt ?? null, nextSeq)
+
+    this.upsertCompactedOp(nextSeq, 'memory', stored.id, deviceId, now)
+    return true
+  }
+
+  private applyEntityOp(incoming: EntitySyncRecord, deviceId: string, nextSeq: number, now: number): boolean {
+    const canonicalKey = normalizeCanonicalKey(incoming.canonicalKey ?? incoming.canonicalName)
+    const existingRow = this.db
+      .prepare('SELECT payload_json, updated_at, updated_by FROM memory_v2_entities WHERE canonical_key = ?')
+      .get(canonicalKey) as { payload_json: string; updated_at: number; updated_by: string } | undefined
+
+    if (!existingRow) {
+      const stored: EntitySyncRecord = {
+        ...incoming,
+        canonicalKey,
+        aliases: dedupeAliases(incoming.aliases, incoming.canonicalName),
+        updatedByDeviceId: deviceId,
+      }
+      this.db
+        .prepare(
+          `INSERT INTO memory_v2_entities (canonical_key, payload_json, updated_at, updated_by, deleted_at, server_seq)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(canonicalKey, JSON.stringify(stored), stored.updatedAt, deviceId, stored.deletedAt ?? null, nextSeq)
+      this.upsertCompactedOp(nextSeq, 'entity', canonicalKey, deviceId, now)
+      return true
+    }
+
+    const existing = JSON.parse(existingRow.payload_json) as EntitySyncRecord
+    const incomingWins = compareVersionTuple(
+      incoming.updatedAt,
+      deviceId,
+      incoming.revision,
+      Number(existingRow.updated_at),
+      existingRow.updated_by,
+      existing.revision,
+    )
+
+    const winner = incomingWins ? incoming : existing
+    const loser = incomingWins ? existing : incoming
+    const mergedAliases = dedupeAliases([...existing.aliases, ...incoming.aliases], winner.canonicalName)
+    const winnerSummary = cleanNullableText(winner.summary)
+    const loserSummary = cleanNullableText(loser.summary)
+    const mergedSummary = winnerSummary ?? loserSummary
+
+    const aliasesGrew =
+      mergedAliases.length !== existing.aliases.length ||
+      mergedAliases.some((alias, index) => alias !== existing.aliases[index])
+    const summaryFilled = !incomingWins && cleanNullableText(existing.summary) === null && mergedSummary !== null
+
+    if (!incomingWins && !aliasesGrew && !summaryFilled) {
+      return false
+    }
+
+    const nextDevice = incomingWins ? deviceId : existingRow.updated_by
+    const nextUpdatedAt = incomingWins ? incoming.updatedAt : Number(existingRow.updated_at)
+    const merged: EntitySyncRecord = {
+      canonicalKey,
+      id: winner.id,
+      canonicalName: winner.canonicalName,
+      kind: winner.kind,
+      aliases: mergedAliases,
+      summary: mergedSummary,
+      mergedInto: winner.mergedInto ?? null,
+      updatedAt: nextUpdatedAt,
+      deletedAt: winner.deletedAt ?? null,
+      revision: Math.max(winner.revision, existing.revision + (!incomingWins ? 1 : 0)),
+      updatedByDeviceId: nextDevice,
+    }
+
+    this.db
+      .prepare(
+        `UPDATE memory_v2_entities
+         SET payload_json = ?, updated_at = ?, updated_by = ?, deleted_at = ?, server_seq = ?
+         WHERE canonical_key = ?`,
+      )
+      .run(JSON.stringify(merged), merged.updatedAt, nextDevice, merged.deletedAt ?? null, nextSeq, canonicalKey)
+    this.upsertCompactedOp(nextSeq, 'entity', canonicalKey, deviceId, now)
+    return true
+  }
+
+  private upsertCompactedOp(seq: number, kind: string, targetKey: string, deviceId: string, now: number): void {
+    this.db.prepare('DELETE FROM memory_v2_ops WHERE kind = ? AND target_key = ?').run(kind, targetKey)
+    this.db
+      .prepare('INSERT INTO memory_v2_ops (seq, kind, target_key, device_id, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(seq, kind, targetKey, deviceId, now)
+  }
+
+  private pruneIdempotency(): void {
+    const countRow = this.db.prepare('SELECT COUNT(*) AS cnt FROM memory_v2_idempotency').get() as
+      | { cnt: number }
+      | undefined
+    const count = Number(countRow?.cnt ?? 0)
+    if (count <= MAX_IDEMPOTENCY_ROWS) return
+    const excess = count - MAX_IDEMPOTENCY_ROWS
+    this.db
+      .prepare(
+        'DELETE FROM memory_v2_idempotency WHERE op_id IN (SELECT op_id FROM memory_v2_idempotency ORDER BY created_at ASC, rowid ASC LIMIT ?)',
+      )
+      .run(excess)
   }
 
   private readMetaInt(key: string): number {
-    const row = this.db.prepare('SELECT value FROM memory_meta WHERE key = ?').get(key) as { value: string } | undefined
+    const row = this.db.prepare('SELECT value FROM memory_v2_meta WHERE key = ?').get(key) as { value: string } | undefined
     const parsed = row ? Number.parseInt(row.value, 10) : 0
-    return Number.isFinite(parsed) ? parsed : 0
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0
   }
 
-  private bumpVersion(): number {
-    const next = this.version() + 1
+  private writeMetaInt(key: string, value: number): void {
     this.db
-      .prepare('INSERT INTO memory_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-      .run('version', String(next))
-    return next
+      .prepare('INSERT INTO memory_v2_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, String(value))
   }
 }
 
-interface FenceState {
-  char: '`' | '~'
-  length: number
-}
-
-interface SectionBounds {
-  headingIndex: number
-  endIndex: number
-}
-
-function updateFence(line: string, current: FenceState | null): FenceState | null {
-  const trimmed = line.trim()
-  if (!current) {
-    const match = /^(`{3,}|~{3,})/.exec(trimmed)
-    if (!match) return null
-    const marker = match[1] ?? ''
-    const char = marker[0] as '`' | '~'
-    if (char === '`' && trimmed.slice(marker.length).includes('`')) return null
-    return { char, length: marker.length }
+function compareVersionTuple(
+  incomingUpdatedAt: number,
+  incomingDeviceId: string,
+  incomingRevision: number,
+  existingUpdatedAt: number,
+  existingDeviceId: string,
+  existingRevision: number,
+): boolean {
+  if (incomingUpdatedAt !== existingUpdatedAt) {
+    return incomingUpdatedAt > existingUpdatedAt
   }
-  const closing = new RegExp(`^${current.char}{${current.length},}$`)
-  return closing.test(trimmed) ? null : current
+  if (incomingDeviceId !== existingDeviceId) {
+    return incomingDeviceId > existingDeviceId
+  }
+  return incomingRevision > existingRevision
 }
 
-function findSectionBounds(lines: string[], section: string): SectionBounds | null {
-  const target = `## ${section.trim()}`
-  let fence: FenceState | null = null
-  let headingIndex = -1
+function normalizeCanonicalKey(raw: string): string {
+  return raw.trim().toLowerCase()
+}
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? ''
-    const nextFence = updateFence(line, fence)
-    if (fence !== null || nextFence !== null) {
-      fence = nextFence
-      continue
+function dedupeAliases(aliases: string[], canonicalName: string): string[] {
+  const seen = new Set<string>([canonicalName.trim().toLowerCase()])
+  const result: string[] = []
+  for (const raw of aliases) {
+    const clean = raw.trim()
+    if (clean === '') continue
+    const key = clean.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(clean.slice(0, MAX_NAME_CHARS))
+    if (result.length >= MAX_ALIASES_PER_ENTITY) break
+  }
+  return result
+}
+
+function validateOp(raw: unknown, deviceId: string): MemoryPushOp {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new MemoryRequestError('op must be an object')
+  }
+  const obj = raw as Record<string, unknown>
+  const opId = requireId(obj.opId, 'opId')
+  if (obj.kind === 'memory') {
+    return { opId, kind: 'memory', memory: validateMemoryRecord(obj.memory, deviceId) }
+  }
+  if (obj.kind === 'entity') {
+    return { opId, kind: 'entity', entity: validateEntityRecord(obj.entity, deviceId) }
+  }
+  throw new MemoryRequestError(`unknown op kind: ${String(obj.kind)}`)
+}
+
+function validateMemoryRecord(raw: unknown, deviceId: string): MemorySyncRecord {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new MemoryRequestError('memory payload must be an object')
+  }
+  const obj = raw as Record<string, unknown>
+  const id = requireId(obj.id, 'memory.id')
+  const kind = requireEnum(obj.kind, MEMORY_KINDS, 'memory.kind') as MemoryKindWire
+  const content = requireText(obj.content, MAX_CONTENT_CHARS, 'memory.content')
+  const summary = optionalText(obj.summary, MAX_SUMMARY_CHARS, 'memory.summary')
+  const tags = requireStringList(obj.tags ?? [], MAX_TAGS_PER_MEMORY, 64, 'memory.tags')
+  const entities = requireStringList(obj.entities ?? [], MAX_ENTITIES_PER_MEMORY, MAX_NAME_CHARS, 'memory.entities')
+  const confidence = requireEnum(obj.confidence, MEMORY_CONFIDENCES, 'memory.confidence') as MemoryConfidenceWire
+  if (typeof obj.importance !== 'number' || !Number.isSafeInteger(obj.importance) || obj.importance < 1 || obj.importance > 5) {
+    throw new MemoryRequestError('memory.importance must be an integer 1..5')
+  }
+  if (typeof obj.pinned !== 'boolean') {
+    throw new MemoryRequestError('memory.pinned must be a boolean')
+  }
+  const validFrom = requireNonNegativeInt(obj.validFrom, 'memory.validFrom')
+  const validUntil = optionalNonNegativeInt(obj.validUntil, 'memory.validUntil')
+  const status = requireEnum(obj.status, MEMORY_ITEM_STATUSES, 'memory.status') as MemoryItemStatusWire
+  const supersededBy = optionalId(obj.supersededBy, 'memory.supersededBy')
+  const sourceKind = requireEnum(obj.sourceKind, MEMORY_SOURCE_KINDS, 'memory.sourceKind') as MemorySourceKindWire
+  const sourceSessionId = optionalId(obj.sourceSessionId, 'memory.sourceSessionId')
+  const sourceEntryId = optionalId(obj.sourceEntryId, 'memory.sourceEntryId')
+  const sourceQuote = optionalText(obj.sourceQuote, MAX_QUOTE_CHARS, 'memory.sourceQuote')
+  const createdAt = requireNonNegativeInt(obj.createdAt, 'memory.createdAt')
+  const updatedAt = requireNonNegativeInt(obj.updatedAt, 'memory.updatedAt')
+  const deletedAt = optionalNonNegativeInt(obj.deletedAt, 'memory.deletedAt')
+  if (typeof obj.revision !== 'number' || !Number.isSafeInteger(obj.revision) || obj.revision < 1) {
+    throw new MemoryRequestError('memory.revision must be a positive integer')
+  }
+
+  return {
+    id,
+    kind,
+    content,
+    summary,
+    tags,
+    entities,
+    confidence,
+    importance: obj.importance,
+    pinned: obj.pinned,
+    validFrom,
+    validUntil,
+    status,
+    supersededBy,
+    sourceKind,
+    sourceSessionId,
+    sourceEntryId,
+    sourceQuote,
+    createdAt,
+    updatedAt,
+    deletedAt,
+    revision: obj.revision,
+    updatedByDeviceId: optionalId(obj.updatedByDeviceId, 'memory.updatedByDeviceId') ?? deviceId,
+  }
+}
+
+function validateEntityRecord(raw: unknown, deviceId: string): EntitySyncRecord {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new MemoryRequestError('entity payload must be an object')
+  }
+  const obj = raw as Record<string, unknown>
+  const id = requireId(obj.id, 'entity.id')
+  const canonicalName = requireText(obj.canonicalName, MAX_NAME_CHARS, 'entity.canonicalName')
+  const canonicalKey = optionalText(obj.canonicalKey, MAX_NAME_CHARS, 'entity.canonicalKey')?.toLowerCase() ?? canonicalName.toLowerCase()
+  const kind = requireEnum(obj.kind, ENTITY_KINDS, 'entity.kind') as EntityKindWire
+  const aliases = requireStringList(obj.aliases ?? [], MAX_ALIASES_PER_ENTITY, MAX_NAME_CHARS, 'entity.aliases')
+  const summary = optionalText(obj.summary, MAX_SUMMARY_CHARS, 'entity.summary')
+  const mergedInto = optionalText(obj.mergedInto, MAX_NAME_CHARS, 'entity.mergedInto')
+  const updatedAt = requireNonNegativeInt(obj.updatedAt, 'entity.updatedAt')
+  const deletedAt = optionalNonNegativeInt(obj.deletedAt, 'entity.deletedAt')
+  if (typeof obj.revision !== 'number' || !Number.isSafeInteger(obj.revision) || obj.revision < 1) {
+    throw new MemoryRequestError('entity.revision must be a positive integer')
+  }
+
+  return {
+    canonicalKey,
+    id,
+    canonicalName,
+    kind,
+    aliases,
+    summary,
+    mergedInto,
+    updatedAt,
+    deletedAt,
+    revision: obj.revision,
+    updatedByDeviceId: optionalId(obj.updatedByDeviceId, 'entity.updatedByDeviceId') ?? deviceId,
+  }
+}
+
+function requireId(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new MemoryRequestError(`${field} is required`)
+  const clean = value.trim()
+  if (clean === '' || clean.length > MAX_ID_LENGTH) throw new MemoryRequestError(`${field} length invalid`)
+  return clean
+}
+
+function optionalId(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new MemoryRequestError(`${field} must be a string`)
+  const clean = value.trim()
+  if (clean === '') return null
+  if (clean.length > MAX_ID_LENGTH) throw new MemoryRequestError(`${field} length invalid`)
+  return clean
+}
+
+function requireText(value: unknown, maxChars: number, field: string): string {
+  if (typeof value !== 'string') throw new MemoryRequestError(`${field} is required`)
+  const clean = value.trim()
+  if (clean === '' || clean.length > maxChars) throw new MemoryRequestError(`${field} length invalid`)
+  return clean
+}
+
+function optionalText(value: unknown, maxChars: number, field: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new MemoryRequestError(`${field} must be a string`)
+  const clean = value.trim()
+  if (clean === '') return null
+  return clean.slice(0, maxChars)
+}
+
+function cleanNullableText(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null
+  const clean = value.trim()
+  return clean === '' ? null : clean
+}
+
+function requireEnum(value: unknown, allowed: readonly string[], field: string): string {
+  if (typeof value !== 'string' || !allowed.includes(value)) {
+    throw new MemoryRequestError(`invalid ${field}`)
+  }
+  return value
+}
+
+function requireNonNegativeInt(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new MemoryRequestError(`${field} must be a non-negative integer`)
+  }
+  return value
+}
+
+function optionalNonNegativeInt(value: unknown, field: string): number | null {
+  if (value === undefined || value === null) return null
+  return requireNonNegativeInt(value, field)
+}
+
+function requireStringList(value: unknown, maxItems: number, maxLen: number, field: string): string[] {
+  if (!Array.isArray(value)) throw new MemoryRequestError(`${field} must be an array`)
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') throw new MemoryRequestError(`${field} entries must be strings`)
+    const clean = item.trim().slice(0, maxLen)
+    if (clean === '') continue
+    if (!seen.has(clean)) {
+      seen.add(clean)
+      result.push(clean)
+      if (result.length >= maxItems) break
     }
-    const trimmed = line.trim()
-    if (headingIndex < 0) {
-      if (trimmed === target) headingIndex = index
-    } else if (/^#{1,2}(?:\s|$)/.test(trimmed)) {
-      return { headingIndex, endIndex: index }
-    }
   }
-
-  if (headingIndex < 0) return null
-  return { headingIndex, endIndex: lines.length }
+  return result
 }
-
-function appendSectionBlock(content: string, section: string, block: string): string {
-  const normalized = content.replaceAll('\r\n', '\n')
-  const lines = normalized.split('\n')
-  const bounds = findSectionBounds(lines, section)
-  if (!bounds) {
-    const base = normalized.trimEnd()
-    return `${base === '' ? '' : `${base}\n\n`}## ${section.trim()}\n\n${block}\n`
-  }
-  const head = lines.slice(0, bounds.endIndex).join('\n').trimEnd()
-  const hasBody = lines.slice(bounds.headingIndex + 1, bounds.endIndex).some((line) => line.trim() !== '')
-  const separator = hasBody ? '\n' : '\n\n'
-  const tailLines = lines.slice(bounds.endIndex)
-  if (tailLines.length === 0) return `${head}${separator}${block}\n`
-  const tail = tailLines.join('\n')
-  const normalizedTail = tail.endsWith('\n') ? tail : `${tail}\n`
-  return `${head}${separator}${block}\n\n${normalizedTail}`
-}
-
-function replaceSection(content: string, section: string, block: string): string {
-  const normalized = content.replaceAll('\r\n', '\n')
-  const lines = normalized.split('\n')
-  const bounds = findSectionBounds(lines, section)
-  if (!bounds) {
-    const base = normalized.trimEnd()
-    return `${base === '' ? '' : `${base}\n\n`}## ${section.trim()}\n\n${block}\n`
-  }
-  const head = lines.slice(0, bounds.headingIndex + 1).join('\n').trimEnd()
-  const tailLines = lines.slice(bounds.endIndex)
-  if (tailLines.length === 0) return `${head}\n\n${block}\n`
-  const tail = tailLines.join('\n')
-  const normalizedTail = tail.endsWith('\n') ? tail : `${tail}\n`
-  return `${head}\n\n${block}\n\n${normalizedTail}`
-}
-
-function normalizeSection(section: unknown): string | null {
-  if (section === undefined || section === null) return null
-  if (typeof section !== 'string') throw new MemoryRequestError('section must be a string')
-  const trimmed = section.trim()
-  if (trimmed === '' || trimmed.length > MAX_SECTION_LENGTH || /[\r\n]/.test(trimmed)) {
-    throw new MemoryRequestError('section must be a non-empty single-line string')
-  }
-  return trimmed
-}
-
-function sanitizeCommentName(name: string): string {
-  const cleaned = name
-    .replace(/[\x00-\x1f\x7f]/g, ' ')
-    .replaceAll('-->', '-- >')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 128)
-  return cleaned === '' ? 'device' : cleaned
-}
-

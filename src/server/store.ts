@@ -156,9 +156,18 @@ export class RelayStore {
     leaseId: string,
     now: number,
     ttlMs: number,
+    minIntervalMs = 0,
+    lastCompletedAt: number | null = null,
   ): { acquired: boolean; leaseId?: string; holderDeviceId?: string; expiresAt: number } {
     this.db.exec('BEGIN IMMEDIATE')
     try {
+      if (minIntervalMs > 0 && lastCompletedAt !== null && now - lastCompletedAt < minIntervalMs) {
+        this.db.exec('COMMIT')
+        return {
+          acquired: false,
+          expiresAt: lastCompletedAt + minIntervalMs,
+        }
+      }
       const existing = this.db
         .prepare('SELECT device_id, expires_at FROM memory_leases WHERE name = ?')
         .get(name) as { device_id: string; expires_at: number } | undefined

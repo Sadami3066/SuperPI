@@ -28,7 +28,7 @@ export interface RealtimeHub {
   isOnline(deviceId: string): boolean
   botsOf(deviceId: string): BotInfo[]
   capabilitiesOf(deviceId: string): string[] | undefined
-  broadcastMemoryChanged(version: number): void
+  broadcastMemoryChanged(version: number, excludeDeviceId?: string): void
   disconnectDevice(deviceId: string): void
   notifyDeviceRenamed(deviceId: string, name: string): void
 }
@@ -621,8 +621,9 @@ export function createRealtimeHub(
     capabilitiesOf(deviceId: string) {
       return connections.get(deviceId)?.capabilities
     },
-    broadcastMemoryChanged(version: number) {
+    broadcastMemoryChanged(version: number, excludeDeviceId?: string) {
       for (const connection of connections.values()) {
+        if (excludeDeviceId !== undefined && connection.deviceId === excludeDeviceId) continue
         send(connection, { type: 'memory_changed', version })
       }
     },

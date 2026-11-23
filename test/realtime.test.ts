@@ -53,7 +53,7 @@ async function startRelay(options?: { now?: () => number; hubOptions?: RealtimeH
   const storeDir = mkdtempSync(path.join(tmpdir(), 'superpi-realtime-'))
   const store = new RelayStore(storeDir)
   store.createAccount(newAccountId(), hashSecret(LOGIN_SECRET), options?.now?.() ?? Date.now())
-  const memory = new MemoryStore(path.join(storeDir, 'memory'), store.database)
+  const memory = new MemoryStore(store.database)
   const config: RelayConfig = {
     host: '127.0.0.1',
     port: 0,
@@ -72,7 +72,7 @@ async function startRelay(options?: { now?: () => number; hubOptions?: RealtimeH
     entries: [],
     memory,
     now: options?.now,
-    onMemoryChanged: (version) => hub.broadcastMemoryChanged(version),
+    onMemoryChanged: (version, sourceDeviceId) => hub.broadcastMemoryChanged(version, sourceDeviceId),
     onDeviceRevoked: (id) => hub.disconnectDevice(id),
     online: (deviceId) => hub.isOnline(deviceId),
     botsOf: (deviceId) => hub.botsOf(deviceId),
@@ -324,14 +324,50 @@ describe('realtime hub', () => {
     const desktop = await enrollDevice(harness, 'Desktop', 'desktop')
     const revokedPhone = await enrollDevice(harness, 'Old Phone', 'android')
 
-    harness.memory.write(
-      { deviceId: desktop.deviceId, deviceName: 'Desktop' },
-      { op: 'append', path: 'profile.md', text: 'One', idempotencyKey: 'm1' },
-    )
-    harness.memory.write(
-      { deviceId: desktop.deviceId, deviceName: 'Desktop' },
-      { op: 'append', path: 'profile.md', text: 'Two', idempotencyKey: 'm2' },
-    )
+    harness.memory.push(desktop.deviceId, {
+      ops: [
+        {
+          opId: 'op-1',
+          kind: 'memory',
+          memory: {
+            id: 'mem-1',
+            kind: 'IDENTITY',
+            content: 'One',
+            tags: [],
+            entities: [],
+            confidence: 'CONFIRMED',
+            importance: 4,
+            pinned: false,
+            validFrom: 1_000,
+            status: 'ACTIVE',
+            sourceKind: 'USER_MANUAL',
+            createdAt: 1_000,
+            updatedAt: 1_000,
+            revision: 1,
+          },
+        },
+        {
+          opId: 'op-2',
+          kind: 'memory',
+          memory: {
+            id: 'mem-2',
+            kind: 'HABIT',
+            content: 'Two',
+            tags: [],
+            entities: [],
+            confidence: 'OBSERVED',
+            importance: 3,
+            pinned: false,
+            validFrom: 2_000,
+            status: 'ACTIVE',
+            sourceKind: 'CHAT_AUTO',
+            createdAt: 2_000,
+            updatedAt: 2_000,
+            revision: 1,
+          },
+        },
+      ],
+    })
 
     const revoke = await fetch(`${harness.httpBase}/v1/devices/${revokedPhone.deviceId}`, {
       method: 'DELETE',
@@ -343,7 +379,56 @@ describe('realtime hub', () => {
     client.send(hello(desktop.deviceId))
     const helloOk = await nextOf(client, 'hello_ok')
     expect(helloOk.memoryVersion).toBe(2)
+    expect(helloOk.capabilities).toContain('memory-v2')
     expect(helloOk.devices.map((device) => device.deviceId)).toEqual([desktop.deviceId])
+  })
+
+  it('broadcasts memory_changed only to peer devices and skips sender device', async () => {
+    const harness = await startRelay()
+    const phoneA = await enrollDevice(harness, 'Phone A', 'android')
+    const phoneB = await enrollDevice(harness, 'Phone B', 'android')
+
+    const clientA = await Client.open(harness.wsBase, phoneA.token)
+    clientA.send(hello(phoneA.deviceId))
+    await nextOf(clientA, 'hello_ok')
+
+    const clientB = await Client.open(harness.wsBase, phoneB.token)
+    clientB.send(hello(phoneB.deviceId))
+    await nextOf(clientB, 'hello_ok')
+
+    const pushResponse = await fetch(`${harness.httpBase}/v2/memory/push`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${phoneA.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ops: [
+          {
+            opId: 'push-a-1',
+            kind: 'memory',
+            memory: {
+              id: 'm-peer',
+              kind: 'IDENTITY',
+              content: 'Prefers decaf coffee',
+              tags: [],
+              entities: [],
+              confidence: 'CONFIRMED',
+              importance: 4,
+              pinned: false,
+              validFrom: 5_000,
+              status: 'ACTIVE',
+              sourceKind: 'USER_MANUAL',
+              createdAt: 5_000,
+              updatedAt: 5_000,
+              revision: 1,
+            },
+          },
+        ],
+      }),
+    })
+    expect(pushResponse.status).toBe(200)
+
+    const notifyB = await nextOf(clientB, 'memory_changed')
+    expect(notifyB.version).toBe(1)
+    await expect(nextOf(clientA, 'memory_changed', 150)).rejects.toThrow('timed out')
   })
 
   it('cleans up non-streaming routes immediately on route_ok while keeping bot.resume streaming', async () => {

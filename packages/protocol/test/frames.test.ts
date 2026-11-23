@@ -673,6 +673,7 @@ describe('protocol validation', () => {
 
     expect(RELAY_CAPABILITIES).toContain('bot-capabilities')
     expect(RELAY_CAPABILITIES).toContain('present-artifacts')
+    expect(RELAY_CAPABILITIES).toContain('memory-v2')
 
     const capGet = parseClientFrame({
       type: 'route',

@@ -12,12 +12,10 @@ import type {
   EnrollResponse,
   ErrorCode,
   HealthResponse,
-  MemoryFileResponse,
-  MemoryRollupLeaseReleaseResponse,
-  MemoryRollupLeaseResponse,
-  MemorySnapshotResponse,
-  MemoryWriteRequest,
-  MemoryWriteResponse,
+  MemoryDreamLeaseReleaseResponse,
+  MemoryDreamLeaseResponse,
+  MemoryPullResponse,
+  MemoryPushRequest,
   PairCodeResponse,
   PairEntry,
   RenameDeviceResponse,
@@ -26,7 +24,7 @@ import type {
 import type { RelayConfig } from './config.ts'
 import { newDeviceId, newPairCode, randomToken, sha256, verifySecret } from './auth.ts'
 import type { DeviceRecord, RelayStore } from './store.ts'
-import { MemoryConflictError, MemoryRequestError, type MemoryStore } from './memory.ts'
+import { MemoryRequestError, type MemoryStore } from './memory.ts'
 
 export interface EnrollRateLimitOptions {
   maxFailures?: number
@@ -40,7 +38,7 @@ export interface RelayServerOptions {
   entries: PairEntry[]
   caPem?: string | null
   memory?: MemoryStore | null
-  onMemoryChanged?: (version: number) => void
+  onMemoryChanged?: (version: number, sourceDeviceId?: string) => void
   onDeviceRevoked?: (deviceId: string) => void
   onDeviceRenamed?: (deviceId: string, name: string) => void
   enrollRateLimit?: EnrollRateLimitOptions
@@ -64,9 +62,9 @@ const DEFAULT_ENROLL_MAX_FAILURES = 10
 const DEFAULT_ENROLL_WINDOW_MS = 15 * 60 * 1000
 const MAX_FAILURE_KEYS = 4_096
 const MAX_DEVICE_NAME_LENGTH = 128
-const DEFAULT_ROLLUP_LEASE_TTL_MS = 10 * 60 * 1000
-const MIN_ROLLUP_LEASE_TTL_MS = 30 * 1000
-const MAX_ROLLUP_LEASE_TTL_MS = 30 * 60 * 1000
+const DEFAULT_DREAM_LEASE_TTL_MS = 10 * 60 * 1000
+const MIN_DREAM_LEASE_TTL_MS = 30 * 1000
+const MAX_DREAM_LEASE_TTL_MS = 30 * 60 * 1000
 
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const now = options.now ?? (() => Date.now())
@@ -155,26 +153,7 @@ async function handle(
       return
     }
 
-    if (method === 'GET' && url.pathname === '/v1/memory/snapshot') {
-      const device = authenticate(options, now(), request, response)
-      if (!device || response.writableEnded) return
-      const memory = requireMemory(options)
-      const body: MemorySnapshotResponse = memory.snapshot()
-      sendJson(response, 200, body)
-      return
-    }
-
-    if (method === 'GET' && url.pathname === '/v1/memory/file') {
-      const device = authenticate(options, now(), request, response)
-      if (!device || response.writableEnded) return
-      const memory = requireMemory(options)
-      const requested = url.searchParams.get('path') ?? ''
-      const body: MemoryFileResponse = memory.file(requested)
-      sendJson(response, 200, body)
-      return
-    }
-
-    if (method === 'POST' && url.pathname === '/v1/memory/write') {
+    if (method === 'POST' && url.pathname === '/v2/memory/push') {
       const device = authenticate(options, now(), request, response)
       if (!device || response.writableEnded) return
       const memory = requireMemory(options)
@@ -186,48 +165,79 @@ async function handle(
       if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
       const writeNow = now()
       options.store.touchDevice(currentDevice.id, writeNow)
-      const result = memory.write({ deviceId: currentDevice.id, deviceName: currentDevice.name }, body as MemoryWriteRequest, writeNow)
-      if (result.applied) options.onMemoryChanged?.(result.version)
-      const responseBody: MemoryWriteResponse = { version: result.version }
-      sendJson(response, 200, responseBody)
+      const result = memory.push(currentDevice.id, body as MemoryPushRequest, writeNow)
+      if (result.changed) options.onMemoryChanged?.(result.response.serverSeq, currentDevice.id)
+      sendJson(response, 200, result.response)
       return
     }
 
-    if (method === 'POST' && url.pathname === '/v1/memory/rollup-lease') {
+    if (method === 'GET' && url.pathname === '/v2/memory/pull') {
+      const device = authenticate(options, now(), request, response)
+      if (!device || response.writableEnded) return
+      const memory = requireMemory(options)
+      const rawSince = url.searchParams.get('since')
+      const rawLimit = url.searchParams.get('limit')
+      const since = rawSince !== null ? Number.parseInt(rawSince, 10) : 0
+      const limit = rawLimit !== null ? Number.parseInt(rawLimit, 10) : 200
+      if ((rawSince !== null && (!Number.isSafeInteger(since) || since < 0)) || (rawLimit !== null && (!Number.isSafeInteger(limit) || limit <= 0))) {
+        throw new HttpError(400, 'bad_request', 'invalid since or limit')
+      }
+      const body: MemoryPullResponse = memory.pull(since, limit)
+      sendJson(response, 200, body)
+      return
+    }
+
+    if (method === 'POST' && url.pathname === '/v2/memory/dream-lease') {
       const currentNow = now()
       const device = authenticate(options, currentNow, request, response)
       if (!device || response.writableEnded) return
-      requireMemory(options)
+      const memory = requireMemory(options)
       const body = await readJson(request, BODY_LIMIT)
       if (body !== null && (typeof body !== 'object' || Array.isArray(body))) {
         throw new HttpError(400, 'bad_request', 'body must be an object')
       }
       const requestedTtl = (body as { ttlMs?: unknown } | null)?.ttlMs
-      let ttlMs = DEFAULT_ROLLUP_LEASE_TTL_MS
+      let ttlMs = DEFAULT_DREAM_LEASE_TTL_MS
       if (requestedTtl !== undefined) {
         if (typeof requestedTtl !== 'number' || !Number.isFinite(requestedTtl) || requestedTtl <= 0) {
           throw new HttpError(400, 'bad_request', 'ttlMs must be a positive number')
         }
-        ttlMs = Math.min(MAX_ROLLUP_LEASE_TTL_MS, Math.max(MIN_ROLLUP_LEASE_TTL_MS, Math.round(requestedTtl)))
+        ttlMs = Math.min(MAX_DREAM_LEASE_TTL_MS, Math.max(MIN_DREAM_LEASE_TTL_MS, Math.round(requestedTtl)))
       }
-      const result: MemoryRollupLeaseResponse = options.store.acquireLease(
-        'rollup',
+      const requestedMinInterval = (body as { minIntervalMs?: unknown } | null)?.minIntervalMs
+      let minIntervalMs = 0
+      if (requestedMinInterval !== undefined) {
+        if (typeof requestedMinInterval !== 'number' || !Number.isFinite(requestedMinInterval) || requestedMinInterval < 0) {
+          throw new HttpError(400, 'bad_request', 'minIntervalMs must be a non-negative number')
+        }
+        minIntervalMs = Math.round(requestedMinInterval)
+      }
+      const lastDreamAt = memory.lastDreamAt()
+      const lease = options.store.acquireLease(
+        'dream',
         device.id,
         randomToken(),
         currentNow,
         ttlMs,
+        minIntervalMs,
+        lastDreamAt,
       )
+      const result: MemoryDreamLeaseResponse = {
+        ...lease,
+        lastDreamAt,
+        serverSeq: memory.version(),
+      }
       sendJson(response, 200, result)
       return
     }
 
-    if (method === 'DELETE' && url.pathname === '/v1/memory/rollup-lease') {
+    if (method === 'DELETE' && url.pathname === '/v2/memory/dream-lease') {
       const device = authenticate(options, now(), request, response)
       if (!device || response.writableEnded) return
       requireMemory(options)
       const leaseId = url.searchParams.get('leaseId')?.trim() || undefined
-      const released = options.store.releaseLease('rollup', device.id, leaseId)
-      const result: MemoryRollupLeaseReleaseResponse = { released }
+      const released = options.store.releaseLease('dream', device.id, leaseId)
+      const result: MemoryDreamLeaseReleaseResponse = { released }
       sendJson(response, 200, result)
       return
     }
@@ -320,14 +330,6 @@ async function handle(
     if (response.headersSent || response.writableEnded || response.destroyed) return
     if (error instanceof HttpError) {
       sendError(response, error.status, error.code, error.message, error.closeConnection)
-      return
-    }
-    if (error instanceof MemoryConflictError) {
-      sendJson(response, 409, {
-        code: 'memory_conflict',
-        message: error.message,
-        details: { currentVersion: error.currentVersion },
-      })
       return
     }
     if (error instanceof MemoryRequestError) {

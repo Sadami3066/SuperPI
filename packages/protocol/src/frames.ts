@@ -14,6 +14,7 @@ export const RELAY_CAPABILITIES = [
   'session-controls',
   'bot-capabilities',
   'present-artifacts',
+  'memory-v2',
 ] as const
 export type RelayCapability = (typeof RELAY_CAPABILITIES)[number]
 
