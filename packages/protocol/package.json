@@ -1,0 +1,15 @@
+{
+  "name": "@superpi/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Wire protocol shared by SuperPI Android devices and relay",
+  "exports": {
+    ".": "./src/index.ts",
+    "./vectors/*": "./vectors/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

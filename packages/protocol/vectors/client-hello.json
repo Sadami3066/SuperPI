@@ -1,0 +1,9 @@
+{
+  "type": "hello",
+  "protocolVersion": 1,
+  "deviceId": "dev-phone",
+  "platform": "android",
+  "appVersion": "2.0.1",
+  "bots": [{ "id": "pi", "name": "PI" }],
+  "capabilities": ["remote-bot", "memory"]
+}

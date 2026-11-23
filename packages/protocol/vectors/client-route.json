@@ -1,0 +1,7 @@
+{
+  "type": "route",
+  "id": "req-1",
+  "to": "dev-desktop",
+  "method": "bot.prompt",
+  "params": { "botId": "pi", "text": "Summarize today's notes" }
+}

@@ -1,0 +1,9 @@
+{
+  "type": "route_event",
+  "id": "req-1",
+  "seq": 3,
+  "event": {
+    "type": "message_update",
+    "assistantMessageEvent": { "type": "text_delta", "delta": "Here is the summary" }
+  }
+}
