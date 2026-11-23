@@ -43,7 +43,7 @@ dependencies {
     compileOnly("androidx.activity:activity-compose:1.12.4")
     compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
-    compileOnly(platform("androidx.compose:compose-bom:2026.03.00"))
+    compileOnly(platform("androidx.compose:compose-bom:2026.11.01"))
     compileOnly("androidx.compose.ui:ui")
     compileOnly("androidx.compose.foundation:foundation")
     compileOnly("androidx.compose.animation:animation")
