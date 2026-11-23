@@ -4,15 +4,25 @@ updates:
     directory: "/apps/android"
     schedule:
       interval: "weekly"
-  - package-ecosystem: "gradle"
-    directory: "/plugins/official"
-    schedule:
-      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      android-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      ts-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]

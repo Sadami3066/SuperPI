@@ -126,12 +126,17 @@ jobs:
           fi
 
       - name: Upload to SuperPI-Market Release & open PR (if MARKET_PUSH_TOKEN set)
-        if: ${{ secrets.MARKET_PUSH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.MARKET_PUSH_TOKEN }}
-          MARKET_TAG: ${{ inputs.market_release_tag || steps.meta.outputs.tag }}
+          INPUT_MARKET_TAG: ${{ inputs.market_release_tag }}
+          DEFAULT_MARKET_TAG: ${{ steps.meta.outputs.tag }}
           MODULES: ${{ steps.meta.outputs.modules }}
         run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "MARKET_PUSH_TOKEN is not configured; skipping SuperPI-Market upload and PR."
+            exit 0
+          fi
+          MARKET_TAG="${INPUT_MARKET_TAG:-$DEFAULT_MARKET_TAG}"
           gh repo clone Sadami3066/SuperPI-Market "$RUNNER_TEMP/market" -- --depth=1
           cd "$RUNNER_TEMP/market"
           if gh release view "$MARKET_TAG" -R Sadami3066/SuperPI-Market >/dev/null 2>&1; then
