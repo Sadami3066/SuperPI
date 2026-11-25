@@ -151,7 +151,6 @@ class PiSessionEngine(
         val pinnedMemory = AtomicReference<String?>(null)
         val pinnedMemoryScope = AtomicReference<MemoryAccessScope?>(null)
         val memoryLoaded = AtomicBoolean(false)
-        val needsMemoryRefresh = AtomicBoolean(false)
         val lastSeenCompactionId = AtomicReference<String?>(null)
         val lastTurnEndedAtMs = AtomicLong(0L)
         fun latestCompactionId(): String? = runCatching {
@@ -176,7 +175,6 @@ class PiSessionEngine(
             pinnedMemory.set(reloaded)
             pinnedMemoryScope.set(activeScope)
             lastSeenCompactionId.set(compactionId)
-            needsMemoryRefresh.set(false)
             lastTurnEndedAtMs.set(0L)
             memoryLoaded.set(true)
         }
@@ -205,13 +203,12 @@ class PiSessionEngine(
                 val scopeChanged = pinnedMemoryScope.get() != activeScope
                 val currentCompactionId = latestCompactionId()
                 val compactionChanged = currentCompactionId != null && currentCompactionId != lastSeenCompactionId.get()
-                val flagged = needsMemoryRefresh.compareAndSet(true, false)
                 val lastEnded = lastTurnEndedAtMs.get()
                 val now = clock()
                 val coldIdleExpired = lastEnded > 0L &&
                     memoryColdRefreshIdleMs > 0L &&
                     now - lastEnded >= memoryColdRefreshIdleMs
-                if (scopeChanged || compactionChanged || flagged || coldIdleExpired) {
+                if (scopeChanged || compactionChanged || coldIdleExpired) {
                     val reloaded = loadMemorySection(activeScope)
                     pinnedMemory.set(reloaded)
                     pinnedMemoryScope.set(activeScope)
@@ -316,21 +313,9 @@ class PiSessionEngine(
             ),
         )
         created = session
-        val memoryUnsubscribe = session.subscribe { event ->
-            when (event) {
-                is SessionEvent.CompactionFinished -> {
-                    needsMemoryRefresh.set(true)
-                    lastTurnEndedAtMs.set(0L)
-                }
-                is SessionEvent.Settled -> {
-                    lastTurnEndedAtMs.set(clock())
-                }
-                is SessionEvent.AgentEventReceived -> {
-                    if (event.event is AgentEvent.AgentEnd) {
-                        lastTurnEndedAtMs.set(clock())
-                    }
-                }
-                else -> Unit
+        val memoryUnsubscribe = session.agent.subscribe { event, _ ->
+            if (event is AgentEvent.AgentEnd) {
+                lastTurnEndedAtMs.set(clock())
             }
         }
         sessionMemoryRefreshes[session.sessionId] = ::refreshPinnedMemoryNow

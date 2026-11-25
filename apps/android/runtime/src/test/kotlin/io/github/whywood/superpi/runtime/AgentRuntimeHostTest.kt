@@ -349,13 +349,17 @@ class AgentRuntimeHostTest {
             val file = fixture.addSession("session-1")
             fixture.host.openSession(file, fixture.homeDir.absolutePath)
             val createGate = CompletableDeferred<Unit>()
+            val createEntered = CompletableDeferred<Unit>()
             var creates = 0
             fixture.engine.onCreating = {
                 creates += 1
-                if (creates == 1) createGate.await()
+                if (creates == 1) {
+                    createEntered.complete(Unit)
+                    createGate.await()
+                }
             }
             val reconfigure = backgroundScope.launch { fixture.host.reconfigure() }
-            settle()
+            createEntered.await()
 
             var sent = false
             val sender = backgroundScope.launch {
