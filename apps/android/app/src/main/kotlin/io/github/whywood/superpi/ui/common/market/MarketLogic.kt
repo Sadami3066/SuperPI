@@ -9,6 +9,37 @@ import java.util.Locale
 
 internal enum class MarketEntryStatus { Install, Installed, Update, Installing, Failed }
 
+internal const val MARKET_PAGE_SIZE = 10
+
+internal data class MarketPageSlice(
+    val items: List<MarketEntry>,
+    val page: Int,
+    val totalPages: Int,
+    val totalItems: Int,
+)
+
+internal fun paginateMarketEntries(
+    entries: List<MarketEntry>,
+    page: Int,
+    pageSize: Int = MARKET_PAGE_SIZE,
+): MarketPageSlice {
+    val safeSize = pageSize.coerceAtLeast(1)
+    val totalItems = entries.size
+    val totalPages = if (totalItems == 0) 0 else (totalItems + safeSize - 1) / safeSize
+    if (totalPages == 0) {
+        return MarketPageSlice(items = emptyList(), page = 0, totalPages = 0, totalItems = 0)
+    }
+    val clampedPage = page.coerceIn(0, totalPages - 1)
+    val fromIndex = clampedPage * safeSize
+    val toIndex = minOf(fromIndex + safeSize, totalItems)
+    return MarketPageSlice(
+        items = entries.subList(fromIndex, toIndex),
+        page = clampedPage,
+        totalPages = totalPages,
+        totalItems = totalItems,
+    )
+}
+
 internal val MARKET_CATEGORY_IDS = listOf(
     "office",
     "content",

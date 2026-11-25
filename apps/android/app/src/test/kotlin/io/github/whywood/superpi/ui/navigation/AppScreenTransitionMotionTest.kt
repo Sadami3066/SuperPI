@@ -56,12 +56,12 @@ class AppScreenTransitionMotionTest {
     }
 
     @Test
-    fun sharedAxisOffsetIsAQuarterOfThePage() {
-        assertEquals(0.25f, AppScreenTransition.SHARED_AXIS_FRACTION, 0f)
+    fun sharedAxisOffsetMatchesFraction() {
+        assertEquals(0.18f, AppScreenTransition.SHARED_AXIS_FRACTION, 0f)
         val ltr = AppScreenTransition.translationFraction(0f, incoming = true, direction = 1) *
             AppScreenTransition.SHARED_AXIS_FRACTION
-        assertEquals(0.25f, ltr, DELTA)
-        assertEquals(-0.25f, ltr * -1f, DELTA)
+        assertEquals(0.18f, ltr, DELTA)
+        assertEquals(-0.18f, ltr * -1f, DELTA)
     }
 
     private companion object {

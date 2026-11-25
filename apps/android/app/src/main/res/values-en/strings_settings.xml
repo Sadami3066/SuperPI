@@ -4,11 +4,10 @@
     <string name="usage_habits_mode_voice">Voice mode</string>
     <string name="usage_habits_mode_camera">Camera mode</string>
     <string name="usage_habits_mode_none">None</string>
-    <string name="settings_group_model">Model &amp; runtime</string>
-    <string name="settings_group_appearance">Appearance</string>
-    <string name="settings_group_conversation">Chats</string>
-    <string name="settings_group_notifications">Notifications &amp; privacy</string>
-    <string name="settings_group_about">About</string>
+    <string name="settings_group_ai">AI &amp; collaboration</string>
+    <string name="settings_group_system">System &amp; capabilities</string>
+    <string name="settings_group_appearance">Appearance &amp; reading</string>
+    <string name="settings_group_support">Data &amp; support</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_account_no_model">No model selected</string>
@@ -22,7 +21,6 @@
     <string name="settings_language_system">Follow system</string>
     <string name="settings_language_chinese">简体中文</string>
     <string name="settings_language_english">English</string>
-    <string name="settings_auto_collapse_process">Auto-collapse process</string>
     <string name="settings_auto_retry">Auto-retry</string>
     <string name="settings_send_while_running">Send while running</string>
     <string name="settings_send_while_running_steer">Steer</string>
@@ -35,7 +33,7 @@
     <string name="settings_privacy_agreement">Privacy &amp; Terms</string>
     <string name="settings_provider">Provider</string>
     <string name="settings_access">System access</string>
-    <string name="settings_android">Android settings</string>
+    <string name="settings_android">System entry &amp; overlay</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_theme_appearance">Appearance</string>
     <string name="settings_theme_appearance_system">Follow system</string>
@@ -114,6 +112,11 @@
     <string name="settings_provider_model_count">Models</string>
     <string name="settings_provider_base_url">Base URL</string>
     <string name="settings_provider_default_base_url">Default</string>
+    <string name="settings_provider_default_model_section">Default model</string>
+    <string name="settings_provider_models_section">Models</string>
+    <string name="settings_provider_model_search">Search models…</string>
+    <string name="settings_provider_no_model_result">No matching models</string>
+    <string name="settings_provider_default_badge">Default</string>
 
     <string name="personalization_nickname_title">Name</string>
     <string name="personalization_nickname_hint">Your name</string>
@@ -198,7 +201,6 @@
     <string name="dev_package_pkgconf">Find libraries at build time</string>
     <string name="settings_background_job_wake">Wake when a background job finishes</string>
     <string name="settings_oauth_manual_hint">Browser did not return automatically? Paste the authorization code or redirect URL below.</string>
-    <string name="settings_new_chat_model">Default model for new chats</string>
     <string name="settings_assistant">System assistant</string>
     <string name="assistant_settings_title">System assistant</string>
     <string name="assistant_settings_role">Default assistant</string>

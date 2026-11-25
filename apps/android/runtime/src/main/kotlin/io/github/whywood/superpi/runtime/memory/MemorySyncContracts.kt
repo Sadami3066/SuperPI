@@ -1,22 +1,96 @@
 package io.github.whywood.superpi.runtime.memory
 
-import java.security.MessageDigest
-import io.github.whywood.superpi.runtime.EntityKind
-import io.github.whywood.superpi.runtime.MemoryConfidence
+import io.github.whywood.superpi.runtime.MemoryBlockInjectionMode
+import io.github.whywood.superpi.runtime.MemoryBlockOwner
+import io.github.whywood.superpi.runtime.MemoryBlockStatus
+import io.github.whywood.superpi.runtime.MemoryEpistemicTier
+import io.github.whywood.superpi.runtime.MemoryEventKind
+import io.github.whywood.superpi.runtime.MemoryEventTimePrecision
 import io.github.whywood.superpi.runtime.MemoryItemStatus
-import io.github.whywood.superpi.runtime.MemoryKind
+import io.github.whywood.superpi.runtime.MemoryProposalStatus
+import io.github.whywood.superpi.runtime.MemorySensitivity
 import io.github.whywood.superpi.runtime.MemorySourceKind
 
-data class MemorySyncRecord(
+enum class MemorySyncKind(val wire: String, val pushOrder: Int) {
+    BLOCK("block", 0),
+    ENTITY("entity", 1),
+    EVENT("event", 2),
+    RELATION("relation", 3),
+    PROPOSAL("proposal", 4),
+    ;
+
+    companion object {
+        fun fromWire(raw: String?): MemorySyncKind? = when (raw?.trim()?.lowercase()) {
+            "block" -> BLOCK
+            "entity" -> ENTITY
+            "event" -> EVENT
+            "relation" -> RELATION
+            "proposal" -> PROPOSAL
+            else -> null
+        }
+    }
+}
+
+data class MemoryBlockSyncRecord(
     val id: String,
-    val kind: MemoryKind,
+    val slug: String,
+    val title: String,
+    val purpose: String,
+    val schemaHint: String? = null,
+    val content: String,
+    val domain: String,
+    val sensitivity: MemorySensitivity,
+    val injectionMode: MemoryBlockInjectionMode,
+    val maxChars: Int,
+    val owner: MemoryBlockOwner,
+    val pinned: Boolean,
+    val status: MemoryBlockStatus,
+    val sortOrder: Int,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val deletedAt: Long? = null,
+    val revision: Long,
+    val updatedByDeviceId: String? = null,
+)
+
+data class MemoryEntitySyncRecord(
+    val id: String,
+    val canonicalName: String,
+    val entityType: String,
+    val aliases: List<String>,
+    val attributesJson: String,
+    val summary: String? = null,
+    val domain: String,
+    val sensitivity: MemorySensitivity,
+    val pinned: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val deletedAt: Long? = null,
+    val revision: Long,
+    val mergedInto: String? = null,
+    val updatedByDeviceId: String? = null,
+)
+
+data class MemoryEventEntityLink(
+    val entityId: String,
+    val role: String,
+)
+
+data class MemoryEventSyncRecord(
+    val id: String,
+    val eventKind: MemoryEventKind,
     val content: String,
     val summary: String? = null,
-    val tags: List<String> = emptyList(),
-    val entities: List<String> = emptyList(),
-    val confidence: MemoryConfidence,
+    val qualifiersJson: String,
+    val semanticKeywords: List<String>,
+    val tags: List<String>,
+    val domain: String,
+    val sensitivity: MemorySensitivity,
+    val epistemicTier: MemoryEpistemicTier,
     val importance: Int,
     val pinned: Boolean,
+    val eventTime: Long,
+    val eventTimePrecision: MemoryEventTimePrecision,
     val validFrom: Long,
     val validUntil: Long? = null,
     val status: MemoryItemStatus,
@@ -25,147 +99,121 @@ data class MemorySyncRecord(
     val sourceSessionId: String? = null,
     val sourceEntryId: String? = null,
     val sourceQuote: String? = null,
+    val entityLinks: List<MemoryEventEntityLink> = emptyList(),
     val createdAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null,
-    val revision: Long = 1L,
+    val revision: Long,
     val updatedByDeviceId: String? = null,
 )
 
-data class EntitySyncRecord(
-    val canonicalKey: String,
+data class MemoryRelationSyncRecord(
     val id: String,
-    val canonicalName: String,
-    val kind: EntityKind,
-    val aliases: List<String> = emptyList(),
-    val summary: String? = null,
-    val mergedInto: String? = null,
+    val fromEntityId: String,
+    val relationType: String,
+    val toEntityId: String,
+    val label: String? = null,
+    val attributesJson: String,
+    val validFrom: Long,
+    val validUntil: Long? = null,
+    val invalidatedAt: Long? = null,
+    val invalidatedBy: String? = null,
+    val epistemicTier: MemoryEpistemicTier,
+    val domain: String,
+    val sensitivity: MemorySensitivity,
+    val sourceEventId: String? = null,
+    val createdAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null,
-    val revision: Long = 1L,
+    val revision: Long,
     val updatedByDeviceId: String? = null,
 )
 
-enum class MemorySyncOpKind(val wire: String) {
-    MEMORY("memory"),
-    ENTITY("entity"),
-    ;
-
-    companion object {
-        fun fromWire(value: String?): MemorySyncOpKind? = when (value?.trim()?.lowercase()) {
-            "memory" -> MEMORY
-            "entity" -> ENTITY
-            else -> null
-        }
-    }
-}
+data class MemoryProposalSyncRecord(
+    val id: String,
+    val slug: String,
+    val title: String,
+    val purpose: String,
+    val domain: String,
+    val sensitivity: MemorySensitivity,
+    val seedContent: String,
+    val supportingEventIds: List<String>,
+    val reason: String,
+    val status: MemoryProposalStatus,
+    val createdAt: Long,
+    val resolvedAt: Long? = null,
+    val updatedAt: Long,
+    val deletedAt: Long? = null,
+    val revision: Long,
+    val updatedByDeviceId: String? = null,
+)
 
 data class MemorySyncOpItem(
     val opId: String,
-    val kind: MemorySyncOpKind,
-    val memory: MemorySyncRecord? = null,
-    val entity: EntitySyncRecord? = null,
-)
-
-data class MemoryPendingPushBatch(
-    val ops: List<MemorySyncOpItem>,
-    val isBaseline: Boolean,
-    val nextBaselineStage: String,
-    val nextBaselineCursorId: String,
-    val nextInitialPushDone: Boolean,
-    val maxLocalSyncSeq: Long,
-    val baselineCutoffSeq: Long,
+    val kind: MemorySyncKind,
+    val block: MemoryBlockSyncRecord? = null,
+    val entity: MemoryEntitySyncRecord? = null,
+    val event: MemoryEventSyncRecord? = null,
+    val relation: MemoryRelationSyncRecord? = null,
+    val proposal: MemoryProposalSyncRecord? = null,
 )
 
 data class MemoryRemotePullEntry(
     val seq: Long,
-    val kind: MemorySyncOpKind,
+    val kind: MemorySyncKind,
     val deviceId: String,
-    val memory: MemorySyncRecord? = null,
-    val entity: EntitySyncRecord? = null,
+    val block: MemoryBlockSyncRecord? = null,
+    val entity: MemoryEntitySyncRecord? = null,
+    val event: MemoryEventSyncRecord? = null,
+    val relation: MemoryRelationSyncRecord? = null,
+    val proposal: MemoryProposalSyncRecord? = null,
 )
 
-data class MemoryRemoteMergeResult(
+data class MemoryPullApplyResult(
     val appliedCount: Int,
+    val deferredEntries: List<MemoryRemotePullEntry>,
     val hadLocalAndRemoteOverlap: Boolean,
-    val serverSeq: Long,
 )
 
-data class MemorySyncCursor(
-    val accountKey: String,
-    val lastPulledServerSeq: Long,
-    val lastPushedLocalSeq: Long,
-    val initialPushDone: Boolean,
-    val baselineStage: String,
-    val baselineCursorId: String,
-    val remoteLastDreamAt: Long?,
-    val postMergeConsolidated: Boolean,
+data class MemoryAccountSwitchCheck(
+    val requiresPrompt: Boolean,
+    val localRecordCount: Int,
 )
-
-object MemoryLimits {
-    const val MAX_ID_LENGTH = 128
-    const val MAX_CONTENT_CHARS = 8_192
-    const val MAX_SUMMARY_CHARS = 2_048
-    const val MAX_QUOTE_CHARS = 1_024
-    const val MAX_ENTITY_NAME_CHARS = 128
-    const val MAX_TAG_CHARS = 64
-    const val MAX_TAGS_PER_MEMORY = 20
-    const val MAX_ENTITIES_PER_MEMORY = 20
-    const val MAX_ALIASES_PER_ENTITY = 32
-
-    fun clampText(raw: String, maxChars: Int): String {
-        if (maxChars <= 0) return ""
-        val trimmed = raw.trim()
-        if (trimmed.length <= maxChars) return trimmed
-        var end = maxChars
-        if (end > 0 && trimmed[end - 1].isHighSurrogate()) {
-            end--
-        }
-        return trimmed.substring(0, end).trimEnd()
-    }
-
-    fun clampOptionalText(raw: String?, maxChars: Int): String? =
-        raw?.let { clampText(it, maxChars) }?.takeIf { it.isNotEmpty() }
-
-    fun clampOpId(raw: String): String {
-        val clean = raw.trim()
-        if (clean.length <= MAX_ID_LENGTH) return clean
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(clean.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-            .take(24)
-        val prefixLen = MAX_ID_LENGTH - digest.length - 1
-        return "${clean.take(prefixLen)}:$digest"
-    }
-}
-
-sealed interface MemoryAccountSwitchCheck {
-    data object Ready : MemoryAccountSwitchCheck
-
-    data class NeedsDecision(val localMemoryCount: Int) : MemoryAccountSwitchCheck
-}
 
 enum class MemoryAccountSwitchMode {
-    MERGE_ALL,
-    REPLACE_WITH_REMOTE,
+    MERGE,
+    REPLACE_LOCAL,
 }
 
-sealed interface DreamLeaseResult {
-    data class Acquired(val leaseId: String? = null) : DreamLeaseResult
+sealed interface ConsolidationLeaseResult {
+    data class Acquired(val leaseId: String?) : ConsolidationLeaseResult
 
-    data class Blocked(val reason: String) : DreamLeaseResult
+    data class Blocked(val reason: String) : ConsolidationLeaseResult
 
-    data object Offline : DreamLeaseResult
+    data object Offline : ConsolidationLeaseResult
 
-    data object Unauthorized : DreamLeaseResult
+    data object Unauthorized : ConsolidationLeaseResult
 
-    data object Rejected : DreamLeaseResult
+    data object Rejected : ConsolidationLeaseResult
 }
 
-interface MemoryDreamCoordinator {
-    suspend fun prepareForDream(forceManual: Boolean, minIntervalMs: Long): DreamLeaseResult
+interface MemoryConsolidationCoordinator {
+    suspend fun prepareForConsolidation(forceManual: Boolean, minIntervalMs: Long): ConsolidationLeaseResult
 
-    suspend fun onDreamCompleted(leaseId: String?, finishedAt: Long)
+    suspend fun onConsolidationCompleted(leaseId: String?, finishedAt: Long)
 
-    suspend fun onDreamFinished(leaseId: String?)
+    suspend fun onConsolidationFinished(leaseId: String?)
+
+    companion object {
+        val NOOP = object : MemoryConsolidationCoordinator {
+            override suspend fun prepareForConsolidation(
+                forceManual: Boolean,
+                minIntervalMs: Long,
+            ): ConsolidationLeaseResult = ConsolidationLeaseResult.Acquired(null)
+
+            override suspend fun onConsolidationCompleted(leaseId: String?, finishedAt: Long) = Unit
+
+            override suspend fun onConsolidationFinished(leaseId: String?) = Unit
+        }
+    }
 }

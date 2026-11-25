@@ -89,6 +89,16 @@ sealed interface AppDestination {
         override val depth: Int = 2
     }
 
+    data object SuperSettings : AppDestination {
+        override val routeKey: String = "settings/super"
+        override val depth: Int = 2
+    }
+
+    data object MemorySettings : AppDestination {
+        override val routeKey: String = "settings/memory"
+        override val depth: Int = 2
+    }
+
     data object WebSearch : AppDestination {
         override val routeKey: String = "settings/web-search"
         override val depth: Int = 3
@@ -184,9 +194,20 @@ sealed interface AppDestination {
         override val depth: Int = 1
     }
 
+    data object SuperTeam : AppDestination {
+        override val routeKey: String = "super/team"
+        override val depth: Int = 1
+    }
+
+    data class WorkerMonitor(val workerId: String) : AppDestination {
+        override val routeKey: String = WORKER_MONITOR_PREFIX + encodeRoutePath(workerId)
+        override val depth: Int = 1
+    }
+
     companion object {
         private const val FILES_PREFIX = "files/"
         private const val REMOTE_FILES_PREFIX = "remote-files/"
+        private const val WORKER_MONITOR_PREFIX = "super/worker/"
         private const val PROVIDER_DETAIL_PREFIX = "providers/"
         private const val CUSTOM_PROVIDER_PREFIX = "providers/custom/"
         private const val CUSTOM_PROVIDER_NEW_ROUTE = "providers/custom"
@@ -229,6 +250,8 @@ sealed interface AppDestination {
             routeKey == Privacy.routeKey -> Privacy
             routeKey == AndroidSettings.routeKey -> AndroidSettings
             routeKey == AgentSettings.routeKey -> AgentSettings
+            routeKey == SuperSettings.routeKey -> SuperSettings
+            routeKey == MemorySettings.routeKey -> MemorySettings
             routeKey == WebSearch.routeKey -> WebSearch
             routeKey == Update.routeKey -> Update
             routeKey == Search.routeKey -> Search
@@ -238,6 +261,9 @@ sealed interface AppDestination {
             routeKey == Memory.routeKey -> Memory
             routeKey == Plugins.routeKey -> Plugins
             routeKey == Relay.routeKey -> Relay
+            routeKey == SuperTeam.routeKey -> SuperTeam
+            routeKey.startsWith(WORKER_MONITOR_PREFIX) ->
+                decodeRoutePath(routeKey.removePrefix(WORKER_MONITOR_PREFIX))?.let(::WorkerMonitor)
 
             routeKey == Miniapp.routeKey -> Miniapp
             routeKey.startsWith(MINIAPP_DETAIL_PREFIX) -> {

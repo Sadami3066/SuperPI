@@ -19,11 +19,39 @@
     <string name="onboarding_avatar_pick">选择头像</string>
     <string name="onboarding_avatar_failed">头像保存失败</string>
     <string name="onboarding_nickname_label">你的称呼</string>
-    <string name="onboarding_nickname_hint">怎么称呼你？</string>
+    <string name="onboarding_nickname_hint">输入称呼（可选）</string>
     <string name="onboarding_language_label">语言</string>
     <string name="onboarding_language_system">跟随系统</string>
     <string name="onboarding_language_chinese">简体中文</string>
     <string name="onboarding_language_english">English</string>
+    <string name="onboarding_instruction_label">你的偏好（可选）</string>
+
+    <string name="onboarding_bot_title">给你的助手取个名字</string>
+    <string name="onboarding_bot_subtitle">为默认助手设置名称和头像，之后也可以随时更改。</string>
+    <string name="onboarding_bot_name_label">助手名称</string>
+    <string name="onboarding_bot_name_hint">PI</string>
+    <string name="onboarding_bot_intro_label">一句话介绍（可选）</string>
+    <string name="onboarding_bot_intro_hint">例如：帮我整理日常、写代码与查资料</string>
+    <string name="onboarding_bot_avatar_pick">设置头像</string>
+    <string name="onboarding_bot_avatar_remove">恢复默认头像</string>
+
+    <string name="onboarding_appearance_title">外观与阅读</string>
+    <string name="onboarding_appearance_subtitle">选择你喜欢的界面色调与字体风格。</string>
+
+    <string name="onboarding_web_search_title">网页搜索（可选）</string>
+    <string name="onboarding_web_search_subtitle">配置搜索引擎 API Key 后可直接联网查找实时资料。</string>
+
+    <string name="onboarding_mode_title">使用模式与聊天偏好</string>
+    <string name="onboarding_mode_subtitle">选择日常进入时的默认模式与回复展示习惯。</string>
+    <string name="onboarding_mode_section">默认进入模式</string>
+    <string name="onboarding_mode_normal_title">PI</string>
+    <string name="onboarding_mode_normal_body">直接和你的专属助手对话、处理事务与使用工具。</string>
+    <string name="onboarding_mode_super_title">Super PI</string>
+    <string name="onboarding_mode_super_body">统一调度多名助手与跨设备任务，汇总进度和结果。</string>
+    <string name="onboarding_chat_prefs_section">聊天体验</string>
+
+    <string name="onboarding_overlay_section">悬浮球与系统入口</string>
+    <string name="onboarding_floating_hint">开启后可在其他应用上方快速查看进度</string>
 
     <string name="onboarding_provider_title">连接你的模型</string>
     <string name="onboarding_provider_section">服务商</string>

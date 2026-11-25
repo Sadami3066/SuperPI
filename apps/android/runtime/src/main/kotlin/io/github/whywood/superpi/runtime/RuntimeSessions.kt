@@ -59,6 +59,8 @@ internal class RuntimeSessions(
 
     suspend fun filePath(sessionId: String): String? = catalog.find(visibleCwds(), sessionId)?.filePath
 
+    suspend fun cwd(sessionId: String): String? = catalog.find(visibleCwds(), sessionId)?.cwd
+
     suspend fun delete(id: String) {
         val summary = catalog.find(visibleCwds(), id)
         detachForget(id)

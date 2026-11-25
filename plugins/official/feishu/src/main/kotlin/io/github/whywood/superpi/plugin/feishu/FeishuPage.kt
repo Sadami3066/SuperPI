@@ -54,7 +54,7 @@ internal fun FeishuPage(host: PluginHost, runtime: FeishuRuntime) {
     val connected = snapshot?.connected == true
     val latestVersion = state.latestVersion
     val updateChecking = state.updateChecking
-    val updateFailed = installed && !updateChecking && latestVersion == null && state.lastCheckedAt > 0
+    val updateFailed = installed && !updateChecking && state.updateFailed
     val canUpdate = version != null && FeishuUpdate.isNewer(latestVersion ?: FEISHU_VERSION, version)
     val checkingFirstTime = !checked && state.checking
     val checkFailed = !checked && !state.checking
@@ -141,6 +141,8 @@ internal fun FeishuPage(host: PluginHost, runtime: FeishuRuntime) {
                     snapshot.missingScopes.size,
                 ),
                 tone = DdNoticeTone.WARNING,
+                actionLabel = host.t("去开通", "Open"),
+                onAction = { runtime.openAppScopes(host) },
             )
         }
 
@@ -208,7 +210,7 @@ private fun StatusCard(host: PluginHost, state: FeishuPageState, linuxAvailable:
     val installed = version != null
     val connected = snapshot?.connected == true
     val latestVersion = state.latestVersion
-    val updateFailed = installed && !state.updateChecking && latestVersion == null && state.lastCheckedAt > 0
+    val updateFailed = installed && !state.updateChecking && state.updateFailed
     val updateStatus = FeishuUpdate.statusTextKey(
         installedVersion = version,
         latestVersion = latestVersion,

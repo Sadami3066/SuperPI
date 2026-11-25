@@ -8,29 +8,30 @@ The official external-plugin source repository maintained by the Super PI Agent 
 
 Super PI Agent is a personal AI agent on Android ([host workspace](../../apps/android)). Plugins implement the host contract `plugin-api` in Kotlin, load inside the App process, and extend the agent with tools, skills, prompt sections and self-drawn pages. Plugins are installed only from `.ddp` files, and every plugin is a separate Android application module.
 
-This repository contains nine official plugins, published by `milous`:
+This repository contains nine market plugins plus the `mcpui-demo` development sample, published by `milous`:
 
 | Module | Plugin | Version | What it does | For |
 |---|---|---|---|---|
-| `feishu` | Feishu | 2.7.1 | Read and write messages, calendar, docs, drive, mail and tasks through the official `lark-cli` | Office users who work in Feishu every day |
-| `wecom` | WeCom | 2.6.2 | Operate messages, mail, docs, schedules and to-dos through the official `wecom-cli` | Teams that use WeCom |
-| `micloud` | Xiaomi Cloud | 2.7.4 | Sign in to a Xiaomi account and read notes, to-dos, SMS, contacts, photos and recordings | Users of Xiaomi Cloud services |
-| `mail` | Mail | 1.6.2 | Connect an IMAP/SMTP mailbox with an authorization code: inbox, conversations, composing with attachments, account management and in-chat mail cards, with agent search, reading, archiving, drafting and sending | Users of standard IMAP/SMTP mailboxes such as QQ, 163, Gmail or iCloud |
-| `ride` | DiDi Ride | 1.3.1 | Didi estimates, order creation, ride status and driver location; payment happens in Didi | Commuters and travellers who need a ride, price comparison or driver status |
-| `hotel` | RollingGo Hotels | 1.4.1 | Search RollingGo hotels, view rooms and orders, create a pending booking; payment happens on RollingGo | Anyone who wants AI help finding, checking or booking hotels |
-| `amap` | Amap Maps | 1.5.3 | Amap MCP for place search, nearby POIs, driving/transit/walking/cycling routes and weather, rendered as cards; requires an Amap key | Commuters and travellers planning routes or looking up places |
+| `feishu` | Feishu | 2.7.2 | Read and write messages, calendar, docs, drive, mail and tasks through the official `lark-cli` | Office users who work in Feishu every day |
+| `wecom` | WeCom | 2.6.3 | Operate messages, mail, docs, schedules and to-dos through the official `wecom-cli` | Teams that use WeCom |
+| `micloud` | Xiaomi Cloud | 2.7.5 | Sign in to a Xiaomi account and read notes, to-dos, SMS, contacts, photos and recordings | Users of Xiaomi Cloud services |
+| `mail` | Mail | 1.6.3 | Connect an IMAP/SMTP mailbox with an authorization code: inbox, conversations, composing with attachments, account management and in-chat mail cards, with agent search, reading, archiving, drafting and sending | Users of standard IMAP/SMTP mailboxes such as QQ, 163, Gmail or iCloud |
+| `ride` | DiDi Ride | 1.3.2 | Didi estimates, order creation, ride status and driver location; payment happens in Didi | Commuters and travellers who need a ride, price comparison or driver status |
+| `hotel` | RollingGo Hotels | 1.4.2 | Search RollingGo hotels, view rooms and orders, create a pending booking; payment happens on RollingGo | Anyone who wants AI help finding, checking or booking hotels |
+| `amap` | Amap Maps | 1.5.4 | Amap MCP for place search, nearby POIs, driving/transit/walking/cycling routes and weather, rendered as cards; requires an Amap key | Commuters and travellers planning routes or looking up places |
 | `rail` | 12306 Railway | 1.4.0 | Search 12306 trains, times and seat availability, then book on 12306 | Anyone travelling by rail who wants train and seat options first |
 | `themes` | Themes | 1.0.1 | Provides eight light and dark colour themes that can be switched from the host appearance settings | Users who want a different visual mood |
+| `mcpui-demo` | MCP UI Demo | 0.1.1 | Development sample that renders MCP tool results with a plugin card; not listed in the market | Plugin authors learning the card/UI pipeline |
 
 `cli-common/` is an internal shared module (CLI update/install core plus text and JSON helpers). It is not a plugin, is not listed in manifests, and is not published to the market. Personal and campus-specific plugins (`sysu`, `wechat`, `zanao`) are maintained separately in `SuperPI-Personal-Plugins`.
 
-Versions follow `version` in each module's `src/main/assets/plugin.json`. All nine manifests declare `apiLevel` 7 and `minHostVersion` `2.0.0`, built against `plugin-api` 2.0.1 and `design` 1.0.0. Runtime dependencies: Feishu uses `lark-cli` 1.0.100, WeCom uses `wecom-cli` 1.3.4; Amap Maps uses the Amap MCP for places and routes with an Amap key; Trains queries 12306 directly; Hotels uses the official `rgh` CLI with OAuth (Node.js/npm required); Ride calls the Didi MCP HTTP API directly with a key configured on its plugin page; Xiaomi Cloud has no CLI and signs in through a WebView on its plugin page; the Mail plugin needs no CLI and connects to IMAP/SMTP directly over the JVM network stack (QQ, 163, 126, Tencent Exmail, Alibaba Mail, Gmail, iCloud, Fastmail, Yahoo, Zoho and custom servers).
+Versions follow `version` in each module's `src/main/assets/plugin.json`. All ten manifests declare `apiLevel` 7 and `minHostVersion` `2.0.0`, built against `plugin-api` 2.0.1 and `design` 1.0.0. Runtime dependencies: Feishu uses `lark-cli` 1.0.100, WeCom uses `wecom-cli` 1.3.4; Amap Maps uses the Amap MCP for places and routes with an Amap key; Trains queries 12306 directly; Hotels uses the official `rgh` CLI with OAuth (Node.js/npm required); Ride calls the Didi MCP HTTP API directly with a key configured on its plugin page; Xiaomi Cloud has no CLI and signs in through a WebView on its plugin page; the Mail plugin needs no CLI and connects to IMAP/SMTP directly over the JVM network stack (QQ, 163, 126, Tencent Exmail, Alibaba Mail, Gmail, iCloud, Fastmail, Yahoo, Zoho and custom servers).
 
 ## What's in the repository
 
 | Path | Description |
 |---|---|
-| `feishu/`, `wecom/`, `micloud/`, `mail/`, `themes/`, `amap/`, `rail/`, `hotel/`, `ride/` | The nine plugin modules: Kotlin sources, `src/main/assets/plugin.json` manifests, icons and pages |
+| `feishu/`, `wecom/`, `micloud/`, `mail/`, `themes/`, `amap/`, `rail/`, `hotel/`, `ride/`, `mcpui-demo/` | The ten plugin modules: Kotlin sources, `src/main/assets/plugin.json` manifests, icons and pages |
 | `gradle/plugin-bundle.gradle.kts` | Shared packaging script providing the `assemblePlugin`, `signPlugin` and `verifyPlugin` tasks |
 | `settings.gradle.kts` | Module list and repositories; dependencies come from `io.github.sadami3066.superpi:plugin-api` on `https://sadami3066.github.io/SuperPI-Maven` (use the latest release there; `api()` brings in the matching `design`), Google and Maven Central |
 | `gradle/wrapper/`, `gradlew` | Gradle 9.8.2 wrapper; no local Gradle installation needed |
@@ -145,4 +146,4 @@ The source code and documentation in this repository are licensed under [Apache-
 - The project is provided as-is and maintained on a best-effort basis, with no guarantee of service availability, response time or continued availability of third-party APIs.
 - Related docs & repositories: [SuperPI](https://github.com/Sadami3066/SuperPI) · [Plugin Developer Docs](../../docs/plugins/README.md) · [SuperPI-Market](https://github.com/Sadami3066/SuperPI-Market) · [Plugin Template](../template/)
 
-Development sample: [`mcpui-demo/`](mcpui-demo/README.md) renders MCP tool results with a plugin card. It is not in the market and requires `plugin-api 1.3.0` / host 1.1.0+.
+Development sample: [`mcpui-demo/`](mcpui-demo/README.md) renders MCP tool results with a plugin card. It is not in the market and requires `plugin-api 2.0.1` / host 2.0.0+.

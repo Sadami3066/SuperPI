@@ -196,4 +196,30 @@ class MarketLogicTest {
         assertFalse(MarketRequiredAccess.Root.satisfiedBy(HostAccess.LOCAL))
         assertFalse(MarketRequiredAccess.Root.satisfiedBy(HostAccess.ADB))
     }
+
+    @Test
+    fun paginationSlicesByTenAndClampsOutOfRangePages() {
+        val emptySlice = paginateMarketEntries(emptyList(), page = 2)
+        assertTrue(emptySlice.items.isEmpty())
+        assertEquals(0, emptySlice.page)
+        assertEquals(0, emptySlice.totalPages)
+        assertEquals(0, emptySlice.totalItems)
+
+        val ten = (1..10).map { entry(id = "item-$it") }
+        val exactSlice = paginateMarketEntries(ten, page = 0)
+        assertEquals(10, exactSlice.items.size)
+        assertEquals(1, exactSlice.totalPages)
+        assertEquals(0, exactSlice.page)
+
+        val twentyThree = (1..23).map { entry(id = "item-$it") }
+        val first = paginateMarketEntries(twentyThree, page = -3)
+        assertEquals(0, first.page)
+        assertEquals(3, first.totalPages)
+        assertEquals(23, first.totalItems)
+        assertEquals((1..10).map { "item-$it" }, first.items.map { it.id })
+
+        val third = paginateMarketEntries(twentyThree, page = 99)
+        assertEquals(2, third.page)
+        assertEquals(listOf("item-21", "item-22", "item-23"), third.items.map { it.id })
+    }
 }

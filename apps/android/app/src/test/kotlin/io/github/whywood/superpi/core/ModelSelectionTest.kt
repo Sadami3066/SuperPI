@@ -80,6 +80,15 @@ class ModelSelectionTest {
         assertNull(selection.ensure(emptySet()))
         assertTrue(settings.saved.isEmpty())
     }
+
+    @Test
+    fun resolveFallsBackWhenModelIdRemovedFromConfiguredProvider() {
+        val stale = ModelConfig("deepseek", "deleted-model", ThinkingLevel.OFF)
+        assertEquals(
+            ModelConfig("deepseek", "deepseek-v4.1-flash", ThinkingLevel.OFF),
+            resolve(stale, setOf("deepseek"), catalog),
+        )
+    }
 }
 
 private fun option(providerId: String, id: String) =

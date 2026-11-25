@@ -5,6 +5,7 @@ import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.ToolActivityStatus
 import io.github.whywood.superpi.runtime.ToolTrace
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ChatSemanticsTest {
@@ -86,5 +87,46 @@ class ChatSemanticsTest {
         assertEquals(ProcessStatus.Stopped, processStatus(streaming = false, status = MessageStatus.STOPPED))
         assertEquals(ProcessStatus.Failed, processStatus(streaming = false, status = MessageStatus.FAILED))
         assertEquals(ProcessStatus.Done, processStatus(streaming = false, status = MessageStatus.DONE))
+    }
+
+    @Test
+    fun liveProcessPhaseDoesNotRevertToStaleReasoningAfterToolCompletes() {
+        val reasoning1 = AssistantStep.Reasoning(id = 1L, text = "First thought before bash")
+        val reasoning3 = AssistantStep.Reasoning(id = 3L, text = "Next thought after bash")
+        val runningTool = tool(2L, ToolActivityStatus.RUNNING)
+        val finishedTool = tool(2L, ToolActivityStatus.DONE)
+        val laterFinishedTool = tool(3L, ToolActivityStatus.DONE)
+
+        assertNull(liveProcessPhase(listOf(reasoning1), streaming = false))
+        assertEquals(
+            LiveProcessPhase.Thinking(reasoning1),
+            liveProcessPhase(listOf(reasoning1), streaming = true),
+        )
+        assertEquals(
+            LiveProcessPhase.CallingTool(runningTool),
+            liveProcessPhase(listOf(reasoning1, runningTool), streaming = true),
+        )
+        assertEquals(
+            LiveProcessPhase.Thinking(reasoning = null),
+            liveProcessPhase(listOf(reasoning1, finishedTool), streaming = true),
+        )
+        assertEquals(
+            LiveProcessPhase.Thinking(reasoning3),
+            liveProcessPhase(listOf(reasoning1, finishedTool, reasoning3), streaming = true),
+        )
+        assertEquals(
+            LiveProcessPhase.CallingTool(runningTool),
+            liveProcessPhase(listOf(reasoning1, runningTool, laterFinishedTool), streaming = true),
+        )
+    }
+
+    @Test
+    fun terminatedReasoningIdMatchesOnlyTrailingReasoningStep() {
+        val reasoning = AssistantStep.Reasoning(id = 1L, text = "Interrupted")
+        val failedTool = tool(2L, ToolActivityStatus.FAILED)
+
+        assertEquals(1L, terminatedReasoningId(listOf(reasoning), terminated = true))
+        assertNull(terminatedReasoningId(listOf(reasoning), terminated = false))
+        assertNull(terminatedReasoningId(listOf(reasoning, failedTool), terminated = true))
     }
 }

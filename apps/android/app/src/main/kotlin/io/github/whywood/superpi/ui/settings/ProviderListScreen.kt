@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,10 +38,13 @@ import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSectionLabel
-import io.github.whywood.superpi.design.DdShapes
+import io.github.whywood.superpi.design.DdSheet
+import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.runtime.ModelConfig
+import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.ui.common.ProviderIcon
 
@@ -53,9 +59,13 @@ fun ProviderListScreen(
     onAddCustomProvider: () -> Unit,
     onProviderClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    defaultModel: ModelConfig = ModelConfig(),
+    modelsByProvider: Map<String, List<ModelOption>> = emptyMap(),
+    onSelectDefaultModel: (String, String) -> Unit = { _, _ -> },
 ) {
     val colors = superPiColors()
     var query by rememberSaveable { mutableStateOf("") }
+    var defaultModelSheetOpen by rememberSaveable { mutableStateOf(false) }
     val filtered = remember(providers, query) {
         val keyword = query.trim()
         providers
@@ -123,6 +133,64 @@ fun ProviderListScreen(
                         fieldTestTag = "provider_search_field",
                     )
                     Spacer(Modifier.height(DdSpacing.Lg))
+                }
+            }
+            if (configuredProviderIds.isNotEmpty() && query.isBlank()) {
+                item(key = "default_model_section") {
+                    val activeProvider = remember(providers, defaultModel.providerId) {
+                        providers.firstOrNull { it.id == defaultModel.providerId }
+                    }
+                    val activeModel = remember(modelsByProvider, defaultModel) {
+                        modelsByProvider[defaultModel.providerId].orEmpty().firstOrNull { it.id == defaultModel.modelId }
+                    }
+                    val modelLabel = activeModel?.displayName?.ifBlank { activeModel.id }
+                        ?: defaultModel.modelId.ifBlank { stringResource(R.string.settings_account_no_model) }
+                    val providerLabel = activeProvider?.name ?: defaultModel.providerId
+                    Column(Modifier.fillMaxWidth()) {
+                        DdSectionLabel(
+                            stringResource(R.string.settings_provider_default_model_section),
+                            Modifier.padding(start = DdSpacing.Xs),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        DdGroupCard {
+                            DdPressable(
+                                onClick = { defaultModelSheetOpen = true },
+                                modifier = Modifier.fillMaxWidth().testTag("provider_default_model_card"),
+                                shape = RectangleShape,
+                                contentDescription = "$modelLabel, $providerLabel",
+                            ) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 68.dp)
+                                        .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Md),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    ProviderIcon(defaultModel.providerId, providerLabel)
+                                    Spacer(Modifier.width(14.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = modelLabel,
+                                            style = DdType.body,
+                                            color = colors.ink,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = providerLabel,
+                                            style = DdType.bodySmall,
+                                            color = colors.inkTertiary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    DdIcon(icon = DdIcons.ChevronRight, tint = colors.inkTertiary, size = 16.dp)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(DdSpacing.Lg))
+                    }
                 }
             }
             item(key = "custom_section") {
@@ -209,6 +277,22 @@ fun ProviderListScreen(
             }
         }
     }
+
+    if (defaultModelSheetOpen) {
+        val configuredProviders = remember(providers, configuredProviderIds) {
+            providers.filter { it.id in configuredProviderIds }.sortedBy { it.name.lowercase() }
+        }
+        DefaultModelPickerSheet(
+            providers = configuredProviders,
+            modelsByProvider = modelsByProvider,
+            defaultModel = defaultModel,
+            onSelect = { providerId, modelId ->
+                defaultModelSheetOpen = false
+                onSelectDefaultModel(providerId, modelId)
+            },
+            onDismiss = { defaultModelSheetOpen = false },
+        )
+    }
 }
 
 @Composable
@@ -256,6 +340,86 @@ private fun ProviderRow(
             }
             Spacer(Modifier.width(6.dp))
             DdIcon(icon = DdIcons.ChevronRight, tint = colors.inkTertiary, size = 16.dp)
+        }
+    }
+}
+
+@Composable
+private fun DefaultModelPickerSheet(
+    providers: List<ProviderSummary>,
+    modelsByProvider: Map<String, List<ModelOption>>,
+    defaultModel: ModelConfig,
+    onSelect: (String, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = superPiColors()
+    var search by remember { mutableStateOf("") }
+    val cleanQuery = search.trim()
+
+    DdSheet(onDismiss = onDismiss) {
+        DdSheetHeader(
+            title = stringResource(R.string.settings_provider_default_model_section),
+            onClose = onDismiss,
+        )
+        DdSearchField(
+            query = search,
+            onQueryChange = { search = it },
+            placeholder = stringResource(R.string.settings_provider_model_search),
+            clearContentDescription = stringResource(R.string.search_clear),
+            modifier = Modifier.padding(horizontal = DdSpacing.Xxl),
+            fieldTestTag = "provider_default_model_search",
+        )
+        Spacer(Modifier.height(DdSpacing.Md))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = DdSpacing.Xxl)
+                .padding(bottom = DdSpacing.Xxl),
+        ) {
+            var renderedAny = false
+            providers.forEach { provider ->
+                val allModels = modelsByProvider[provider.id].orEmpty()
+                val filteredModels = if (cleanQuery.isEmpty()) {
+                    allModels
+                } else {
+                    allModels.filter { model ->
+                        model.displayName.contains(cleanQuery, ignoreCase = true) ||
+                            model.id.contains(cleanQuery, ignoreCase = true) ||
+                            provider.name.contains(cleanQuery, ignoreCase = true)
+                    }
+                }
+                if (filteredModels.isEmpty()) return@forEach
+                if (renderedAny) Spacer(Modifier.height(DdSpacing.Lg))
+                renderedAny = true
+                DdSectionLabel(provider.name, Modifier.padding(start = DdSpacing.Xs))
+                Spacer(Modifier.height(DdSpacing.Xs))
+                DdGroupCard {
+                    filteredModels.forEachIndexed { idx, model ->
+                        if (idx > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                        val isSelected = defaultModel.providerId == provider.id && defaultModel.modelId == model.id
+                        DdListRow(
+                            title = model.displayName.ifBlank { model.id },
+                            onClick = { onSelect(provider.id, model.id) },
+                            trailing = if (isSelected) {
+                                {
+                                    DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 18.dp)
+                                }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.testTag("provider_default_pick_${provider.id}_${model.id}"),
+                        )
+                    }
+                }
+            }
+            if (!renderedAny) {
+                DdEmptyState(
+                    text = stringResource(R.string.settings_provider_no_model_result),
+                    modifier = Modifier.padding(vertical = DdSpacing.Xl),
+                )
+            }
         }
     }
 }

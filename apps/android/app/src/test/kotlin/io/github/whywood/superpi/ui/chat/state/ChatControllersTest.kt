@@ -158,7 +158,7 @@ class ChatControllersTest {
         advanceUntilIdle()
 
         assertEquals("m2", state.modelId)
-        assertEquals("m2", settings.saved.lastOrNull()?.modelId)
+        assertTrue(settings.saved.isEmpty())
         assertEquals("m2", runtime.sessionModels["session-1"]?.modelId)
     }
 
@@ -188,7 +188,7 @@ class ChatControllersTest {
 
         assertEquals("m2", state.modelId)
         assertEquals("m2", runtime.sessionModels["session-1"]?.modelId)
-        assertEquals("m2", settings.saved.lastOrNull()?.modelId)
+        assertTrue(settings.saved.isEmpty())
     }
 
     @Test
@@ -215,7 +215,7 @@ class ChatControllersTest {
         assertEquals("p", state.providerId)
         assertEquals("m2", state.modelId)
         assertEquals(ThinkingLevel.HIGH, state.thinkingLevel)
-        assertEquals(ModelConfig("p", "m2", ThinkingLevel.HIGH), settings.saved.lastOrNull())
+        assertTrue(settings.saved.isEmpty())
         assertEquals("m2", runtime.sessionModels["session-1"]?.modelId)
     }
 

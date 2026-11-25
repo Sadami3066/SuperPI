@@ -12,3 +12,17 @@ data class UserQuestion(
     val options: List<QuestionOption> = emptyList(),
     val multiSelect: Boolean = false,
 )
+
+data class QuestionAnswer(
+    val questionId: String,
+    val selected: List<String> = emptyList(),
+    val custom: String? = null,
+    val skipped: Boolean = false,
+)
+
+data class PendingQuestion(
+    val requestId: String,
+    val sessionId: String,
+    val toolCallId: String,
+    val questions: List<UserQuestion>,
+)

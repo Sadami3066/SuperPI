@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.github.whywood.superpi.MainActivity
+import io.github.whywood.superpi.conversation.ActiveRunView
 import io.github.whywood.superpi.conversation.ConversationStore
 import io.github.whywood.superpi.conversation.RunCompletion
 import io.github.whywood.superpi.R
@@ -24,6 +25,12 @@ import io.github.whywood.superpi.runtime.InterruptedRun
 import io.github.whywood.superpi.runtime.PendingQuestion
 import io.github.whywood.superpi.runtime.RunStatus
 import io.github.whywood.superpi.runtime.RuntimeActivity
+import io.github.whywood.superpi.runtime.RuntimeEvent
+import io.github.whywood.superpi.runtime.SuperRuntime
+import io.github.whywood.superpi.runtime.WorkerOutcome
+import io.github.whywood.superpi.runtime.WorkerStatus
+import io.github.whywood.superpi.runtime.isBusyForCommands
+import io.github.whywood.superpi.runtime.superagent.LocalWorkerPool
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +38,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class NotificationCenter(
@@ -38,12 +47,17 @@ class NotificationCenter(
     private val runtime: ConversationQueries,
     private val store: ConversationStore,
     private val pendingQuestions: StateFlow<List<PendingQuestion>>,
+    private val superRuntime: SuperRuntime? = null,
 ) {
     private val manager = NotificationManagerCompat.from(context)
     private var scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val postedQuestionSessions = ConcurrentHashMap.newKeySet<String>()
     private var collector: Job? = null
     private var questionCollector: Job? = null
+    private var superThreadCollector: Job? = null
+    private var superWorkersCollector: Job? = null
+    private var superQuestionsCollector: Job? = null
+    private var superEventsCollector: Job? = null
     @Volatile
     private var foregroundStarted = false
     @Volatile
@@ -56,7 +70,78 @@ class NotificationCenter(
             store.runCompletions.collect(::onRunCompletion)
         }
         questionCollector = scope.launch {
-            pendingQuestions.collect(::onPendingQuestions)
+            pendingQuestions.collect { refreshAllQuestions() }
+        }
+        val superRt = superRuntime
+        if (superRt != null) {
+            superThreadCollector = scope.launch {
+                var previousBusyAndTool: Pair<Boolean, String?>? = null
+                var previousQuestionId: String? = null
+                var initialized = false
+                superRt.threadState
+                    .map { Triple(it.busy, it.activeToolText, it.pendingQuestion?.requestId) }
+                    .distinctUntilChanged()
+                    .collect { (busy, activeToolText, questionId) ->
+                        val busyAndTool = busy to activeToolText
+                        if (!initialized || busyAndTool != previousBusyAndTool) {
+                            previousBusyAndTool = busyAndTool
+                            updateForeground()
+                        }
+                        if (!initialized || questionId != previousQuestionId) {
+                            previousQuestionId = questionId
+                            refreshAllQuestions()
+                        }
+                        initialized = true
+                    }
+            }
+            superWorkersCollector = scope.launch {
+                var initialized = false
+                var previousStatuses = emptyMap<String, WorkerStatus>()
+                superRt.workers.collect { workers ->
+                    if (initialized) {
+                        workers.forEach { worker ->
+                            val prev = previousStatuses[worker.workerId]
+                            if (prev != null && prev.isBusyForCommands && !worker.status.isBusyForCommands) {
+                                val targetId = workerSessionTarget(worker.workerId)
+                                val title = formatSuperWorkerTitle(worker.botName, worker.title)
+                                when (worker.status) {
+                                    WorkerStatus.FAILED -> postResult(
+                                        sessionId = targetId,
+                                        title = title,
+                                        status = RunStatus.FAILED,
+                                        text = "",
+                                        error = worker.lastError,
+                                    )
+                                    WorkerStatus.IDLE -> if (worker.lastOutcome == WorkerOutcome.SUCCEEDED &&
+                                        !worker.lastTurnSilent &&
+                                        !LocalWorkerPool.isSilentNoUpdateReply(worker.lastSummary.orEmpty())
+                                    ) {
+                                        postResult(
+                                            sessionId = targetId,
+                                            title = title,
+                                            status = RunStatus.DONE,
+                                            text = worker.lastSummary.orEmpty(),
+                                            error = null,
+                                        )
+                                    }
+                                    else -> Unit
+                                }
+                            }
+                        }
+                    }
+                    previousStatuses = workers.associate { it.workerId to it.status }
+                    initialized = true
+                    updateForeground()
+                }
+            }
+            superQuestionsCollector = scope.launch {
+                superRt.pendingWorkerQuestions.collect {
+                    refreshAllQuestions()
+                }
+            }
+            superEventsCollector = scope.launch {
+                superRt.superThreadEvents.collect(::onSuperThreadEvent)
+            }
         }
     }
 
@@ -65,6 +150,14 @@ class NotificationCenter(
         collector = null
         questionCollector?.cancel()
         questionCollector = null
+        superThreadCollector?.cancel()
+        superThreadCollector = null
+        superWorkersCollector?.cancel()
+        superWorkersCollector = null
+        superQuestionsCollector?.cancel()
+        superQuestionsCollector = null
+        superEventsCollector?.cancel()
+        superEventsCollector = null
         clearQuestionNotifications()
         scope.cancel()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -84,7 +177,7 @@ class NotificationCenter(
     }
 
     fun refreshQuestionNotifications() {
-        scope.launch { onPendingQuestions(pendingQuestions.value) }
+        scope.launch { refreshAllQuestions() }
     }
 
     fun clearQuestionNotifications() {
@@ -92,6 +185,15 @@ class NotificationCenter(
             manager.cancel(questionId(sessionId))
         }
         postedQuestionSessions.clear()
+    }
+
+    private suspend fun refreshAllQuestions() {
+        onPendingQuestions(mergedPendingQuestions())
+    }
+
+    private fun mergedPendingQuestions(): List<PendingQuestion> {
+        val superRt = superRuntime ?: return pendingQuestions.value
+        return pendingQuestions.value + buildSuperPendingQuestions(superRt.threadState.value, superRt.workers.value)
     }
 
     private suspend fun onPendingQuestions(pending: List<PendingQuestion>) {
@@ -111,9 +213,7 @@ class NotificationCenter(
     }
 
     private suspend fun postQuestion(sessionId: String, questions: List<PendingQuestion>) {
-        val title = runCatching { runtime.sessionTitle(sessionId) }.getOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?: context.getString(R.string.app_name)
+        val title = resolveNotificationTitle(sessionId)
         val body = questionNotificationBody(questions.first())
         val builder = NotificationCompat.Builder(context, CHANNEL_QUESTIONS)
             .setSmallIcon(R.drawable.ic_notification)
@@ -138,8 +238,25 @@ class NotificationCenter(
         postedQuestionSessions += sessionId
     }
 
+    private suspend fun resolveNotificationTitle(sessionId: String): String {
+        if (sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID) {
+            return SUPER_DISPLAY_TITLE
+        }
+        if (sessionId.startsWith(WORKER_TARGET_PREFIX)) {
+            val workerId = sessionId.removePrefix(WORKER_TARGET_PREFIX)
+            val worker = superRuntime?.workers?.value?.firstOrNull { it.workerId == workerId }
+            if (worker != null) {
+                return formatSuperWorkerTitle(worker.botName, worker.title)
+            }
+            return SUPER_DISPLAY_TITLE
+        }
+        return runCatching { runtime.sessionTitle(sessionId) }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.app_name)
+    }
+
     fun foregroundNotification(): android.app.Notification {
-        val active = store.activeRuns.value
+        val active = mergedActiveRuns()
         val latest = active.values.maxByOrNull { it.startedAt }
         val title = when {
             active.isEmpty() -> context.getString(R.string.app_name)
@@ -259,6 +376,41 @@ class NotificationCenter(
             text = change.text,
             error = change.error,
         )
+    }
+
+    private fun onSuperThreadEvent(event: RuntimeEvent) {
+        when (event) {
+            is RuntimeEvent.RunFinished -> {
+                updateForeground()
+                postResult(
+                    sessionId = SuperRuntime.SUPER_THREAD_SESSION_ID,
+                    title = SUPER_DISPLAY_TITLE,
+                    status = event.status,
+                    text = event.text,
+                    error = null,
+                )
+            }
+
+            is RuntimeEvent.RunFailed -> {
+                updateForeground()
+                postResult(
+                    sessionId = SuperRuntime.SUPER_THREAD_SESSION_ID,
+                    title = SUPER_DISPLAY_TITLE,
+                    status = RunStatus.FAILED,
+                    text = "",
+                    error = event.message,
+                )
+            }
+
+            else -> Unit
+        }
+    }
+
+    private fun mergedActiveRuns(): Map<String, ActiveRunView> {
+        val superRt = superRuntime ?: return store.activeRuns.value
+        val merged = LinkedHashMap<String, ActiveRunView>(store.activeRuns.value)
+        merged.putAll(buildSuperActiveRuns(superRt.threadState.value, superRt.workers.value))
+        return merged
     }
 
     private fun updateForeground() {
@@ -387,6 +539,9 @@ class NotificationCenter(
 
     companion object {
         const val EXTRA_SESSION_ID = "io.github.whywood.superpi.extra.SESSION_ID"
+        const val WORKER_TARGET_PREFIX = "worker:"
+        const val SUPER_DISPLAY_TITLE = "Super PI"
+        fun workerSessionTarget(workerId: String): String = "$WORKER_TARGET_PREFIX$workerId"
         private const val CHANNEL_RUNTIME = "agent_runtime"
         private const val CHANNEL_RESULTS = "session_results"
         private const val CHANNEL_QUESTIONS = "agent_questions"

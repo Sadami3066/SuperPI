@@ -7,7 +7,7 @@ A standalone Gradle Android project for building external Super PI Agent plugins
 - JDK 17
 - Android SDK: compileSdk 36, minSdk 29
 - Gradle 9.8.2 (wrapper included)
-- Depends on `plugin-api:2.0.1` from <https://sadami3066.github.io/SuperPI-Maven>
+- Depends on `plugin-api` 2.0.x from <https://sadami3066.github.io/SuperPI-Maven>; this checkout pins `2.0.1`. Bump `pluginApiVersion` in `build.gradle.kts` when you need the 2.0.2 SDK release.
 
 Set `sdk.dir=/path/to/Android/Sdk` in `local.properties`, or set `ANDROID_HOME`.
 
@@ -56,6 +56,6 @@ The host never reads a plugin's `res/`, so build UI with Compose or declared UI 
 | `build.gradle.kts` | Android configuration and the `generateSigningKey` / `assemblePlugin` / `signPlugin` / `verifyPlugin` tasks (including Ed25519 and the canonical entry digest) |
 | `src/main/assets/plugin.json` | Plugin manifest |
 | `src/main/assets/skills/template-skill/` | Example skill: `SKILL.md` + `references/format.md` |
-| `src/main/kotlin/.../TemplatePlugin.kt` | Reference implementation: `availability`, skill, prompt section, `template_echo` tool |
+| `src/main/kotlin/.../TemplatePlugin.kt` | Reference implementation: `availability`, skill, prompt section, `template_echo` / `template_state` tools |
 
 The full contract and signing spec live in [Plugin Developer Docs](../../docs/plugins/README.md); listing and distribution rules are in [Marketplace Policy](../../docs/plugins/market-policy.md).

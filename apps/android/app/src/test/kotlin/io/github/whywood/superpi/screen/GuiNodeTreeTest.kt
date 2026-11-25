@@ -402,6 +402,46 @@ class GuiNodeTreeTest {
         assertTrue(json.contains("\"bounds\":\"[10,20][110,220]\""))
     }
 
+    @Test
+    fun passwordNodesRedactTextAndMarkSecret() {
+        val tree = node(
+            className = "android.widget.EditText",
+            text = "SuperSecret123!",
+        ).copy(secret = true, editable = true)
+        val snapshot = snapshotOf(tree)
+        val stored = snapshot.nodes.single()
+        assertTrue(stored.secret)
+        assertNull(stored.text)
+        val json = GuiNodeTree.nodeJson(stored).toString()
+        assertFalse(json.contains("SuperSecret123!"))
+        assertTrue(json.contains("\"secret\":true"))
+    }
+
+    @Test
+    fun sparseStateFlagsSerializeOnlyWhenActive() {
+        val tree = node(className = "android.widget.CheckBox", text = "Agree").copy(
+            checked = true,
+            selected = true,
+            focused = true,
+            showingHint = true,
+            placeholder = "Tap here",
+        )
+        val json = GuiNodeTree.nodeJson(snapshotOf(tree).nodes.single()).toString()
+        assertTrue(json.contains("\"checked\":true"))
+        assertTrue(json.contains("\"selected\":true"))
+        assertTrue(json.contains("\"focused\":true"))
+        assertTrue(json.contains("\"showingHint\":true"))
+        assertTrue(json.contains("\"placeholder\":\"Tap here\""))
+
+        val plainJson = GuiNodeTree.nodeJson(snapshotNode(text = "Plain")).toString()
+        assertFalse(plainJson.contains("\"checked\""))
+        assertFalse(plainJson.contains("\"selected\""))
+        assertFalse(plainJson.contains("\"focused\""))
+        assertFalse(plainJson.contains("\"showingHint\""))
+        assertFalse(plainJson.contains("\"secret\""))
+        assertFalse(plainJson.contains("\"placeholder\""))
+    }
+
     private fun node(
         className: String = "android.view.View",
         text: String? = null,

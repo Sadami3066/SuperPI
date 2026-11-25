@@ -48,7 +48,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import io.github.whywood.superpi.data.AppMode
 import io.github.whywood.superpi.data.AttachmentRef
+import io.github.whywood.superpi.data.COMPACTION_TRIGGER_DEFAULT
 import io.github.whywood.superpi.data.relay.RemoteSessionSummaryDto
 import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdSheet
@@ -66,15 +68,17 @@ import io.github.whywood.superpi.plugin.host.services.PluginPageRequest
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.plugins.PluginPageHost
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.runtime.BotBlueprint
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.JobSnapshot
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.runtime.SessionUsage
+import io.github.whywood.superpi.runtime.WorkerRunRecord
 import io.github.whywood.superpi.ui.RemoteDrawerState
 import io.github.whywood.superpi.ui.SuperPIDrawer
-import io.github.whywood.superpi.ui.chat.UsageSheet
 import io.github.whywood.superpi.ui.common.chat.AttachmentPreviewDialog
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
+import io.github.whywood.superpi.ui.common.chat.UsageSheet
 import io.github.whywood.superpi.ui.jobs.JobsSheet
 import io.github.whywood.superpi.ui.navigation.AppDestination
 import io.github.whywood.superpi.ui.workspaces.DeleteWorkspaceDialog
@@ -115,7 +119,11 @@ sealed interface ShellOverlay {
         val errorMessage: String? = null,
     ) : ShellOverlay
     data class AttachmentPreview(val attachment: AttachmentRef, val file: File) : ShellOverlay
-    data class Usage(val usage: SessionUsage, val canCompact: Boolean = false) : ShellOverlay
+    data class Usage(
+        val usage: SessionUsage,
+        val canCompact: Boolean = false,
+        val compactionTriggerPercent: Int = COMPACTION_TRIGGER_DEFAULT,
+    ) : ShellOverlay
     data class Jobs(val jobs: List<JobSnapshot>, val selectedJobId: String?, val output: String?) : ShellOverlay
 }
 
@@ -170,6 +178,11 @@ data class ShellDrawerState(
     val remoteCapabilitiesWorkspaceIds: Set<String> = emptySet(),
     val remoteShowArchivedWorkspaceIds: Set<String> = emptySet(),
     val canCreateRemoteBotDeviceIds: Set<String> = emptySet(),
+    val appMode: AppMode = AppMode.NORMAL,
+    val superWorkers: List<WorkerRunRecord> = emptyList(),
+    val superBlueprints: List<BotBlueprint> = emptyList(),
+    val activeWorkerId: String? = null,
+    val userSubtitle: String = "",
 )
 data class ShellDrawerActions(
     val onNavigate: (AppDestination) -> Unit, val onDismiss: () -> Unit, val onOpen: () -> Unit = {},
@@ -192,6 +205,10 @@ data class ShellDrawerActions(
     val onSetRemoteSessionPinned: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
     val onSetRemoteSessionArchived: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
     val onDeleteRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
+    val onToggleAppMode: () -> Unit = {},
+    val onOpenSuperTeam: () -> Unit = {},
+    val onOpenWorkerMonitor: (String) -> Unit = {},
+    val onDeleteWorker: (String) -> Unit = {},
 )
 fun resolveOverlays(state: ShellOverlayState): List<ShellOverlay> = buildList {
     state.workspaceCreate?.let(::add)
@@ -270,6 +287,7 @@ internal fun OverlayHost(
 
                 is ShellOverlay.Usage -> UsageSheet(
                     usage = overlay.usage,
+                    compactionTriggerPercent = overlay.compactionTriggerPercent,
                     onDismiss = overlayActions.onDismissUsage,
                     onCompact = if (overlay.canCompact) overlayActions.onCompactUsage else null,
                 )
@@ -618,6 +636,15 @@ private fun ShellDrawerHost(
                 onSetRemoteSessionPinned = actions.onSetRemoteSessionPinned,
                 onSetRemoteSessionArchived = actions.onSetRemoteSessionArchived,
                 onDeleteRemoteSession = actions.onDeleteRemoteSession,
+                appMode = state.appMode,
+                superWorkers = state.superWorkers,
+                superBlueprints = state.superBlueprints,
+                activeWorkerId = state.activeWorkerId,
+                userSubtitle = state.userSubtitle,
+                onToggleAppMode = actions.onToggleAppMode,
+                onOpenSuperTeam = actions.onOpenSuperTeam,
+                onOpenWorkerMonitor = actions.onOpenWorkerMonitor,
+                onDeleteWorker = actions.onDeleteWorker,
             )
         }
     }

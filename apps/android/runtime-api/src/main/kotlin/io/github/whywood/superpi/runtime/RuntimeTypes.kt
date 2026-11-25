@@ -61,6 +61,7 @@ data class RuntimeWorkspace(
     val avatar: String? = null,
     val intro: String? = null,
     val remote: RemoteBotRef? = null,
+    val defaultModel: ModelConfig? = null,
 )
 
 data class OpenedSession(
@@ -442,6 +443,8 @@ interface WorkspaceAdmin {
     suspend fun renameWorkspace(id: String, name: String)
 
     suspend fun updateWorkspaceProfile(id: String, avatar: String?, intro: String?)
+
+    suspend fun updateWorkspaceDefaultModel(id: String, model: ModelConfig?) = Unit
 
     suspend fun deleteWorkspace(id: String)
 

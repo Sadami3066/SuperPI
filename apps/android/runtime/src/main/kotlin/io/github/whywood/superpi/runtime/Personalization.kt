@@ -3,6 +3,8 @@ package io.github.whywood.superpi.runtime
 import io.github.whywood.superpi.sdk.coding.prompt.DEFAULT_SYSTEM_PROMPT_PREAMBLE
 import java.time.OffsetDateTime
 
+internal const val MAX_PERSONALIZATION_INSTRUCTION_CHARS = 4_000
+
 data class Personalization(
     val nickname: String = "Milous",
     val instruction: String = "",
@@ -35,7 +37,7 @@ internal fun buildPersonalizationSections(
         }.trim(),
     )
 
-    val instruction = personalization.instruction.trim()
+    val instruction = personalization.instruction.trim().take(MAX_PERSONALIZATION_INSTRUCTION_CHARS)
     if (instruction.isNotEmpty()) {
         sections["instruction"] = wrapPromptSection("instruction", "User's instruction:\n\n$instruction")
     }
@@ -62,7 +64,7 @@ internal fun buildSessionSystemPromptSections(
     }
     sections["preamble"] = promptPreamble?.trim()?.takeIf { it.isNotEmpty() }
         ?: DEFAULT_SYSTEM_PROMPT_PREAMBLE.replace("SuperPI", "PI")
-    promptRules?.trim()?.takeIf { it.isNotEmpty() }?.let { sections["rules"] = wrapPromptSection("rules", it) }
+    promptRules?.trim()?.takeIf { it.isNotEmpty() }?.let { sections["plugin_rules"] = wrapPromptSection("plugin_rules", it) }
     sections.putAll(extra)
     return sections
 }

@@ -18,9 +18,20 @@ import io.github.whywood.superpi.runtime.MiniappNotificationRequest
 import io.github.whywood.superpi.runtime.MiniappReminder
 import io.github.whywood.superpi.runtime.MiniappReminderRequest
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.UUID
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 private const val CHANNEL_ID = "miniapp_reminders"
 private const val PREFS_NAME = "miniapp_notifications"
@@ -28,9 +39,7 @@ private const val ACTION_REMINDER = "io.github.whywood.superpi.action.MINIAPP_RE
 private const val EXTRA_APP_ID = "app_id"
 private const val EXTRA_REMINDER_ID = "reminder_id"
 private const val MAX_REMINDERS_PER_APP = 64
-private const val DAY_MILLIS = 24L * 60 * 60 * 1000
 
-@Serializable
 internal data class StoredReminder(
     val appId: String,
     val appName: String,
@@ -42,7 +51,6 @@ internal data class StoredReminder(
 )
 
 internal class MiniappReminderStore(private val file: File) {
-    private val json = Json { ignoreUnknownKeys = true }
     private val lock = Any()
     private var cache: List<StoredReminder>? = null
 
@@ -69,7 +77,14 @@ internal class MiniappReminderStore(private val file: File) {
     private fun load(): List<StoredReminder> {
         cache?.let { return it }
         val loaded = runCatching {
-            if (!file.isFile) emptyList() else json.decodeFromString<List<StoredReminder>>(file.readText())
+            if (!file.isFile) {
+                emptyList()
+            } else {
+                val root = Json.parseToJsonElement(file.readText()) as? JsonArray ?: return@runCatching emptyList()
+                root.mapNotNull { element ->
+                    (element as? JsonObject)?.let(::decodeStoredReminder)
+                }
+            }
         }.getOrDefault(emptyList())
         cache = loaded
         return loaded
@@ -80,12 +95,40 @@ internal class MiniappReminderStore(private val file: File) {
         runCatching {
             file.parentFile?.let { parent -> if (!parent.isDirectory) parent.mkdirs() }
             val temp = File(file.parentFile, file.name + ".tmp")
-            temp.writeText(json.encodeToString(reminders))
+            val encoded = buildJsonArray {
+                reminders.forEach { reminder -> add(encodeStoredReminder(reminder)) }
+            }
+            temp.writeText(encoded.toString())
             if (!temp.renameTo(file)) {
                 file.writeText(temp.readText())
                 temp.delete()
             }
         }
+    }
+
+    private fun encodeStoredReminder(reminder: StoredReminder): JsonObject = buildJsonObject {
+        put("appId", reminder.appId)
+        put("appName", reminder.appName)
+        put("id", reminder.id)
+        put("title", reminder.title)
+        put("body", reminder.body)
+        put("at", reminder.at)
+        put("repeatDaily", reminder.repeatDaily)
+    }
+
+    private fun decodeStoredReminder(obj: JsonObject): StoredReminder? {
+        val appId = (obj["appId"] as? JsonPrimitive)?.contentOrNull ?: return null
+        val id = (obj["id"] as? JsonPrimitive)?.contentOrNull ?: return null
+        val at = (obj["at"] as? JsonPrimitive)?.longOrNull ?: return null
+        return StoredReminder(
+            appId = appId,
+            appName = (obj["appName"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+            id = id,
+            title = (obj["title"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+            body = (obj["body"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+            at = at,
+            repeatDaily = (obj["repeatDaily"] as? JsonPrimitive)?.booleanOrNull ?: false,
+        )
     }
 }
 
@@ -119,12 +162,6 @@ internal class MiniappReminderScheduler(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         runCatching { manager.cancel(pending) }
-    }
-
-    fun reschedule(reminders: List<StoredReminder>) {
-        reminders.forEach { reminder ->
-            if (reminder.at > System.currentTimeMillis()) schedule(reminder) else cancel(reminder)
-        }
     }
 
     private fun reminderIntent(appId: String, reminderId: String): Intent =
@@ -295,8 +332,11 @@ class MiniappReminderReceiver : BroadcastReceiver() {
         val scheduler = MiniappReminderScheduler(context)
         when (intent.action) {
             EXTRA_ACTION_REMINDER -> deliver(context, store, scheduler, intent)
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED ->
-                scheduler.reschedule(store.all())
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                val plan = reconcileRemindersOnBoot(store, System.currentTimeMillis())
+                plan.toSchedule.forEach { scheduler.schedule(it) }
+                plan.toCancel.forEach { scheduler.cancel(it) }
+            }
         }
     }
 
@@ -318,9 +358,7 @@ class MiniappReminderReceiver : BroadcastReceiver() {
             postNotification(context, reminder.appId, reminder.appName, reminder.id, reminder.title, reminder.body)
         }
         if (reminder.repeatDaily) {
-            var next = reminder.at + DAY_MILLIS
-            val now = System.currentTimeMillis()
-            while (next <= now) next += DAY_MILLIS
+            val next = nextDailyOccurrence(reminder.at, System.currentTimeMillis())
             val repeated = reminder.copy(at = next)
             store.upsert(repeated)
             scheduler.schedule(repeated)
@@ -332,4 +370,45 @@ class MiniappReminderReceiver : BroadcastReceiver() {
     private companion object {
         const val EXTRA_ACTION_REMINDER = ACTION_REMINDER
     }
+}
+
+internal data class BootReconcilePlan(
+    val toSchedule: List<StoredReminder>,
+    val toCancel: List<StoredReminder>,
+)
+
+internal fun nextDailyOccurrence(
+    atMillis: Long,
+    nowMillis: Long,
+    zone: ZoneId = ZoneId.systemDefault(),
+): Long {
+    var next = ZonedDateTime.ofInstant(Instant.ofEpochMilli(atMillis), zone).plusDays(1)
+    while (next.toInstant().toEpochMilli() <= nowMillis) {
+        next = next.plusDays(1)
+    }
+    return next.toInstant().toEpochMilli()
+}
+
+internal fun reconcileRemindersOnBoot(
+    store: MiniappReminderStore,
+    nowMillis: Long,
+    zone: ZoneId = ZoneId.systemDefault(),
+): BootReconcilePlan {
+    val toSchedule = mutableListOf<StoredReminder>()
+    val toCancel = mutableListOf<StoredReminder>()
+    store.all().forEach { reminder ->
+        when {
+            reminder.at > nowMillis -> toSchedule += reminder
+            reminder.repeatDaily -> {
+                val updated = reminder.copy(at = nextDailyOccurrence(reminder.at, nowMillis, zone))
+                store.upsert(updated)
+                toSchedule += updated
+            }
+            else -> {
+                store.remove(reminder.appId, reminder.id)
+                toCancel += reminder
+            }
+        }
+    }
+    return BootReconcilePlan(toSchedule = toSchedule, toCancel = toCancel)
 }

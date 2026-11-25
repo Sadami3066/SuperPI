@@ -12,10 +12,10 @@ import type {
   EnrollResponse,
   ErrorCode,
   HealthResponse,
-  MemoryDreamLeaseReleaseResponse,
-  MemoryDreamLeaseResponse,
-  MemoryPullResponse,
-  MemoryPushRequest,
+  MemoryConsolidationLeaseReleaseResponse,
+  MemoryConsolidationLeaseResponse,
+  MemoryV3PullResponse,
+  MemoryV3PushRequest,
   PairCodeResponse,
   PairEntry,
   RenameDeviceResponse,
@@ -56,15 +56,15 @@ export interface RelayServer {
 
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000
 const BODY_LIMIT = 64 * 1024
-const MEMORY_BODY_LIMIT = 2 * 1024 * 1024
+const MEMORY_BODY_LIMIT = 4 * 1024 * 1024
 const ENROLL_BODY_TIMEOUT_MS = 15_000
 const DEFAULT_ENROLL_MAX_FAILURES = 10
 const DEFAULT_ENROLL_WINDOW_MS = 15 * 60 * 1000
 const MAX_FAILURE_KEYS = 4_096
 const MAX_DEVICE_NAME_LENGTH = 128
-const DEFAULT_DREAM_LEASE_TTL_MS = 10 * 60 * 1000
-const MIN_DREAM_LEASE_TTL_MS = 30 * 1000
-const MAX_DREAM_LEASE_TTL_MS = 30 * 60 * 1000
+const DEFAULT_CONSOLIDATION_LEASE_TTL_MS = 10 * 60 * 1000
+const MIN_CONSOLIDATION_LEASE_TTL_MS = 30 * 1000
+const MAX_CONSOLIDATION_LEASE_TTL_MS = 30 * 60 * 1000
 
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const now = options.now ?? (() => Date.now())
@@ -153,7 +153,7 @@ async function handle(
       return
     }
 
-    if (method === 'POST' && url.pathname === '/v2/memory/push') {
+    if (method === 'POST' && url.pathname === '/v3/memory/push') {
       const device = authenticate(options, now(), request, response)
       if (!device || response.writableEnded) return
       const memory = requireMemory(options)
@@ -165,13 +165,13 @@ async function handle(
       if (typeof body !== 'object' || body === null) throw new HttpError(400, 'bad_request', 'body must be an object')
       const writeNow = now()
       options.store.touchDevice(currentDevice.id, writeNow)
-      const result = memory.push(currentDevice.id, body as MemoryPushRequest, writeNow)
+      const result = memory.push(currentDevice.id, body as MemoryV3PushRequest, writeNow)
       if (result.changed) options.onMemoryChanged?.(result.response.serverSeq, currentDevice.id)
       sendJson(response, 200, result.response)
       return
     }
 
-    if (method === 'GET' && url.pathname === '/v2/memory/pull') {
+    if (method === 'GET' && url.pathname === '/v3/memory/pull') {
       const device = authenticate(options, now(), request, response)
       if (!device || response.writableEnded) return
       const memory = requireMemory(options)
@@ -182,12 +182,12 @@ async function handle(
       if ((rawSince !== null && (!Number.isSafeInteger(since) || since < 0)) || (rawLimit !== null && (!Number.isSafeInteger(limit) || limit <= 0))) {
         throw new HttpError(400, 'bad_request', 'invalid since or limit')
       }
-      const body: MemoryPullResponse = memory.pull(since, limit)
+      const body: MemoryV3PullResponse = memory.pull(since, limit)
       sendJson(response, 200, body)
       return
     }
 
-    if (method === 'POST' && url.pathname === '/v2/memory/dream-lease') {
+    if (method === 'POST' && url.pathname === '/v3/memory/consolidation-lease') {
       const currentNow = now()
       const device = authenticate(options, currentNow, request, response)
       if (!device || response.writableEnded) return
@@ -197,12 +197,15 @@ async function handle(
         throw new HttpError(400, 'bad_request', 'body must be an object')
       }
       const requestedTtl = (body as { ttlMs?: unknown } | null)?.ttlMs
-      let ttlMs = DEFAULT_DREAM_LEASE_TTL_MS
+      let ttlMs = DEFAULT_CONSOLIDATION_LEASE_TTL_MS
       if (requestedTtl !== undefined) {
         if (typeof requestedTtl !== 'number' || !Number.isFinite(requestedTtl) || requestedTtl <= 0) {
           throw new HttpError(400, 'bad_request', 'ttlMs must be a positive number')
         }
-        ttlMs = Math.min(MAX_DREAM_LEASE_TTL_MS, Math.max(MIN_DREAM_LEASE_TTL_MS, Math.round(requestedTtl)))
+        ttlMs = Math.min(
+          MAX_CONSOLIDATION_LEASE_TTL_MS,
+          Math.max(MIN_CONSOLIDATION_LEASE_TTL_MS, Math.round(requestedTtl)),
+        )
       }
       const requestedMinInterval = (body as { minIntervalMs?: unknown } | null)?.minIntervalMs
       let minIntervalMs = 0
@@ -212,32 +215,32 @@ async function handle(
         }
         minIntervalMs = Math.round(requestedMinInterval)
       }
-      const lastDreamAt = memory.lastDreamAt()
+      const lastConsolidationAt = memory.lastConsolidationAt()
       const lease = options.store.acquireLease(
-        'dream',
+        'consolidation',
         device.id,
         randomToken(),
         currentNow,
         ttlMs,
         minIntervalMs,
-        lastDreamAt,
+        lastConsolidationAt,
       )
-      const result: MemoryDreamLeaseResponse = {
+      const result: MemoryConsolidationLeaseResponse = {
         ...lease,
-        lastDreamAt,
+        lastConsolidationAt,
         serverSeq: memory.version(),
       }
       sendJson(response, 200, result)
       return
     }
 
-    if (method === 'DELETE' && url.pathname === '/v2/memory/dream-lease') {
+    if (method === 'DELETE' && url.pathname === '/v3/memory/consolidation-lease') {
       const device = authenticate(options, now(), request, response)
       if (!device || response.writableEnded) return
       requireMemory(options)
       const leaseId = url.searchParams.get('leaseId')?.trim() || undefined
-      const released = options.store.releaseLease('dream', device.id, leaseId)
-      const result: MemoryDreamLeaseReleaseResponse = { released }
+      const released = options.store.releaseLease('consolidation', device.id, leaseId)
+      const result: MemoryConsolidationLeaseReleaseResponse = { released }
       sendJson(response, 200, result)
       return
     }
@@ -461,7 +464,7 @@ function toDeviceInfo(device: DeviceRecord, options: RelayServerOptions): Device
   return info
 }
 
-function readJson(request: IncomingMessage, limit = BODY_LIMIT, timeoutMs = 0): Promise<unknown> {
+function readJson(request: IncomingMessage, limit = BODY_LIMIT, timeoutMs = 30_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0

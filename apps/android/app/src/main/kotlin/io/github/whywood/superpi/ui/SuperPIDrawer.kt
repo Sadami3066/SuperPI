@@ -1,23 +1,18 @@
 package io.github.whywood.superpi.ui
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -34,6 +29,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -48,43 +45,57 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
+import io.github.whywood.superpi.data.AppMode
 import io.github.whywood.superpi.data.relay.RemoteSessionSummaryDto
 import io.github.whywood.superpi.design.DdAlpha
+import io.github.whywood.superpi.design.DdDialog
+import io.github.whywood.superpi.ui.common.PiBrandMark
+import io.github.whywood.superpi.design.DdEmptyState
 import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
+import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMenu
 import io.github.whywood.superpi.design.DdMenuItem
-import io.github.whywood.superpi.design.DdPressable
-import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMotion
+import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
+import io.github.whywood.superpi.design.DdText
+import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.runtime.BotBlueprint
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SuperRuntime
+import io.github.whywood.superpi.runtime.WorkerRunRecord
+import io.github.whywood.superpi.runtime.WorkerStatus
+import io.github.whywood.superpi.runtime.isActive
+import io.github.whywood.superpi.runtime.isBusyForCommands
 import io.github.whywood.superpi.ui.common.AvatarBadge
 import io.github.whywood.superpi.ui.common.BotAvatar
 import io.github.whywood.superpi.ui.common.WorkspaceMenuAction
@@ -447,6 +458,15 @@ fun SuperPIDrawer(
     onSetRemoteSessionPinned: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
     onSetRemoteSessionArchived: (RuntimeWorkspace, RemoteSessionSummaryDto, Boolean) -> Unit = { _, _, _ -> },
     onDeleteRemoteSession: (RuntimeWorkspace, RemoteSessionSummaryDto) -> Unit = { _, _ -> },
+    appMode: AppMode = AppMode.NORMAL,
+    superWorkers: List<WorkerRunRecord> = emptyList(),
+    superBlueprints: List<BotBlueprint> = emptyList(),
+    activeWorkerId: String? = null,
+    userSubtitle: String = "",
+    onToggleAppMode: () -> Unit = {},
+    onOpenSuperTeam: () -> Unit = {},
+    onOpenWorkerMonitor: (String) -> Unit = {},
+    onDeleteWorker: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
@@ -458,11 +478,20 @@ fun SuperPIDrawer(
     var remoteSessionMenuAnchor by remember { mutableStateOf(Offset.Zero) }
     var remoteRenameTarget by remember { mutableStateOf<Pair<RuntimeWorkspace, RemoteSessionSummaryDto>?>(null) }
     var remoteDeleteTarget by remember { mutableStateOf<Pair<RuntimeWorkspace, RemoteSessionSummaryDto>?>(null) }
-    val orderedWorkspaces = remember(workspaces, pinnedWorkspaceIds) {
-        workspaces.filter { it.id in pinnedWorkspaceIds } + workspaces.filterNot { it.id in pinnedWorkspaceIds }
+    val isSuperMode = appMode == AppMode.SUPER
+    val orderedWorkspaces = remember(workspaces, pinnedWorkspaceIds, isSuperMode) {
+        if (isSuperMode) {
+            emptyList()
+        } else {
+            workspaces.filter { it.id in pinnedWorkspaceIds } + workspaces.filterNot { it.id in pinnedWorkspaceIds }
+        }
     }
-    val sessionsByCwd = remember(sessions) {
-        sessions.filterNot { it.archived }.groupBy { it.cwd }
+    val sessionsByCwd = remember(sessions, isSuperMode) {
+        if (isSuperMode) {
+            emptyMap()
+        } else {
+            sessions.filterNot { it.archived }.groupBy { it.cwd }
+        }
     }
     val expandedSessionsSaver = remember {
         Saver<Set<String>, ArrayList<String>>(
@@ -479,8 +508,8 @@ fun SuperPIDrawer(
     var expandedOfflineRemoteDeviceIds by rememberSaveable(stateSaver = expandedSessionsSaver) {
         mutableStateOf(emptySet<String>())
     }
-    var moreExpanded by rememberSaveable { mutableStateOf(false) }
     val entries = remember(
+        isSuperMode,
         orderedWorkspaces,
         sessionsByCwd,
         expandedWorkspaceIds,
@@ -493,19 +522,23 @@ fun SuperPIDrawer(
         expandedOfflineRemoteDeviceIds,
         canCreateRemoteBotDeviceIds,
     ) {
-        buildDrawerEntries(
-            workspaces = orderedWorkspaces,
-            sessionsByCwd = sessionsByCwd,
-            expandedWorkspaceIds = expandedWorkspaceIds,
-            expandedSessionWorkspaceIds = expandedSessionWorkspaceIds,
-            remoteDrawerStates = remoteDrawerStates,
-            relayOnline = relayOnline,
-            remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
-            remoteShowArchivedWorkspaceIds = remoteShowArchivedWorkspaceIds,
-            collapsedOnlineRemoteDeviceIds = collapsedOnlineRemoteDeviceIds,
-            expandedOfflineRemoteDeviceIds = expandedOfflineRemoteDeviceIds,
-            canCreateRemoteBotDeviceIds = canCreateRemoteBotDeviceIds,
-        )
+        if (isSuperMode) {
+            emptyList()
+        } else {
+            buildDrawerEntries(
+                workspaces = orderedWorkspaces,
+                sessionsByCwd = sessionsByCwd,
+                expandedWorkspaceIds = expandedWorkspaceIds,
+                expandedSessionWorkspaceIds = expandedSessionWorkspaceIds,
+                remoteDrawerStates = remoteDrawerStates,
+                relayOnline = relayOnline,
+                remoteSessionManageWorkspaceIds = remoteSessionManageWorkspaceIds,
+                remoteShowArchivedWorkspaceIds = remoteShowArchivedWorkspaceIds,
+                collapsedOnlineRemoteDeviceIds = collapsedOnlineRemoteDeviceIds,
+                expandedOfflineRemoteDeviceIds = expandedOfflineRemoteDeviceIds,
+                canCreateRemoteBotDeviceIds = canCreateRemoteBotDeviceIds,
+            )
+        }
     }
     Column(
         modifier
@@ -522,128 +555,61 @@ fun SuperPIDrawer(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(if (colors.dark) colors.ink.copy(alpha = 0.92f) else colors.surface)
-                    .border(1.dp, colors.hairline, CircleShape)
-                    .testTag("drawer_brand"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.v2_wave),
-                    contentDescription = null,
-                    modifier = Modifier.size(27.dp),
-                    contentScale = ContentScale.Fit,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = buildAnnotatedString {
-                    append("Super PI")
-                    withStyle(SpanStyle(color = colors.accent)) { append(".") }
-                },
+            PiBrandMark(
+                size = 30.dp,
+                modifier = Modifier.testTag("drawer_brand"),
+            )
+            Spacer(Modifier.width(8.dp))
+            DrawerModeSegmentedSwitcher(
+                appMode = appMode,
+                onClick = onToggleAppMode,
                 modifier = Modifier.weight(1f),
-                style = DdType.wordmark.copy(
-                    fontSize = 30.sp,
-                    lineHeight = 36.sp,
-                    letterSpacing = (-0.4).sp,
-                ),
-                color = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(DdSpacing.Sm))
-            DdIconButton(
-                icon = DdIcons.Search,
-                onClick = onOpenSearch,
-                contentDescription = stringResource(R.string.drawer_search),
-                modifier = Modifier.testTag("drawer_search"),
-                size = 44.dp,
-                iconSize = 20.dp,
-                tint = colors.inkSecondary,
-            )
+            Spacer(Modifier.width(DdSpacing.Xs))
+            if (appMode == AppMode.NORMAL) {
+                DdIconButton(
+                    icon = DdIcons.Search,
+                    onClick = onOpenSearch,
+                    contentDescription = stringResource(R.string.drawer_search),
+                    modifier = Modifier.testTag("drawer_search"),
+                    size = 44.dp,
+                    iconSize = 20.dp,
+                    tint = colors.inkSecondary,
+                )
+            } else {
+                Spacer(Modifier.size(44.dp))
+            }
         }
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(20.dp))
+        if (appMode == AppMode.SUPER) {
+            SuperDrawerBody(
+                superWorkers = superWorkers,
+                superBlueprints = superBlueprints,
+                activeWorkerId = activeWorkerId,
+                onOpenSuperTeam = onOpenSuperTeam,
+                onOpenMemory = onOpenMemory,
+                onOpenRelay = onOpenRelay,
+                onOpenTimers = onOpenTimers,
+                onOpenWorkerMonitor = onOpenWorkerMonitor,
+                onDeleteWorker = onDeleteWorker,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        } else {
         val newChatWorkspaceId = preferredNewChatWorkspaceId(workspaces, activeWorkspaceId)
         DrawerNewChatButton(
             onClick = { newChatWorkspaceId?.let(onNewSessionInWorkspace) },
         )
         Spacer(Modifier.height(DdSpacing.Sm))
-        Column(Modifier.fillMaxWidth()) {
-            DrawerNavItem(
-                icon = DdIcons.Apps,
-                label = stringResource(R.string.drawer_nav_miniapp),
-                onClick = onOpenMiniapp,
-                testTag = "drawer_miniapp",
-            )
-            DrawerNavItem(
-                icon = DdIcons.Book,
-                label = stringResource(R.string.drawer_nav_skills),
-                onClick = onOpenSkills,
-                testTag = "drawer_skills",
-            )
-            DrawerNavItem(
-                icon = DdIcons.Puzzle,
-                label = stringResource(R.string.drawer_nav_plugins),
-                onClick = onOpenPlugins,
-                testTag = "drawer_plugins",
-            )
-            DrawerNavItem(
-                icon = DdIcons.DotsVertical,
-                label = stringResource(if (moreExpanded) R.string.drawer_nav_less else R.string.drawer_nav_more),
-                onClick = { moreExpanded = !moreExpanded },
-                testTag = "drawer_more",
-                trailing = { DrawerMoreChevron(expanded = moreExpanded) },
-            )
-            val motionEnabled = LocalDdMotionEnabled.current
-            AnimatedVisibility(
-                visible = moreExpanded,
-                enter = fadeIn(if (motionEnabled) tween(DdMotion.FAST) else snap()) +
-                    expandVertically(
-                        animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
-                        expandFrom = Alignment.Top,
-                    ),
-                exit = fadeOut(if (motionEnabled) tween(DdMotion.FAST) else snap()) +
-                    shrinkVertically(
-                        animationSpec = if (motionEnabled) tween(DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
-                        shrinkTowards = Alignment.Top,
-                    ),
-            ) {
-                Column(Modifier.fillMaxWidth()) {
-                    DrawerNavItem(
-                        icon = DdIcons.Brain,
-                        label = stringResource(R.string.drawer_nav_memory),
-                        onClick = onOpenMemory,
-                        testTag = "drawer_memory",
-                        modifier = Modifier.padding(start = 14.dp),
-                    )
-                    DrawerNavItem(
-                        icon = DdIcons.Phone,
-                        label = stringResource(R.string.drawer_nav_relay),
-                        onClick = onOpenRelay,
-                        testTag = "drawer_relay",
-                        modifier = Modifier.padding(start = 14.dp),
-                    )
-                    DrawerNavItem(
-                        icon = DdIcons.Plug,
-                        label = stringResource(R.string.drawer_nav_mcp),
-                        onClick = onOpenMcp,
-                        testTag = "drawer_mcp",
-                        modifier = Modifier.padding(start = 14.dp),
-                    )
-                    DrawerNavItem(
-                        icon = DdIcons.Clock,
-                        label = stringResource(R.string.drawer_nav_timer),
-                        onClick = onOpenTimers,
-                        testTag = "drawer_timer",
-                        modifier = Modifier.padding(start = 14.dp),
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(14.dp))
+        DrawerShortcutsGrid(
+            onOpenMiniapp = onOpenMiniapp,
+            onOpenSkills = onOpenSkills,
+            onOpenPlugins = onOpenPlugins,
+            onOpenMemory = onOpenMemory,
+            onOpenRelay = onOpenRelay,
+            onOpenMcp = onOpenMcp,
+            onOpenTimers = onOpenTimers,
+        )
+        Spacer(Modifier.height(DdSpacing.Md))
         DdHairline(color = colors.hairline.copy(alpha = DdAlpha.Hairline))
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -823,10 +789,17 @@ fun SuperPIDrawer(
                 }
             }
         }
+        }
         DdHairline(color = colors.hairline.copy(alpha = DdAlpha.Hairline))
-        Spacer(Modifier.height(DdSpacing.Md))
-        DrawerAccountRow(userName = userName, avatar = avatar, hasUpdate = hasUpdate, onClick = onSettings)
-        Spacer(Modifier.height(DdSpacing.Md))
+        Spacer(Modifier.height(DdSpacing.Sm))
+        DrawerAccountRow(
+            userName = userName,
+            userSubtitle = userSubtitle,
+            avatar = avatar,
+            hasUpdate = hasUpdate,
+            onClick = onSettings,
+        )
+        Spacer(Modifier.height(DdSpacing.Lg))
     }
     renameTarget?.let { session ->
         RenameSessionDialog(
@@ -1528,20 +1501,127 @@ private fun DrawerRemoteSessionRow(
 }
 
 @Composable
-private fun DrawerMoreChevron(expanded: Boolean) {
+private fun DrawerShortcutsGrid(
+    onOpenMiniapp: () -> Unit,
+    onOpenSkills: () -> Unit,
+    onOpenPlugins: () -> Unit,
+    onOpenMemory: () -> Unit,
+    onOpenRelay: () -> Unit,
+    onOpenMcp: () -> Unit,
+    onOpenTimers: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            DrawerShortcutTile(
+                icon = DdIcons.Apps,
+                label = stringResource(R.string.drawer_nav_miniapp),
+                onClick = onOpenMiniapp,
+                testTag = "drawer_miniapp",
+                modifier = Modifier.weight(1f),
+            )
+            DrawerShortcutTile(
+                icon = DdIcons.Book,
+                label = stringResource(R.string.drawer_nav_skills),
+                onClick = onOpenSkills,
+                testTag = "drawer_skills",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            DrawerShortcutTile(
+                icon = DdIcons.Puzzle,
+                label = stringResource(R.string.drawer_nav_plugins),
+                onClick = onOpenPlugins,
+                testTag = "drawer_plugins",
+                modifier = Modifier.weight(1f),
+            )
+            DrawerShortcutTile(
+                icon = DdIcons.Brain,
+                label = stringResource(R.string.drawer_nav_memory),
+                onClick = onOpenMemory,
+                testTag = "drawer_memory",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            DrawerShortcutTile(
+                icon = DdIcons.Phone,
+                label = stringResource(R.string.drawer_nav_relay),
+                onClick = onOpenRelay,
+                testTag = "drawer_relay",
+                modifier = Modifier.weight(1f),
+            )
+            DrawerShortcutTile(
+                icon = DdIcons.Plug,
+                label = stringResource(R.string.drawer_nav_mcp),
+                onClick = onOpenMcp,
+                testTag = "drawer_mcp",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        DrawerShortcutTile(
+            icon = DdIcons.Clock,
+            label = stringResource(R.string.drawer_nav_timer),
+            onClick = onOpenTimers,
+            testTag = "drawer_timer",
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun DrawerShortcutTile(
+    icon: DdIcon,
+    label: String,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier,
+) {
     val colors = superPiColors()
-    val motionEnabled = LocalDdMotionEnabled.current
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
-        label = "drawer-more-chevron",
-    )
-    DdIcon(
-        icon = DdIcons.ChevronDown,
-        tint = colors.inkTertiary,
-        size = 16.dp,
-        modifier = Modifier.graphicsLayer { rotationZ = rotation },
-    )
+    DdPressable(
+        onClick = onClick,
+        modifier = modifier
+            .heightIn(min = 44.dp)
+            .border(0.5.dp, colors.surfaceRim, DdShapes.Medium)
+            .testTag(testTag),
+        shape = DdShapes.Medium,
+        background = colors.surface,
+        contentDescription = label,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 11.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DdIcon(
+                icon = icon,
+                tint = colors.inkSecondary,
+                size = 17.dp,
+            )
+            Text(
+                text = label,
+                style = DdType.label.copy(fontSize = 13.5.sp, lineHeight = 18.sp),
+                color = colors.ink,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 @Composable
@@ -1732,11 +1812,13 @@ private fun DrawerSessionRow(
 @Composable
 private fun DrawerAccountRow(
     userName: String,
+    userSubtitle: String,
     avatar: ImageBitmap?,
     hasUpdate: Boolean,
     onClick: () -> Unit,
 ) {
     val colors = superPiColors()
+    val subtitle = userSubtitle.ifBlank { stringResource(R.string.drawer_account_hint) }
     DdPressable(
         onClick = onClick,
         modifier = Modifier
@@ -1763,7 +1845,7 @@ private fun DrawerAccountRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = stringResource(R.string.drawer_account_hint),
+                    text = subtitle,
                     style = DdType.micro.copy(letterSpacing = 0.2.sp),
                     color = colors.inkTertiary,
                     maxLines = 1,
@@ -1783,10 +1865,423 @@ private fun DrawerAccountRow(
                         Modifier
                             .align(Alignment.TopEnd)
                             .size(6.dp)
-                            .background(colors.accent, CircleShape),
+                            .background(colors.signal, CircleShape),
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DrawerModeSegmentedSwitcher(
+    appMode: AppMode,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
+    val options = remember { listOf(AppMode.NORMAL, AppMode.SUPER) }
+    val selectedIndex = if (appMode == AppMode.SUPER) 1 else 0
+    val animatedIndex by animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = if (motionEnabled) DdMotion.SegmentedSpring else snap(),
+        label = "drawer-mode-segment",
+    )
+    val contentDesc = stringResource(
+        if (appMode == AppMode.SUPER) {
+            R.string.super_mode_switch_to_normal
+        } else {
+            R.string.super_mode_switch_to_super
+        },
+    )
+    val directionSign = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1f else 1f
+    BoxWithConstraints(
+        modifier
+            .height(44.dp)
+            .clip(CircleShape)
+            .background(colors.wash)
+            .semantics { stateDescription = contentDesc }
+            .testTag("drawer_mode_switch"),
+    ) {
+        val segmentWidth = maxWidth / 2f
+        val thumbColor = if (colors.dark) colors.raised else colors.surface
+        Box(
+            Modifier
+                .width(segmentWidth)
+                .fillMaxHeight()
+                .graphicsLayer { translationX = size.width * animatedIndex * directionSign }
+                .padding(3.dp)
+                .then(
+                    if (colors.dark) {
+                        Modifier.border(0.75.dp, colors.surfaceRim, CircleShape)
+                    } else {
+                        Modifier.shadow(2.dp, CircleShape, clip = false)
+                    },
+                )
+                .clip(CircleShape)
+                .background(thumbColor),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .selectableGroup(),
+        ) {
+            options.forEachIndexed { index, option ->
+                val isSelected = index == selectedIndex
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) colors.ink else colors.inkTertiary,
+                    animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
+                    label = "drawer-mode-text-$index",
+                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.Tab,
+                            onClick = { if (!isSelected) onClick() },
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        )
+                        .padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (option == AppMode.SUPER) {
+                        Text(
+                            text = "Super PI",
+                            style = DdType.chip.copy(
+                                fontSize = 12.5.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            ),
+                            color = textColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        Text(
+                            text = "PI",
+                            style = DdType.chip.copy(
+                                fontSize = 12.5.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            ),
+                            color = textColor,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SuperDrawerBody(
+    superWorkers: List<WorkerRunRecord>,
+    superBlueprints: List<BotBlueprint>,
+    activeWorkerId: String? = null,
+    onOpenSuperTeam: () -> Unit,
+    onOpenMemory: () -> Unit,
+    onOpenRelay: () -> Unit,
+    onOpenTimers: () -> Unit,
+    onOpenWorkerMonitor: (String) -> Unit,
+    onDeleteWorker: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    var deleteTarget by remember { mutableStateOf<WorkerRunRecord?>(null) }
+    val enabledCount = remember(superBlueprints) { superBlueprints.count { it.enabledInSuper } }
+    val activeWorkers = remember(superWorkers) {
+        superWorkers.filter { it.status.isActive }.sortedByDescending { it.updatedAt }
+    }
+    val savedWorkers = remember(superWorkers) {
+        superWorkers.filterNot { it.status.isActive }.sortedByDescending { it.updatedAt }
+    }
+    val slotCountsByBotRef = remember(superWorkers, superBlueprints) {
+        val counts = superWorkers.groupingBy { it.botRef }.eachCount().toMutableMap()
+        superBlueprints.forEach { bp ->
+            if (bp.usedWorkerSlots > 0 && bp.ref !in counts) {
+                counts[bp.ref] = bp.usedWorkerSlots
+            }
+        }
+        counts
+    }
+    val maxSlotsByBotRef = remember(superBlueprints) {
+        superBlueprints.associate { it.ref to it.maxWorkerSlots }
+    }
+    Column(modifier) {
+        DrawerNavItem(
+            icon = DdIcons.Sparkles,
+            label = stringResource(R.string.super_drawer_team),
+            onClick = onOpenSuperTeam,
+            testTag = "drawer_super_team",
+            trailing = {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(colors.wash)
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.super_drawer_team_enabled_count, enabledCount),
+                        style = DdType.chip,
+                        color = colors.inkSecondary,
+                        maxLines = 1,
+                    )
+                }
+            },
+        )
+        DrawerNavItem(
+            icon = DdIcons.Brain,
+            label = stringResource(R.string.drawer_nav_memory),
+            onClick = onOpenMemory,
+            testTag = "drawer_super_memory",
+        )
+        DrawerNavItem(
+            icon = DdIcons.Phone,
+            label = stringResource(R.string.drawer_nav_relay),
+            onClick = onOpenRelay,
+            testTag = "drawer_super_relay",
+        )
+        DrawerNavItem(
+            icon = DdIcons.Clock,
+            label = stringResource(R.string.drawer_nav_timer),
+            onClick = onOpenTimers,
+            testTag = "drawer_super_timer",
+        )
+        Spacer(Modifier.height(14.dp))
+        DdHairline(color = colors.hairline.copy(alpha = DdAlpha.Hairline))
+        if (activeWorkers.isEmpty() && savedWorkers.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(top = DdSpacing.Xxl),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                DdEmptyState(
+                    text = stringResource(R.string.super_drawer_workers_empty),
+                    icon = DdIcons.Sparkles,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(top = DdSpacing.Sm, bottom = DdSpacing.Xs),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (activeWorkers.isNotEmpty()) {
+                    item(key = "super_active_header") {
+                        Text(
+                            text = stringResource(R.string.super_drawer_workers_active),
+                            style = DdType.chip,
+                            color = colors.inkTertiary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                    items(activeWorkers, key = { "active_${it.workerId}" }) { worker ->
+                        SuperDrawerWorkerRow(
+                            worker = worker,
+                            usedSlots = slotCountsByBotRef[worker.botRef] ?: 1,
+                            maxSlots = maxSlotsByBotRef[worker.botRef] ?: SuperRuntime.MAX_WORKERS_PER_BOT,
+                            selected = worker.workerId == activeWorkerId,
+                            onClick = { onOpenWorkerMonitor(worker.workerId) },
+                            onRequestDelete = if (!worker.status.isBusyForCommands) {
+                                { deleteTarget = worker }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                }
+                if (savedWorkers.isNotEmpty()) {
+                    item(key = "super_saved_header") {
+                        Text(
+                            text = stringResource(R.string.super_drawer_workers_saved),
+                            style = DdType.chip,
+                            color = colors.inkTertiary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                    items(savedWorkers, key = { "saved_${it.workerId}" }) { worker ->
+                        SuperDrawerWorkerRow(
+                            worker = worker,
+                            usedSlots = slotCountsByBotRef[worker.botRef] ?: 1,
+                            maxSlots = maxSlotsByBotRef[worker.botRef] ?: SuperRuntime.MAX_WORKERS_PER_BOT,
+                            selected = worker.workerId == activeWorkerId,
+                            onClick = { onOpenWorkerMonitor(worker.workerId) },
+                            onRequestDelete = { deleteTarget = worker },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    deleteTarget?.let { target ->
+        DdDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = stringResource(R.string.super_worker_delete_title),
+            content = {
+                DdText(
+                    text = stringResource(R.string.super_worker_delete_body, target.title),
+                    style = DdType.body,
+                    color = colors.inkSecondary,
+                )
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.super_worker_cancel),
+                    onClick = { deleteTarget = null },
+                )
+                DdTextAction(
+                    text = stringResource(R.string.super_worker_delete_confirm),
+                    color = colors.danger,
+                    onClick = {
+                        deleteTarget = null
+                        onDeleteWorker(target.workerId)
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun SuperDrawerWorkerRow(
+    worker: WorkerRunRecord,
+    usedSlots: Int,
+    maxSlots: Int,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+    onRequestDelete: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    val relativeTime = rememberRelativeTime(worker.updatedAt)
+    val thisDeviceLabel = stringResource(R.string.super_drawer_this_device)
+    val effectiveMaxSlots = maxSlots.coerceAtLeast(1)
+    val slotText = stringResource(
+        R.string.super_team_slots,
+        usedSlots.coerceIn(0, effectiveMaxSlots),
+        effectiveMaxSlots,
+    )
+    val subtitle = buildString {
+        append(worker.botName)
+        if (worker.isRemote && worker.deviceName.isNotBlank()) {
+            append(" · ")
+            append(worker.deviceName)
+        } else {
+            append(" · ")
+            append(thisDeviceLabel)
+        }
+        append(" · ")
+        append(slotText)
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .testTag("drawer_worker_${worker.workerId}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DdPressable(
+            onClick = onClick,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 48.dp),
+            shape = DdShapes.Medium,
+            background = if (selected) colors.wash else Color.Transparent,
+            contentDescription = worker.title,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                BotAvatar(
+                    name = worker.botName,
+                    avatar = worker.botAvatar,
+                    size = 28.dp,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = worker.title,
+                        style = DdType.bodySmall.copy(
+                            fontSize = 13.5.sp,
+                            lineHeight = 18.sp,
+                            fontWeight = if (selected) FontWeight.Medium else null,
+                        ),
+                        color = colors.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = subtitle,
+                        style = DdType.bodySmall.copy(fontSize = 11.5.sp, lineHeight = 16.sp),
+                        color = colors.inkTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                when (worker.status) {
+                    WorkerStatus.RUNNING -> DdSpinner(
+                        color = colors.accent,
+                        size = 13.dp,
+                        strokeWidth = 1.5.dp,
+                    )
+
+                    WorkerStatus.QUEUED,
+                    WorkerStatus.WAITING_INPUT,
+                    -> Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(colors.signal),
+                    )
+
+                    WorkerStatus.STALLED -> Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(colors.warning),
+                    )
+
+                    WorkerStatus.FAILED -> Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(colors.danger),
+                    )
+
+                    WorkerStatus.IDLE -> Text(
+                        text = relativeTime,
+                        style = DdType.bodySmall.copy(fontSize = 10.5.sp),
+                        color = colors.inkTertiary,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
+        if (onRequestDelete != null) {
+            DdIconButton(
+                icon = DdIcons.Trash,
+                onClick = onRequestDelete,
+                contentDescription = stringResource(R.string.super_drawer_worker_delete),
+                modifier = Modifier.testTag("drawer_worker_delete_${worker.workerId}"),
+                size = 44.dp,
+                iconSize = 16.dp,
+                tint = colors.inkTertiary,
+            )
         }
     }
 }

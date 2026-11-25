@@ -1,7 +1,6 @@
 package io.github.whywood.superpi.ui.settings
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,10 +37,9 @@ import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
-import io.github.whywood.superpi.design.DdMenu
-import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdRowDivider
+import io.github.whywood.superpi.design.DdSlider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
@@ -95,12 +91,6 @@ fun ChatSettingsScreen(
                     onChange = onChatFontScaleChange,
                 )
                 DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
-                SwitchRow(
-                    title = R.string.settings_auto_collapse_process,
-                    checked = preferences.autoCollapseProcess,
-                    onCheckedChange = { onToggle(UiToggle.AUTO_COLLAPSE_PROCESS, it) },
-                )
-                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                 ProcessDetailRow(
                     value = processDetail,
                     onChange = onProcessDetailChange,
@@ -140,54 +130,22 @@ private fun SendWhileRunningRow(
     onChange: (SendWhileRunning) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val colors = superPiColors()
-    Box {
-        DdListRow(
-            title = stringResource(R.string.settings_send_while_running),
-            value = sendWhileRunningLabel(value),
-            onClick = { expanded = true },
-            showChevron = true,
-            modifier = Modifier.testTag("settings_send_while_running"),
-        )
-        DdMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            menuWidth = 240.dp,
-        ) {
-            SendWhileRunningMenuItem(
-                selected = value == SendWhileRunning.STEER,
-                label = stringResource(R.string.settings_send_while_running_steer),
-                onClick = {
-                    expanded = false
-                    onChange(SendWhileRunning.STEER)
-                },
-                testTag = "settings_send_while_running_option_steer",
-            )
-            SendWhileRunningMenuItem(
-                selected = value == SendWhileRunning.QUEUE,
-                label = stringResource(R.string.settings_send_while_running_queue),
-                onClick = {
-                    expanded = false
-                    onChange(SendWhileRunning.QUEUE)
-                },
-                testTag = "settings_send_while_running_option_queue",
-            )
-        }
-    }
-}
-
-@Composable
-private fun SendWhileRunningMenuItem(
-    selected: Boolean,
-    label: String,
-    onClick: () -> Unit,
-    testTag: String,
-) {
-    DdMenuItem(
-        text = label,
-        onClick = onClick,
-        selected = selected,
-        testTag = testTag,
+    SettingsDropdownRow(
+        title = stringResource(R.string.settings_send_while_running),
+        value = sendWhileRunningLabel(value),
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        options = listOf(SendWhileRunning.STEER, SendWhileRunning.QUEUE),
+        selected = value,
+        optionLabel = { option -> sendWhileRunningLabel(option) },
+        onSelect = onChange,
+        rowTag = "settings_send_while_running",
+        optionTag = { option ->
+            when (option) {
+                SendWhileRunning.STEER -> "settings_send_while_running_option_steer"
+                SendWhileRunning.QUEUE -> "settings_send_while_running_option_queue"
+            }
+        },
     )
 }
 
@@ -205,32 +163,18 @@ private fun ProcessDetailRow(
     onChange: (ProcessDetail) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        DdListRow(
-            title = stringResource(R.string.chat_process_detail_title),
-            value = processDetailLabel(value),
-            onClick = { expanded = true },
-            showChevron = true,
-            modifier = Modifier.testTag("settings_process_detail"),
-        )
-        DdMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            menuWidth = 240.dp,
-        ) {
-            ProcessDetail.entries.forEach { option ->
-                DdMenuItem(
-                    text = processDetailLabel(option),
-                    onClick = {
-                        expanded = false
-                        onChange(option)
-                    },
-                    selected = value == option,
-                    testTag = "settings_process_detail_option_${option.name.lowercase()}",
-                )
-            }
-        }
-    }
+    SettingsDropdownRow(
+        title = stringResource(R.string.chat_process_detail_title),
+        value = processDetailLabel(value),
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        options = ProcessDetail.entries,
+        selected = value,
+        optionLabel = { option -> processDetailLabel(option) },
+        onSelect = onChange,
+        rowTag = "settings_process_detail",
+        optionTag = { option -> "settings_process_detail_option_${option.name.lowercase()}" },
+    )
 }
 
 @Composable
@@ -293,19 +237,12 @@ private fun ChatFontSizeRow(scale: Float, onChange: (Float) -> Unit) {
                 softWrap = false,
             )
         }
-        Slider(
+        DdSlider(
             value = sliderValue,
             onValueChange = { sliderValue = normalizeChatFontScale(it) },
             onValueChangeFinished = { onChange(sliderValue) },
             valueRange = CHAT_FONT_SCALE_MIN..CHAT_FONT_SCALE_MAX,
             steps = 10,
-            colors = SliderDefaults.colors(
-                thumbColor = colors.accent,
-                activeTrackColor = colors.accent,
-                inactiveTrackColor = colors.wash,
-                activeTickColor = colors.onAccent.copy(alpha = 0.5f),
-                inactiveTickColor = colors.hairline,
-            ),
             modifier = Modifier.fillMaxWidth().testTag("chat_font_size_slider"),
         )
         Text(

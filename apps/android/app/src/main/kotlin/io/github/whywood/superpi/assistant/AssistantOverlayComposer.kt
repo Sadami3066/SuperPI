@@ -104,7 +104,10 @@ internal fun AssistantOverlayComposer(
     val inputEnabled = remoteControls.inputEnabled
     val modelControlsVisible = remoteControls.modelControlsVisible
     val blockedReason = if (inputEnabled) null else stringResource(R.string.assistant_remote_offline)
-    val canSend = inputEnabled && value.isNotBlank() && state.conversation.loaded && !state.importingAttachment
+    val canSend = inputEnabled &&
+        (value.isNotBlank() || state.attachments.isNotEmpty()) &&
+        state.conversation.loaded &&
+        !state.importingAttachment
     val stops = busy && !canSend
     var showModelSheet by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }

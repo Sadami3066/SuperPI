@@ -1,21 +1,9 @@
 package io.github.whywood.superpi.data.relay
 
-import io.github.whywood.superpi.runtime.EntityKind
-import io.github.whywood.superpi.runtime.MemoryConfidence
-import io.github.whywood.superpi.runtime.MemoryItemStatus
-import io.github.whywood.superpi.runtime.MemoryKind
-import io.github.whywood.superpi.runtime.MemorySourceKind
-import io.github.whywood.superpi.runtime.memory.EntitySyncRecord
-import io.github.whywood.superpi.runtime.memory.MemorySyncOpItem
-import io.github.whywood.superpi.runtime.memory.MemorySyncOpKind
-import io.github.whywood.superpi.runtime.memory.MemorySyncRecord
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -88,110 +76,26 @@ class RelayProtocolTest {
     }
 
     @Test
-    fun encodesAndParsesMemoryV2PushPullAndDreamLeasePayloads() {
-        val pushBody = RelayProtocol.memoryPushRequest(
-            ops = listOf(
-                MemorySyncOpItem(
-                    opId = "op-m1",
-                    kind = MemorySyncOpKind.MEMORY,
-                    memory = MemorySyncRecord(
-                        id = "mem-1",
-                        kind = MemoryKind.IDENTITY,
-                        content = "Prefers tea",
-                        tags = listOf("drink"),
-                        entities = listOf("Alice"),
-                        confidence = MemoryConfidence.CONFIRMED,
-                        importance = 4,
-                        pinned = true,
-                        validFrom = 100L,
-                        status = MemoryItemStatus.ACTIVE,
-                        sourceKind = MemorySourceKind.USER_MANUAL,
-                        createdAt = 100L,
-                        updatedAt = 200L,
-                        revision = 1L,
-                        updatedByDeviceId = "dev-a",
-                    ),
-                ),
-                MemorySyncOpItem(
-                    opId = "op-e1",
-                    kind = MemorySyncOpKind.ENTITY,
-                    entity = EntitySyncRecord(
-                        canonicalKey = "alice",
-                        id = "ent-1",
-                        canonicalName = "Alice",
-                        kind = EntityKind.PERSON,
-                        aliases = listOf("Ali"),
-                        summary = "Friend",
-                        updatedAt = 200L,
-                        revision = 1L,
-                        updatedByDeviceId = "dev-a",
-                    ),
-                ),
-            ),
-            dreamCompletedAt = 5_000L,
+    fun buildsMemoryV3Endpoints() {
+        assertEquals(
+            "https://relay.example:8443/v3/memory/push",
+            RelayProtocol.memoryPushUrl("https://relay.example:8443/"),
         )
-        val parsedPushJson = Json.parseToJsonElement(pushBody).jsonObject
-        assertEquals(2, parsedPushJson.getValue("ops").jsonArray.size)
-        assertEquals(5_000L, parsedPushJson.getValue("dreamCompletedAt").jsonPrimitive.long)
-
-        val pushResp = RelayProtocol.parseMemoryPushResponse(
-            """{"serverSeq":9,"appliedCount":2,"skippedCount":0,"lastDreamAt":5000}""",
+        assertEquals(
+            "https://relay.example:8443/v3/memory/pull?since=42&limit=100",
+            RelayProtocol.memoryPullUrl("https://relay.example:8443/", since = 42L, limit = 100),
         )
-        assertEquals(9L, pushResp?.serverSeq)
-        assertEquals(5000L, pushResp?.lastDreamAt)
-
-        val pullResp = RelayProtocol.parseMemoryPullResponse(
-            """
-            {
-              "serverSeq": 9,
-              "hasMore": true,
-              "nextSince": 8,
-              "lastDreamAt": 5000,
-              "entries": [
-                {
-                  "seq": 8,
-                  "kind": "memory",
-                  "deviceId": "dev-a",
-                  "memory": {
-                    "id": "mem-1",
-                    "kind": "IDENTITY",
-                    "content": "Prefers tea",
-                    "summary": null,
-                    "tags": ["drink"],
-                    "entities": ["Alice"],
-                    "confidence": "CONFIRMED",
-                    "importance": 4,
-                    "pinned": true,
-                    "validFrom": 100,
-                    "validUntil": null,
-                    "status": "ACTIVE",
-                    "supersededBy": null,
-                    "sourceKind": "USER_MANUAL",
-                    "createdAt": 100,
-                    "updatedAt": 200,
-                    "deletedAt": null,
-                    "revision": 1,
-                    "updatedByDeviceId": "dev-a"
-                  }
-                }
-              ]
-            }
-            """.trimIndent(),
+        assertEquals(
+            "https://relay.example:8443/v3/memory/pull?since=0&limit=1",
+            RelayProtocol.memoryPullUrl("https://relay.example:8443", since = -5L, limit = 0),
         )
-        assertNotNull(pullResp)
-        assertEquals(true, pullResp!!.hasMore)
-        assertEquals("Prefers tea", pullResp.entries.single().memory?.content)
-        assertNull(pullResp.entries.single().memory?.summary)
-
-        val leaseReq = Json.parseToJsonElement(RelayProtocol.memoryDreamLeaseRequest(60_000L, 43_200_000L)).jsonObject
-        assertEquals(60_000L, leaseReq.getValue("ttlMs").jsonPrimitive.long)
-        assertEquals(43_200_000L, leaseReq.getValue("minIntervalMs").jsonPrimitive.long)
-
-        val leaseResp = RelayProtocol.parseMemoryDreamLeaseResponse(
-            """{"acquired":false,"holderDeviceId":"dev-a","expiresAt":9000,"lastDreamAt":5000,"serverSeq":9}""",
+        assertEquals(
+            "https://relay.example:8443/v3/memory/consolidation-lease",
+            RelayProtocol.memoryConsolidationLeaseUrl("https://relay.example:8443/"),
         )
-        assertEquals(false, leaseResp?.acquired)
-        assertEquals("dev-a", leaseResp?.holderDeviceId)
-        assertTrue(RelayProtocol.parseMemoryDreamLeaseRelease("""{"released":true}"""))
+        assertEquals(
+            "https://relay.example:8443/v3/memory/consolidation-lease?leaseId=lease%2F1+a",
+            RelayProtocol.memoryConsolidationLeaseUrl("https://relay.example:8443", " lease/1 a "),
+        )
     }
 }

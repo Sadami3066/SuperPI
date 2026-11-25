@@ -32,7 +32,7 @@ class ScreenToolsTest {
     private val screenshotDir: File get() = File(temporaryFolder.root, "gui/screenshots")
 
     @Test
-    fun exposesElevenScreenToolsWithoutLegacyAliases() {
+    fun exposesTwelveScreenToolsWithoutLegacyAliases() {
         val names = screenTools(controller, screenshotDir).map { it.name }
         assertEquals(screenToolNames(), names)
         assertEquals(
@@ -47,7 +47,8 @@ class ScreenToolsTest {
                 "screen_key",
                 "screen_wait",
                 "screen_list_apps",
-            "screen_launch",
+                "screen_launch",
+                "screen_batch",
             ),
             names,
         )
@@ -88,13 +89,13 @@ class ScreenToolsTest {
             assertNull("${tool.name} 的 target 参数不应重复描述", target["description"])
         }
         val schemaChars = tools.sumOf { it.description.length + it.parameters.toString().length }
-        assertTrue("screen tool text too long: $schemaChars", schemaChars <= 9_300)
+        assertTrue("screen tool text too long: $schemaChars", schemaChars <= 10_800)
     }
 
     @Test
     fun toolTextFollowsTaskLanguagePolicy() {
         val tools = screenTools(controller, screenshotDir)
-        assertEquals(11, tools.size)
+        assertEquals(12, tools.size)
         tools.forEach { tool ->
             assertNull("${tool.name} 不应再带 promptSnippet", tool.promptSnippet)
             assertTrue(
@@ -148,6 +149,7 @@ class ScreenToolsTest {
         val text = result.text()
         assertTrue(text.contains("\"state\":\"offline\""))
         assertTrue(text.contains("\"tap\":\"none\""))
+        assertTrue(text.contains("\"keys\":[]"))
         assertTrue(text.contains("\"screenshot\":false"))
         assertTrue(!text.contains("\"main\""))
     }
@@ -162,6 +164,7 @@ class ScreenToolsTest {
         assertNull(result.isError)
         val text = result.text()
         assertTrue(text.contains("\"accessibility\":\"disabled\""))
+        assertTrue(text.contains("enable SuperPI accessibility"))
         assertTrue(text.contains("\"readNodes\":false"))
         assertTrue(text.contains("\"tap\":\"point\""))
         assertTrue(text.contains("\"virtual\""))
@@ -491,14 +494,30 @@ class ScreenToolsTest {
 
     @Test
     fun appToolListsLaunchableApps() = runTest {
+        controller.appsList = listOf(
+            ScreenApp("com.example", "Example", "com.example/.Main"),
+            ScreenApp("com.other.notes", "Quick Notes", ""),
+            ScreenApp("com.example.shop", "Example Shop", ""),
+        )
         val result = run("screen_list_apps", buildJsonObject {})
         assertNull(result.isError)
         val text = result.text()
         assertTrue(text.contains("\"target\":\"virtual\""))
-        assertTrue(text.contains("\"count\":1"))
+        assertTrue(text.contains("\"total\":3"))
+        assertTrue(text.contains("\"count\":3"))
+        assertTrue(text.contains("\"truncated\":false"))
         assertTrue(text.contains("\"package\":\"com.example\""))
         assertTrue(text.contains("\"label\":\"Example\""))
         assertTrue(text.contains("\"component\":\"com.example/.Main\""))
+
+        val filtered = run("screen_list_apps", buildJsonObject { put("query", "example"); put("limit", 1) })
+        assertNull(filtered.isError)
+        val filteredText = filtered.text()
+        assertTrue(filteredText.contains("\"total\":2"))
+        assertTrue(filteredText.contains("\"count\":1"))
+        assertTrue(filteredText.contains("\"truncated\":true"))
+        assertTrue(filteredText.contains("com.example"))
+        assertFalse(filteredText.contains("com.other.notes"))
     }
 
     @Test
@@ -630,6 +649,7 @@ class ScreenToolsTest {
         assertTrue(!text.contains("\"hostPath\""))
         assertTrue(text.contains("\"width\":1080"))
         assertTrue(text.contains("\"height\":2400"))
+        assertTrue(text.contains("read(path=\\\"${screenshotDir.absolutePath}/screen-"))
         assertTrue(!text.contains("\"backend\""))
         val file = screenshotDir.listFiles()!!.single()
         assertTrue(file.name.startsWith("screen-"))
@@ -844,6 +864,103 @@ class ScreenToolsTest {
         }
     }
 
+    @Test
+    fun observeToolReturnsIncrementalDiffAndHonorsFullFlag() = runTest {
+        val tools = screenTools(controller, screenshotDir).associateBy { it.name }
+        val observe = tools.getValue("screen_observe")
+
+        val first = observe.execute("c1", buildJsonObject {}, null, null).text()
+        assertTrue(first.contains("\"mode\":\"full\""))
+        assertTrue(first.contains("\"snapshotId\":\"s1\""))
+
+        val second = observe.execute("c2", buildJsonObject {}, null, null).text()
+        assertTrue(second.contains("\"mode\":\"diff\""))
+        assertTrue(second.contains("\"baseSnapshotId\":\"s1\""))
+        assertTrue(second.contains("\"changed\":false"))
+
+        controller.observeSnapshot = GuiNodeTree.buildSnapshot(
+            root = GuiNode(
+                className = "android.widget.FrameLayout",
+                bounds = GuiBounds(0, 0, 1080, 2400),
+                children = listOf(
+                    GuiNode(className = "android.widget.Button", bounds = GuiBounds(100, 50, 300, 150), text = "Done"),
+                    GuiNode(className = "android.widget.Button", bounds = GuiBounds(100, 200, 300, 300), text = "OK again"),
+                ),
+            ),
+            packageName = "com.example",
+        )
+        val third = observe.execute("c3", buildJsonObject {}, null, null).text()
+        assertTrue(third.contains("\"mode\":\"diff\""))
+        assertTrue(third.contains("\"changed\":true"))
+        assertTrue(third.contains("\"prevRef\":\"1\""))
+
+        val forcedFull = observe.execute("c4", buildJsonObject { put("full", true) }, null, null).text()
+        assertTrue(forcedFull.contains("\"mode\":\"full\""))
+        assertTrue(forcedFull.contains("\"nodes\""))
+    }
+
+    @Test
+    fun writeToolsAttachEffectAndScrollBoundaryAtEnd() = runTest {
+        val tools = screenTools(controller, screenshotDir).associateBy { it.name }
+        tools.getValue("screen_observe").execute("obs", buildJsonObject {}, null, null)
+
+        controller.onTapEffect = {
+            controller.observeSnapshot = GuiNodeTree.buildSnapshot(
+                root = GuiNode(
+                    className = "android.widget.FrameLayout",
+                    bounds = GuiBounds(0, 0, 1080, 2400),
+                    children = listOf(
+                        GuiNode(className = "android.widget.Button", bounds = GuiBounds(100, 50, 300, 150), text = "Next"),
+                    ),
+                ),
+                packageName = "com.example",
+            )
+        }
+        val tapText = tools.getValue("screen_tap").execute("tap", buildJsonObject { put("x", 10); put("y", 20) }, null, null).text()
+        assertTrue(tapText.contains("\"ok\":true"))
+        assertTrue(tapText.contains("\"kind\":\"ui_changed\""))
+        assertTrue(tapText.contains("\"changed\":true"))
+        assertTrue(tapText.contains("\"mode\":\"diff\""))
+
+        val scrollText = tools.getValue("screen_scroll").execute("scr", buildJsonObject { put("direction", "down") }, null, null).text()
+        assertTrue(scrollText.contains("\"kind\":\"no_change\""))
+        assertTrue(scrollText.contains("\"atEnd\":true"))
+    }
+
+    @Test
+    fun typeToolRedactsSecretPasswordFields() = runTest {
+        controller.nextTextResult = ScreenTextResult(BACKEND_ACCESSIBILITY, "", false, secret = true)
+        val result = run(
+            "screen_type",
+            buildJsonObject {
+                put("text", "MySecretPass99")
+                put("ref", "1")
+            },
+        )
+        assertNull(result.isError)
+        val text = result.text()
+        assertFalse(text.contains("MySecretPass99"))
+        assertTrue(text.contains("\"secret\":true"))
+        assertTrue(text.contains("\"text\":\"(hidden)\""))
+        assertTrue(text.contains("\"verified\":false"))
+    }
+
+    @Test
+    fun typeToolHidesTextWhenNoSelectorIsProvided() = runTest {
+        val result = run(
+            "screen_type",
+            buildJsonObject {
+                put("text", "BlindSecret42")
+            },
+        )
+        assertNull(result.isError)
+        val text = result.text()
+        assertFalse(text.contains("BlindSecret42"))
+        assertTrue(text.contains("\"text\":\"(hidden)\""))
+        assertTrue(text.contains("\"verified\":false"))
+        assertTrue(text.contains("Unverified blind input hidden"))
+    }
+
     private suspend fun run(name: String, args: JsonObject): io.github.whywood.superpi.sdk.agent.AgentToolResult {
         val tool = screenTools(controller, screenshotDir).first { it.name == name }
         return tool.execute("call", args, null, null)
@@ -881,10 +998,13 @@ class ScreenToolsTest {
         var lastScrollAmount = -1
         var lastTypedText: String? = null
         var lastTextSelector: GuiSelector? = null
+        var nextTextResult: ScreenTextResult? = null
+        var onTapEffect: (() -> Unit)? = null
         var capture = ScreenCapture(byteArrayOf(9), 1, 1, BACKEND_ACCESSIBILITY)
         var waitOutcome = ScreenWaitOutcome(matched = true)
         var observeSnapshot: GuiSnapshot? = null
         var listAppsFailure: Throwable? = null
+        var appsList: List<ScreenApp> = listOf(ScreenApp("com.example", "Example", "com.example/.Main"))
         var statusSnapshot = ScreenStatusSnapshot(
             accessibilityConnected = true,
             accessibilityEnabled = true,
@@ -923,6 +1043,7 @@ class ScreenToolsTest {
         override suspend fun tap(selector: GuiSelector, durationMs: Int): String {
             lastTapSelector = selector
             lastTapDuration = durationMs
+            onTapEffect?.invoke()
             return "已点击"
         }
 
@@ -950,7 +1071,7 @@ class ScreenToolsTest {
         ): ScreenTextResult {
             lastTypedText = text
             lastTextSelector = selector
-            return ScreenTextResult(BACKEND_ACCESSIBILITY, text, true)
+            return nextTextResult ?: ScreenTextResult(BACKEND_ACCESSIBILITY, text, true)
         }
 
         override suspend fun key(name: String): String = "已按键"
@@ -970,7 +1091,7 @@ class ScreenToolsTest {
 
         override suspend fun listApps(): List<ScreenApp> {
             listAppsFailure?.let { throw it }
-            return listOf(ScreenApp("com.example", "Example", "com.example/.Main"))
+            return appsList
         }
 
         private fun snapshot(): GuiSnapshot = GuiNodeTree.buildSnapshot(

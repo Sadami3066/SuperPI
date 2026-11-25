@@ -51,18 +51,34 @@ internal class RuntimeWorkspaces(
         workspace
     }
 
-    suspend fun rename(id: String, name: String) {
-        if (id == AgentRuntimeHost.HOME_ID) return
-        val workspace = directories.read().firstOrNull { it.id == id } ?: return
+    suspend fun rename(id: String, name: String) = mutex.withLock {
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty()) return@withLock
+        if (id == AgentRuntimeHost.HOME_ID) {
+            val current = directories.readHomeProfile()
+            directories.updateHomeProfile(current.copy(name = trimmed))
+            emitListChanged()
+            return@withLock
+        }
+        val workspace = directories.read().firstOrNull { it.id == id } ?: return@withLock
         directories.add(workspace.copy(name = trimmed))
         emitListChanged()
     }
 
     suspend fun updateProfile(id: String, avatar: String?, intro: String?): RuntimeWorkspace? =
         mutex.withLock {
-            if (id == AgentRuntimeHost.HOME_ID) return@withLock null
+            if (id == AgentRuntimeHost.HOME_ID) {
+                val current = directories.readHomeProfile()
+                directories.updateHomeProfile(
+                    current.copy(
+                        avatar = normalizeAvatar(avatar),
+                        intro = normalizeIntro(intro),
+                    ),
+                )
+                val updated = homeWorkspace()
+                emitListChanged()
+                return@withLock updated
+            }
             val workspace = directories.read().firstOrNull { it.id == id } ?: return@withLock null
             val updated = workspace.copy(
                 avatar = normalizeAvatar(avatar),
@@ -72,6 +88,30 @@ internal class RuntimeWorkspaces(
             emitListChanged()
             updated
         }
+
+    suspend fun updateDefaultModel(id: String, model: ModelConfig?): RuntimeWorkspace? =
+        mutex.withLock {
+            val normalized = normalizeModelConfig(model)
+            if (id == AgentRuntimeHost.HOME_ID || id.isBlank()) {
+                directories.updateHomeDefaultModel(normalized)
+                val updated = homeWorkspace().copy(defaultModel = normalized)
+                emitListChanged()
+                return@withLock updated
+            }
+            val workspace = directories.read().firstOrNull { it.id == id } ?: return@withLock null
+            val updated = workspace.copy(defaultModel = normalized)
+            directories.add(updated)
+            emitListChanged()
+            updated
+        }
+
+    suspend fun defaultModelForCwd(cwd: String, fallback: ModelConfig): ModelConfig {
+        val target = canonicalOrAbsolute(cwd)
+        if (target == canonicalOrAbsolute(homeDir.absolutePath)) {
+            return directories.readHomeDefaultModel() ?: fallback
+        }
+        return directories.read().firstOrNull { canonicalOrAbsolute(it.cwd) == target }?.defaultModel ?: fallback
+    }
 
     suspend fun delete(id: String) {
         if (id == AgentRuntimeHost.HOME_ID) return
@@ -116,15 +156,31 @@ internal class RuntimeWorkspaces(
     private fun normalizeIntro(raw: String?): String? =
         raw?.trim().takeUnless { it.isNullOrEmpty() }?.take(MAX_INTRO_LENGTH)
 
-    private fun homeWorkspace(): RuntimeWorkspace = RuntimeWorkspace(
-        id = AgentRuntimeHost.HOME_ID,
-        name = AgentRuntimeHost.HOME_NAME,
-        cwd = homeDir.absolutePath,
-        isHome = true,
-    )
+    private fun normalizeModelConfig(model: ModelConfig?): ModelConfig? {
+        val provider = model?.providerId?.trim().orEmpty()
+        val modelId = model?.modelId?.trim().orEmpty()
+        if (provider.isEmpty() || modelId.isEmpty()) return null
+        return ModelConfig(providerId = provider, modelId = modelId, thinkingLevel = model!!.thinkingLevel)
+    }
+
+    private fun canonicalOrAbsolute(path: String): String =
+        runCatching { File(path).canonicalPath }.getOrElse { File(path).absolutePath }
+
+    private suspend fun homeWorkspace(): RuntimeWorkspace {
+        val profile = directories.readHomeProfile()
+        return RuntimeWorkspace(
+            id = AgentRuntimeHost.HOME_ID,
+            name = profile.name.trim().ifEmpty { AgentRuntimeHost.HOME_NAME },
+            cwd = homeDir.absolutePath,
+            isHome = true,
+            avatar = normalizeAvatar(profile.avatar),
+            intro = normalizeIntro(profile.intro),
+            defaultModel = directories.readHomeDefaultModel(),
+        )
+    }
 
     companion object {
         private const val MAX_AVATAR_PATH_LENGTH = 512
-        private const val MAX_INTRO_LENGTH = 40
+        const val MAX_INTRO_LENGTH = 200
     }
 }

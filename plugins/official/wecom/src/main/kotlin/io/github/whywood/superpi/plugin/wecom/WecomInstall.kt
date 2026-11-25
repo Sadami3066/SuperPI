@@ -36,14 +36,21 @@ internal object WecomInstall {
         onEvent: (CliInstallEvent) -> Unit,
     ) {
         val messages = object : CliInstallMessages {
-            override fun downloadFailed(cause: Throwable?): String = when (cause?.message) {
-                "sha512 mismatch" -> host.text(WecomTexts.errorIntegrityMismatch)
-                else -> host.text(WecomTexts.errorDownload, cause?.message?.takeLast(300).orEmpty())
+            override fun downloadFailed(cause: Throwable?): String {
+                if (cause?.message == "sha512 mismatch") return host.text(WecomTexts.errorIntegrityMismatch)
+                runCatching { host.logs().warn("wecom install download failed: ${cause?.message?.takeLast(300).orEmpty()}") }
+                return host.text(WecomTexts.errorDownload)
             }
 
-            override fun versionMismatch(output: String): String = host.text(WecomTexts.errorVersion, output)
+            override fun versionMismatch(output: String): String {
+                runCatching { host.logs().warn("wecom install version mismatch: ${output.takeLast(300)}") }
+                return host.text(WecomTexts.errorVersion)
+            }
 
-            override fun installFailed(output: String): String = host.text(WecomTexts.errorInstall, output)
+            override fun installFailed(output: String): String {
+                runCatching { host.logs().warn("wecom install failed: ${output.takeLast(300)}") }
+                return host.text(WecomTexts.errorInstall)
+            }
         }
         runner.run(
             linux = linux,

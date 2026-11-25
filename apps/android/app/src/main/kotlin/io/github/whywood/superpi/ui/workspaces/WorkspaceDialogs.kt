@@ -12,6 +12,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.AvatarCropDialog
-import io.github.whywood.superpi.ui.common.rememberAppIcon
+import io.github.whywood.superpi.ui.common.PiBrandMark
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
 import io.github.whywood.superpi.data.isSharedStorageGranted
 import io.github.whywood.superpi.data.mountDisplayPath
@@ -63,7 +64,7 @@ import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
 
 private const val MAX_WORKSPACE_NAME_LENGTH = 40
-private const val MAX_INTRO_LENGTH = 40
+private const val MAX_INTRO_LENGTH = 200
 
 data class RemoteHostTarget(
     val deviceId: String,
@@ -198,7 +199,7 @@ fun WorkspaceCreateDialog(
                         },
                     )
                     remoteTargets.forEach { target ->
-                        DdRowDivider(leadingInset = 32.dp)
+                        DdRowDivider()
                         DdListRow(
                             title = target.deviceName,
                             modifier = Modifier.testTag("workspace_device_${target.deviceId}"),
@@ -228,7 +229,7 @@ fun WorkspaceCreateDialog(
                             null
                         },
                     )
-                    DdRowDivider(leadingInset = 32.dp)
+                    DdRowDivider()
                     DdListRow(
                         title = stringResource(R.string.workspace_directory_public),
                         subtitle = when {
@@ -320,20 +321,19 @@ private fun BotAvatarField(
     onChoose: () -> Unit,
     onUseDefault: () -> Unit,
 ) {
-    val context = LocalContext.current
     Column {
         DdSectionLabel(stringResource(R.string.bot_avatar))
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val image = remember(avatar) { avatar?.asImageBitmap() } ?: rememberAppIcon(context)
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(superPiColors().accentSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (image != null) {
+            val image = remember(avatar) { avatar?.asImageBitmap() }
+            if (image != null) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, superPiColors().hairline, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Image(
                         bitmap = image,
                         contentDescription = null,
@@ -341,6 +341,8 @@ private fun BotAvatarField(
                         contentScale = ContentScale.Crop,
                     )
                 }
+            } else {
+                PiBrandMark(size = 44.dp)
             }
             Spacer(Modifier.width(12.dp))
             DdTextAction(

@@ -12,20 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class QuestionAnswer(
-    val questionId: String,
-    val selected: List<String> = emptyList(),
-    val custom: String? = null,
-    val skipped: Boolean = false,
-)
-
-data class PendingQuestion(
-    val requestId: String,
-    val sessionId: String,
-    val toolCallId: String,
-    val questions: List<UserQuestion>,
-)
-
 sealed interface QuestionOutcome {
     data class Answered(val answers: List<QuestionAnswer>) : QuestionOutcome
 

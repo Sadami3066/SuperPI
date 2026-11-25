@@ -62,6 +62,8 @@ class ArrangeToolsTest {
         listOf("id", "calendarId", "title", "start", "end", "allDay", "location", "description", "reminders", "query", "limit", "series")
             .forEach { field -> assertTrue(field, properties.containsKey(field)) }
         assertEquals(200, ((properties["limit"] as JsonObject)["maximum"] as JsonPrimitive).int)
+        assertEquals("integer", ((properties["id"] as JsonObject)["type"] as JsonPrimitive).content)
+        assertEquals(5, ((properties["reminders"] as JsonObject)["maxItems"] as JsonPrimitive).int)
     }
 
     @Test
@@ -97,6 +99,7 @@ class ArrangeToolsTest {
         val event = result.json()["event"]!!.jsonObject
         assertEquals("团队会议", event["title"]!!.jsonPrimitive.content)
         assertEquals(1L, event["calendarId"]!!.jsonPrimitive.content.toLong())
+        assertFalse(event.containsKey("eventId"))
     }
 
     @Test
@@ -221,6 +224,24 @@ class ArrangeToolsTest {
 
         assertNull(result.isError)
         assertNull(calendar.get(event.id))
+        val json = result.json()
+        assertEquals(JsonPrimitive(true), json["deleted"])
+        assertEquals(event.id, json["id"]!!.jsonPrimitive.content.toLong())
+    }
+
+    @Test
+    fun rejectsMoreThanFiveReminders() = runTest {
+        val tooMany = buildJsonArray { (1..6).forEach { add(JsonPrimitive(it * 5)) } }
+        val result = run(
+            "create",
+            buildJsonObject {
+                put("title", "过多提醒")
+                put("start", "2026-10-26 10:00")
+                put("reminders", tooMany)
+            },
+        )
+        assertEquals(true, result.isError)
+        assertTrue(result.text().contains("5"))
     }
 
     @Test

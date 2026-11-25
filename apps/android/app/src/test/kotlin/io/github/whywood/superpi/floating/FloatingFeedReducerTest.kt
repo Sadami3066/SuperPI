@@ -385,7 +385,7 @@ class FloatingFeedReducerTest {
     }
 
     @Test
-    fun whaleMoodFollowsRunThenPendingThenIdleThenSleepy() {
+    fun piBotMoodFollowsRunThenPendingThenIdleThenSleepy() {
         val running = baseState().copy(
             runs = listOf(run("session-a", "会话", 1_000L)),
             questions = listOf(pending("req-1")),

@@ -103,8 +103,10 @@ class AskUserQuestionToolTest {
             null,
             null,
         )
-        assertNull(result.isError)
-        assertEquals("Timed out waiting for the user's answer.", resultText(result))
+        assertEquals(true, result.isError)
+        val payload = Json.parseToJsonElement(resultText(result)).jsonObject
+        assertEquals(JsonPrimitive(true), payload["timedOut"])
+        assertTrue((payload["message"] as JsonPrimitive).content.contains("Timed out"))
         assertTrue(center.pending.value.isEmpty())
     }
 
@@ -225,7 +227,7 @@ class AskUserQuestionToolTest {
     }
 
     @Test
-    fun skippedQuestionsAreOmitted() = runTest {
+    fun skippedQuestionsAreRecordedWithSkippedFlag() = runTest {
         val center = QuestionCenter()
         val tool = askUserQuestionTool(center, boundBinding())
         var result: AgentToolResult? = null
@@ -241,6 +243,8 @@ class AskUserQuestionToolTest {
         runCurrent()
         center.answer(center.pending.value.single().requestId, listOf(QuestionAnswer("single", skipped = true)))
         job.join()
-        assertTrue(answerEntries(requireNotNull(result)).isEmpty())
+        val entry = answerEntries(requireNotNull(result)).single().jsonObject
+        assertEquals("single", (entry["id"] as JsonPrimitive).content)
+        assertEquals(JsonPrimitive(true), entry["skipped"])
     }
 }

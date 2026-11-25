@@ -25,15 +25,37 @@ private fun cleanPreviewLine(line: String): String = line.trim()
 
 internal enum class ProcessActivity { Thinking, CallingTool, Replying }
 
-internal fun processActivity(steps: List<AssistantStep>, streaming: Boolean): ProcessActivity? {
-    if (!streaming) return null
-    if (steps.any { it is AssistantStep.Tool && it.trace.status == ToolActivityStatus.RUNNING }) {
-        return ProcessActivity.CallingTool
-    }
-    val last = steps.lastOrNull()
-    if (last is AssistantStep.Text && last.text.isNotBlank()) return ProcessActivity.Replying
-    return ProcessActivity.Thinking
+internal sealed interface LiveProcessPhase {
+    data class Thinking(val reasoning: AssistantStep.Reasoning? = null) : LiveProcessPhase
+
+    data class CallingTool(val tool: AssistantStep.Tool) : LiveProcessPhase
+
+    data object Replying : LiveProcessPhase
 }
+
+internal fun liveProcessPhase(steps: List<AssistantStep>, streaming: Boolean): LiveProcessPhase? {
+    if (!streaming) return null
+    val runningTool = steps
+        .filterIsInstance<AssistantStep.Tool>()
+        .lastOrNull { it.trace.status == ToolActivityStatus.RUNNING }
+    if (runningTool != null) return LiveProcessPhase.CallingTool(runningTool)
+    return when (val last = steps.lastOrNull()) {
+        is AssistantStep.Text -> if (last.text.isNotBlank()) LiveProcessPhase.Replying else LiveProcessPhase.Thinking()
+        is AssistantStep.Reasoning -> LiveProcessPhase.Thinking(reasoning = last)
+        else -> LiveProcessPhase.Thinking()
+    }
+}
+
+internal fun processActivity(steps: List<AssistantStep>, streaming: Boolean): ProcessActivity? =
+    when (liveProcessPhase(steps, streaming)) {
+        is LiveProcessPhase.Thinking -> ProcessActivity.Thinking
+        is LiveProcessPhase.CallingTool -> ProcessActivity.CallingTool
+        LiveProcessPhase.Replying -> ProcessActivity.Replying
+        null -> null
+    }
+
+internal fun terminatedReasoningId(steps: List<AssistantStep>, terminated: Boolean): Long? =
+    if (terminated) (steps.lastOrNull() as? AssistantStep.Reasoning)?.id else null
 
 internal enum class ProcessStatus { Running, Done, Stopped, Failed }
 

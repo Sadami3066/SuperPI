@@ -57,6 +57,11 @@ class TimerStore(
     private val changesFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
     val changes: SharedFlow<Unit> = changesFlow.asSharedFlow()
 
+    @Volatile
+    private var cachedSignature: TimerCacheKey? = null
+    private var cachedTimers: List<Timer> = emptyList()
+    private var cachedZoneId: String? = null
+
     internal val loadCount = AtomicInteger()
 
     suspend fun list(): List<Timer> = mutex.withLock { load() }
@@ -120,6 +125,7 @@ class TimerStore(
             sessionFile = patch.sessionFile ?: existing.sessionFile,
             cwd = patch.cwd ?: existing.cwd,
             nextRunAt = nextRunAt,
+            lastError = if (patch.enabled == true || bindingChanged) null else existing.lastError,
             updatedAt = clock.millis(),
         )
         persist(current.toMutableList().also { it[index] = updated })
@@ -145,6 +151,26 @@ class TimerStore(
             nextRunAt = if (once) null else nextRunAtAfter(existing.trigger, at),
             lastDeliveredAt = at,
             lastError = null,
+            updatedAt = at,
+        )
+        persist(current.toMutableList().also { it[index] = updated })
+        updated
+    }
+
+    suspend fun markDeliveryDeferred(
+        id: String,
+        error: TimerError,
+        retryAt: Long,
+        at: Long,
+    ): Timer? = mutex.withLock {
+        val current = load()
+        val index = current.indexOfFirst { it.id == id }
+        if (index < 0) return@withLock null
+        val existing = current[index]
+        val updated = existing.copy(
+            enabled = true,
+            nextRunAt = retryAt,
+            lastError = error,
             updatedAt = at,
         )
         persist(current.toMutableList().also { it[index] = updated })
@@ -204,12 +230,25 @@ class TimerStore(
         true
     }
 
+    suspend fun recomputeTargetsIfZoneChanged(): Boolean = mutex.withLock {
+        val current = load()
+        val currentZone = zoneProvider()
+        val storedZone = cachedZoneId ?: return@withLock false
+        if (storedZone == currentZone.id) return@withLock false
+        val updated = recomputeList(current, clock.millis(), currentZone)
+        persist(updated)
+        true
+    }
+
     suspend fun recomputeTargets(): Unit = mutex.withLock {
         val current = load()
-        val nowMillis = clock.millis()
-        val zone = zoneProvider()
+        val updated = recomputeList(current, clock.millis(), zoneProvider())
+        if (updated != current) persist(updated)
+    }
+
+    private fun recomputeList(current: List<Timer>, nowMillis: Long, zone: ZoneId): List<Timer> {
         val now = ZonedDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), zone)
-        val updated = current.map { timer ->
+        return current.map { timer ->
             if (!timer.enabled) {
                 if (timer.nextRunAt == null) timer else timer.copy(nextRunAt = null, updatedAt = nowMillis)
             } else {
@@ -233,7 +272,6 @@ class TimerStore(
                 }
             }
         }
-        if (updated != current) persist(updated)
     }
 
     private fun nowZoned(): ZonedDateTime = ZonedDateTime.ofInstant(Instant.ofEpochMilli(clock.millis()), zoneProvider())
@@ -251,11 +289,25 @@ class TimerStore(
 
     private fun load(): List<Timer> {
         loadCount.incrementAndGet()
-        if (!file.exists()) return emptyList()
+        val signature = currentSignature()
+        if (!signature.exists) {
+            cachedSignature = signature
+            cachedTimers = emptyList()
+            cachedZoneId = null
+            return emptyList()
+        }
+        if (cachedSignature == signature) {
+            return cachedTimers
+        }
         val text: String = runCatching { file.readText() }.getOrElse { error ->
             return discardCorrupt("failed to read timer data", error)
         }
-        if (text.isBlank()) return emptyList()
+        if (text.isBlank()) {
+            cachedSignature = signature
+            cachedTimers = emptyList()
+            cachedZoneId = null
+            return emptyList()
+        }
         val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject
             ?: return discardCorrupt("timer data is not a valid JSON object")
         val version = (root["schemaVersion"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
@@ -263,6 +315,7 @@ class TimerStore(
         if (version != SCHEMA_VERSION) {
             return discardCorrupt("unsupported schemaVersion: $version")
         }
+        val storedZoneId = (root[ZONE_ID_KEY] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         val entries = root[ENTRIES_KEY] as? JsonArray
             ?: return discardCorrupt("timer data is missing $ENTRIES_KEY")
         val timers = mutableListOf<Timer>()
@@ -277,9 +330,26 @@ class TimerStore(
         if (corruptEntries > 0) {
             logWarn(TAG, "$corruptEntries corrupt timer entries skipped")
             if (backup(CORRUPT_BACKUP_FILE_NAME)) runCatching { persist(timers) } else blockWrites()
+        } else {
+            cachedSignature = signature
+            cachedTimers = timers.toList()
+            cachedZoneId = storedZoneId
         }
         return timers
     }
+
+    private fun currentSignature(): TimerCacheKey =
+        if (!file.exists()) {
+            TimerCacheKey(exists = false, lastModified = 0L, length = 0L)
+        } else {
+            TimerCacheKey(exists = true, lastModified = file.lastModified(), length = file.length())
+        }
+
+    private data class TimerCacheKey(
+        val exists: Boolean,
+        val lastModified: Long,
+        val length: Long,
+    )
 
     private fun discardCorrupt(message: String, error: Throwable? = null): List<Timer> {
         logWarn(TAG, message, error)
@@ -332,8 +402,10 @@ class TimerStore(
         if (!directory.exists() && !directory.mkdirs()) {
             throw IllegalStateException("cannot create timer directory: ${directory.absolutePath}")
         }
+        val zoneId = zoneProvider().id
         val root = buildJsonObject {
             put("schemaVersion", SCHEMA_VERSION)
+            put(ZONE_ID_KEY, zoneId)
             putJsonArray("timers") { timers.forEach { add(it.toJsonObject()) } }
         }
         val temp = File(directory, "$FILE_NAME.tmp")
@@ -348,12 +420,16 @@ class TimerStore(
         } catch (_: AtomicMoveNotSupportedException) {
             Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
+        cachedTimers = timers.toList()
+        cachedZoneId = zoneId
+        cachedSignature = currentSignature()
         changesFlow.tryEmit(Unit)
     }
 
     companion object {
         const val SCHEMA_VERSION = 3
         private const val ENTRIES_KEY = "timers"
+        private const val ZONE_ID_KEY = "zoneId"
         private const val CORRUPT_BACKUP_FILE_NAME = "timers.json.corrupt"
         private const val FILE_NAME = "timers.json"
         private const val DIRECTORY_NAME = "timers"

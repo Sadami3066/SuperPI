@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
 
                 null -> {
                     val data = intent.data
-                    if (data != null) {
+                    if (data != null && isExternalViewIntakeScheme(data.scheme)) {
                         if (isPluginPackage(data, intent.type)) {
                             pendingPluginImportUri.value = data.toString()
                         } else {
@@ -341,12 +341,15 @@ class MainActivity : ComponentActivity() {
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT < 33) return
-        if (!OnboardingPreferences(this).isCompleted()) return
+        val onboardingPrefs = OnboardingPreferences(this)
+        if (!onboardingPrefs.isCompleted()) return
+        if (onboardingPrefs.hasRequestedNotificationPermission()) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
+        onboardingPrefs.markNotificationPermissionRequested()
         ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
     }
 
@@ -360,3 +363,6 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PLUGIN_IMPORT_URI = "io.github.whywood.superpi.extra.PLUGIN_IMPORT_URI"
     }
 }
+
+internal fun isExternalViewIntakeScheme(scheme: String?): Boolean =
+    !scheme.equals("superpi", ignoreCase = true)

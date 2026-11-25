@@ -58,6 +58,16 @@ internal object RelayEventMapper {
             },
         )
 
+        is RuntimeEvent.PluginCustomMessage -> listOf(
+            buildJsonObject {
+                put("type", "plugin_custom_message")
+                put("customType", event.customType)
+                put("payload", event.payload)
+                put("text", event.text)
+                put("display", event.display)
+            },
+        )
+
         else -> emptyList()
     }
 

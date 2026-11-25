@@ -33,7 +33,7 @@ class MiniappEditToolTest {
         root = Files.createTempDirectory("superpi-miniapp-edit-tool").toFile()
         store = MiniappStore(File(root, "miniapp"))
         MemoryMiniappData.reset()
-        tool = miniappEditTool(store) { file -> MemoryMiniappData(file) }
+        tool = miniappDataTool(store) { file -> MemoryMiniappData(file) }
     }
 
     @After
@@ -85,8 +85,8 @@ class MiniappEditToolTest {
         execute("get", app, key)
 
     @Test
-    fun catalogContainsSingleEditTool() {
-        assertEquals("miniapp_edit", tool.name)
+    fun catalogContainsSingleDataTool() {
+        assertEquals("miniapp_data", tool.name)
         val parameters = tool.parameters
         assertEquals(
             listOf("action", "app"),
@@ -260,8 +260,12 @@ class MiniappEditToolTest {
 
         val allowed = setValue(app, "big", JsonPrimitive("x".repeat(262140)))
         assertNull(allowed.isError)
-        val stored = resultJson(getValue(app, "big")).getValue("value").jsonPrimitive.content
-        assertEquals(262140, stored.length)
+        val fetched = resultJson(getValue(app, "big"))
+        assertEquals(true, fetched.getValue("truncated").jsonPrimitive.boolean)
+        assertEquals(262142, fetched.getValue("totalChars").jsonPrimitive.content.toInt())
+        val preview = fetched.getValue("valuePreview").jsonPrimitive.content
+        assertEquals(16_003, preview.length)
+        assertTrue(preview.endsWith("..."))
     }
 
     @Test

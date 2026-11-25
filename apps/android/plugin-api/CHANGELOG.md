@@ -1,5 +1,13 @@
 # Plugin API changelog
 
+## 2.0.2 / API level 7
+
+Patch release, binary compatible with 2.0.1 and still API level 7:
+
+- `Cards.deliver` also checks `TextBlock` content for an existing `present(...)` instruction, so rich-text plugin results do not get a second delivery hint.
+- No signature or behavior changes beyond that; plugins built against 2.0.1 keep working and need no rebuild unless they want the fix in their own artifact.
+- Pairs with `design 1.1.0`; host 2.0.0+.
+
 ## 2.0.1 / API level 7
 
 Patch release, binary compatible with 2.0.0 and still API level 7:

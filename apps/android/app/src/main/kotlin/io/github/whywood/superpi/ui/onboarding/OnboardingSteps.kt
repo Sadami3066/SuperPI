@@ -77,6 +77,7 @@ import io.github.whywood.superpi.R
 import io.github.whywood.superpi.core.AssistantRole
 import io.github.whywood.superpi.data.AppLanguage
 import io.github.whywood.superpi.data.DevBundle
+import io.github.whywood.superpi.data.OverlayEntryMode
 import io.github.whywood.superpi.data.PersonalizationStore
 import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdHairline
@@ -86,11 +87,13 @@ import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdTextAction
+import io.github.whywood.superpi.design.DdTextArea
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.DdWordmark
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
@@ -98,6 +101,7 @@ import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.host.HostAccess
 import io.github.whywood.superpi.runtime.ProviderCatalog
 import io.github.whywood.superpi.runtime.ProviderSummary
+import io.github.whywood.superpi.ui.common.PiBrandMark
 import io.github.whywood.superpi.ui.common.rememberAvatarBitmap
 import io.github.whywood.superpi.ui.common.ProviderIcon
 import kotlinx.coroutines.Dispatchers
@@ -126,7 +130,7 @@ internal fun WelcomeStep(modifier: Modifier = Modifier) {
         modifier.fillMaxSize().padding(horizontal = DdSpacing.Xxl).testTag("onboarding_step_welcome"),
     ) {
         Spacer(Modifier.height(DdSpacing.Xs))
-        DdWordmark(color = colors.ink, dotColor = colors.accent, style = DdType.wordmark)
+        DdWordmark(color = colors.ink, dotColor = colors.signal, style = DdType.wordmark)
         Spacer(Modifier.height(26.dp))
         Text(
             text = stringResource(R.string.onboarding_welcome_title),
@@ -159,23 +163,10 @@ internal fun WelcomeStep(modifier: Modifier = Modifier) {
                 )
             }
             val markSize = minOf(maxHeight, 260.dp, maxWidth * 0.72f)
-            val medallionColor = if (colors.dark) Color(0xFFEBEAEF) else colors.surface
-            Box(
-                Modifier
-                    .size(markSize)
-                    .graphicsLayer { translationY = floatOffset.dp.toPx() }
-                    .clip(CircleShape)
-                    .background(medallionColor)
-                    .border(1.dp, colors.hairline.copy(alpha = 0.45f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.mascot_wave),
-                    contentDescription = null,
-                    modifier = Modifier.size(markSize * 0.86f),
-                    contentScale = ContentScale.Fit,
-                )
-            }
+            PiBrandMark(
+                size = markSize * 0.72f,
+                modifier = Modifier.graphicsLayer { translationY = floatOffset.dp.toPx() },
+            )
         }
     }
 }
@@ -184,6 +175,8 @@ internal fun WelcomeStep(modifier: Modifier = Modifier) {
 internal fun AccountStep(
     nickname: String,
     onNicknameChange: (String) -> Unit,
+    instruction: String,
+    onInstructionChange: (String) -> Unit,
     language: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit,
     avatarVersion: Int,
@@ -216,7 +209,7 @@ internal fun AccountStep(
             testTag = "onboarding_nickname",
             trailing = { AvatarButton(avatar = avatar, onPick = onPickAvatar) },
         )
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
         FieldLabel(text = stringResource(R.string.onboarding_language_label))
         Spacer(Modifier.height(DdSpacing.Xxs))
         SettingRow(
@@ -224,6 +217,21 @@ internal fun AccountStep(
             onClick = { languageSheetOpen = true },
             testTag = "onboarding_language_row",
         )
+        Spacer(Modifier.height(24.dp))
+        FieldLabel(text = stringResource(R.string.onboarding_instruction_label))
+        Spacer(Modifier.height(DdSpacing.Sm))
+        OnboardingCard {
+            Column(Modifier.fillMaxWidth().padding(DdSpacing.Lg)) {
+                DdTextArea(
+                    value = instruction,
+                    onValueChange = { onInstructionChange(it.take(PersonalizationStore.MAX_INSTRUCTION_LENGTH)) },
+                    placeholder = stringResource(R.string.personalization_instruction_hint),
+                    minHeight = 96.dp,
+                    maxHeight = 148.dp,
+                    testTag = "onboarding_instruction",
+                )
+            }
+        }
         Spacer(Modifier.height(DdSpacing.Xl))
         Text(
             text = stringResource(R.string.onboarding_account_note),
@@ -238,9 +246,9 @@ internal fun AccountStep(
                 title = stringResource(R.string.onboarding_language_label),
                 onClose = { languageSheetOpen = false },
             )
-            Column(Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Md).padding(bottom = DdSpacing.Xxl)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Xxl).padding(bottom = DdSpacing.Xxl)) {
                 AppLanguage.entries.forEachIndexed { index, option ->
-                    if (index > 0) DdHairline(Modifier.padding(horizontal = DdSpacing.Sm))
+                    if (index > 0) DdRowDivider()
                     DdListRow(
                         title = languageLabel(option),
                         onClick = {
@@ -276,6 +284,9 @@ internal fun ProviderStep(
     onSelectProvider: (ProviderSummary) -> Unit,
     onStartOAuth: () -> Unit,
     onSignOutOAuth: () -> Unit,
+    webSearchConfigured: Map<String, Boolean>,
+    onSaveWebSearch: (String, String) -> Unit,
+    onClearWebSearch: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
@@ -431,6 +442,11 @@ internal fun ProviderStep(
                 )
             }
         }
+        WebSearchOptionalSection(
+            configured = webSearchConfigured,
+            onSave = onSaveWebSearch,
+            onClear = onClearWebSearch,
+        )
         Spacer(Modifier.height(DdSpacing.Xxl))
     }
     if (sheetOpen) {
@@ -448,6 +464,10 @@ internal fun ProviderStep(
 
 @Composable
 internal fun PermissionsStep(
+    floatingEnabled: Boolean,
+    overlayEntryMode: OverlayEntryMode,
+    onToggleFloating: (Boolean) -> Unit,
+    onOverlayEntryModeChange: (OverlayEntryMode) -> Unit,
     onSharedStorageGranted: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -600,7 +620,7 @@ internal fun PermissionsStep(
             )
             DdHairline()
             PermissionRow(
-                icon = DdIcons.Sun,
+                icon = DdIcons.Calendar,
                 title = stringResource(R.string.onboarding_permission_calendar),
                 subtitle = stringResource(R.string.onboarding_permission_calendar_hint),
                 granted = calendar,
@@ -658,6 +678,17 @@ internal fun PermissionsStep(
                 onClick = { openBatteryOptimizationSettings(context) },
             )
         }
+        OverlayPreferencesSection(
+            floatingEnabled = floatingEnabled,
+            overlayEntryMode = overlayEntryMode,
+            onToggleFloating = { enabled ->
+                onToggleFloating(enabled)
+                if (enabled && !Settings.canDrawOverlays(context)) {
+                    openOverlaySettings(context)
+                }
+            },
+            onOverlayEntryModeChange = onOverlayEntryModeChange,
+        )
         Spacer(Modifier.height(DdSpacing.Huge))
     }
 }

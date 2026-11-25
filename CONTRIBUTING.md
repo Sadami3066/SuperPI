@@ -1,13 +1,13 @@
 # Contributing to SuperPI
 
-Thank you for contributing! This monorepo contains the Android app, Desktop client, self-hosted Relay, shared Wire Protocol, Official Plugins, and Plugin Template.
+Thank you for contributing! This monorepo contains the Android app, the self-hosted Relay, the shared Wire Protocol, official plugins, and the plugin template. The Desktop client is being rebuilt and is not part of the 2.0.3 release.
 
 ## Repository Map
 
 - `apps/android/` — Android app, agent runtime, shell bridges, `:design`, `:plugin-api`
-- `apps/desktop/` — Electron + React desktop client wrapping `pi --mode rpc`
-- `apps/relay/` — Node.js 24 relay and Memory v2 server
-- `packages/protocol/` — Shared WebSocket & Memory v2 protocol + JSON vectors
+- `apps/desktop/` — Electron + React desktop client source (rewrite in progress, not part of 2.0.3)
+- `apps/relay/` — Node.js 24 relay and Memory v3 server
+- `packages/protocol/` — Shared WebSocket & Memory v3 protocol + JSON vectors
 - `plugins/official/` — Official `.ddp` plugins (`feishu`, `wecom`, `mail`, `micloud`, `amap`, `rail`, `hotel`, `ride`, `themes`, `mcpui-demo`)
 - `plugins/template/` & `plugins/sample/` — Third-party starter template & E2E fixture
 

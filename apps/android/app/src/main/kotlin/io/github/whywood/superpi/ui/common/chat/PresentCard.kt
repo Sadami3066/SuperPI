@@ -605,7 +605,7 @@ private fun PresentedCardItem(
     resolveCard: (String) -> PresentedCardRef?,
 ) {
     val id = item.id.orEmpty()
-    val card = remember(id) { resolveCard(id) }
+    val card = remember(id, resolveCard) { resolveCard(id) }
     val fallback: @Composable () -> Unit = {
         PresentedCardFallback(item.title ?: item.name, colors)
     }

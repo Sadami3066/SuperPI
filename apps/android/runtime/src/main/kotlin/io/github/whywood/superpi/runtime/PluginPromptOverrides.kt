@@ -63,10 +63,27 @@ internal fun mergePluginPromptOverrides(
     val preamble = singleValue(accepted, "preamble", warn) { it.preamble?.trim()?.takeIf(String::isNotEmpty) }
     val rules = singleValue(accepted, "rules", warn) { it.rules?.trim()?.takeIf(String::isNotEmpty) }
     val sections = mergeSections(accepted, warn)
-    val body = buildList {
-        legacyBody?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
-        sections.forEach { section -> section.body.trim().takeIf { it.isNotEmpty() }?.let(::add) }
-    }.joinToString("\n\n").takeIf { it.isNotEmpty() }
+    val sectionsText = sections.mapNotNull { section -> section.body.trim().takeIf { it.isNotEmpty() } }
+        .joinToString("\n\n")
+    val separatorLength = if (sectionsText.isNotEmpty()) 2 else 0
+    val legacyBudget = (PLUGIN_PROMPT_TOTAL_BUDGET - maxOf(total, sectionsText.length) - separatorLength).coerceAtLeast(0)
+    val legacyText = legacyBody?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
+        if (raw.length <= legacyBudget) {
+            raw
+        } else {
+            warn("legacy plugin prompt body exceeds available prompt budget ($legacyBudget chars), truncated")
+            val suffix = "\n...(truncated)"
+            val compactSuffix = "...(truncated)"
+            when {
+                legacyBudget > suffix.length -> raw.take(legacyBudget - suffix.length).trimEnd() + suffix
+                legacyBudget > compactSuffix.length -> raw.take(legacyBudget - compactSuffix.length).trimEnd() + compactSuffix
+                else -> null
+            }
+        }
+    }
+    val body = listOfNotNull(legacyText, sectionsText.takeIf { it.isNotEmpty() })
+        .joinToString("\n\n")
+        .takeIf { it.isNotEmpty() }
     return PluginPromptMerge(
         pluginsBody = body,
         preamble = preamble,

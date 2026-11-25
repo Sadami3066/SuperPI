@@ -223,7 +223,7 @@ private fun HotelErrorState(host: PluginHost, message: String) {
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            DdTextAction(text = host.t("去连接", "Open"), onClick = { host.openHotelPage() })
+            DdTextAction(text = host.t("打开插件页", "Open plugin"), onClick = { host.openHotelPage() })
         }
     }
 }
@@ -383,7 +383,7 @@ private fun SearchBudgetStrip(host: PluginHost, details: HotelSearchDetails) {
 @Composable
 private fun SearchHero(host: PluginHost, hotel: HotelSummary, details: HotelSearchDetails, expanded: Boolean) {
     val colors = superPiColors()
-    val star = hotel.starRating?.takeIf { it.isNotBlank() }?.let { "$it★" }
+    val star = hotel.starRating?.takeIf { it.isNotBlank() }?.let { host.t("$it 星", "$it-star") }
     val distance = hotelDistanceText(hotel.distanceMeters) ?: hotel.distance
     val meta = listOfNotNull(star, distance).joinToString(" · ")
     val overBudget = hotelIsOverBudget(hotel, details.maxPrice)
@@ -503,7 +503,7 @@ private fun CompactHotelRow(
     maxPrice: Double?,
 ) {
     val colors = superPiColors()
-    val star = hotel.starRating?.takeIf { it.isNotBlank() }?.let { "$it★" }
+    val star = hotel.starRating?.takeIf { it.isNotBlank() }?.let { host.t("$it 星", "$it-star") }
     val meta = listOfNotNull(
         star,
         hotelDistanceText(hotel.distanceMeters) ?: hotel.distance,
@@ -748,7 +748,7 @@ internal fun HotelDetailCard(host: PluginHost, state: ToolResultState) {
                     )
                 }
                 val sub = listOfNotNull(
-                    details.starRating?.takeIf { it.isNotBlank() }?.let { "$it★" },
+                    details.starRating?.takeIf { it.isNotBlank() }?.let { host.t("$it 星", "$it-star") },
                     details.checkIn?.let { checkIn ->
                         details.checkOut?.let { checkOut -> "${shortDate(checkIn)} → ${shortDate(checkOut)}" }
                     },

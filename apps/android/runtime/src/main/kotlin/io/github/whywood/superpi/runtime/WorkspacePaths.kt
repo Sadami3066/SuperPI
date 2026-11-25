@@ -3,17 +3,16 @@ package io.github.whywood.superpi.runtime
 import io.github.whywood.superpi.sdk.agent.AgentToolResult
 import io.github.whywood.superpi.sdk.ai.TextContent
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
-import io.github.whywood.superpi.sdk.coding.tools.truncateHead
-import java.io.File
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import okio.FileSystem
 import okio.Path.Companion.toPath
 
-private val FILE_TOOL_NAMES = setOf("read", "write", "edit", "ls", "grep", "find")
+private val FILE_TOOL_NAMES = setOf("read", "write", "edit")
 
 internal const val ABSOLUTE_PATH_GUIDELINE =
     "File tool arguments need explicit absolute paths; the workspace is only a suggested location, not an access boundary."
@@ -23,7 +22,7 @@ internal fun requireAbsolutePath(path: String): String {
     return path.toPath(normalize = true).toString()
 }
 
-internal fun CodingTool.withAbsolutePaths(): CodingTool {
+internal fun CodingTool.withAbsolutePaths(fs: FileSystem? = null): CodingTool {
     if (name !in FILE_TOOL_NAMES) return this
     val original = this
     val properties = parameters.getValue("properties").jsonObject.toMutableMap()
@@ -50,24 +49,25 @@ internal fun CodingTool.withAbsolutePaths(): CodingTool {
         prepareArguments = ::prepare,
         execute = { id, args, signal, update ->
             val prepared = prepare(args)
-            val result = original.execute(id, prepared, signal, update)
-            if (name !in setOf("ls", "find", "grep") || result.isError == true) {
-                result
-            } else {
-                val path = (prepared.getValue("path") as JsonPrimitive).content
-                val base = if (File(path).isFile) File(path).parent.orEmpty() else path
-                AgentToolResult(details = result.details, isError = result.isError, content = result.content.map { block ->
-                    if (block !is TextContent || block.text.startsWith("No ") || block.text == "(empty directory)") block
-                    else {
-                        val split = block.text.indexOf("\n\n[")
-                        val body = if (split < 0) block.text else block.text.substring(0, split)
-                        val notice = if (split < 0) "" else block.text.substring(split)
-                        val absolute = body.lineSequence().joinToString("\n") { line -> "${base.trimEnd('/')}/$line" }
-                        val bounded = truncateHead(absolute + notice, maxLines = Int.MAX_VALUE)
-                        block.copy(text = bounded.text + if (bounded.truncated) "\n\n[Absolute-path output truncated; narrow the query.]" else "")
+            if (name == "read" && fs != null) {
+                val pathStr = (prepared.getValue("path") as JsonPrimitive).content
+                val path = pathStr.toPath(normalize = true)
+                val directMeta = runCatching { fs.metadataOrNull(path) }.getOrNull()
+                val targetMeta = if (directMeta?.symlinkTarget != null) {
+                    runCatching { fs.metadataOrNull(fs.canonicalize(path)) }.getOrNull()
+                } else {
+                    directMeta
+                }
+                if (targetMeta != null) {
+                    if (targetMeta.isDirectory) {
+                        throw IllegalArgumentException("Path is a directory, not a file: $pathStr")
                     }
-                })
+                    if (!targetMeta.isRegularFile) {
+                        throw IllegalArgumentException("Path is not a regular file: $pathStr")
+                    }
+                }
             }
+            original.execute(id, prepared, signal, update)
         },
     )
 }

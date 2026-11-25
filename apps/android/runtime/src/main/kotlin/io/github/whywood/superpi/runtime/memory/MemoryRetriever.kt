@@ -1,268 +1,319 @@
 package io.github.whywood.superpi.runtime.memory
 
 import androidx.sqlite.SQLiteConnection
+import io.github.whywood.superpi.runtime.MemoryAccessScope
 import io.github.whywood.superpi.runtime.MemoryEntity
-import io.github.whywood.superpi.runtime.MemoryFilter
+import io.github.whywood.superpi.runtime.MemoryEntityRelation
+import io.github.whywood.superpi.runtime.MemoryEvent
+import io.github.whywood.superpi.runtime.MemoryEventFilter
+import io.github.whywood.superpi.runtime.MemoryEventKind
 import io.github.whywood.superpi.runtime.MemoryItemStatus
-import io.github.whywood.superpi.runtime.MemoryKind
-import io.github.whywood.superpi.runtime.MemoryRecord
 import io.github.whywood.superpi.runtime.MemorySearchHit
 import java.util.Locale
+import kotlin.math.abs
 
-internal interface MemoryVectorChannel {
-    suspend fun score(queries: List<String>, candidateIds: Set<String>?): Map<String, Double>
-}
+interface MemoryVectorChannel {
+    suspend fun scoreCandidates(
+        queries: List<String>,
+        candidateIds: List<String>,
+    ): Map<String, Double> = emptyMap()
 
-internal object NoopVectorChannel : MemoryVectorChannel {
-    override suspend fun score(queries: List<String>, candidateIds: Set<String>?): Map<String, Double> = emptyMap()
-}
-
-internal interface MemoryRetriever {
-    suspend fun search(queries: List<String>, filter: MemoryFilter): List<MemorySearchHit>
-}
-
-internal class FtsEntityRetriever(
-    private val db: MemoryDatabase,
-    private val vectorChannel: MemoryVectorChannel = NoopVectorChannel,
-    private val clock: () -> Long = System::currentTimeMillis,
-) : MemoryRetriever {
-    override suspend fun search(queries: List<String>, filter: MemoryFilter): List<MemorySearchHit> {
-        val cleanQueries = queries.map { it.trim() }.filter { it.isNotEmpty() }
-        val limit = filter.limit.coerceIn(1, MAX_SEARCH_LIMIT)
-        val nowMs = clock()
-        if (cleanQueries.isEmpty()) {
-            val browsed = db.read { conn ->
-                MemoryStorage.queryRecords(conn, filter.copy(limit = limit))
-            }
-            return browsed.map { MemorySearchHit(record = it, score = 1.0) }
-        }
-
-        val initialCandidates = db.read { conn ->
-            gatherCandidates(conn, cleanQueries, filter, limit)
-        }
-        if (initialCandidates.records.isEmpty()) return emptyList()
-
-        val vectorScores = runCatching {
-            vectorChannel.score(cleanQueries, initialCandidates.records.keys)
-        }.getOrDefault(emptyMap())
-
-        val allowedEntityNames = initialCandidates.allowedEntityNames
-        val scored = initialCandidates.records.values
-            .filter { matchesExtraFilter(it, filter, allowedEntityNames) }
-            .map { record ->
-                val lexical = initialCandidates.lexicalScores[record.id] ?: 0.0
-                val entityHitNames = initialCandidates.matchedEntitiesByMemory[record.id].orEmpty()
-                val entityBonus = if (entityHitNames.isNotEmpty()) ENTITY_LINK_BONUS else 0.0
-                val vectorBoost = (vectorScores[record.id] ?: 0.0).coerceAtLeast(0.0) * VECTOR_WEIGHT
-                val baseScore = (lexical + entityBonus + vectorBoost).coerceAtLeast(MIN_BASE_SCORE)
-                val finalScore = baseScore *
-                    recencyFactor(record, nowMs) *
-                    record.confidence.weight *
-                    importanceFactor(record) *
-                    historyFactor(record)
-                MemorySearchHit(
-                    record = record,
-                    score = finalScore,
-                    matchedEntities = entityHitNames.distinct(),
-                )
-            }
-            .sortedWith(
-                compareByDescending<MemorySearchHit> { it.score }
-                    .thenByDescending { it.record.updatedAt },
-            )
-
-        val deduplicated = collapseNearDuplicates(scored).take(limit)
-        if (deduplicated.isNotEmpty()) {
-            db.writeTransaction { conn ->
-                MemoryStorage.incrementAccess(conn, deduplicated.map { it.record.id }, nowMs)
-            }
-        }
-        return deduplicated
+    companion object {
+        val NOOP: MemoryVectorChannel = object : MemoryVectorChannel {}
     }
+}
 
-    private data class CandidatePool(
-        val records: Map<String, MemoryRecord>,
-        val lexicalScores: Map<String, Double>,
-        val matchedEntitiesByMemory: Map<String, MutableList<String>>,
-        val allowedEntityNames: Set<String>?,
+internal object LocalGraphRetriever {
+    private const val DIRECT_ENTITY_BONUS = 0.40
+    private const val ONE_HOP_ENTITY_BONUS = 0.25
+    private const val TWO_HOP_ENTITY_BONUS = 0.12
+    private const val EXACT_SUBSTRING_BONUS = 0.45
+    private const val VECTOR_WEIGHT = 0.50
+    private const val NEAR_DUPLICATE_JACCARD = 0.78
+
+    private data class CandidateAccumulator(
+        val event: MemoryEvent,
+        var lexicalScore: Double = 0.0,
+        var graphBonus: Double = 0.0,
+        var viaRelation: Boolean = false,
+        val matchedEntities: LinkedHashSet<String> = LinkedHashSet(),
     )
 
-    private fun gatherCandidates(
+    suspend fun search(
+        database: MemoryDatabase,
+        queries: List<String>,
+        filter: MemoryEventFilter,
+        nowMs: Long,
+        recordAccess: Boolean,
+        vectorChannel: MemoryVectorChannel = MemoryVectorChannel.NOOP,
+    ): List<MemorySearchHit> {
+        if (filter.scope == MemoryAccessScope.OFF) return emptyList()
+        val cleanQueries = queries.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        val limit = filter.limit.coerceIn(1, 25)
+        if (cleanQueries.isEmpty()) {
+            return database.read { conn ->
+                MemoryStorage.listEvents(conn, filter.copy(limit = limit))
+                    .map { MemorySearchHit(event = it, score = 1.0) }
+            }
+        }
+
+        val candidates = database.read { conn ->
+            collectCandidates(conn, cleanQueries, filter, limit)
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val vectorScores = if (vectorChannel === MemoryVectorChannel.NOOP) {
+            emptyMap()
+        } else {
+            runCatching {
+                vectorChannel.scoreCandidates(cleanQueries, candidates.keys.toList())
+            }.getOrDefault(emptyMap())
+        }
+
+        val scored = candidates.values.map { acc ->
+            val vectorBoost = (vectorScores[acc.event.id] ?: 0.0).coerceAtLeast(0.0) * VECTOR_WEIGHT
+            val baseSignal = maxOf(0.1, acc.lexicalScore + acc.graphBonus + vectorBoost)
+            val finalScore = baseSignal *
+                recencyFactor(acc.event, nowMs) *
+                acc.event.epistemicTier.retrievalWeight *
+                importancePinFactor(acc.event) *
+                statusFactor(acc.event.status)
+            MemorySearchHit(
+                event = acc.event,
+                score = finalScore,
+                matchedEntities = acc.matchedEntities.toList(),
+                matchedViaRelation = acc.viaRelation && acc.graphBonus > 0.0,
+            )
+        }.sortedWith(
+            compareByDescending<MemorySearchHit> { it.score }
+                .thenByDescending { it.event.pinned }
+                .thenByDescending { it.event.eventTime },
+        )
+
+        val deduped = collapseNearDuplicates(scored, limit)
+        if (recordAccess && deduped.isNotEmpty()) {
+            database.writeTransaction { conn ->
+                MemoryStorage.recordAccessHits(conn, deduped.map { it.event.id }, nowMs)
+            }
+        }
+        return deduped
+    }
+
+    private fun collectCandidates(
+        conn: SQLiteConnection,
+        cleanQueries: List<String>,
+        filter: MemoryEventFilter,
+        limit: Int,
+    ): LinkedHashMap<String, CandidateAccumulator> {
+        val candidates = LinkedHashMap<String, CandidateAccumulator>()
+        val directMatched = matchEntities(conn, cleanQueries, filter.scope)
+        val activatedEntities = spreadGraphActivation(conn, directMatched, filter.scope)
+
+        val entityLookup = MemoryGraphStorage.listEntities(conn, scope = filter.scope).associateBy { it.id }
+        val resolvedEntityName = filter.entityName?.trim()?.takeIf { it.isNotEmpty() }?.let { rawName ->
+            MemoryGraphStorage.findEntityByNameOrAlias(conn, rawName)?.canonicalName ?: rawName
+        }
+        val extraTerms = ArrayList<String>()
+        activatedEntities.keys.forEach { entityId ->
+            entityLookup[entityId]?.let { entity ->
+                extraTerms += entity.canonicalName
+                extraTerms.addAll(entity.aliases.take(4))
+            }
+        }
+
+        val matchClause = MemoryTokenizer.toFtsMatchClause(cleanQueries, extraTerms)
+        if (matchClause != null) {
+            val candidatePool = (limit * 4).coerceIn(20, 200)
+            MemoryStorage.ftsSearchCandidates(conn, matchClause, filter, candidatePool).forEach { (event, rawBm25) ->
+                if (!matchesNonTextFilters(event, filter, resolvedEntityName)) return@forEach
+                val acc = candidates.getOrPut(event.id) { CandidateAccumulator(event = event) }
+                val magnitude = abs(rawBm25)
+                acc.lexicalScore = maxOf(acc.lexicalScore, (magnitude / (1.0 + magnitude)) + 0.15)
+            }
+        }
+
+        activatedEntities.forEach { (entityId, activation) ->
+            val entityName = entityLookup[entityId]?.canonicalName
+            val linked = MemoryStorage.listEventsForEntity(
+                conn = conn,
+                entityId = entityId,
+                scope = filter.scope,
+                includeHistory = filter.includeHistory,
+                limit = 80,
+            )
+            linked.forEach { event ->
+                if (!matchesNonTextFilters(event, filter, resolvedEntityName)) return@forEach
+                val acc = candidates.getOrPut(event.id) { CandidateAccumulator(event = event) }
+                if (activation.bonus > acc.graphBonus) {
+                    acc.graphBonus = activation.bonus
+                }
+                if (activation.hop > 0) acc.viaRelation = true
+                if (entityName != null) acc.matchedEntities += entityName
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            MemoryStorage.listEvents(conn, filter.copy(limit = 200)).forEach { event ->
+                if (containsExactOrSemanticMatch(event, cleanQueries)) {
+                    candidates[event.id] = CandidateAccumulator(
+                        event = event,
+                        lexicalScore = EXACT_SUBSTRING_BONUS,
+                    )
+                }
+            }
+        } else {
+            candidates.values.forEach { acc ->
+                if (containsExactOrSemanticMatch(acc.event, cleanQueries)) {
+                    acc.lexicalScore += EXACT_SUBSTRING_BONUS
+                }
+            }
+        }
+        return candidates
+    }
+
+    private data class EntityActivation(
+        val hop: Int,
+        val bonus: Double,
+    )
+
+    private fun matchEntities(
         conn: SQLiteConnection,
         queries: List<String>,
-        filter: MemoryFilter,
-        limit: Int,
-    ): CandidatePool {
-        val entities = MemoryStorage.listActiveEntities(conn)
-        val matchedEntities = resolveMatchedEntities(queries, filter.entityName, entities)
-        val explicitEntity = filter.entityName?.trim()?.takeIf { it.isNotEmpty() }
-        val allowedEntityNames = explicitEntity?.let { raw ->
-            val resolved = resolveMatchedEntities(emptyList(), raw, entities)
-            buildSet {
-                add(raw.lowercase(Locale.ROOT))
-                resolved.forEach { entity ->
-                    add(entity.canonicalName.lowercase(Locale.ROOT))
-                    entity.aliases.forEach { alias -> add(alias.lowercase(Locale.ROOT)) }
-                }
-            }
-        }
-        val extraAliasTerms = matchedEntities.flatMap { entity ->
-            listOf(entity.canonicalName) + entity.aliases
-        }
-        val ftsClause = MemoryTokenizer.toFtsMatchClause(queries, extraAliasTerms)
-
-        val lexicalScores = HashMap<String, Double>()
-        val matchedByMemory = HashMap<String, MutableList<String>>()
-        val candidateIds = LinkedHashSet<String>()
-        val candidateLimit = (limit * CANDIDATE_MULTIPLIER).coerceIn(20, 200)
-
-        if (ftsClause != null) {
-            val statusClause = if (filter.includeHistory) "" else " AND m.status = 'ACTIVE'"
-            val kindClause = if (filter.kinds.isEmpty()) {
-                ""
-            } else {
-                " AND m.kind IN (${filter.kinds.joinToString(",") { "?" }})"
-            }
-            conn.prepare(
-                """
-                SELECT f.memory_id, bm25(memories_fts, 0.0, 2.0, 1.2, 1.8) AS score
-                FROM memories_fts f
-                JOIN memories m ON m.id = f.memory_id
-                WHERE memories_fts MATCH ? AND m.deleted_at IS NULL$statusClause$kindClause
-                ORDER BY score ASC
-                LIMIT ?
-                """.trimIndent(),
-            ).use { stmt ->
-                var bindIndex = 1
-                stmt.bindText(bindIndex++, ftsClause)
-                filter.kinds.forEach { kind -> stmt.bindText(bindIndex++, kind.wire) }
-                stmt.bindLong(bindIndex, candidateLimit.toLong())
-                while (stmt.step()) {
-                    val memoryId = stmt.getText(0)
-                    val bm25Positive = (-stmt.getDouble(1)).coerceAtLeast(0.0)
-                    val normalized = bm25Positive / (1.0 + bm25Positive)
-                    candidateIds += memoryId
-                    lexicalScores[memoryId] = normalized + SUBSTRING_BASE
-                }
-            }
-        }
-
-        if (matchedEntities.isNotEmpty()) {
-            val entityIds = matchedEntities.map { it.id }
-            val entityNamesById = matchedEntities.associate { it.id to it.canonicalName }
-            val placeholders = entityIds.joinToString(",") { "?" }
-            conn.prepare(
-                "SELECT memory_id, entity_id FROM memory_entities WHERE entity_id IN ($placeholders)",
-            ).use { stmt ->
-                entityIds.forEachIndexed { index, id -> stmt.bindText(index + 1, id) }
-                while (stmt.step()) {
-                    val memoryId = stmt.getText(0)
-                    val entityId = stmt.getText(1)
-                    candidateIds += memoryId
-                    entityNamesById[entityId]?.let { name ->
-                        matchedByMemory.getOrPut(memoryId) { ArrayList() }.add(name)
-                    }
-                }
-            }
-        }
-
-        val records = MemoryStorage.findByIds(conn, candidateIds.toList(), filter.includeHistory)
-        val loweredQueries = queries.map { it.lowercase(Locale.ROOT) }
-        for ((id, record) in records) {
-            val lowerContent = record.content.lowercase(Locale.ROOT)
-            if (loweredQueries.any { lowerContent.contains(it) }) {
-                lexicalScores[id] = (lexicalScores[id] ?: 0.0) + EXACT_PHRASE_BONUS
-            }
-        }
-        return CandidatePool(records, lexicalScores, matchedByMemory, allowedEntityNames)
-    }
-
-    private fun resolveMatchedEntities(
-        queries: List<String>,
-        explicitEntityName: String?,
-        entities: List<MemoryEntity>,
+        scope: MemoryAccessScope,
     ): List<MemoryEntity> {
-        val searchStrings = ArrayList<String>(queries.size + 1)
-        searchStrings.addAll(queries)
-        explicitEntityName?.trim()?.takeIf { it.isNotEmpty() }?.let { searchStrings += it }
-        if (searchStrings.isEmpty() || entities.isEmpty()) return emptyList()
-
-        val loweredTerms = searchStrings
-            .flatMap { q -> MemoryTokenizer.queryTokens(q) + listOf(q.lowercase(Locale.ROOT)) }
-            .distinct()
+        val entities = MemoryGraphStorage.listEntities(conn, scope = scope)
+        if (entities.isEmpty()) return emptyList()
+        val loweredQueries = queries.map { it.lowercase(Locale.ROOT) }
+        val queryTokenSet = queries.flatMap { MemoryTokenizer.queryTokens(it) }.toSet()
 
         return entities.filter { entity ->
-            val names = listOf(entity.canonicalName) + entity.aliases
-            names.any { rawName ->
-                val lowerName = rawName.lowercase(Locale.ROOT)
-                loweredTerms.any { term ->
-                    (term.length >= 2 && (lowerName.contains(term) || term.contains(lowerName))) ||
-                        lowerName == term
+            val terms = (listOf(entity.canonicalName) + entity.aliases)
+                .map { it.trim().lowercase(Locale.ROOT) }
+                .filter { it.isNotEmpty() }
+            terms.any { term ->
+                val isCjk = term.any { MemoryTokenizer.isNoSpaceScript(it) }
+                if (isCjk) {
+                    term.length >= 2 && (loweredQueries.any { it.contains(term) || term.contains(it) } || term in queryTokenSet)
+                } else {
+                    term.length >= 2 && (
+                        term in queryTokenSet ||
+                            loweredQueries.any { q -> q == term || Regex("\\b${Regex.escape(term)}\\b").containsMatchIn(q) }
+                        )
                 }
             }
         }
     }
 
-    private fun matchesExtraFilter(
-        record: MemoryRecord,
-        filter: MemoryFilter,
-        allowedEntityNames: Set<String>?,
-    ): Boolean {
-        if (filter.kinds.isNotEmpty() && record.kind !in filter.kinds) return false
-        val cleanTag = filter.tag?.trim()?.takeIf { it.isNotEmpty() }
-        if (cleanTag != null && record.tags.none { it.equals(cleanTag, ignoreCase = true) }) return false
-        if (allowedEntityNames != null) {
-            val matchesEntity = record.entities.any { it.lowercase(Locale.ROOT) in allowedEntityNames }
-            if (!matchesEntity) return false
+    private fun spreadGraphActivation(
+        conn: SQLiteConnection,
+        seeds: List<MemoryEntity>,
+        scope: MemoryAccessScope,
+    ): Map<String, EntityActivation> {
+        val activated = LinkedHashMap<String, EntityActivation>()
+        if (seeds.isEmpty()) return activated
+
+        seeds.forEach { activated[it.id] = EntityActivation(hop = 0, bonus = DIRECT_ENTITY_BONUS) }
+
+        val activeRelations = MemoryGraphStorage.listActiveRelations(conn, scope = scope)
+        val neighborsByEntity = HashMap<String, MutableList<String>>()
+        activeRelations.forEach { rel: MemoryEntityRelation ->
+            neighborsByEntity.getOrPut(rel.fromEntityId) { ArrayList() }.add(rel.toEntityId)
+            neighborsByEntity.getOrPut(rel.toEntityId) { ArrayList() }.add(rel.fromEntityId)
         }
-        val cleanSession = filter.sessionId?.trim()?.takeIf { it.isNotEmpty() }
-        if (cleanSession != null && record.sourceSessionId != cleanSession) return false
-        if (filter.sinceEpochMs != null && record.validFrom < filter.sinceEpochMs!!) return false
-        if (filter.untilEpochMs != null && record.validFrom > filter.untilEpochMs!!) return false
+
+        val frontier1 = ArrayList<String>()
+        seeds.forEach { seed ->
+            neighborsByEntity[seed.id].orEmpty().forEach { neighborId ->
+                val existing = activated[neighborId]
+                if (existing == null || ONE_HOP_ENTITY_BONUS > existing.bonus) {
+                    activated[neighborId] = EntityActivation(hop = 1, bonus = ONE_HOP_ENTITY_BONUS)
+                    frontier1 += neighborId
+                }
+            }
+        }
+
+        frontier1.distinct().forEach { hop1Id ->
+            neighborsByEntity[hop1Id].orEmpty().forEach { hop2Id ->
+                if (hop2Id !in activated) {
+                    activated[hop2Id] = EntityActivation(hop = 2, bonus = TWO_HOP_ENTITY_BONUS)
+                }
+            }
+        }
+
+        return activated
+    }
+
+    private fun matchesNonTextFilters(
+        event: MemoryEvent,
+        filter: MemoryEventFilter,
+        resolvedEntityName: String? = null,
+    ): Boolean {
+        if (filter.eventKinds.isNotEmpty() && event.eventKind !in filter.eventKinds) return false
+        if (filter.domains.isNotEmpty() && event.domain !in filter.domains) return false
+        val wantedTag = filter.tag?.trim()?.removePrefix("#")?.takeIf { it.isNotEmpty() }
+        if (wantedTag != null) {
+            if (event.tags.none { it.equals(wantedTag, ignoreCase = true) }) return false
+        }
+        val wantedEntity = resolvedEntityName ?: filter.entityName?.trim()?.takeIf { it.isNotEmpty() }
+        if (wantedEntity != null) {
+            if (event.entityNames.none { it.equals(wantedEntity, ignoreCase = true) }) return false
+        }
+        filter.sinceEventTimeMs?.let { if (event.eventTime < it) return false }
+        filter.untilEventTimeMs?.let { if (event.eventTime > it) return false }
+        filter.sessionId?.takeIf { it.isNotBlank() }?.let { if (event.sourceSessionId != it) return false }
         return true
     }
 
-    private fun recencyFactor(record: MemoryRecord, nowMs: Long): Double {
-        val ageDays = ((nowMs - record.validFrom).coerceAtLeast(0L)).toDouble() / MS_PER_DAY
-        return when (record.kind) {
-            MemoryKind.IDENTITY, MemoryKind.HABIT -> (1.0 / (1.0 + ageDays / 365.0)).coerceAtLeast(0.85)
-            MemoryKind.ACTIVE -> {
-                val expired = record.validUntil != null && record.validUntil!! < nowMs
-                if (expired) 0.45 else (1.0 / (1.0 + ageDays / 90.0)).coerceAtLeast(0.75)
+    private fun containsExactOrSemanticMatch(event: MemoryEvent, queries: List<String>): Boolean {
+        val haystack = buildString {
+            append(event.content.lowercase(Locale.ROOT))
+            event.summary?.trim()?.takeIf { it.isNotEmpty() }?.let { append(' ').append(it.lowercase(Locale.ROOT)) }
+            if (event.semanticKeywords.isNotEmpty()) append(' ').append(event.semanticKeywords.joinToString(" ").lowercase(Locale.ROOT))
+            if (event.tags.isNotEmpty()) append(' ').append(event.tags.joinToString(" ").lowercase(Locale.ROOT))
+        }
+        return queries.any { q -> haystack.contains(q.lowercase(Locale.ROOT)) }
+    }
+
+    private fun recencyFactor(event: MemoryEvent, nowMs: Long): Double {
+        val ageDays = ((nowMs - event.eventTime).coerceAtLeast(0L)).toDouble() / MemoryLimits.MS_PER_DAY.toDouble()
+        return when (event.eventKind) {
+            MemoryEventKind.FACT, MemoryEventKind.PREFERENCE, MemoryEventKind.BOUNDARY ->
+                (1.0 / (1.0 + ageDays / 365.0)).coerceAtLeast(0.85)
+            MemoryEventKind.COMMITMENT, MemoryEventKind.GOAL -> {
+                val base = (1.0 / (1.0 + ageDays / 90.0)).coerceAtLeast(0.75)
+                val validUntilMs = event.validUntil
+                if (validUntilMs != null && validUntilMs < nowMs) base * 0.6 else base
             }
-            MemoryKind.EPISODIC -> (1.0 / (1.0 + ageDays / EPISODIC_HALF_LIFE_DAYS)).coerceAtLeast(0.25)
+            MemoryEventKind.EPISODE, MemoryEventKind.NOTE ->
+                (1.0 / (1.0 + ageDays / 60.0)).coerceAtLeast(0.25)
         }
     }
 
-    private fun importanceFactor(record: MemoryRecord): Double =
-        1.0 + 0.06 * (record.importance - 3) + if (record.pinned) 0.15 else 0.0
+    private fun importancePinFactor(event: MemoryEvent): Double {
+        val importanceDelta = (event.importance.coerceIn(1, 5) - 3) * 0.06
+        val pinBonus = if (event.pinned) 0.15 else 0.0
+        val activationBonus = ((event.activationScore - 1.0) * 0.04).coerceIn(0.0, 0.16)
+        return 1.0 + importanceDelta + pinBonus + activationBonus
+    }
 
-    private fun historyFactor(record: MemoryRecord): Double =
-        if (record.status == MemoryItemStatus.ACTIVE) 1.0 else 0.72
+    private fun statusFactor(status: MemoryItemStatus): Double = when (status) {
+        MemoryItemStatus.ACTIVE -> 1.0
+        MemoryItemStatus.RESOLVED -> 0.78
+        MemoryItemStatus.SUPERSEDED, MemoryItemStatus.EXPIRED, MemoryItemStatus.ARCHIVED -> 0.70
+    }
 
-    private fun collapseNearDuplicates(sorted: List<MemorySearchHit>): List<MemorySearchHit> {
-        if (sorted.size <= 1) return sorted
-        val kept = ArrayList<MemorySearchHit>(sorted.size)
-        for (candidate in sorted) {
+    private fun collapseNearDuplicates(hits: List<MemorySearchHit>, limit: Int): List<MemorySearchHit> {
+        val kept = ArrayList<MemorySearchHit>(limit)
+        for (candidate in hits) {
             val duplicate = kept.any { existing ->
-                existing.record.kind == candidate.record.kind &&
-                    MemoryTokenizer.bigramJaccard(existing.record.content, candidate.record.content) > DUPLICATE_JACCARD_THRESHOLD
+                existing.event.eventKind == candidate.event.eventKind &&
+                    MemoryTokenizer.bigramJaccard(existing.event.content, candidate.event.content) >= NEAR_DUPLICATE_JACCARD
             }
-            if (!duplicate) kept += candidate
+            if (!duplicate) {
+                kept += candidate
+                if (kept.size >= limit) break
+            }
         }
         return kept
-    }
-
-    private companion object {
-        private const val MAX_SEARCH_LIMIT = 25
-        private const val CANDIDATE_MULTIPLIER = 4
-        private const val MS_PER_DAY = 86_400_000.0
-        private const val EPISODIC_HALF_LIFE_DAYS = 60.0
-        private const val ENTITY_LINK_BONUS = 0.35
-        private const val VECTOR_WEIGHT = 0.5
-        private const val SUBSTRING_BASE = 0.15
-        private const val EXACT_PHRASE_BONUS = 0.45
-        private const val MIN_BASE_SCORE = 0.1
-        private const val DUPLICATE_JACCARD_THRESHOLD = 0.75
     }
 }

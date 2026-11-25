@@ -8,6 +8,7 @@
     <files-path name="gui" path="gui/" />
     <files-path name="miniapp_userdata" path="miniapp/userdata/" />
     <files-path name="updates" path="updates/" />
+    <files-path name="agent" path="agent/" />
     <cache-path name="camera" path="camera/" />
     <cache-path name="share_incoming" path="share-incoming/" />
     <cache-path name="handoff" path="handoff/" />

@@ -7,8 +7,6 @@
     <string name="drawer_nav_timer">Timer</string>
     <string name="drawer_nav_memory">Memory</string>
     <string name="drawer_nav_relay">Devices</string>
-    <string name="drawer_nav_more">Show more</string>
-    <string name="drawer_nav_less">Show less</string>
     <string name="drawer_account_hint">Account</string>
     <string name="drawer_archived_title">Archived</string>
     <string name="drawer_archived_empty">No archived conversations yet</string>
@@ -81,7 +79,17 @@
     <string name="bot_tools_screen">Screen tools</string>
     <string name="bot_tools_miniapp">Mini app tools</string>
     <string name="bot_tools_screen_permission">Requires higher-level control in System Access</string>
+    <string name="bot_memory_section">Personal memory</string>
+    <string name="bot_memory_scope">Memory scope</string>
+    <string name="bot_memory_scope_personal">All</string>
+    <string name="bot_memory_scope_work">Work only</string>
+    <string name="bot_memory_scope_off">Off</string>
+    <string name="bot_memory_dispatch">Allow memory updates</string>
     <string name="bot_instructions">Instructions</string>
+    <string name="bot_model_section">Model</string>
+    <string name="bot_default_model">Default model</string>
+    <string name="bot_default_model_global">Follow global default</string>
+    <string name="bot_default_model_thinking_off">Off</string>
     <string name="bot_created_toast">Created. Capabilities are off by default; turn them on in Bot settings.</string>
     <string name="drawer_remote_loading">Loading chats…</string>
     <string name="drawer_remote_relay_upgrade">This server needs an update to list remote chats</string>

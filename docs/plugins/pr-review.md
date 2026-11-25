@@ -17,6 +17,7 @@ Marketplace maintainers review every entry against this checklist and send back 
 - [ ] The `.ddp` passes signature verification: `keyId` in `META-INF/plugin-signature.json` matches the entry's `publisherKeyId`
 - [ ] The first listing records the publisher `keyId`; updates under the same id reuse the same key, and a new key means a new publisher
 - [ ] `capabilities` / `provides` in `plugin.json` match actual behavior, with no undeclared capabilities
+- [ ] `apiLevel` is 7, `ui.apiLevel` is 3, and `minHostVersion` is `2.0.0` or the lowest host that truly supports every used API
 - [ ] No malicious, destructive or undisclosed behavior: no stealing credentials, chats or files, no bypassing system permissions
 - [ ] Within size limits: 50 MB per plugin, 20 MB per skill
 

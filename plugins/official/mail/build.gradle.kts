@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.whywood.superpi.plugin.mail"
         minSdk = 29
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.6.2"
+        versionCode = 13
+        versionName = "1.6.3"
     }
 
     compileOptions {

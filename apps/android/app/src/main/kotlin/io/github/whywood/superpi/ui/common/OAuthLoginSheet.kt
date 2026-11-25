@@ -109,7 +109,7 @@ fun OAuthLoginSheet(
                 }
                 if (state.options.isNotEmpty()) {
                     state.options.forEachIndexed { index, option ->
-                        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                        if (index > 0) DdRowDivider()
                         DdListRow(
                             title = option.label,
                             subtitle = option.description,

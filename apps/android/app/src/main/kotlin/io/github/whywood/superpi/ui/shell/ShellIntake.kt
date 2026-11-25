@@ -40,6 +40,8 @@ data class ShellIntakeChatState(
     val switchingConversation: Boolean, val conversationId: String?,
     val conversationCwd: String, val conversations: List<ConversationSummary>,
     val archivedConversations: List<ConversationSummary>, val archivedCount: Int,
+    val superMode: Boolean = false,
+    val superReady: Boolean = false,
 )
 
 data class ShellIntakeActions(
@@ -81,6 +83,11 @@ sealed interface DeepLinkIntake {
 
 fun resolveSessionIntake(requestedId: String?, chat: ShellIntakeChatState): SessionIntake {
     if (requestedId == null) return SessionIntake.Idle
+    if (requestedId == io.github.whywood.superpi.runtime.SuperRuntime.SUPER_THREAD_SESSION_ID ||
+        requestedId.startsWith(io.github.whywood.superpi.service.NotificationCenter.WORKER_TARGET_PREFIX)
+    ) {
+        return SessionIntake.Open(requestedId)
+    }
     if (!chat.ready) return SessionIntake.WaitingForReady
     val found = chat.conversations.any { it.id == requestedId } ||
         chat.archivedConversations.any { it.id == requestedId }
@@ -90,6 +97,7 @@ fun needsSecondSessionGrace(archivedCount: Int, archivedConversations: List<Conv
     archivedCount > 0 && archivedConversations.isEmpty()
 fun resolveShareIntake(hasPayload: Boolean, chat: ShellIntakeChatState): ShareIntake = when {
     !hasPayload -> ShareIntake.Idle
+    chat.superMode -> if (!chat.superReady) ShareIntake.WaitingForReady else ShareIntake.Ready
     !chat.ready -> ShareIntake.WaitingForReady
     chat.conversationId == null -> ShareIntake.WaitingForSession
     !chat.historyLoaded || chat.sending || chat.switchingConversation -> ShareIntake.WaitingForChat
@@ -121,6 +129,8 @@ internal fun ShellIntakeHost(
     LaunchedEffect(
         pendingShare,
         chat.ready,
+        chat.superMode,
+        chat.superReady,
         chat.historyLoaded,
         chat.sending,
         chat.switchingConversation,
@@ -284,7 +294,7 @@ internal fun ShellChatLifecycle(chatViewModel: ChatViewModel) {
 
 @Composable
 internal fun ShellNavigationBackHandler(navigator: AppNavigator, drawerOpen: Boolean, onBack: () -> Unit) {
-    BackHandler(enabled = drawerOpen || navigator.canPop, onBack = onBack)
+    BackHandler(enabled = drawerOpen, onBack = onBack)
 }
 
 @Composable

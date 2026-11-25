@@ -8,9 +8,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
@@ -34,11 +37,11 @@ private val goalParameters: JsonObject = buildJsonObject {
         }
         putJsonObject("goalId") {
             put("type", "string")
-            put("description", "Id of the current goal from get_goal; required for change actions")
+            put("description", "Id of the current goal from goal(action=get); required for edit, pause, resume, complete, and blocked")
         }
         putJsonObject("revision") {
             put("type", "integer")
-            put("description", "Current goal revision from get_goal; required for change actions")
+            put("description", "Current goal revision from goal(action=get); required for edit, pause, resume, complete, and blocked")
         }
         putJsonObject("objective") {
             put("type", "string")
@@ -60,14 +63,7 @@ fun goalTools(
     binding: SessionBinding,
     service: GoalService,
     defaultMaxRounds: () -> Int = { 0 },
-): List<CodingTool> {
-    val delegate = goalTool(binding, service, defaultMaxRounds)
-    return listOf(
-        toolVariant(delegate, "get_goal", "Read this conversation's goal, its id, revision, state and round progress.", emptySet(), fixedAction = "get"),
-        toolVariant(delegate, "create_goal", "Create and arm a concrete goal when the user requests it. Omit maxRounds for the configured default.", setOf("objective", "maxRounds"), setOf("objective"), "create"),
-        toolVariant(delegate, "update_goal", "Update the current goal using its exact id and revision from get_goal. edit/pause/resume require a user request; complete requires achieved work; blocked requires the same blocker across three goal rounds.", setOf("goalId", "revision", "action", "objective", "maxRounds", "blockedReason"), setOf("goalId", "revision", "action"), actions = listOf("edit", "pause", "resume", "complete", "blocked")),
-    )
-}
+): List<CodingTool> = listOf(goalTool(binding, service, defaultMaxRounds))
 
 private fun goalTool(
     binding: SessionBinding,
@@ -75,7 +71,7 @@ private fun goalTool(
     defaultMaxRounds: () -> Int,
 ): CodingTool = CodingTool(
     name = "goal",
-    description = "Read or change this conversation's goal. get reads it; create arms a new goal; edit, pause, resume, complete and blocked change it. Changes need the current revision; create, edit, pause and resume need a direct user request.",
+    description = "Read or change this conversation's goal. action=get reads it; create arms a new goal; edit, pause, resume, complete and blocked change it. Changes need the exact goalId and revision from action=get; create, edit, pause and resume require a direct user request.",
     parameters = goalParameters,
     label = "goal",
     execute = { _, args, signal, _ ->
@@ -84,7 +80,10 @@ private fun goalTool(
             val session = binding.current()
                 ?: return@goalToolResult textResult("No session is bound. Goal tools require an active session.", isError = true)
             when (val action = args.requiredString("action").lowercase()) {
-                "get" -> textResult(goalViewJson(service.goals.value[session.sessionId]).toString())
+                "get" -> {
+                    validateActionArgs("goal(action=get)", args, goalParameters, setOf("action"))
+                    textResult(goalViewJson(service.goals.value[session.sessionId]).toString())
+                }
                 "create" -> createGoal(service, session.sessionId, args, defaultMaxRounds)
                 "edit", "pause", "resume", "complete", "blocked" ->
                     changeGoal(service, session.sessionId, args, action)
@@ -103,6 +102,13 @@ private suspend fun createGoal(
     args: JsonObject,
     defaultMaxRounds: () -> Int,
 ): AgentToolResult {
+    validateActionArgs(
+        label = "goal(action=create)",
+        args = args,
+        parameters = goalParameters,
+        allowedFields = setOf("action", "objective", "maxRounds"),
+        requiredFields = setOf("objective"),
+    )
     val source = service.currentTurnSource(sessionId)
     if (!source.isUserInitiated()) {
         return textResult(
@@ -128,12 +134,22 @@ private suspend fun changeGoal(
         "blocked" -> setOf("blockedReason")
         else -> emptySet()
     }
-    val unexpected = args.keys - (setOf("goalId", "revision", "action") + changeFields)
-    if (unexpected.isNotEmpty()) return textResult("action=$action does not accept: ${unexpected.joinToString()}", isError = true)
+    val requiredFields = if (action == "blocked") {
+        setOf("action", "goalId", "revision", "blockedReason")
+    } else {
+        setOf("action", "goalId", "revision")
+    }
+    validateActionArgs(
+        label = "action=$action",
+        args = args,
+        parameters = goalParameters,
+        allowedFields = setOf("goalId", "revision", "action") + changeFields,
+        requiredFields = requiredFields,
+    )
     val goalId = args.requiredString("goalId", "goal_id")
     val revision = args.requiredInt("revision")
     val current = service.goals.value[sessionId]
-        ?: return textResult("No goal exists for this session. Use create_goal first.", isError = true)
+        ?: return textResult("No goal exists for this session. Use goal with action=create first.", isError = true)
     if (current.goal.id != goalId) {
         return textResult(
             "goalId does not match the current goal (${current.goal.id}).",
@@ -142,7 +158,7 @@ private suspend fun changeGoal(
     }
     if (current.goal.revision != revision) {
         return textResult(
-            "revision does not match the current goal revision (${current.goal.revision}). Call get_goal again.",
+            "revision does not match the current goal revision (${current.goal.revision}). Call goal with action=get again.",
             isError = true,
         )
     }
@@ -239,8 +255,8 @@ private suspend fun changeGoal(
 private fun resumeFailureMessage(goal: Goal): String = when {
     goal.phase == GoalPhase.COMPLETE -> "The goal is already complete."
     goal.maxRounds > 0 && goal.roundsStarted >= goal.maxRounds ->
-        "The goal has no rounds left (${goal.roundsStarted} of ${goal.maxRounds} used). Raise maxRounds with update_goal action=edit before resuming."
-    else -> "The goal is already active. Use get_goal to read its state."
+        "The goal has no rounds left (${goal.roundsStarted} of ${goal.maxRounds} used). Raise maxRounds with goal action=edit before resuming."
+    else -> "The goal is already active. Use goal(action=get) to read its state."
 }
 
 private fun goalViewJson(view: GoalView?): JsonObject = buildJsonObject {
@@ -297,3 +313,35 @@ private fun JsonObject.requiredString(vararg names: String): String =
 
 private fun JsonObject.requiredInt(vararg names: String): Int =
     intOrNull(*names) ?: throw IllegalArgumentException("Missing or invalid required parameter: ${names.first()}")
+
+internal fun validateActionArgs(
+    label: String,
+    args: JsonObject,
+    parameters: JsonObject,
+    allowedFields: Set<String>,
+    requiredFields: Set<String> = emptySet(),
+) {
+    val properties = parameters["properties"]?.jsonObject ?: JsonObject(emptyMap())
+    val unexpected = args.keys - allowedFields
+    if (unexpected.isNotEmpty()) {
+        throw IllegalArgumentException("$label does not accept: ${unexpected.joinToString()}")
+    }
+    val invalid = args.keys.filter { key ->
+        val value = args[key] as? JsonPrimitive
+        val type = (properties[key]?.jsonObject?.get("type") as? JsonPrimitive)?.content
+        when (type) {
+            "string" -> value == null || !value.isString
+            "boolean" -> value == null || value.isString || value.booleanOrNull == null
+            "number", "integer" -> value == null || value.isString || value.doubleOrNull?.isFinite() != true ||
+                (type == "integer" && value.doubleOrNull!! % 1.0 != 0.0)
+            else -> false
+        }
+    }
+    if (invalid.isNotEmpty()) {
+        throw IllegalArgumentException("Invalid argument type: ${invalid.joinToString()}")
+    }
+    val missing = requiredFields.filter { key -> args[key] == null || args[key] is JsonNull }
+    if (missing.isNotEmpty()) {
+        throw IllegalArgumentException("$label requires: ${missing.joinToString()}")
+    }
+}

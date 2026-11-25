@@ -8,6 +8,7 @@ object DdIcons {
     val AudioLines = DdIcon(R.drawable.ic_chat_voice_wave)
     val Book = DdIcon(R.drawable.ic_ai_skills)
     val Brain = DdIcon(R.drawable.ic_ai_memory)
+    val Calendar = DdIcon(R.drawable.ic_system_calendar)
     val Camera = DdIcon(R.drawable.ic_file_camera)
     val ChatPreferences = DdIcon(R.drawable.ic_chat_preferences)
     val Check = DdIcon(R.drawable.ic_status_confirm)

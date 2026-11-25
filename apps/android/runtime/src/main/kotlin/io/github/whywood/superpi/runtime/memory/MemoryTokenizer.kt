@@ -6,11 +6,16 @@ import java.util.Locale
 internal object MemoryTokenizer {
     private val CONNECTOR_SEPARATORS = Regex("[_+.#-]+")
     private val COMBINING_DIACRITICS = Regex("\\p{M}+")
-    private val QUERY_SPLIT_PATTERN = Regex("为什么|什么|怎么|怎样|哪里|在哪|哪个|哪些|多少|谁|啥|吗|呢|吧|啊|的|了")
+    private val QUERY_SPLIT_PATTERN = Regex("为什么|什么|怎么|怎样|哪里|在哪|哪个|哪些|多少|谁|啥|时候|一下|吗|呢|吧|啊|的|了")
     private val QUERY_STOP_UNIGRAMS = setOf(
         "我", "你", "他", "她", "它", "是", "在", "有", "的", "了",
         "吗", "呢", "吧", "啊", "这", "那", "哪", "个", "很", "也",
         "都", "就", "还", "又", "只", "把", "被", "给", "和", "与",
+    )
+    private val QUERY_STOP_BIGRAMS = setOf(
+        "我们", "你们", "他们", "自己", "以前", "之前", "现在", "最近",
+        "今天", "明天", "昨天", "那个", "这个", "一些", "一个", "可以",
+        "需要", "想要", "知道", "告诉", "帮我", "请问", "还是", "或者",
     )
     private const val MAX_QUERY_TOKENS = 64
 
@@ -83,7 +88,7 @@ internal object MemoryTokenizer {
             extractNoSpaceTokens(
                 segment = segment,
                 includeUnigramsInMultiCharRuns = includeUnigramsInMultiCharRuns,
-                filterChineseStopUnigrams = splitQueryStopWords,
+                filterStopWords = splitQueryStopWords,
                 out = tokens,
             )
         }
@@ -130,7 +135,7 @@ internal object MemoryTokenizer {
     private fun extractNoSpaceTokens(
         segment: String,
         includeUnigramsInMultiCharRuns: Boolean,
-        filterChineseStopUnigrams: Boolean,
+        filterStopWords: Boolean,
         out: MutableList<String>,
     ) {
         var index = 0
@@ -143,12 +148,15 @@ internal object MemoryTokenizer {
             while (end < segment.length && isNoSpaceScript(segment[end])) end++
             val run = segment.substring(index, end)
             if (run.length == 1) {
-                if (!filterChineseStopUnigrams || run !in QUERY_STOP_UNIGRAMS) {
+                if (!filterStopWords || run !in QUERY_STOP_UNIGRAMS) {
                     out += run
                 }
             } else {
                 for (position in 0 until run.length - 1) {
-                    out += run.substring(position, position + 2)
+                    val bigram = run.substring(position, position + 2)
+                    if (!filterStopWords || bigram !in QUERY_STOP_BIGRAMS) {
+                        out += bigram
+                    }
                 }
                 if (includeUnigramsInMultiCharRuns) {
                     for (position in run.indices) {

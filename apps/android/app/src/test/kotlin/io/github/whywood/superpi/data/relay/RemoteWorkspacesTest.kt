@@ -61,4 +61,19 @@ class RemoteWorkspacesTest {
 
         assertEquals(dataUrl, workspace.avatar)
     }
+
+    @Test
+    fun propagatesRemoteIntroToWorkspace() {
+        val workspace = RemoteWorkspaces.workspace(
+            File("/root"),
+            bot.copy(intro = "  Remote helper  "),
+        )
+        assertEquals("Remote helper", workspace.intro)
+
+        val blankIntroWorkspace = RemoteWorkspaces.workspace(
+            File("/root"),
+            bot.copy(intro = "   "),
+        )
+        assertNull(blankIntroWorkspace.intro)
+    }
 }

@@ -1107,6 +1107,150 @@ class RemoteSessionHandleTest {
         assertEquals(listOf("Images too large"), errors)
     }
 
+    @Test
+    fun pendingModelAndThinkingAttachToFirstPromptAndClearOncePeerSessionBound() = runTest {
+        val transport = FakeRemoteTransport()
+        val engine = engine(transport, backgroundScope)
+        val handle = engine.create(null, ModelConfig())
+
+        RemoteSessionRegistry.setPendingModel(
+            sessionId = handle.sessionId,
+            providerId = "openai",
+            modelId = "gpt-5",
+            thinkingLevel = io.github.whywood.superpi.runtime.ThinkingLevel.HIGH,
+        )
+        RemoteSessionRegistry.setPendingThinking(
+            sessionId = handle.sessionId,
+            thinkingLevel = io.github.whywood.superpi.runtime.ThinkingLevel.XHIGH,
+        )
+        val pendingBefore = RemoteSessionRegistry.pendingModelSelection(handle.sessionId)
+        assertEquals("openai", pendingBefore?.providerId)
+        assertEquals("gpt-5", pendingBefore?.modelId)
+        assertEquals(io.github.whywood.superpi.runtime.ThinkingLevel.XHIGH, pendingBefore?.thinkingLevel)
+
+        val job = launch { handle.prompt("hello with custom model") }
+        runCurrent()
+        val promptCall = transport.calls.single { it.method == "bot.prompt" }
+        assertEquals("openai", promptCall.params.getValue("provider").jsonPrimitive.content)
+        assertEquals("gpt-5", promptCall.params.getValue("modelId").jsonPrimitive.content)
+        assertEquals("xhigh", promptCall.params.getValue("thinkingLevel").jsonPrimitive.content)
+        assertEquals(FakeRemoteTransport.PEER_SESSION_ID, RemoteSessionRegistry.peerSessionId(handle.sessionId))
+        assertNull(RemoteSessionRegistry.pendingModelSelection(handle.sessionId))
+
+        transport.emit(promptCall.routeId, 0L, FakeEvents.textDelta("ok"))
+        transport.emit(promptCall.routeId, 1L, FakeEvents.settled())
+        runCurrent()
+        assertTrue(job.isCompleted)
+
+        val secondJob = launch { handle.prompt("follow up without overrides") }
+        runCurrent()
+        val secondCall = transport.calls.last { it.method == "bot.prompt" }
+        assertEquals(FakeRemoteTransport.PEER_SESSION_ID, secondCall.params.getValue("sessionId").jsonPrimitive.content)
+        assertNull(secondCall.params["provider"])
+        assertNull(secondCall.params["modelId"])
+        assertNull(secondCall.params["thinkingLevel"])
+        transport.emit(secondCall.routeId, 0L, FakeEvents.textDelta("ok2"))
+        transport.emit(secondCall.routeId, 1L, FakeEvents.settled())
+        runCurrent()
+        assertTrue(secondJob.isCompleted)
+    }
+
+    @Test
+    fun persistsAndForwardsPluginCustomMessageInActiveAndPassiveModes() = runTest {
+        val transport = FakeRemoteTransport()
+        val activeEvents = mutableListOf<SessionRuntimeEvent>()
+        val activeEngine = RemoteSessionEngine(
+            cwd,
+            agentDir,
+            target(transport),
+            transport,
+            backgroundScope,
+            onPassiveRuntimeEvent = { activeEvents += it },
+        )
+        val activeHandle = activeEngine.create(null, ModelConfig())
+        val activeJob = launch { activeHandle.prompt("trigger plugin") }
+        runCurrent()
+        val promptCall = transport.calls.single { it.method == "bot.prompt" }
+        transport.emit(
+            promptCall.routeId,
+            0L,
+            buildJsonObject {
+                put("type", "plugin_custom_message")
+                put("customType", "active_card")
+                put("payload", """{"score":10}""")
+                put("text", "Active plugin output")
+                put("display", true)
+            },
+        )
+        transport.emit(promptCall.routeId, 1L, FakeEvents.textDelta("done"))
+        transport.emit(promptCall.routeId, 2L, FakeEvents.settled())
+        runCurrent()
+        assertTrue(activeJob.isCompleted)
+
+        val activeCustom = activeEvents.map { it.event }
+            .filterIsInstance<RuntimeEvent.PluginCustomMessage>()
+            .single()
+        assertEquals("active_card", activeCustom.customType)
+        assertEquals("""{"score":10}""", activeCustom.payload)
+        assertEquals("Active plugin output", activeCustom.text)
+        assertEquals(true, activeCustom.display)
+        assertTrue(File(activeHandle.sessionFile!!).readText().contains("active_card"))
+        activeHandle.close()
+
+        transport.calls.clear()
+        transport.result = { call ->
+            when (call.method) {
+                "bot.resume" -> buildJsonObject {
+                    put("sessionId", "peer-custom-watch")
+                    put("busy", true)
+                    put("gap", false)
+                    put("seq", 0L)
+                }
+                else -> buildJsonObject {}
+            }
+        }
+        val mirror = RemoteMirrorSession.create(cwd, agentDir)
+        mirror.appendRemoteMapping("device-1", "pi", "peer-custom-watch", historySeq = 0L)
+        mirror.appendUserMessage("Old msg", emptyList())
+        val mirrorPath = mirror.sessionFile!!
+        mirror.close()
+
+        val passiveEvents = mutableListOf<SessionRuntimeEvent>()
+        val passiveEngine = RemoteSessionEngine(
+            cwd,
+            agentDir,
+            target(transport),
+            transport,
+            backgroundScope,
+            onPassiveRuntimeEvent = { passiveEvents += it },
+        )
+        val passiveHandle = passiveEngine.create(mirrorPath, ModelConfig())
+        runCurrent()
+        val resumeCall = transport.calls.single { it.method == "bot.resume" }
+        transport.emit(
+            resumeCall.routeId,
+            1L,
+            buildJsonObject {
+                put("type", "plugin_custom_message")
+                put("customType", "passive_card")
+                put("payload", """{"ok":true}""")
+                put("text", "Passive plugin output")
+                put("display", false)
+            },
+        )
+        transport.emit(resumeCall.routeId, 2L, FakeEvents.settled())
+        runCurrent()
+
+        val passiveCustom = passiveEvents.map { it.event }
+            .filterIsInstance<RuntimeEvent.PluginCustomMessage>()
+            .single()
+        assertEquals("passive_card", passiveCustom.customType)
+        assertEquals("""{"ok":true}""", passiveCustom.payload)
+        assertEquals("Passive plugin output", passiveCustom.text)
+        assertEquals(false, passiveCustom.display)
+        assertTrue(File(passiveHandle.sessionFile!!).readText().contains("passive_card"))
+    }
+
     private fun engine(transport: FakeRemoteTransport, scope: CoroutineScope): RemoteSessionEngine =
         RemoteSessionEngine(cwd, agentDir, target(transport), transport, scope)
 

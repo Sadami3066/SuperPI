@@ -6,8 +6,9 @@
     <string name="usage_compact_now">立即整理上下文</string>
     <string name="usage_input">输入</string>
     <string name="usage_output">输出</string>
-    <string name="usage_cache_read">缓存读取</string>
-    <string name="usage_cache_write">缓存写入</string>
+    <string name="usage_cache">缓存</string>
+    <string name="usage_cache_read">读取</string>
+    <string name="usage_cache_write">写入</string>
     <string name="usage_cost">费用</string>
     <string name="usage_cost_value">$%1$s</string>
     <string name="usage_footnote">当前估算上下文占比与本会话累计用量。</string>

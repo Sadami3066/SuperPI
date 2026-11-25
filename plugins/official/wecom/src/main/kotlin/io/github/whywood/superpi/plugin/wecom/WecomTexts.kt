@@ -70,8 +70,7 @@ internal object WecomTexts {
     val openLink = literal("打开链接", "Open link")
     val stageFinishing = literal("正在完成登录…", "Finishing sign-in…")
     val errorTimeout = literal("扫码超时，请重新连接", "Scan timed out; connect again")
-    val errorAuth = literal("企业微信授权失败：%s", "WeCom authorization failed: %s")
-    val errorExitCode = literal("退出码 %d", "Exit code %d")
+    val errorAuth = literal("企业微信授权没有完成，请重新扫码。", "WeCom authorization didn't complete. Scan the QR code again.")
     val errorWorkspace = literal(
         "无法写入临时文件，请重启应用后重试。",
         "Couldn't write a temporary file; restart the app and try again.",
@@ -82,13 +81,13 @@ internal object WecomTexts {
     val stageInstalling = literal("正在安装组件…", "Installing the component…")
     val stageFinishingInstall = literal("正在完成安装…", "Finishing installation…")
     val installDone = literal("企业微信组件已安装", "WeCom component installed")
-    val errorDownload = literal("下载安装包失败：%s", "Installer download failed: %s")
-    val errorVersion = literal("安装包版本不匹配：%s", "Package version mismatch: %s")
-    val errorInstall = literal("安装失败：%s", "Install failed: %s")
+    val errorDownload = literal("下载安装包失败，请检查网络后重试。", "Couldn't download the installer. Check your network and try again.")
+    val errorVersion = literal("安装包校验没有通过，请重试。", "The package didn't pass verification. Try again.")
+    val errorInstall = literal("安装没有完成，请重试。", "The installation didn't finish. Try again.")
 
     val stageSigningOut = literal("正在退出登录…", "Signing out…")
-    val errorLogout = literal("退出登录失败：%s", "Sign-out failed: %s")
-    val statusError = literal("状态检测失败：%s", "Status check failed: %s")
+    val errorLogout = literal("退出登录失败，请重试。", "Couldn't sign out. Try again.")
+    val statusError = literal("无法读取企业微信状态，请重试。", "Couldn't read the WeCom status. Try again.")
     val stageCancelling = literal("正在取消…", "Cancelling…")
 
     val cancel = literal("取消", "Cancel")
@@ -99,6 +98,8 @@ internal object WecomTexts {
         "企业微信插件状态尚未加载完成。",
         "The WeCom plugin status is not loaded yet.",
     )
+
+    val errorUnknown = literal("操作没有完成，请重试。", "The action didn't finish. Try again.")
 
     val confirmLogoutTitle = literal("退出企业微信登录？", "Sign out of WeCom?")
     val confirmLogoutBody = literal(

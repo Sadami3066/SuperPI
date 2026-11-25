@@ -105,7 +105,7 @@ private fun webFetchTool(provider: WebProvider): CodingTool = CodingTool(
 
 private fun searchOutput(query: String, result: WebSearchResult): String {
     if (result.items.isEmpty()) return "No results found for \"$query\""
-    return buildString {
+    val listing = buildString {
         append("Search for \"").append(query).append("\" returned ").append(result.items.size).append(" results:\n")
         result.items.forEachIndexed { index, item ->
             append('\n')
@@ -115,14 +115,22 @@ private fun searchOutput(query: String, result: WebSearchResult): String {
             item.date?.let { append(" (").append(it).append(")") }
             append('\n')
         }
-        append('\n').append(EXTERNAL_CONTENT_NOTICE)
+    }.trimEnd()
+    return buildString {
+        append(wrapUntrustedWeb("web_search", listing))
+        append("\n\n").append(EXTERNAL_CONTENT_NOTICE)
     }
 }
 
 private fun fetchOutput(url: String, content: String): String = buildString {
     append("Fetched page: ").append(url).append("\n\n")
-    append(content)
+    append(wrapUntrustedWeb("web_fetch", content))
     append("\n\n").append(EXTERNAL_CONTENT_NOTICE)
+}
+
+private fun wrapUntrustedWeb(source: String, content: String): String {
+    val safe = content.replace("</untrusted_web_content>", "<\\/untrusted_web_content>")
+    return "<untrusted_web_content source=\"$source\">\n$safe\n</untrusted_web_content>"
 }
 
 private suspend fun webToolResult(block: suspend () -> AgentToolResult): AgentToolResult = try {

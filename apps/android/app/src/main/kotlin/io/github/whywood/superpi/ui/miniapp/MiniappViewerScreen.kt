@@ -178,6 +178,9 @@ fun MiniappViewerScreen(
     DisposableEffect(data) {
         onDispose { data?.close() }
     }
+    DisposableEffect(host) {
+        onDispose { host?.close() }
+    }
     BackHandler(enabled = fullscreen || canGoBack) {
         if (fullscreen) applyFullscreen(false) else webViewState.goBack()
     }

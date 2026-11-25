@@ -171,6 +171,23 @@ class CliInstallRunnerTest {
     }
 
     @Test
+    fun extractFailureKeepsStderrInMessage() = runTest {
+        val linux = FakeLinux(
+            handler = { command ->
+                when {
+                    command.startsWith("extract") -> LinuxResult(1, "", "tar: archive not found")
+                    command.startsWith("restore") -> LinuxResult(0, "true", "")
+                    else -> LinuxResult(0, "", "")
+                }
+            },
+        )
+        val error = runCatching {
+            CliInstallRunner(plan).run(linux, successfulNetwork(), staging(), release, FakeMessages()) {}
+        }.exceptionOrNull()
+        assertEquals("version-mismatch:tar: archive not found", error!!.message)
+    }
+
+    @Test
     fun installVersionMismatchRestoresExistingBinary() = runTest {
         val linux = FakeLinux(
             handler = { command ->

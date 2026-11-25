@@ -40,7 +40,12 @@ class PresentToolTest {
     private fun tool(
         miniappLookup: (suspend (String) -> PresentedMiniapp?)? = null,
         cwd: File = folder.root,
-    ): CodingTool = presentTool(miniappLookup) { BoundSession("session-1", null, cwd.absolutePath) }
+        cardExists: ((String) -> Boolean)? = null,
+    ): CodingTool = presentTool(
+        miniappLookup = miniappLookup,
+        cardExists = cardExists,
+        session = { BoundSession("session-1", null, cwd.absolutePath) },
+    )
 
     private suspend fun run(tool: CodingTool, args: JsonObject): Pair<AgentToolResult, String> {
         val result = tool.execute("call-1", args, null, null)
@@ -329,6 +334,23 @@ class PresentToolTest {
     }
 
     @Test
+    fun cardExistsCallbackRejectsUnknownCardAndAcceptsKnownCard() = runTest {
+        val validatedTool = tool(cardExists = { id -> id == "call-valid" })
+        val (accepted, _) = run(
+            validatedTool,
+            itemsArgs(item { put("type", "card"); put("id", "call-valid") }),
+        )
+        assertNull(accepted.isError)
+
+        val (rejected, rejectedText) = run(
+            validatedTool,
+            itemsArgs(item { put("type", "card"); put("id", "call-fabricated") }),
+        )
+        assertEquals(true, rejected.isError)
+        assertTrue(rejectedText.contains("card not found in this session"))
+    }
+
+    @Test
     fun fileTitleIsOptional() = runTest {
         folder.newFile("data.json")
         val (result, text) = run(
@@ -339,6 +361,30 @@ class PresentToolTest {
         val entry = outputItems(text).single()
         assertEquals("application/json", entry.string("mime"))
         assertFalse(entry.containsKey("title"))
+    }
+
+    @Test
+    fun resolvesWorkerArtifactUrisViaArtifactResolverAndRejectsUnknownArtifacts() = runTest {
+        val staged = folder.newFile("summary.pdf")
+        val resolvedTool = presentTool(
+            artifactResolver = { raw -> if (raw == "worker://wrk-1/art-1") staged else null },
+            session = { BoundSession("super:router", null, folder.root.absolutePath) },
+        )
+        val (okResult, okText) = run(
+            resolvedTool,
+            itemsArgs(item { put("type", "file"); put("path", "worker://wrk-1/art-1"); put("title", "Report") }),
+        )
+        assertNull(okResult.isError)
+        val presented = outputItems(okText).single()
+        assertEquals(staged.absolutePath, presented.string("path"))
+        assertEquals("Report", presented.string("title"))
+
+        val (errResult, errText) = run(
+            resolvedTool,
+            itemsArgs(item { put("type", "file"); put("path", "worker://wrk-1/missing") }),
+        )
+        assertEquals(true, errResult.isError)
+        assertTrue(errText.contains("artifact not found"))
     }
 
     private fun outputItems(text: String): List<JsonObject> =

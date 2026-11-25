@@ -21,18 +21,62 @@
     <string name="assistant_configure_hint">尚未配置模型</string>
     <string name="assistant_configure_input">先在设置中配置模型</string>
     <string name="assistant_copied">已复制</string>
-    <string name="assistant_duration_minutes">%1$dm %2$ds</string>
-    <string name="assistant_duration_seconds">%1$ss</string>
     <string name="assistant_elapsed_seconds">%1$d 秒</string>
     <string name="assistant_elapsed_minutes_seconds">%1$d 分 %2$d 秒</string>
     <string name="assistant_elapsed_hours_minutes_seconds">%1$d 小时 %2$d 分 %3$d 秒</string>
     <string name="assistant_failed">生成失败</string>
-    <string name="assistant_greeting_afternoon">下午好</string>
-    <string name="assistant_greeting_evening">晚上好</string>
-    <string name="assistant_greeting_morning">早上好</string>
-    <string name="assistant_greeting_named">%1$s，%2$s</string>
+    <string name="assistant_greeting_morning_named">早安，{name}，世界还没醒，我们先开始。</string>
+    <string name="assistant_greeting_morning_plain">早安，世界还没醒，我们先开始。</string>
+    <string name="assistant_greeting_afternoon">午后频道已接通。</string>
+    <string name="assistant_greeting_evening">日落时分，再推一把？</string>
+    <string name="assistant_greeting_night_1">夜幕已落，保持专注。</string>
+    <string name="assistant_greeting_night_2_named">晚间频道在线，{name}。</string>
+    <string name="assistant_greeting_night_2_plain">晚间频道在线。</string>
+    <string name="assistant_greeting_late_night_1_named">夜深了，{name}，只有你和我。</string>
+    <string name="assistant_greeting_late_night_1_plain">夜深了，只有你和我。</string>
+    <string name="assistant_greeting_late_night_2">灵感总在午夜降临。</string>
+    <string-array name="assistant_greetings_general_named">
+        <item>又上线了，{name}。</item>
+        <item>交给我吧。</item>
+        <item>开始吧，{name}。</item>
+        <item>随时切入。</item>
+        <item>这一次，搞点什么？</item>
+        <item>说吧，我在听。</item>
+        <item>唤醒成功，{name}。</item>
+        <item>信号满格。</item>
+        <item>算力已就位。</item>
+        <item>连接已同步，{name}。</item>
+        <item>零延迟待命。</item>
+    </string-array>
+    <string-array name="assistant_greetings_general_plain">
+        <item>又上线了。</item>
+        <item>交给我吧。</item>
+        <item>开始吧。</item>
+        <item>随时切入。</item>
+        <item>这一次，搞点什么？</item>
+        <item>说吧，我在听。</item>
+        <item>唤醒成功。</item>
+        <item>信号满格。</item>
+        <item>算力已就位。</item>
+        <item>连接已同步。</item>
+        <item>零延迟待命。</item>
+    </string-array>
     <string name="assistant_hint">有什么可以帮你？</string>
     <string name="assistant_home_prompt">今天想从哪里开始？</string>
+    <string-array name="assistant_starter_prompts">
+        <item>帮我搓一个能直接用的小程序：</item>
+        <item>帮我盯紧这件事，到点或有变化提醒我：</item>
+        <item>把这段乱糟糟的想法，改写得利落点：</item>
+        <item>帮我给这段代码做个硬核体检：</item>
+        <item>帮我查查最新资料，只要干货：</item>
+        <item>帮我操作一下手机，完成这个流程：</item>
+        <item>帮我挑挑这个方案的毛病：</item>
+        <item>帮我整理一下这个文件里的重点：</item>
+        <item>替我写一段直接能发出去的回复：</item>
+        <item>帮我对比一下，替我拿个主意：</item>
+        <item>记住这条长期偏好，以后照着做：</item>
+        <item>用最直白的话，给我讲透：</item>
+    </string-array>
     <string name="assistant_image_failed">图片无法加载</string>
     <string name="assistant_jump_bottom">回到底部</string>
     <string name="assistant_loading">正在载入…</string>
@@ -45,8 +89,6 @@
     <string name="assistant_more">更多操作</string>
     <string name="assistant_open_settings">去设置</string>
     <string name="assistant_process">过程</string>
-    <string name="assistant_process_reasoning">%1$d 个思考</string>
-    <string name="assistant_process_tools">%1$d 个工具</string>
     <string name="assistant_process_tool_group">执行了 %1$d 个工具</string>
     <string name="assistant_quote">引用</string>
     <string name="assistant_quote_remove">取消引用</string>

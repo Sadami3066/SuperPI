@@ -33,4 +33,23 @@ class AppPreferencesTest {
         assertEquals(CHAT_FONT_SCALE_MIN, normalizeChatFontScale(CHAT_FONT_SCALE_MIN))
         assertEquals(CHAT_FONT_SCALE_MAX, normalizeChatFontScale(CHAT_FONT_SCALE_MAX))
     }
+
+    @Test
+    fun normalizeCompactionTriggerPercentClampsAndSnapsToFivePercentSteps() {
+        assertEquals(75, COMPACTION_TRIGGER_DEFAULT)
+        assertEquals(50, normalizeCompactionTriggerPercent(20))
+        assertEquals(90, normalizeCompactionTriggerPercent(98))
+        assertEquals(75, normalizeCompactionTriggerPercent(75))
+        assertEquals(75, normalizeCompactionTriggerPercent(73))
+        assertEquals(80, normalizeCompactionTriggerPercent(78))
+    }
+
+    @Test
+    fun parseAppModeDefaultsToNormalAndRoundTrips() {
+        assertEquals(AppMode.NORMAL, UiPreferences().appMode)
+        assertEquals(AppMode.NORMAL, parseAppMode(null))
+        assertEquals(AppMode.NORMAL, parseAppMode("UNKNOWN"))
+        assertEquals(AppMode.NORMAL, parseAppMode(AppMode.NORMAL.name))
+        assertEquals(AppMode.SUPER, parseAppMode(AppMode.SUPER.name))
+    }
 }

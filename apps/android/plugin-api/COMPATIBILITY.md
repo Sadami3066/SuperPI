@@ -56,7 +56,7 @@ Mark new capabilities that are uncertain or not promised as stable with `@Plugin
 | apiLevel | SDK (plugin-api / design) | Host version | Notes |
 |---|---|---|---|
 | 5 | 0.8.1 / 0.6.1 | ≤1.0.3 | Historical contract, rejected from 1.0.4 |
-| 7 | 2.0.x / 1.0.x | 2.0.0+ | SuperPI package and class names (`io.github.whywood.superpi`, `SuperPIPlugin`); plugin ids use `io.github.whywood.superpi.plugin.*`; UI API level 3 |
+| 7 | 2.0.x / 1.0.x–1.1.x | 2.0.0+ | SuperPI package and class names (`io.github.whywood.superpi`, `SuperPIPlugin`); plugin ids use `io.github.whywood.superpi.plugin.*`; UI API level 3. `2.0.2` is an additive patch that fixes duplicate `present(...)` hints for rich-text results |
 | 6 | 1.0.x / 0.6.1 | 1.0.4+ | Factory construction, event interfaces, prompt override experimental capability |
 | 6 | 1.1.x / 0.7.x | 1.0.6+ | Additive expansion: devices/permissions/package management/privileged access/Intents/dedicated windows/background tasks/clipboard/location/contacts/SMS/calendar/media/speech/web/host credentials/accessibility/settings storage, page arguments and interactive pickers, notification listening and actions, system event hooks, new design components; plugins can use the `permissions`/`components` manifest fields |
 | 6 | 1.2.x / 0.9.x | 1.0.8+ | Theming and plugin page sheets: manifest `provides.themes`, `UiService.openPageSheet`, `PluginPageContext.presentation`/`PluginPagePresentation`; design theme color overload, `DdTheme.lightSuperPI()` and status/notice/progress components |

@@ -107,5 +107,5 @@ private val SKILL_MARKDOWN = """
     - 路线：`amap_route_driving` / `amap_route_transit` / `amap_route_walking` / `amap_route_bicycling`，起终点用经纬度；返回路线和分段距离、耗时。高德不返回轨迹串，驾车有时只有 1 条备选；公交需要起点和终点城市，返回全部换乘方案。
     - 天气：`amap_weather`（城市名称或编码），按白天和夜间返回天气、温度、风向和风力，天数由高德决定。
     - 返回的数据以工具结果为准，正文写结论和下一步。
-    - Key 在插件页配置；Key 无效或未配置时引导用户到插件页处理。
+    - 服务凭证在插件页配置；凭证无效或未配置时引导用户到插件页处理。
 """.trimIndent()

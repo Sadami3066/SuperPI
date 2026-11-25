@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import io.github.whywood.superpi.core.AppDependencies
 import io.github.whywood.superpi.data.OnboardingPreferences
+import io.github.whywood.superpi.design.DdFontStyle
 import io.github.whywood.superpi.ui.onboarding.OnboardingGate
 import io.github.whywood.superpi.ui.onboarding.OnboardingScreen
 import io.github.whywood.superpi.ui.onboarding.OnboardingSplash
@@ -21,6 +22,7 @@ internal fun AppOnboardingGate(
     runtimeReady: Boolean,
     hasCredentials: Boolean,
     hasSessions: Boolean,
+    onFontStyleChange: (DdFontStyle) -> Unit = {},
     onFinished: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -61,6 +63,7 @@ internal fun AppOnboardingGate(
         ONBOARDING_DECISION_CHAT -> content()
         ONBOARDING_DECISION_ONBOARDING -> OnboardingScreen(
             graph = graph,
+            onFontStyleChange = onFontStyleChange,
             onFinished = {
                 decision = ONBOARDING_DECISION_CHAT
                 onFinished()

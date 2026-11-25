@@ -56,27 +56,37 @@ internal class MiniappFileStore(
 
     fun mimeType(name: String): String {
         val extension = name.substringAfterLast('.', "").lowercase()
-        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+        return MimeTypeMap.getSingleton()?.getMimeTypeFromExtension(extension)
             ?: "application/octet-stream"
     }
 
     suspend fun import(uri: Uri, preferredName: String? = null): MiniappFileRef = withContext(Dispatchers.IO) {
         val name = safeName(preferredName ?: displayName(uri) ?: "file")
-        val target = uniqueTarget(name)
-        val written = runCatching {
-            resolver.openInputStream(uri)?.use { input ->
+        val input = resolver.openInputStream(uri)
+            ?: throw MiniappHostException(MiniappHostException.FAILED, "cannot open selected file")
+        input.use { stream -> importStream(name, stream) }
+    }
+
+    internal suspend fun importStream(name: String, input: java.io.InputStream): MiniappFileRef =
+        withContext(Dispatchers.IO) {
+            val target = uniqueTarget(safeName(name))
+            val written = runCatching {
                 target.outputStream().use { output ->
                     copyLimited(input, output, MAX_FILE_BYTES)
                 }
-            } ?: throw IOException("cannot open selected file")
-        }.getOrElse { error ->
-            target.delete()
-            if (error is MiniappHostException) throw error
-            throw MiniappHostException(MiniappHostException.FAILED, error.message ?: "cannot import file")
+            }.getOrElse { error ->
+                target.delete()
+                if (error is MiniappHostException) throw error
+                throw MiniappHostException(MiniappHostException.FAILED, error.message ?: "cannot import file")
+            }
+            runCatching {
+                checkQuota(written)
+            }.getOrElse { error ->
+                target.delete()
+                throw error
+            }
+            fileRef(target, written)
         }
-        checkQuota(written)
-        fileRef(target, written)
-    }
 
     suspend fun write(path: String, encoding: String, data: String): MiniappFileRef = withContext(Dispatchers.IO) {
         val target = resolve(path)
@@ -84,9 +94,7 @@ internal class MiniappFileStore(
             throw MiniappHostException(MiniappHostException.INVALID_PARAMS, "path is a folder")
         }
         val bytes = if (encoding == "base64") decodeBase64(data) else data.toByteArray(Charsets.UTF_8)
-        if (bytes.size > MAX_FILE_BYTES) {
-            throw MiniappHostException(MiniappHostException.TOO_LARGE, "file is too large")
-        }
+        checkQuotaFor(target, bytes.size.toLong())
         target.parentFile?.let { parent ->
             if (!parent.isDirectory && !parent.mkdirs() && !parent.isDirectory) {
                 throw MiniappHostException(MiniappHostException.FAILED, "cannot create file folder")
@@ -95,7 +103,6 @@ internal class MiniappFileStore(
         runCatching { target.writeBytes(bytes) }.getOrElse { error ->
             throw MiniappHostException(MiniappHostException.FAILED, error.message ?: "cannot write file")
         }
-        checkQuota(target.length())
         fileRef(target, target.length())
     }
 
@@ -241,22 +248,40 @@ internal class MiniappFileStore(
     }
 
     private fun checkQuota(lastWritten: Long) {
+        if (lastWritten > MAX_FILE_BYTES) {
+            throw MiniappHostException(MiniappHostException.TOO_LARGE, "file is too large")
+        }
+        val (total, files) = measureUsage(exclude = null)
+        validateUsage(total, files)
+    }
+
+    private fun checkQuotaFor(target: File, incomingBytes: Long) {
+        if (incomingBytes > MAX_FILE_BYTES) {
+            throw MiniappHostException(MiniappHostException.TOO_LARGE, "file is too large")
+        }
+        val (existingBytes, existingFiles) = measureUsage(exclude = target.canonicalFile)
+        validateUsage(existingBytes + incomingBytes, existingFiles + 1)
+    }
+
+    private fun measureUsage(exclude: File?): Pair<Long, Int> {
+        if (!root.isDirectory) return 0L to 0
         var total = 0L
         var files = 0
         root.walkTopDown().forEach { file ->
-            if (file.isFile) {
+            if (file.isFile && (exclude == null || file.canonicalFile != exclude)) {
                 total += file.length()
                 files += 1
             }
         }
-        if (total > MAX_TOTAL_BYTES) {
+        return total to files
+    }
+
+    private fun validateUsage(totalBytes: Long, fileCount: Int) {
+        if (totalBytes > MAX_TOTAL_BYTES) {
             throw MiniappHostException(MiniappHostException.TOO_LARGE, "miniapp file storage is full")
         }
-        if (files > MAX_ENTRIES) {
+        if (fileCount > MAX_ENTRIES) {
             throw MiniappHostException(MiniappHostException.TOO_LARGE, "too many files")
-        }
-        if (lastWritten > MAX_FILE_BYTES) {
-            throw MiniappHostException(MiniappHostException.TOO_LARGE, "file is too large")
         }
     }
 

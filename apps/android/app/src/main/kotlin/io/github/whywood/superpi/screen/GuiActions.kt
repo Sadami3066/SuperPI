@@ -7,6 +7,7 @@ class GuiUnavailableException(
 data class GuiTextResult(
     val text: String,
     val verified: Boolean,
+    val secret: Boolean = false,
 )
 
 data class GuiScreenshot(val png: ByteArray, val width: Int, val height: Int)
@@ -23,6 +24,10 @@ interface GuiActions {
     fun bounds(displayId: Int, selector: GuiSelector): GuiBounds
 
     val connected: Boolean
+
+    suspend fun awaitQuiet(displayId: Int, quietMs: Long = 350L, maxWaitMs: Long = 700L): Boolean? = null
+
+    suspend fun awaitDisplayChange(displayId: Int, timeoutMs: Long = 300L): Boolean? = null
 
     suspend fun observe(displayId: Int, maxDepth: Int, maxNodes: Int, expectedPackage: String? = null): GuiSnapshot
 

@@ -83,18 +83,18 @@ class ToolContractDeviceTest {
         val draft = graph.miniappStore.createDraft("Contract ${UUID.randomUUID().toString().take(8)}")
         try {
             assertNull(run(tools.getValue("write"), buildJsonObject { put("path", file.absolutePath); put("content", "contract-marker\n") }).isError)
-            val command = run(tools.getValue("bash"), buildJsonObject { put("command", "printf 'from-linux\\n' >> '${file.absolutePath}'; cat '${file.absolutePath}'") })
+            val command = run(tools.getValue("bash"), buildJsonObject { put("command", "printf 'from-linux\\n' >> '${file.absolutePath}'; cat '${file.absolutePath}'"); put("description", "Append and read file") })
             assertNull(command.isError)
             assertTrue(command.text().contains("from-linux"))
             downloaded.writeText("neutral-download")
-            assertTrue(run(tools.getValue("bash"), buildJsonObject { put("command", "cat '${downloaded.absolutePath}'") }).text().contains("neutral-download"))
+            assertTrue(run(tools.getValue("bash"), buildJsonObject { put("command", "cat '${downloaded.absolutePath}'"); put("description", "Read downloaded file") }).text().contains("neutral-download"))
             assertTrue(run(tools.getValue("read"), args(downloaded)).text().contains("neutral-download"))
             File(draft.directory, "index.html").writeText("<html><body>neutral-miniapp</body></html>")
             val loader = io.github.whywood.superpi.runtime.miniappTools(graph.miniappStore, false).first { it.name == "miniapp_load" }
             val installed = run(loader, args(draft.directory))
             assertNull(installed.text(), installed.isError)
             val installedDirectory = File(Json.parseToJsonElement(installed.text()).jsonObject.getValue("path").jsonPrimitive.content)
-            assertTrue(run(tools.getValue("bash"), buildJsonObject { put("command", "cat '${File(installedDirectory, "index.html").absolutePath}'") }).text().contains("neutral-miniapp"))
+            assertTrue(run(tools.getValue("bash"), buildJsonObject { put("command", "cat '${File(installedDirectory, "index.html").absolutePath}'"); put("description", "Read installed miniapp") }).text().contains("neutral-miniapp"))
             assertTrue(run(tools.getValue("read"), args(File(installedDirectory, "index.html"))).text().contains("neutral-miniapp"))
 
             assertTrue(run(tools.getValue("read"), args(file)).text().contains("from-linux"))
@@ -112,13 +112,13 @@ class ToolContractDeviceTest {
             val missing = run(delivery, buildJsonObject { put("items", buildJsonArray { add(buildJsonObject { put("type", "file"); put("path", file.absolutePath + ".missing") }) }) })
             assertEquals(true, missing.isError)
             assertTrue(runCatching { run(tools.getValue("read"), buildJsonObject { put("path", file.name) }) }.exceptionOrNull() is IllegalArgumentException)
-            val big = run(tools.getValue("bash"), buildJsonObject { put("command", "head -c 180000 /dev/zero | tr '\\0' x; printf '\\nFINAL_ERROR\\n'; exit 7") })
+            val big = run(tools.getValue("bash"), buildJsonObject { put("command", "head -c 180000 /dev/zero | tr '\\0' x; printf '\\nFINAL_ERROR\\n'; exit 7"); put("description", "Produce oversized output") })
             assertEquals(true, big.isError)
             assertTrue(big.text().contains("FINAL_ERROR"))
             log = File(big.details!!.jsonObject.getValue("fullOutputPath").jsonPrimitive.content)
             assertEquals(180013L, log.length())
             assertTrue(run(tools.getValue("read"), buildJsonObject { put("path", log.absolutePath); put("offset", 2); put("limit", 1) }).text().contains("FINAL_ERROR"))
-            assertTrue(run(tools.getValue("bash"), buildJsonObject { put("command", "tail -c 32 '${log.absolutePath}'") }).text().contains("FINAL_ERROR"))
+            assertTrue(run(tools.getValue("bash"), buildJsonObject { put("command", "tail -c 32 '${log.absolutePath}'"); put("description", "Read output tail") }).text().contains("FINAL_ERROR"))
         } finally { file.delete(); log?.delete(); downloaded.delete(); graph.miniappStore.delete(draft.manifest.id); draft.directory.deleteRecursively() }
     }
 
@@ -129,10 +129,10 @@ class ToolContractDeviceTest {
         try {
             file.writeText("alias-marker\n")
             val alias = "/data/data/${context.packageName}/files/home/${file.name}"
-            val aliased = run(tools.getValue("bash"), buildJsonObject { put("command", "cat '$alias'") })
+            val aliased = run(tools.getValue("bash"), buildJsonObject { put("command", "cat '$alias'"); put("description", "Read file via alias") })
             assertNull(aliased.text(), aliased.isError)
             assertTrue(aliased.text().contains("alias-marker"))
-            val native = run(tools.getValue("bash"), buildJsonObject { put("command", "ls '/data/user/0/${context.packageName}/files'") })
+            val native = run(tools.getValue("bash"), buildJsonObject { put("command", "ls '/data/user/0/${context.packageName}/files'"); put("description", "List app files dir") })
             assertNull(native.text(), native.isError)
             assertTrue(native.text().contains("home"))
         } finally {
@@ -144,7 +144,7 @@ class ToolContractDeviceTest {
     fun timeoutCancellationAndBackgroundCleanupStopRealProcesses() = runBlocking {
         val environment = linux()
         val bash = tools(environment).getValue("bash")
-        val timeout = run(bash, buildJsonObject { put("command", "printf partial; sleep 20"); put("timeout", 1) })
+        val timeout = run(bash, buildJsonObject { put("command", "printf partial; sleep 20"); put("description", "Verify command timeout"); put("timeout", 1) })
         assertEquals(true, timeout.isError)
         assertTrue(timeout.text().contains("partial"))
         assertTrue(timeout.text().contains("timed out"))
@@ -152,7 +152,7 @@ class ToolContractDeviceTest {
         val signal = RunSignal()
         try {
             val running = async {
-                runCatching { bash.execute("cancel", buildJsonObject { put("command", "echo $$ > '${pidFile.absolutePath}'; sleep 60") }, signal, null) }
+                runCatching { bash.execute("cancel", buildJsonObject { put("command", "echo $$ > '${pidFile.absolutePath}'; sleep 60"); put("description", "Verify process cancellation") }, signal, null) }
             }
             withTimeout(5000) { while (!pidFile.exists() || pidFile.length() == 0L) delay(30) }
             val pid = pidFile.readText().trim().toLong()
@@ -195,12 +195,12 @@ class ToolContractDeviceTest {
                 override suspend fun run(command: String, timeoutSeconds: Long?, signal: RunSignal?): ShellResult = error("unused")
             }
             val rootTool = io.github.whywood.superpi.runtime.systemShellTool { rootExecutor }
-            val rootTimeout = run(rootTool, buildJsonObject { put("command", "printf root-partial; sleep 20"); put("timeoutMs", 1000) })
+            val rootTimeout = run(rootTool, buildJsonObject { put("command", "printf root-partial; sleep 20"); put("description", "Verify root shell timeout"); put("timeoutMs", 1000) })
             assertEquals(true, rootTimeout.isError)
             assertTrue(rootTimeout.text(), rootTimeout.text().contains("root-partial") && rootTimeout.text().contains("timed out"))
             pidFile.delete()
             val rootSignal = RunSignal()
-            val rootRun = async { runCatching { rootTool.execute("root-cancel", buildJsonObject { put("command", "echo $$ > '${pidFile.absolutePath}'; sleep 60") }, rootSignal, null) } }
+            val rootRun = async { runCatching { rootTool.execute("root-cancel", buildJsonObject { put("command", "echo $$ > '${pidFile.absolutePath}'; sleep 60"); put("description", "Verify root shell cancellation") }, rootSignal, null) } }
             withTimeout(5000) { while (!pidFile.exists() || pidFile.length() == 0L) delay(30) }
             val rootPid = pidFile.readText().trim().toLong()
             rootSignal.abort("contract root cancellation")

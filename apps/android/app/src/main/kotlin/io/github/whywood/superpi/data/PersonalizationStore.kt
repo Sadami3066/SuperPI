@@ -44,11 +44,12 @@ class PersonalizationStore(context: Context) {
     suspend fun save(value: PersonalizationUi) {
         store.edit { values ->
             values[nicknameKey] = value.nickname.take(MAX_NICKNAME_LENGTH)
-            values[instructionKey] = value.instruction
+            values[instructionKey] = value.instruction.take(MAX_INSTRUCTION_LENGTH)
         }
     }
 
     companion object {
         const val MAX_NICKNAME_LENGTH = 40
+        const val MAX_INSTRUCTION_LENGTH = 4_000
     }
 }

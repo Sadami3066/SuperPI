@@ -23,6 +23,7 @@ class AppHostAccessController(
     private val startPairingAction: () -> Unit,
     private val openWirelessDebuggingAction: (Context) -> Unit,
     private val onChanged: suspend () -> Unit,
+    private val onAdbDisabled: (suspend () -> Unit)? = null,
 ) : HostAccessController {
     private val selected = MutableStateFlow(HostAccess.LOCAL)
     private val rootReady = MutableStateFlow(false)
@@ -50,6 +51,7 @@ class AppHostAccessController(
     override suspend fun select(access: HostAccess) {
         selected.value = access
         preferences.setSelected(access)
+        if (access != HostAccess.ADB) onAdbDisabled?.invoke()
         if (access == HostAccess.ROOT) probeRoot()
         notifyIfChanged()
     }

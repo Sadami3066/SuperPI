@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.whywood.superpi.plugin.wecom"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "2.6.2"
+        versionCode = 16
+        versionName = "2.6.3"
     }
 
     compileOptions {

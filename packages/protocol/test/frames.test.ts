@@ -673,7 +673,8 @@ describe('protocol validation', () => {
 
     expect(RELAY_CAPABILITIES).toContain('bot-capabilities')
     expect(RELAY_CAPABILITIES).toContain('present-artifacts')
-    expect(RELAY_CAPABILITIES).toContain('memory-v2')
+    expect(RELAY_CAPABILITIES).toContain('memory-v3')
+    expect(RELAY_CAPABILITIES).not.toContain('memory-v2')
 
     const capGet = parseClientFrame({
       type: 'route',
@@ -698,10 +699,47 @@ describe('protocol validation', () => {
           mcpServers: [],
           screenTools: true,
           miniappTools: false,
+          memoryScope: 'WORK_ONLY',
+          memoryDispatch: true,
         },
       },
     })
     expect(capSet).toMatchObject({ method: 'bot.capabilities.set' })
+
+    const capSetReset = parseClientFrame({
+      type: 'route',
+      id: 'r-cap-reset',
+      to: 'dev-phone-2',
+      method: 'bot.capabilities.set',
+      params: {
+        botId: 'home',
+        policy: {
+          memoryScope: null,
+          memoryDispatch: null,
+        },
+      },
+    })
+    expect(capSetReset).toMatchObject({ method: 'bot.capabilities.set' })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-cap-bad-scope',
+        to: 'dev-phone-2',
+        method: 'bot.capabilities.set',
+        params: { botId: 'home', policy: { memoryScope: 'ONLY_ME' } },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'r-cap-bad-dispatch',
+        to: 'dev-phone-2',
+        method: 'bot.capabilities.set',
+        params: { botId: 'home', policy: { memoryDispatch: 'yes' } },
+      }),
+    ).toThrow(RouteValidationError)
 
     expect(() =>
       parseClientFrame({
@@ -753,6 +791,254 @@ describe('protocol validation', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(RouteValidationError)
       expect((error as RouteValidationError).code).toBe('payload_too_large')
+    }
+  })
+
+  it('supports super-worker capability, rich BotInfo metadata, and worker.* route validation', () => {
+    expect(RELAY_CAPABILITIES).toContain('super-worker')
+
+    const richHello = parseClientFrame({
+      ...(readVector('client-hello.json') as Record<string, unknown>),
+      bots: [
+        {
+          id: 'coder',
+          name: 'Coder',
+          intro: '  Fixes bugs and runs tests  ',
+          capabilities: {
+            skills: ['git-workflow', 'kotlin'],
+            plugins: ['mail'],
+            mcpServers: ['github'],
+            screenTools: false,
+            miniappTools: true,
+            memoryScope: 'work_only',
+            memoryDispatch: false,
+          },
+        },
+        { id: 'pi', name: 'PI' },
+      ],
+    })
+    expect(richHello).toMatchObject({
+      type: 'hello',
+      bots: [
+        {
+          id: 'coder',
+          name: 'Coder',
+          intro: 'Fixes bugs and runs tests',
+          capabilities: {
+            skills: ['git-workflow', 'kotlin'],
+            plugins: ['mail'],
+            mcpServers: ['github'],
+            screenTools: false,
+            miniappTools: true,
+            memoryScope: 'WORK_ONLY',
+            memoryDispatch: false,
+          },
+        },
+        { id: 'pi', name: 'PI' },
+      ],
+    })
+    expect(decodeFrameLine('client', encodeFrame(richHello).trimEnd())).toEqual(richHello)
+
+    expect(() =>
+      parseClientFrame({
+        ...(readVector('client-hello.json') as Record<string, unknown>),
+        bots: [
+          {
+            id: 'pi',
+            name: 'PI',
+            capabilities: { skills: [], plugins: [], mcpServers: [], memoryScope: 'INVALID' },
+          },
+        ],
+      }),
+    ).toThrow(ProtocolError)
+
+    const promptWithModel = parseClientFrame({
+      type: 'route',
+      id: 'p-model-1',
+      to: 'dev-phone-2',
+      method: 'bot.prompt',
+      params: {
+        botId: 'home',
+        text: 'Hello',
+        provider: 'deepseek',
+        modelId: 'deepseek-chat',
+        thinkingLevel: 'medium',
+      },
+    })
+    expect(promptWithModel).toMatchObject({
+      type: 'route',
+      method: 'bot.prompt',
+      params: { provider: 'deepseek', modelId: 'deepseek-chat', thinkingLevel: 'medium' },
+    })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'p-model-partial',
+        to: 'dev-phone-2',
+        method: 'bot.prompt',
+        params: { botId: 'home', text: 'Hello', provider: 'deepseek' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        ...(readVector('client-hello.json') as Record<string, unknown>),
+        bots: [{ id: 'pi', name: 'PI', intro: 123 }],
+      }),
+    ).toThrow(ProtocolError)
+
+    const validWorkerRoutes = [
+      { id: 'w-list', method: 'worker.list', params: { botId: 'home' } },
+      { id: 'w-list-all', method: 'worker.list', params: {} },
+      { id: 'w-start', method: 'worker.start', params: { botId: 'home', task: 'Check train tickets', workerId: 'wrk-1', title: 'Train Tickets' } },
+      { id: 'w-continue', method: 'worker.continue', params: { botId: 'home', workerId: 'wrk-1', message: 'Check tomorrow' } },
+      { id: 'w-resume', method: 'worker.resume', params: { botId: 'home', workerId: 'wrk-1', afterSeq: 12 } },
+      { id: 'w-steer', method: 'worker.steer', params: { botId: 'home', workerId: 'wrk-1', message: 'Prefer direct train' } },
+      { id: 'w-abort', method: 'worker.abort', params: { botId: 'home', workerId: 'wrk-1' } },
+      {
+        id: 'w-approval',
+        method: 'worker.approval',
+        params: { botId: 'home', workerId: 'wrk-1', requestId: 'req-1', answers: [{ id: 'q1', selected: ['Yes'] }] },
+      },
+      { id: 'w-inspect', method: 'worker.inspect', params: { botId: 'home', workerId: 'wrk-1', tail: 20 } },
+      { id: 'w-delete', method: 'worker.delete', params: { botId: 'home', workerId: 'wrk-1' } },
+      { id: 'w-compact', method: 'worker.compact', params: { botId: 'home', workerId: 'wrk-1' } },
+      {
+        id: 'w-set-model',
+        method: 'worker.set_model',
+        params: { botId: 'home', workerId: 'wrk-1', providerId: 'deepseek', modelId: 'deepseek-reasoner', thinkingLevel: 'MEDIUM' },
+      },
+      {
+        id: 'w-set-thinking',
+        method: 'worker.set_model',
+        params: { botId: 'home', workerId: 'wrk-1', thinkingLevel: 'HIGH' },
+      },
+    ]
+    for (const route of validWorkerRoutes) {
+      const parsed = parseClientFrame({ type: 'route', to: 'dev-phone-2', ...route })
+      expect(parsed).toMatchObject({ type: 'route', method: route.method })
+    }
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'w-set-model-empty',
+        to: 'dev-phone-2',
+        method: 'worker.set_model',
+        params: { botId: 'home', workerId: 'wrk-1' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'w-start-empty',
+        to: 'dev-phone-2',
+        method: 'worker.start',
+        params: { botId: 'home', task: '   ' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'w-resume-neg',
+        to: 'dev-phone-2',
+        method: 'worker.resume',
+        params: { botId: 'home', workerId: 'wrk-1', afterSeq: -1 },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'w-inspect-bad-tail',
+        to: 'dev-phone-2',
+        method: 'worker.inspect',
+        params: { botId: 'home', workerId: 'wrk-1', tail: 500 },
+      }),
+    ).toThrow(RouteValidationError)
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'w-approval-empty',
+        to: 'dev-phone-2',
+        method: 'worker.approval',
+        params: { botId: 'home', workerId: 'wrk-1', requestId: 'req-1' },
+      }),
+    ).toThrow(RouteValidationError)
+
+    const validImageStart = parseClientFrame({
+      type: 'route',
+      id: 'w-start-img',
+      to: 'dev-phone-2',
+      method: 'worker.start',
+      params: {
+        botId: 'home',
+        task: '',
+        images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+      },
+    })
+    expect(validImageStart).toMatchObject({ type: 'route', method: 'worker.start' })
+
+    const validImageContinue = parseClientFrame({
+      type: 'route',
+      id: 'w-cont-img',
+      to: 'dev-phone-2',
+      method: 'worker.continue',
+      params: {
+        botId: 'home',
+        workerId: 'wrk-1',
+        message: ' ',
+        images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+      },
+    })
+    expect(validImageContinue).toMatchObject({ type: 'route', method: 'worker.continue' })
+
+    expect(() =>
+      parseClientFrame({
+        type: 'route',
+        id: 'w-steer-empty-both',
+        to: 'dev-phone-2',
+        method: 'worker.steer',
+        params: { botId: 'home', workerId: 'wrk-1', message: '', images: [] },
+      }),
+    ).toThrow(RouteValidationError)
+  })
+
+  it('validates plugin_custom_message and lifecycle route events for remote worker cards', () => {
+    const parsed = parseServerFrame({
+      type: 'route_event',
+      id: 'w-custom-1',
+      seq: 3,
+      event: {
+        type: 'plugin_custom_message',
+        customType: 'todo_list',
+        payload: '{"items":[]}',
+        text: 'Todo updated',
+        display: true,
+      },
+    })
+    expect(parsed).toMatchObject({
+      type: 'route_event',
+      id: 'w-custom-1',
+      seq: 3,
+      event: {
+        type: 'plugin_custom_message',
+        customType: 'todo_list',
+      },
+    })
+
+    for (const type of ['compaction_start', 'compaction_end', 'retry_start', 'retry_end'] as const) {
+      const lifecycle = parseServerFrame({
+        type: 'route_event',
+        id: 'w-life-1',
+        seq: 4,
+        event: { type },
+      })
+      expect(lifecycle).toMatchObject({ type: 'route_event', event: { type } })
     }
   })
 })

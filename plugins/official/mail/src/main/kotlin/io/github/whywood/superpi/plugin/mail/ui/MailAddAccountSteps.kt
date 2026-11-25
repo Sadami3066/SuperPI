@@ -402,6 +402,10 @@ internal fun ResultStep(
                     color = colors.inkSecondary,
                 )
             }
+            if (testing) {
+                Spacer(Modifier.height(16.dp))
+                DdLoadingBlock(text = host.t("正在测试连接", "Testing connection"))
+            }
         }
         Spacer(Modifier.height(24.dp))
     }

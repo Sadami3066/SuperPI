@@ -3,7 +3,10 @@
     <string name="settings_agent">智能体行为</string>
     <string name="agent_settings_title">智能体行为</string>
     <string name="agent_section_capabilities">能力</string>
-    <string name="agent_section_metadata">会话命名</string>
+    <string name="agent_section_context">上下文</string>
+    <string name="agent_compaction_threshold_title">自动压缩阈值</string>
+    <string name="agent_compaction_threshold_summary">对话占用达到该比例时自动整理早期内容</string>
+    <string name="agent_compaction_threshold_value">%1$d%%</string>
     <string name="agent_metadata_title">会话标题</string>
     <string name="agent_metadata_summary">自动选择快速模型为会话命名</string>
     <string name="agent_metadata_auto">自动</string>

@@ -14,14 +14,14 @@
     "en": "Plugin Template"
   },
   "summary": {
-    "default": "Starting point for external PI plugins: one tool, one skill and one prompt section.",
-    "zh": "外部插件起点：一个工具、一个技能与一段提示词。",
-    "en": "Starting point for external PI plugins: one tool, one skill and one prompt section."
+    "default": "Starting point for external PI plugins: two tools, one skill and one prompt section.",
+    "zh": "外部插件起点：两个工具、一个技能与一段提示词。",
+    "en": "Starting point for external PI plugins: two tools, one skill and one prompt section."
   },
   "description": {
-    "default": "Copy this project, rename the plugin id and entry class, then build and sign a .ddp bundle.",
-    "zh": "复制本工程，改插件 id 与入口类，即可构建并签名自己的 .ddp 插件包。",
-    "en": "Copy this project, rename the plugin id and entry class, then build and sign a .ddp bundle."
+    "default": "Copy this project, rename the plugin, then build and sign your own plugin bundle.",
+    "zh": "复制本工程并修改插件名称，即可构建并签名自己的插件包。",
+    "en": "Copy this project, rename the plugin, then build and sign your own plugin bundle."
   },
   "homepage": "https://github.com/Sadami3066/SuperPI-Plugins",
   "icon": "asset:icon.png",

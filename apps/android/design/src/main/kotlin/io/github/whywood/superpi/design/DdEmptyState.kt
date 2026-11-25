@@ -19,9 +19,10 @@ fun DdEmptyState(
 ) {
     Text(
         text = text,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().padding(horizontal = DdSpacing.Lg),
         style = DdType.bodySmall,
         color = superPiColors().inkTertiary,
+        textAlign = TextAlign.Center,
     )
 }
 
@@ -36,7 +37,7 @@ fun DdEmptyState(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = DdSpacing.Xxl),
+            .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(DdSpacing.Md),
     ) {

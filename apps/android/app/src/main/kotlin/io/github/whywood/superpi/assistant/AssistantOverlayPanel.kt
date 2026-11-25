@@ -3,9 +3,10 @@ package io.github.whywood.superpi.assistant
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Toast
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -58,7 +59,6 @@ import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
-import io.github.whywood.superpi.design.DdMotion
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
@@ -67,6 +67,7 @@ import io.github.whywood.superpi.runtime.PendingQuestion
 import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.ui.common.chat.ChatScrollFollowEffect
 import io.github.whywood.superpi.ui.common.chat.ChatTurn
+import io.github.whywood.superpi.ui.common.chat.ScrollFollowPolicy
 import io.github.whywood.superpi.ui.common.chat.presentedCardLookup
 import io.github.whywood.superpi.ui.common.chat.rememberChatScrollController
 import io.github.whywood.superpi.ui.common.chat.AskQuestionCard
@@ -148,14 +149,34 @@ internal fun AssistantOverlayPanel(
         else -> (headerHeight + with(density) { contentHeightPx.toDp() } + 2.dp)
             .coerceIn(headerHeight + 8.dp, maxHeight)
     }
+    val motionEnabled = LocalDdMotionEnabled.current
     val panelHeight = animateDpAsState(
         targetValue = targetHeight,
-        animationSpec = if (snapHeight) snap() else tween(DdMotion.BASE, easing = DdMotion.EaseOut),
+        animationSpec = if (snapHeight || !motionEnabled) {
+            snap()
+        } else {
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = ScrollFollowPolicy.PanelHeightSpringStiffness,
+            )
+        },
         label = "overlay-panel-height",
     )
 
+    var knownMessageCount by remember(state.sessionId) { mutableIntStateOf(0) }
     LaunchedEffect(state.sessionId, state.conversation.loaded) {
-        if (state.conversation.loaded) scroll.jumpToBottom(animate = false)
+        if (state.conversation.loaded) {
+            knownMessageCount = messages.size
+            scroll.jumpToBottom(animate = false)
+        }
+    }
+    LaunchedEffect(state.sessionId, state.conversation.loaded, messages.size) {
+        if (!state.conversation.loaded) return@LaunchedEffect
+        val grew = messages.size > knownMessageCount
+        if (grew && scroll.following) {
+            scroll.jumpToBottom(animate = motionEnabled)
+        }
+        knownMessageCount = messages.size
     }
     LaunchedEffect(pendingQuestions.map { it.requestId }) {
         if (pendingQuestions.isNotEmpty()) {
@@ -171,7 +192,7 @@ internal fun AssistantOverlayPanel(
         controller = scroll,
         sessionKey = state.sessionId,
         sending = state.conversation.sending,
-        smooth = LocalDdMotionEnabled.current,
+        smooth = motionEnabled,
     )
 
     val copyOutput: (String) -> Unit = { text ->
@@ -241,15 +262,17 @@ internal fun AssistantOverlayPanel(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                DdIconButton(
-                    icon = DdIcons.Folder,
-                    onClick = onOpenWorkspaceSwitcher,
-                    contentDescription = stringResource(R.string.assistant_overlay_switch_workspace),
-                    modifier = Modifier.testTag("assistant_overlay_workspace_switch"),
-                    size = 36.dp,
-                    iconSize = 17.dp,
-                    tint = colors.inkTertiary,
-                )
+                if (config.switcherVisible) {
+                    DdIconButton(
+                        icon = DdIcons.Folder,
+                        onClick = onOpenWorkspaceSwitcher,
+                        contentDescription = stringResource(R.string.assistant_overlay_switch_workspace),
+                        modifier = Modifier.testTag("assistant_overlay_workspace_switch"),
+                        size = 36.dp,
+                        iconSize = 17.dp,
+                        tint = colors.inkTertiary,
+                    )
+                }
                 DdIconButton(
                     icon = DdIcons.Expand,
                     onClick = onOpenInApp,
@@ -281,7 +304,6 @@ internal fun AssistantOverlayPanel(
                                     onOpenFile = actions.onOpenFile,
                                     onRetry = actions.onRetry,
                                     attachmentRoot = config.attachmentRoot,
-                                    autoCollapseProcess = config.autoCollapseProcess,
                                     processDetail = config.processDetail,
                                     pendingQuestions = pendingQuestions,
                                     onAnswerQuestion = actions.onAnswerQuestion,

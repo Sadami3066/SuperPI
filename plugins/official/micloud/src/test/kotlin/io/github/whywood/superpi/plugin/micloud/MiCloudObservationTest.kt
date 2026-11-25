@@ -310,7 +310,7 @@ class MiCloudObservationTest {
 
         assertTrue(result.isError)
         assertEquals("upstream boom", result.rawBody())
-        assertTrue(result.guidance().orEmpty().contains("HTTP 500"))
+        assertEquals("小米云相册暂时无法访问，请稍后重试。", result.guidance())
         assertNull(result.cardTitle())
     }
 

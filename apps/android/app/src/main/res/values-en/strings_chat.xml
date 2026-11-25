@@ -21,18 +21,62 @@
     <string name="assistant_configure_hint">No model configured</string>
     <string name="assistant_configure_input">Configure a model in settings first</string>
     <string name="assistant_copied">Copied</string>
-    <string name="assistant_duration_minutes">%1$dm %2$ds</string>
-    <string name="assistant_duration_seconds">%1$ss</string>
     <string name="assistant_elapsed_seconds">%1$ds</string>
     <string name="assistant_elapsed_minutes_seconds">%1$dm %2$ds</string>
     <string name="assistant_elapsed_hours_minutes_seconds">%1$dh %2$dm %3$ds</string>
     <string name="assistant_failed">Generation failed</string>
-    <string name="assistant_greeting_afternoon">Good afternoon</string>
-    <string name="assistant_greeting_evening">Good evening</string>
-    <string name="assistant_greeting_morning">Good morning</string>
-    <string name="assistant_greeting_named">%1$s, %2$s</string>
+    <string name="assistant_greeting_morning_named">Morning, {name}. Ahead of the crowd.</string>
+    <string name="assistant_greeting_morning_plain">Morning. Ahead of the crowd.</string>
+    <string name="assistant_greeting_afternoon">Afternoon frequency locked.</string>
+    <string name="assistant_greeting_evening">One last push before sundown?</string>
+    <string name="assistant_greeting_night_1">Nightfall. Stay sharp.</string>
+    <string name="assistant_greeting_night_2_named">Evening channel live, {name}.</string>
+    <string name="assistant_greeting_night_2_plain">Evening channel live.</string>
+    <string name="assistant_greeting_late_night_1_named">Late shift, {name}. Just you and me.</string>
+    <string name="assistant_greeting_late_night_1_plain">Late shift. Just you and me.</string>
+    <string name="assistant_greeting_late_night_2">Midnight thoughts?</string>
+    <string-array name="assistant_greetings_general_named">
+        <item>Back online, {name}.</item>
+        <item>I\'ve got it from here.</item>
+        <item>Let\'s roll, {name}.</item>
+        <item>Ready when you are.</item>
+        <item>What are we building today?</item>
+        <item>All ears.</item>
+        <item>Awake and ready, {name}.</item>
+        <item>Loud and clear.</item>
+        <item>Systems primed.</item>
+        <item>Synced up, {name}.</item>
+        <item>Standing by.</item>
+    </string-array>
+    <string-array name="assistant_greetings_general_plain">
+        <item>Back online.</item>
+        <item>I\'ve got it from here.</item>
+        <item>Let\'s roll.</item>
+        <item>Ready when you are.</item>
+        <item>What are we building today?</item>
+        <item>All ears.</item>
+        <item>Awake and ready.</item>
+        <item>Loud and clear.</item>
+        <item>Systems primed.</item>
+        <item>Synced up.</item>
+        <item>Standing by.</item>
+    </string-array>
     <string name="assistant_hint">How can I help?</string>
     <string name="assistant_home_prompt">Where would you like to start?</string>
+    <string-array name="assistant_starter_prompts">
+        <item>Build me a runnable miniapp for: </item>
+        <item>Watch this and ping me when it changes: </item>
+        <item>Rewrite this messy draft into something sharp: </item>
+        <item>Run a deep review on this code: </item>
+        <item>Look up the latest on this, no fluff: </item>
+        <item>Automate this flow on my phone: </item>
+        <item>Tear apart this plan and find the weak spots: </item>
+        <item>Pull the key takeaways from this file: </item>
+        <item>Draft a reply I can send right away: </item>
+        <item>Compare these options and help me call it: </item>
+        <item>Remember this preference for future tasks: </item>
+        <item>Break this down in plain English: </item>
+    </string-array>
     <string name="assistant_image_failed">Could not load image</string>
     <string name="assistant_jump_bottom">Back to bottom</string>
     <string name="assistant_loading">Loading…</string>
@@ -45,8 +89,6 @@
     <string name="assistant_more">More actions</string>
     <string name="assistant_open_settings">Open settings</string>
     <string name="assistant_process">Process</string>
-    <string name="assistant_process_reasoning">%1$d thoughts</string>
-    <string name="assistant_process_tools">%1$d tools</string>
     <string name="assistant_process_tool_group">Ran %1$d tools</string>
     <string name="assistant_quote">Quote</string>
     <string name="assistant_quote_remove">Remove quote</string>

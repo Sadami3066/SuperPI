@@ -42,7 +42,11 @@ internal fun SuperPIApp(
         runtimeReady = state.ready,
         hasCredentials = authKinds.isNotEmpty(),
         hasSessions = state.conversations.isNotEmpty(),
-        onFinished = { chatViewModel.newSession(AgentRuntimeHost.HOME_ID) },
+        onFontStyleChange = onFontStyleChange,
+        onFinished = {
+            chatViewModel.refreshWorkspaces()
+            chatViewModel.newSession(AgentRuntimeHost.HOME_ID)
+        },
     ) {
         AppShell(
             graph = graph,

@@ -142,11 +142,11 @@ Fields you write into `details` other than `superpi.fileRefs` are passed through
 
 `isError = true` marks a failed tool result (the model can retry or explain it); an exception thrown from `execute` (other than cancellation) also becomes an error result, so do not use exceptions to convey business errors.
 
-#### Three layers of tool results: raw / guidance / card (2.0.0, plugin tools only)
+#### Three layers of tool results: raw / guidance / card (2.0.x, plugin tools only)
 
 Cards belong to plugin tools only: a `PluginTool` result may carry a card, and the host renders it in the answer area by `superpi.card`. Plugins that run a CLI through bash (such as Sun Yat-sen University, Feishu, WeCom) produce no cards and do not parse bash commands; their results stay CLI text that the model reads and answers from, and the host does no card handling for bash results at all.
 
-The tool writes three pieces of data into the result details, and `open fun Cards.deliver(callId, result)` (plugin-api 2.0.0, host 2.0.0+) assembles them into model-visible text and display text:
+The tool writes three pieces of data into the result details, and `open fun Cards.deliver(callId, result)` (plugin-api 2.0.x, host 2.0.0+) assembles them into model-visible text and display text:
 
 | details key | Contents | Who uses it |
 |---|---|---|
@@ -158,8 +158,9 @@ The tool writes three pieces of data into the result details, and `open fun Card
 - The text of `textResult` contains only the plugin's own body (for example a list of mailbox facts); `raw`/`guidance` are no longer assembled by the host.
 - For error results (`isError = true`), `Cards.deliver` drops the card and the `present` instruction, keeping only the body, the full return and the usage instructions.
 - The card payload must be complete (including raw dirty strings, IDs, coordinates, image URLs, state, pagination tokens); trimming happens only in the default preview/expand of the rendering layer.
-- Fetch image URLs with `host.images().load(url, maxEdgePx)` (the manifest must declare the `images` capability), which returns `RemoteImage.bitmap`; render it with `DdRemoteImage` from design 1.0.0, and use `DdImageViewer(bitmap)` for full screen. Images only go into host memory and the private cache; do not write them to shared storage or the plugin data directory.
-- `plugin-api 2.0.0` + `design 1.0.0`: plugins using `host.images()` write `minHostVersion: "1.4.0"`; `plugin-api 2.0.0` is still additive within level 6.
+- Fetch image URLs with `host.images().load(url, maxEdgePx)` (the manifest must declare the `images` capability), which returns `RemoteImage.bitmap`; render it with `DdRemoteImage` from design 1.1.0, and use `DdImageViewer(bitmap)` for full screen. Images only go into host memory and the private cache; do not write them to shared storage or the plugin data directory.
+- `plugin-api 2.0.x` + `design 1.1.0`: plugins using `host.images()` write `minHostVersion: "2.0.0"`.
+- `2.0.2` adds one guard in `Cards.deliver`: if the existing result already contains a `present(...)` instruction in a `TextBlock`, the instruction is not appended again.
 
 Tools enter the session with enabled plugins by default; when you need session information, use the live handle from `contributionsFor`:
 
@@ -303,7 +304,7 @@ Notes:
 
 ## Host services
 
-`PluginHost` exposes 35 service accessors (17 in 1.0, 18 added in 1.1.0), of which `components()` / `credentials()` / `accessibility()` are experimental APIs that need an explicit opt-in:
+`PluginHost` exposes 36 service accessors, of which `components()` / `credentials()` / `accessibility()` are experimental APIs that need an explicit opt-in:
 
 ```kotlin
 @OptIn(PluginExperimentalApi::class)
@@ -741,15 +742,21 @@ if (host.accessibility().enabled) {
 
 ## Compatibility and migration
 
-### 1.2.x → 1.3.0 (purely additive)
+### Migrating to the 2.0.2 SDK (API level 7)
 
-`plugin-api 2.0.0` does not raise the apiLevel: existing plugins need no code change or rebuild. To render cards on MCP/plugin tool results: raise the dependency to `plugin-api 2.0.0` and write `minHostVersion: "1.1.0"` in the manifest; then also implement `ToolResultRendererContributor` on the object returned from `ui()`, matching with `toolResultMatch(source/server/tool/toolPrefix)` and constructing with `toolResultRenderer`. When the agent calls an MCP tool through `tool_execute`, the host restores the inner tool identity automatically, so renderers match on the real MCP server/tool.
+Host 2.0.0+ accepts only `apiLevel = 7`. Rebuild the module against `plugin-api 2.0.2` (which brings `design 1.1.0` through `api()`), use the `io.github.whywood.superpi.plugin.api` package and `SuperPIPlugin`, set `apiLevel: 7`, `minHostVersion: "2.0.0"` and `ui.apiLevel: 3`, then sign again with the same publisher key. There is no level 6 compatibility layer.
 
-`plugin-api 2.0.0` / `design 1.0.0` do not raise the apiLevel either: new `PluginHost.images()` (returning `RemoteImage`) and `DdRemoteImage`; add `images` to the `plugin.json` capabilities and a plugin can load remote images in cards. Both are additive only, and old plugins need no rebuild.
+`2.0.2` is a binary-compatible patch on the 2.0 line: `Cards.deliver` now also checks `TextBlock` content for an existing `present(...)` instruction, so rich-text plugin results do not append the hint twice. No signature changes; a plugin built against `2.0.1` keeps working and needs no rebuild unless it wants the fixed copy in its own artifact.
 
-### 1.1.x → 1.2.0 (purely additive)
+### 1.2.x → 1.3.0 (purely additive, level 6)
 
-`plugin-api 2.0.0` does not raise the apiLevel: existing plugins need no code change or rebuild. To use the new capabilities (theme packs, `openPageSheet`, page presentation mode, design 1.0.0 components): raise the dependencies to `plugin-api 2.0.0`/`design 1.0.0` and write `minHostVersion: "1.0.8"`; theme packs declare ids in `provides.themes` and add `assets/themes.json`.
+`plugin-api 1.3.0` stays on API level 6: existing plugins need no code change or rebuild. To render cards on MCP/plugin tool results, raise the dependency to `1.3.0` and write `minHostVersion: "1.1.0"`; implement `ToolResultRendererContributor` on the object returned from `ui()`, match with `toolResultMatch(source/server/tool/toolPrefix)`, and construct with `toolResultRenderer`. When the agent calls an MCP tool through `tool_execute`, the host restores the inner tool identity automatically.
+
+`plugin-api 1.3.1` adds `PluginHost.images()` (returning `RemoteImage`), rendered with `DdRemoteImage`; add `images` to the plugin manifest and write `minHostVersion: "1.4.0"`.
+
+### 1.1.x → 1.2.0 (purely additive, level 6)
+
+`plugin-api 1.2.0` stays on API level 6: existing plugins need no code change or rebuild. To use theme packs, `openPageSheet` or page presentation mode, raise the dependency to `1.2.0` / `design 0.9.0` and write `minHostVersion: "1.0.8"`; theme packs declare ids in `provides.themes` and add `assets/themes.json`.
 
 ### 1.0.x → 1.1.0 (purely additive)
 
@@ -797,25 +804,25 @@ Manifest and project:
 - `apiLevel: 6`, `minHostVersion: "1.0.4"`, `ui.apiLevel: 2`; `entryClass` and the entry class's no-arg constructor are unchanged.
 - `capabilities` may add `prompt` (prompt override); all other wire names are unchanged.
 - Dependencies become `compileOnly("io.github.sadami3066.superpi:plugin-api:<version>")` (`<version>` from the latest `SuperPI-Maven` release), rebuilt against the host Kotlin/Compose versions; any change to `.ddp` contents requires a new signature.
-- Manifest parsing, validation and version comparison moved to the host (host repository `app/plugin/host/external/`), and the SDK no longer has `PluginManifestCodec` / `PluginValidation` / `PluginVersion`; `PluginManifest` / `Provides` / `UiManifest` / `PublisherInfo` are host-constructed read-only interfaces that plugins do not construct.
+- Manifest parsing, validation and version comparison moved to the host (`apps/android/app/src/main/kotlin/io/github/whywood/superpi/plugin/host/external/`), and the SDK no longer has `PluginManifestCodec` / `PluginValidation` / `PluginVersion`; `PluginManifest` / `Provides` / `UiManifest` / `PublisherInfo` are host-constructed read-only interfaces that plugins do not construct.
 - The compatibility promise applies from 1.0.0: within level 6 only binary-compatible additions; deleting or changing public APIs requires a new `apiLevel` (see `plugin-api/COMPATIBILITY.md`).
 
 ## ABI and versions
 
-- Currently `plugin-api 1.1.0` / API level 6: `PLUGIN_API_VERSION = "1.1.0"`, `PLUGIN_API_LEVEL = 7`, `BASELINE_API_LEVEL = 7`, `MIN_SUPPORTED_API_LEVEL = 7`. At load the host requires `plugin.apiLevel` to be within `MIN_SUPPORTED_API_LEVEL..PLUGIN_API_LEVEL` (currently 6..6); an omitted `apiLevel` is treated as `BASELINE_API_LEVEL` (6). Since 1.0.4 the host rejects level 5 plugins and asks for a rebuild with the new SDK.
+- Current plugin SDK artifact: `plugin-api 2.0.2` with `design 1.1.0`. The ABI line constants are `PLUGIN_API_LEVEL = 7`, `BASELINE_API_LEVEL = 7`, `MIN_SUPPORTED_API_LEVEL = 7`, `HOST_UI_API_LEVEL = 3`; `PLUGIN_API_VERSION` remains `"2.0.0"` as the 2.0 contract line. At load the host requires `plugin.apiLevel` to be within `MIN_SUPPORTED_API_LEVEL..PLUGIN_API_LEVEL` (currently 7..7); an omitted `apiLevel` is treated as `BASELINE_API_LEVEL` (7). Host 2.0.0+ rejects level 6 and older plugins and asks for a rebuild.
 - Compatibility matrix:
 
 | apiLevel | plugin-api / design | Host | Notes |
 |---|---|---|---|
 | 5 | 0.8.1 / 0.6.1 | ≤1.0.3 | Historical contract, rejected from 1.0.4 |
-| 6 | 1.0.x / 0.6.1 | 1.0.4+ | Factory construction, event interfaces, prompt override experimental capability |
-| 6 | 1.1.x / 0.7.x | 1.0.6+ | Additive: 38 capabilities, 18 new service accessors, permissions/components, notification listening and system events, page arguments and interactive pickers, design 0.7.0 components |
+| 6 | 1.0.x–1.4.x / 0.6.x–0.11.x | 1.0.4–1.4.3 | Factory construction, event interfaces, prompt override, device/system capabilities, renderers, plugin-side card delivery |
+| 7 | 2.0.x / 1.0.x–1.1.x | 2.0.0+ | SuperPI package and class names (`io.github.whywood.superpi`, `SuperPIPlugin`), plugin ids `io.github.whywood.superpi.plugin.*`, UI API level 3; 39 capabilities, 36 service accessors |
 
 - **Compatibility contract**: within one `apiLevel` only binary-compatible additions (new optional interfaces, methods with default implementations, value class constants, factory functions, optional manifest fields); deleting, renaming, changing signatures or changing runtime semantics requires a new `apiLevel`. Full rules in `plugin-api/COMPATIBILITY.md`.
-- `minHostVersion` compares only `major.minor.patch` and ignores suffixes (`1.0.4-dev` counts as `1.0.4`), so a development build is not blocked by its own threshold; the host version comes from the app's `BuildConfig.VERSION_NAME` and is currently 1.0.6+; thresholds for older capabilities (such as `1.0.4`) stay valid.
-- Gate: `./scripts/api-compat.sh` exports the public ABI of `plugin-api` and `design` and compares it with the `apps/android/plugin-api/compat/`, `design/compat/` baselines, failing on removals or signature changes; `--update` is only for a level bump or the first baseline. A breaking change requires bumping `apiLevel`, updating the baseline, and writing `plugin-api/CHANGELOG.md` plus the host release notes.
+- `minHostVersion` compares only `major.minor.patch` and ignores suffixes (`2.0.0-dev` counts as `2.0.0`), so a development build is not blocked by its own threshold; the host version comes from the app's `BuildConfig.VERSION_NAME` and is currently 2.0.3.
+- Gate: `apps/android/scripts/api-compat.sh` exports the public ABI of `plugin-api` and `design` and compares it with the `apps/android/plugin-api/compat/level-7.api` and `apps/android/design/compat/design.api` baselines, failing on removals or signature changes; `--update` is only for a level bump or the first baseline. A breaking change requires bumping `apiLevel`, updating the baseline, and writing `plugin-api/CHANGELOG.md` plus the host release notes.
 - Experimental APIs are marked `@PluginExperimentalApi` (`@RequiresOptIn`) and plugins must opt in explicitly; adjustments are allowed while experimental, and graduation only drops the annotation without changing signatures. Current experimental capabilities: `PromptOverridePlugin`, `components()`, `credentials()`, `accessibility()`.
-- `design` is protected by the ABI gate together with `plugin-api`; plugins using design 0.7.0 components write `minHostVersion` according to the host version (1.0.6+).
+- `design` is protected by the ABI gate together with `plugin-api`; the current SDK ships `design 1.1.0` through `api()`, so plugin projects normally declare only `plugin-api`.
 - Plugins must depend on host libraries with `compileOnly`; the host being parent-first guarantees `plugin-api` and Compose exist only in the host.
 - Compose makes no cross-version binary ABI promise: plugins must be rebuilt against the host Kotlin/Compose versions; a version mismatch only disables that plugin's UI, never rejects the plugin.
 

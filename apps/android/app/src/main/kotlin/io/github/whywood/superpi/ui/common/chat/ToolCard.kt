@@ -85,7 +85,7 @@ internal object ProcessRowMetrics {
     val ChevronSize = 12.dp
     val OuterInset = DdSpacing.Xs
     val InnerInset = DdSpacing.Sm
-    val HeaderMinHeight = 32.dp
+    val HeaderMinHeight = 44.dp
     val MarkerCenterX = OuterInset + InnerInset + IconSize / 2
     val BodyStartPadding = OuterInset + InnerInset + IconSize + IconGap
 }
@@ -113,11 +113,19 @@ internal fun ToolCard(
     val output = tool.resultText()
     val toolUsedFormat = stringResource(R.string.chat_process_tool_used)
     val compactTitle = if (compact) toolUsedLabel(toolUsedFormat, tool.name) else null
-    val title = compactTitle ?: titleOverride ?: displayToolName(tool.name)
-    val preview = remember(rawArguments, tool.arguments, titleOverride, output, tool.status, compact) {
+    val isFailed = tool.status == ToolActivityStatus.FAILED
+    val descriptionTitle = remember(rawArguments, tool.arguments, titleOverride, tool.status, compact) {
+        if (!compact && !isFailed && titleOverride == null) {
+            toolDescriptionArg(rawArguments, tool.arguments)
+        } else {
+            null
+        }
+    }
+    val title = compactTitle ?: descriptionTitle ?: titleOverride ?: displayToolName(tool.name)
+    val preview = remember(rawArguments, tool.arguments, titleOverride, descriptionTitle, output, tool.status, compact) {
         when {
             compact -> ""
-            tool.status == ToolActivityStatus.FAILED -> output
+            isFailed -> output
                 ?.lineSequence()
                 ?.firstOrNull { it.isNotBlank() }
                 ?.trim()
@@ -125,21 +133,23 @@ internal fun ToolCard(
                 ?.let(::sanitizeToolPath)
                 .orEmpty()
 
+            descriptionTitle != null -> ""
             titleOverride == null -> toolArgsPreview(rawArguments, tool.arguments)
             else -> ""
         }
     }
-    val duration = tool.durationMs?.takeIf { it > 0L }
     val statusText = when (tool.status) {
         ToolActivityStatus.RUNNING -> stringResource(R.string.assistant_tool_running)
         ToolActivityStatus.DONE -> stringResource(R.string.assistant_tool_done)
         ToolActivityStatus.FAILED -> stringResource(R.string.assistant_tool_failed)
     }
-    val statusColor = when (tool.status) {
-        ToolActivityStatus.RUNNING -> colors.accent
-        ToolActivityStatus.DONE -> colors.inkSecondary
-        ToolActivityStatus.FAILED -> colors.danger
+    val iconTint = if (isFailed) colors.danger else colors.inkTertiary.copy(alpha = DdAlpha.Secondary)
+    val titleColor = when {
+        isFailed -> colors.danger
+        descriptionTitle != null -> colors.ink
+        else -> colors.inkSecondary
     }
+    val previewColor = if (isFailed) colors.danger else colors.inkTertiary
     Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -147,7 +157,7 @@ internal fun ToolCard(
                 .padding(horizontal = ProcessRowMetrics.OuterInset)
                 .heightIn(min = ProcessRowMetrics.HeaderMinHeight)
                 .clip(RoundedCornerShape(6.dp))
-                .semantics { stateDescription = state }
+                .semantics { stateDescription = "$statusText · $state" }
                 .clickable(role = Role.Button, onClick = onToggle)
                 .padding(horizontal = ProcessRowMetrics.InnerInset)
                 .testTag("tool_toggle_${tool.id}"),
@@ -162,19 +172,19 @@ internal fun ToolCard(
             } else {
                 ToolRowIcon(
                     kind = toolIconKind(tool.name),
-                    tint = colors.inkTertiary.copy(alpha = DdAlpha.Secondary),
+                    tint = iconTint,
                 )
             }
             Spacer(Modifier.width(ProcessRowMetrics.IconGap))
             Text(
                 text = title,
                 modifier = if (preview.isEmpty()) {
-                    Modifier.weight(1f, fill = false).widthIn(max = 180.dp)
+                    Modifier.weight(1f)
                 } else {
                     Modifier.widthIn(max = 180.dp)
                 },
                 style = DdType.bodySmall.copy(
-                    fontFamily = if (compactTitle == null && titleOverride == null) {
+                    fontFamily = if (compactTitle == null && descriptionTitle == null && titleOverride == null) {
                         FontFamily.Monospace
                     } else {
                         FontFamily.Default
@@ -182,7 +192,7 @@ internal fun ToolCard(
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
                 ),
-                color = colors.inkSecondary,
+                color = titleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -196,31 +206,12 @@ internal fun ToolCard(
                         fontSize = 11.sp,
                         lineHeight = 18.sp,
                     ),
-                    color = colors.inkTertiary,
+                    color = previewColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-            } else {
-                Spacer(Modifier.weight(1f))
             }
             Spacer(Modifier.width(DdSpacing.Sm))
-            Text(
-                text = statusText,
-                style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 18.sp),
-                color = statusColor,
-                maxLines = 1,
-                softWrap = false,
-            )
-            if (duration != null) {
-                Text(
-                    text = " · ${durationLabel(duration)}",
-                    style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 18.sp),
-                    color = colors.inkTertiary,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
-            Spacer(Modifier.width(DdSpacing.Xs))
             DdIcon(
                 icon = DdIcons.ChevronRight,
                 modifier = Modifier.graphicsLayer { rotationZ = rotation.value },
@@ -458,40 +449,6 @@ private fun ToolResultPayload?.fileRefs(): List<ToolResultPayload.Block.FileRef>
     (this as? ToolResultPayload.Blocks)?.blocks
         ?.filterIsInstance<ToolResultPayload.Block.FileRef>()
         .orEmpty()
-
-private fun toolArgsPreview(raw: JsonObject?, legacy: Map<String, String>): String {
-    val preferred = listOf(
-        "command",
-        "cmd",
-        "path",
-        "file_path",
-        "pattern",
-        "query",
-        "url",
-        "description",
-        "prompt",
-    )
-    val value = if (raw != null) {
-        preferred.firstNotNullOfOrNull { key ->
-            (raw[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
-                ?: raw[key]?.toString()?.takeIf { it.isNotBlank() && it != "null" && it != "\"\"" }
-        } ?: raw.values.firstOrNull { it.toString().let { value -> value.isNotBlank() && value != "null" } }
-            ?.let { if (it is JsonPrimitive && it.isString) it.content else it.toString() }
-    } else {
-        preferred.firstNotNullOfOrNull { key -> legacy[key]?.takeIf { it.isNotBlank() } }
-            ?: legacy.values.firstOrNull { it.isNotBlank() }
-    } ?: return ""
-    return sanitizeToolPath(value.replace('\n', ' ').trim())
-}
-
-private val ANDROID_PRIVATE_FILES_PREFIX = Regex("""/data/(?:user/\d+|data)/[^/\s]+/files/""")
-private val ANDROID_SHARED_STORAGE_PREFIX = Regex("""/storage/emulated/\d+/?""")
-
-private fun sanitizeToolPath(raw: String): String = raw
-    .replace(ANDROID_PRIVATE_FILES_PREFIX, "~/")
-    .replace(ANDROID_SHARED_STORAGE_PREFIX) { match ->
-        if (match.value.endsWith("/")) "Storage/" else "Storage"
-    }
 
 @Composable
 private fun ToolRowIcon(kind: ToolIconKind, tint: Color) {

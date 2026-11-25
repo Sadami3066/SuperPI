@@ -59,7 +59,7 @@ internal class DidiClient(private val host: PluginHost) {
 
     suspend fun probe(candidateKey: String? = null) {
         val key = candidateKey?.trim().takeUnless { it.isNullOrEmpty() } ?: keyStore.currentKey()
-        if (key.isNullOrBlank()) throw DidiException(host.t("请先填写滴滴 Key", "Enter your Didi key first"))
+        if (key.isNullOrBlank()) throw DidiException(host.t("请先填写滴滴账号凭证", "Enter your Didi account credential first"))
         val body = post(
             method = "tools/list",
             params = null,
@@ -67,13 +67,13 @@ internal class DidiClient(private val host: PluginHost) {
             timeoutMs = PROBE_TIMEOUT_MS,
         )
         if (!parseDidiToolsList(body)) {
-            throw DidiException(host.t("连接失败，请检查 Key 是否正确", "Connection failed. Check the key and try again."))
+            throw DidiException(host.t("连接失败，请检查账号凭证是否正确", "Connection failed. Check the account credential and try again."))
         }
     }
 
     suspend fun call(tool: String, arguments: JsonObject): RideResponse {
         val key = keyStore.currentKey()
-        if (key.isNullOrBlank()) throw DidiException(host.t("还没有配置滴滴 Key", "Didi key is not configured"))
+        if (key.isNullOrBlank()) throw DidiException(host.t("还没有配置滴滴账号凭证", "Didi account credential is not configured"))
         val body = post(
             method = "tools/call",
             params = buildJsonObject {
@@ -152,7 +152,7 @@ internal class DidiClient(private val host: PluginHost) {
         if (response.statusCode !in 200..299 || body.isEmpty()) {
             throw DidiException(
                 when (response.statusCode) {
-                    401, 403 -> host.t("Key 无效或没有权限", "The key is invalid or unauthorized")
+                    401, 403 -> host.t("账号凭证无效或没有权限", "The account credential is invalid or unauthorized")
                     else -> host.t(
                         "滴滴服务暂时不可用（${response.statusCode}）",
                         "Didi is unavailable (${response.statusCode})",

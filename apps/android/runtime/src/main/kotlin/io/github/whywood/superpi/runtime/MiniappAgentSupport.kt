@@ -62,12 +62,18 @@ internal fun miniappAgentToolVisible(name: String): Boolean = name !in ONE_SHOT_
 
 internal fun oneShotToolContext(context: AppToolContext, registry: JobRegistry): AppToolContext = context.copy(
     pluginTools = { binding ->
-        context.pluginTools(binding).filter { miniappAgentToolVisible(it.name) && !it.name.startsWith("job_") } + jobTools(binding, registry)
+        context.pluginTools(binding).filter { isOneShotAllowedTool(it.name) } + jobTools(binding, registry)
+    },
+    pluginDeferredTools = { binding ->
+        context.pluginDeferredTools(binding).filter { isOneShotAllowedTool(it.name) }
     },
     extraToolFactories = context.extraToolFactories.map { factory ->
-        { cwd, binding -> factory(cwd, binding).filter { miniappAgentToolVisible(it.name) && !it.name.startsWith("job_") } }
+        { cwd, binding -> factory(cwd, binding).filter { isOneShotAllowedTool(it.name) } }
     },
 )
+
+private fun isOneShotAllowedTool(name: String): Boolean =
+    miniappAgentToolVisible(name) && name != "job" && !name.startsWith("job_")
 
 internal fun miniappAgentEventOf(sessionEvent: SessionEvent): MiniappAgentEvent? = when (sessionEvent) {
     is SessionEvent.AgentEventReceived -> miniappAgentEventOf(sessionEvent.event)

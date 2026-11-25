@@ -198,14 +198,15 @@ class RelayFramesTest {
 
     @Test
     fun parsesAndEncodesCapabilitiesSyncEventsFileEntriesAndPaths() {
-        assertTrue(RELAY_CAPABILITIES.containsAll(listOf("bot-live-sync", "bot-manage", "session-manage", "workspace-files", "bot-controls", "session-controls", "sync-events", "memory-v2")))
+        assertTrue(RELAY_CAPABILITIES.containsAll(listOf("bot-live-sync", "bot-manage", "session-manage", "workspace-files", "bot-controls", "session-controls", "sync-events", "memory-v3")))
+        assertFalse(RELAY_CAPABILITIES.contains("memory-v2"))
         assertFalse(RELAY_CAPABILITIES.contains("workspace-git"))
         assertFalse(RELAY_CAPABILITIES.contains("session-fork"))
         assertFalse(RELAY_CAPABILITIES_READONLY.contains("bot-manage"))
         assertFalse(RELAY_CAPABILITIES_READONLY.contains("bot-controls"))
         assertFalse(RELAY_CAPABILITIES_READONLY.contains("session-controls"))
-        assertTrue(RELAY_CAPABILITIES_READONLY.contains("sync-events"))
-        assertTrue(RELAY_CAPABILITIES_READONLY.contains("memory-v2"))
+        assertTrue(RELAY_CAPABILITIES_READONLY.containsAll(listOf("sync-events", "memory-v3")))
+        assertFalse(RELAY_CAPABILITIES_READONLY.contains("memory-v2"))
 
         val modelSyncJson = RelayFrames.syncEvent(
             kind = "model_changed",
@@ -292,6 +293,8 @@ class RelayFramesTest {
         assertEquals("docs/readme.md", RelayFrames.validateRelativeWorkspacePath("docs/readme.md"))
         assertEquals("", RelayFrames.validateRelativeWorkspacePath("", allowEmpty = true))
         assertTrue(runCatching { RelayFrames.validateRelativeWorkspacePath("../secret") }.isFailure)
+        assertTrue(runCatching { RelayFrames.validateRelativeWorkspacePath("C:secret") }.isFailure)
+        assertTrue(runCatching { RelayFrames.validateRelativeWorkspacePath("dir:name/file.txt") }.isFailure)
         assertEquals("image/png", RelayFrames.detectImageMime(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 0, 0, 0)))
     }
 }
@@ -358,8 +361,86 @@ class RelayEventMapperTest {
     }
 
     @Test
+    fun mapsPluginCustomMessage() {
+        val custom = RelayEventMapper.map(
+            RuntimeEvent.PluginCustomMessage(
+                runId = "run",
+                customType = "weather_card",
+                payload = """{"temp":22}""",
+                text = "Sunny 22C",
+                display = true,
+            ),
+        ).single()
+        assertEquals("plugin_custom_message", custom.string("type"))
+        assertEquals("weather_card", custom.string("customType"))
+        assertEquals("""{"temp":22}""", custom.string("payload"))
+        assertEquals("Sunny 22C", custom.string("text"))
+        assertEquals(true, custom.getValue("display").jsonPrimitive.boolean)
+    }
+
+    @Test
     fun ignoresUiOnlyEvents() {
         assertTrue(RelayEventMapper.map(RuntimeEvent.SessionListChanged()).isEmpty())
+    }
+
+    @Test
+    fun encodesAndParsesSuperWorkerCapabilityAndRichBotMetadata() {
+        assertTrue(RELAY_CAPABILITIES.contains("super-worker"))
+        assertFalse(RELAY_CAPABILITIES_READONLY.contains("super-worker"))
+
+        val caps = RelayBotCapabilities(
+            skills = listOf("screen-ops", "git-workflow"),
+            plugins = listOf("Mail", "Calendar"),
+            mcpServers = listOf("github"),
+            screenTools = true,
+            miniappTools = false,
+            memoryScope = "WORK_ONLY",
+            memoryDispatch = true,
+        )
+        val hello = RelayFrames.hello(
+            deviceId = "dev-1",
+            platform = "android",
+            appVersion = "2.0.1",
+            bots = listOf(
+                RelayBot(
+                    id = "home",
+                    name = "PI",
+                    intro = "Personal assistant",
+                    capabilities = caps,
+                ),
+                RelayBot(id = "plain", name = "Plain"),
+            ),
+        )
+        val parsed = RelayFrames.parse(
+            buildJsonObject {
+                put("type", "hello_ok")
+                put("accountId", "acct")
+                put("memoryVersion", 1L)
+                put("capabilities", hello.getValue("capabilities"))
+                put(
+                    "devices",
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("deviceId", "dev-1")
+                                put("name", "Phone A")
+                                put("platform", "android")
+                                put("online", true)
+                                put("lastSeen", 10L)
+                                put("bots", hello.getValue("bots"))
+                            },
+                        )
+                    },
+                )
+            }.toString(),
+        ) as RelayServerFrame.HelloOk
+
+        assertTrue(parsed.capabilities.contains("super-worker"))
+        val bots = parsed.devices.single().bots
+        assertEquals("Personal assistant", bots[0].intro)
+        assertEquals(caps, bots[0].capabilities)
+        assertEquals("", bots[1].intro)
+        assertEquals(null, bots[1].capabilities)
     }
 
     private fun JsonObject.string(key: String): String = getValue(key).jsonPrimitive.content

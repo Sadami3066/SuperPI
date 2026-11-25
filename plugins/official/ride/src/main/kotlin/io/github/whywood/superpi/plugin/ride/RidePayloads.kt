@@ -685,8 +685,8 @@ internal fun rideErrorGuidance(kind: RideErrorKind, code: Int?, translate: RideT
         "Invalid parameters: pass coordinates and the product category as strings, with coordinates from ride_place_search.",
     )
     RideErrorKind.AUTH -> translate(
-        "在插件设置页检查滴滴 Key 是否有效，重新填写后再试。",
-        "Check the DiDi key in the plugin settings, re-enter it and try again.",
+        "到插件页重新连接滴滴账号，再试一次。",
+        "Reconnect the DiDi account on the plugin page, then try again.",
     )
     RideErrorKind.NETWORK -> translate(
         "网络或滴滴服务暂时不可用，稍后重试；不要换成本地编造的结果。",
@@ -696,17 +696,17 @@ internal fun rideErrorGuidance(kind: RideErrorKind, code: Int?, translate: RideT
 }
 
 internal fun didiErrorHint(code: Int?, translate: RideTranslate): String = when (code) {
-    -32002 -> translate("请检查滴滴 Key 是否有效，或在设置页重新填写。", "Check that the DiDi key is valid, or re-enter it in settings.")
+    -32002 -> translate("滴滴账号的连接已失效，请到插件页重新连接。", "The DiDi account connection has expired. Reconnect it on the plugin page.")
     -32010 -> translate("请检查参数格式，经纬度与车型品类都传字符串。", "Check the parameters; coordinates and the product category must be strings.")
     -32011 -> translate("请确认订单号是否正确。", "Check that the order ID is correct.")
     -32021 -> translate("预估结果已过期，请重新预估后再下单。", "The estimate expired. Estimate again before booking.")
     -32030 -> translate("这类订单不支持此操作。", "This order type does not support the operation.")
     -32031 -> translate("订单还未支付。", "The order has not been paid yet.")
     -32040 -> translate("订单已经取消过了，无需重复操作。", "The order was already cancelled.")
-    -32041 -> translate("司机已接单或订单已完成，无法通过接口取消。", "A driver has accepted or the ride is complete, so it cannot be cancelled through the API.")
+    -32041 -> translate("司机已接单或订单已完成，无法取消。", "A driver has accepted or the ride is complete, so it cannot be cancelled.")
     -32050 -> translate("滴滴内部错误，请稍后重试。", "DiDi had an internal error. Try again later.")
     -32060 -> translate("支付失败，请在滴滴内检查支付账户。", "Payment failed. Check the payment account in DiDi.")
-    else -> translate("请稍后重试；如果一直失败，请检查 Key 是否有效。", "Try again later; if it keeps failing, check that the key is valid.")
+    else -> translate("请稍后重试；如果一直失败，请到插件页重新连接。", "Try again later; if it keeps failing, reconnect on the plugin page.")
 }
 
 internal const val RATE_LIMIT_CODE = -32001
@@ -726,6 +726,11 @@ private val AUTH_MARKERS = listOf(
     "unauthorized",
     "forbidden",
     "鉴权失败",
+    "账号凭证",
+    "没有权限",
+    "还没有配置",
+    "未配置",
+    "not configured",
 )
 
 private val PARAM_MARKERS = listOf(

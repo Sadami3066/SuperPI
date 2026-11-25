@@ -21,8 +21,18 @@ interface SessionDirectory {
     suspend fun removeMeta(id: String)
 }
 
+data class HomeWorkspaceProfile(
+    val name: String = AgentRuntimeHost.HOME_NAME,
+    val avatar: String? = null,
+    val intro: String? = null,
+)
+
 interface WorkspaceDirectory {
     suspend fun read(): List<RuntimeWorkspace>
     suspend fun add(workspace: RuntimeWorkspace)
     suspend fun remove(id: String)
+    suspend fun readHomeDefaultModel(): ModelConfig? = null
+    suspend fun updateHomeDefaultModel(model: ModelConfig?) = Unit
+    suspend fun readHomeProfile(): HomeWorkspaceProfile = HomeWorkspaceProfile()
+    suspend fun updateHomeProfile(profile: HomeWorkspaceProfile) = Unit
 }

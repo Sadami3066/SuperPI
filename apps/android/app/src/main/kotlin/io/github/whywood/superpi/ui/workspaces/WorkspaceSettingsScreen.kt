@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,21 +36,33 @@ import io.github.whywood.superpi.data.AgentDocStore
 import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
+import io.github.whywood.superpi.design.DdDropdown
 import io.github.whywood.superpi.design.DdGroupCard
+import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
+import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
+import io.github.whywood.superpi.design.DdSheet
+import io.github.whywood.superpi.design.DdSheetHeader
+import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdRowHorizontalPadding
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.manager.PluginManagerFacade
 import io.github.whywood.superpi.runtime.McpConfigStore
+import io.github.whywood.superpi.runtime.ModelConfig
+import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.ThinkingLevel
+import io.github.whywood.superpi.runtime.resolveThinkingLevel
 import io.github.whywood.superpi.ui.common.AvatarCropDialog
 import io.github.whywood.superpi.ui.common.BotAvatar
+import io.github.whywood.superpi.ui.common.chat.thinkingLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,11 +75,15 @@ fun WorkspaceSettingsScreen(
     workspaceToolPolicies: WorkspaceToolPolicyStore,
     pluginManager: PluginManagerFacade,
     mcpConfigStore: McpConfigStore,
+    providerCatalog: ProviderDirectory? = null,
+    configuredProviderIds: Set<String> = emptySet(),
+    globalModelConfig: ModelConfig = ModelConfig(),
     existingNames: List<String>,
     screenToolsReady: Boolean,
     onRename: (String) -> Unit,
     onAvatarPicked: (Bitmap?) -> Unit,
     onIntroChange: (String) -> Unit,
+    onUpdateDefaultModel: (ModelConfig?) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -76,6 +95,7 @@ fun WorkspaceSettingsScreen(
     var cropSource by rememberSaveable(workspace.id) { mutableStateOf<String?>(null) }
     var showIntroDialog by rememberSaveable(workspace.id) { mutableStateOf(false) }
     var showRenameDialog by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    var showDefaultModelSheet by rememberSaveable(workspace.id) { mutableStateOf(false) }
     var capabilityKind by rememberSaveable(workspace.id) { mutableStateOf<WorkspaceCapabilityKind?>(null) }
     var agentsDocSet by remember(workspace.id) { mutableStateOf<Boolean?>(null) }
     var policy by remember(workspace.id) {
@@ -175,41 +195,39 @@ fun WorkspaceSettingsScreen(
                     }
                 }
             }
-            if (!workspace.isHome) {
-                Spacer(Modifier.height(20.dp))
-                DdSectionLabel(stringResource(R.string.bot_identity))
-                Spacer(Modifier.height(8.dp))
-                DdGroupCard {
-                    DdListRow(
-                        icon = DdIcons.Image,
-                        title = stringResource(R.string.bot_avatar),
-                        value = workspace.avatar
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let { stringResource(R.string.bot_avatar_change) },
-                        onClick = { showAvatarSheet = true },
-                        showChevron = true,
-                        modifier = Modifier.testTag("bot_settings_avatar"),
-                    )
-                    DdRowDivider(leadingInset = 50.dp)
-                    DdListRow(
-                        icon = DdIcons.Pen,
-                        title = stringResource(R.string.workspace_name_placeholder),
-                        value = workspace.name,
-                        onClick = { showRenameDialog = true },
-                        showChevron = true,
-                        modifier = Modifier.testTag("bot_settings_name"),
-                    )
-                    DdRowDivider(leadingInset = 50.dp)
-                    DdListRow(
-                        icon = DdIcons.Info,
-                        title = stringResource(R.string.bot_intro),
-                        value = workspace.intro?.takeIf { it.isNotBlank() }
-                            ?: stringResource(R.string.bot_intro_placeholder),
-                        onClick = { showIntroDialog = true },
-                        showChevron = true,
-                        modifier = Modifier.testTag("bot_settings_intro"),
-                    )
-                }
+            Spacer(Modifier.height(20.dp))
+            DdSectionLabel(stringResource(R.string.bot_identity))
+            Spacer(Modifier.height(8.dp))
+            DdGroupCard {
+                DdListRow(
+                    icon = DdIcons.Image,
+                    title = stringResource(R.string.bot_avatar),
+                    value = workspace.avatar
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { stringResource(R.string.bot_avatar_change) },
+                    onClick = { showAvatarSheet = true },
+                    showChevron = true,
+                    modifier = Modifier.testTag("bot_settings_avatar"),
+                )
+                DdRowDivider(leadingInset = 50.dp)
+                DdListRow(
+                    icon = DdIcons.Pen,
+                    title = stringResource(R.string.workspace_name_placeholder),
+                    value = workspace.name,
+                    onClick = { showRenameDialog = true },
+                    showChevron = true,
+                    modifier = Modifier.testTag("bot_settings_name"),
+                )
+                DdRowDivider(leadingInset = 50.dp)
+                DdListRow(
+                    icon = DdIcons.Info,
+                    title = stringResource(R.string.bot_intro),
+                    value = workspace.intro?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.bot_intro_placeholder),
+                    onClick = { showIntroDialog = true },
+                    showChevron = true,
+                    modifier = Modifier.testTag("bot_settings_intro"),
+                )
             }
             Spacer(Modifier.height(20.dp))
             DdSectionLabel(stringResource(R.string.bot_capabilities))
@@ -285,6 +303,16 @@ fun WorkspaceSettingsScreen(
                 )
             }
             Spacer(Modifier.height(20.dp))
+            BotMemoryPolicySection(
+                policy = policy,
+                isHome = workspace.isHome,
+                enabled = policyLoaded,
+                useCardContainer = true,
+                tagPrefix = "bot_memory",
+                onSelectScope = { scope -> updatePolicy { it.copy(memoryScope = scope) } },
+                onToggleDispatch = { checked -> updatePolicy { it.copy(memoryDispatch = checked) } },
+            )
+            Spacer(Modifier.height(20.dp))
             DdGroupCard {
                 DdListRow(
                     icon = DdIcons.File,
@@ -298,6 +326,21 @@ fun WorkspaceSettingsScreen(
                     showChevron = true,
                     modifier = Modifier.testTag("bot_settings_agents"),
                 )
+            }
+            if (providerCatalog != null) {
+                Spacer(Modifier.height(20.dp))
+                DdSectionLabel(stringResource(R.string.bot_model_section))
+                Spacer(Modifier.height(8.dp))
+                DdGroupCard {
+                    DdListRow(
+                        icon = DdIcons.Cloud,
+                        title = stringResource(R.string.bot_default_model),
+                        value = botDefaultModelLabel(workspace.defaultModel, providerCatalog),
+                        onClick = { showDefaultModelSheet = true },
+                        showChevron = true,
+                        modifier = Modifier.testTag("bot_settings_default_model"),
+                    )
+                }
             }
             Spacer(Modifier.height(40.dp))
         }
@@ -374,6 +417,230 @@ fun WorkspaceSettingsScreen(
             },
             onDismiss = { showRenameDialog = false },
         )
+    }
+
+    if (showDefaultModelSheet && providerCatalog != null) {
+        BotDefaultModelSheet(
+            current = workspace.defaultModel,
+            globalDefault = globalModelConfig,
+            providerCatalog = providerCatalog,
+            configuredProviderIds = configuredProviderIds,
+            onSelect = onUpdateDefaultModel,
+            onDismiss = { showDefaultModelSheet = false },
+        )
+    }
+}
+
+@Composable
+private fun botDefaultModelLabel(
+    model: ModelConfig?,
+    providerCatalog: ProviderDirectory,
+): String {
+    if (model == null) return stringResource(R.string.bot_default_model_global)
+    val modelName = providerCatalog.models(model.providerId).firstOrNull { it.id == model.modelId }?.displayName
+        ?: model.modelId
+    return if (model.thinkingLevel == ThinkingLevel.OFF) {
+        modelName
+    } else {
+        "$modelName · ${thinkingLabel(model.thinkingLevel)}"
+    }
+}
+
+@Composable
+private fun BotDefaultModelSheet(
+    current: ModelConfig?,
+    globalDefault: ModelConfig,
+    providerCatalog: ProviderDirectory,
+    configuredProviderIds: Set<String>,
+    onSelect: (ModelConfig?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = superPiColors()
+    val providers = remember(providerCatalog, configuredProviderIds) {
+        providerCatalog.summaries.filter { it.id in configuredProviderIds }
+    }
+    var selectedProviderId by remember(current, globalDefault, providers) {
+        mutableStateOf(
+            current?.providerId?.takeIf { id -> providers.any { it.id == id } }
+                ?: globalDefault.providerId.takeIf { id -> providers.any { it.id == id } }
+                ?: providers.firstOrNull()?.id.orEmpty(),
+        )
+    }
+    val models = remember(providerCatalog, selectedProviderId) {
+        if (selectedProviderId.isBlank()) emptyList() else providerCatalog.models(selectedProviderId)
+    }
+    val activeModelId = current?.takeIf { it.providerId == selectedProviderId }?.modelId
+        ?: globalDefault.takeIf { it.providerId == selectedProviderId }?.modelId
+        ?: models.firstOrNull()?.id.orEmpty()
+    val activeOption = models.firstOrNull { it.id == activeModelId } ?: models.firstOrNull()
+    val thinkingLevels = activeOption?.thinkingLevels.orEmpty().ifEmpty { listOf(ThinkingLevel.OFF) }
+    var selectedThinking by remember(current, activeOption) {
+        mutableStateOf(thinkingLevels.resolveThinkingLevel(current?.thinkingLevel ?: globalDefault.thinkingLevel))
+    }
+    var showProviders by remember { mutableStateOf(false) }
+    var showThinking by remember { mutableStateOf(false) }
+
+    DdSheet(onDismiss = onDismiss) {
+        DdSheetHeader(
+            title = stringResource(R.string.bot_default_model),
+            onClose = onDismiss,
+        )
+        CompositionLocalProvider(LocalDdRowHorizontalPadding provides DdSpacing.Md) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = DdSpacing.Md),
+            ) {
+            Spacer(Modifier.height(DdSpacing.Sm))
+            val globalLabel = providerCatalog.models(globalDefault.providerId)
+                .firstOrNull { it.id == globalDefault.modelId }?.displayName ?: globalDefault.modelId
+            DdListRow(
+                title = stringResource(R.string.bot_default_model_global),
+                subtitle = globalLabel,
+                onClick = {
+                    onSelect(null)
+                    onDismiss()
+                },
+                trailing = {
+                    if (current == null) {
+                        DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 20.dp)
+                    }
+                },
+                modifier = Modifier.testTag("bot_default_model_global"),
+            )
+            DdRowDivider()
+            if (providers.isEmpty()) {
+                DdListRow(
+                    title = stringResource(R.string.assistant_model_unconfigured),
+                    onClick = null,
+                    enabled = false,
+                )
+            } else {
+                val providerName = providers.firstOrNull { it.id == selectedProviderId }?.name ?: selectedProviderId
+                DdDropdown(
+                    expanded = showProviders,
+                    onDismissRequest = { showProviders = false },
+                    anchor = {
+                        DdListRow(
+                            title = stringResource(R.string.assistant_model_provider),
+                            trailing = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = providerName,
+                                        modifier = Modifier.widthIn(max = 160.dp),
+                                        style = DdType.bodySmall,
+                                        color = colors.inkTertiary,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
+                                }
+                            },
+                            onClick = { showProviders = true },
+                        )
+                    },
+                ) {
+                    providers.forEach { provider ->
+                        DdMenuItem(
+                            text = provider.name,
+                            onClick = {
+                                showProviders = false
+                                selectedProviderId = provider.id
+                            },
+                            selected = provider.id == selectedProviderId,
+                            trailing = if (provider.id == selectedProviderId) {
+                                { DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp) }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+                DdRowDivider()
+                if (thinkingLevels.any { it != ThinkingLevel.OFF }) {
+                    DdDropdown(
+                        expanded = showThinking,
+                        onDismissRequest = { showThinking = false },
+                        anchor = {
+                            DdListRow(
+                                title = stringResource(R.string.assistant_thinking_sheet),
+                                trailing = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = thinkingLabel(selectedThinking),
+                                            modifier = Modifier.widthIn(max = 140.dp),
+                                            style = DdType.bodySmall,
+                                            color = colors.inkTertiary,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
+                                    }
+                                },
+                                onClick = { showThinking = true },
+                            )
+                        },
+                    ) {
+                        thinkingLevels.forEach { level ->
+                            DdMenuItem(
+                                text = thinkingLabel(level),
+                                onClick = {
+                                    showThinking = false
+                                    selectedThinking = level
+                                    if (current != null && current.providerId == selectedProviderId) {
+                                        onSelect(current.copy(thinkingLevel = level))
+                                        onDismiss()
+                                    }
+                                },
+                                selected = level == selectedThinking,
+                                trailing = if (level == selectedThinking) {
+                                    { DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp) }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                    }
+                    DdRowDivider()
+                }
+                if (models.isEmpty()) {
+                    DdListRow(
+                        title = stringResource(R.string.assistant_remote_models_empty),
+                        onClick = null,
+                        enabled = false,
+                    )
+                } else {
+                    models.forEachIndexed { index, option ->
+                        val selected = current != null &&
+                            current.providerId == selectedProviderId &&
+                            current.modelId == option.id
+                        DdListRow(
+                            title = option.displayName,
+                            onClick = {
+                                val resolvedThinking = option.thinkingLevels.resolveThinkingLevel(selectedThinking)
+                                onSelect(ModelConfig(selectedProviderId, option.id, resolvedThinking))
+                                onDismiss()
+                            },
+                            trailing = {
+                                if (selected) {
+                                    DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 20.dp)
+                                }
+                            },
+                        )
+                        if (index != models.lastIndex) DdRowDivider()
+                    }
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+            }
+        }
+        Spacer(Modifier.height(DdSpacing.Xl))
     }
 }
 

@@ -162,10 +162,10 @@ class RuntimeWorkspacesTest {
         val workspace = workspaces.create(
             "Trimmed",
             avatar = "  /data/avatars/b.webp  ",
-            intro = "  " + "x".repeat(50) + "  ",
+            intro = "  " + "x".repeat(250) + "  ",
         )
         assertEquals("/data/avatars/b.webp", workspace.avatar)
-        assertEquals("x".repeat(40), workspace.intro)
+        assertEquals("x".repeat(RuntimeWorkspaces.MAX_INTRO_LENGTH), workspace.intro)
     }
 
     @Test
@@ -209,8 +209,54 @@ class RuntimeWorkspacesTest {
         assertEquals(null, home.intro)
     }
 
+    @Test
+    fun updateDefaultModelPersistsAndClearsForHomeAndCustomWorkspaces() = runBlocking {
+        val global = ModelConfig("deepseek", "deepseek-chat", ThinkingLevel.OFF)
+        val homeDefault = ModelConfig("anthropic", "claude-sonnet", ThinkingLevel.MEDIUM)
+        val botDefault = ModelConfig("openai", "gpt-5", ThinkingLevel.HIGH)
+
+        workspaces.updateDefaultModel(AgentRuntimeHost.HOME_ID, homeDefault)
+        assertEquals(homeDefault, workspaces.list().single { it.isHome }.defaultModel)
+        assertEquals(homeDefault, workspaces.defaultModelForCwd(homeDir.absolutePath, global))
+
+        workspaces.updateDefaultModel(AgentRuntimeHost.HOME_ID, null)
+        assertEquals(null, workspaces.list().single { it.isHome }.defaultModel)
+        assertEquals(global, workspaces.defaultModelForCwd(homeDir.absolutePath, global))
+
+        val bot = workspaces.create("Coder")
+        workspaces.updateDefaultModel(bot.id, botDefault)
+        assertEquals(botDefault, workspaces.find(bot.id).defaultModel)
+        assertEquals(botDefault, workspaces.defaultModelForCwd(bot.cwd, global))
+
+        workspaces.updateDefaultModel(bot.id, null)
+        assertEquals(null, workspaces.find(bot.id).defaultModel)
+        assertEquals(global, workspaces.defaultModelForCwd(bot.cwd, global))
+    }
+
+    @Test
+    fun homeWorkspaceSupportsCustomIdentityAndCannotDelete() = runBlocking {
+        workspaces.rename(AgentRuntimeHost.HOME_ID, "Atlas")
+        workspaces.updateProfile(AgentRuntimeHost.HOME_ID, "/tmp/atlas.jpg", "Main assistant")
+        val updated = workspaces.find(AgentRuntimeHost.HOME_ID)
+
+        assertTrue(updated.isHome)
+        assertEquals("Atlas", updated.name)
+        assertEquals("/tmp/atlas.jpg", updated.avatar)
+        assertEquals("Main assistant", updated.intro)
+
+        workspaces.delete(AgentRuntimeHost.HOME_ID)
+        assertEquals("Atlas", workspaces.find(AgentRuntimeHost.HOME_ID).name)
+
+        workspaces.rename(AgentRuntimeHost.HOME_ID, "   ")
+        assertEquals("Atlas", workspaces.find(AgentRuntimeHost.HOME_ID).name)
+        directories.homeProfile = HomeWorkspaceProfile(name = "   ")
+        assertEquals(AgentRuntimeHost.HOME_NAME, workspaces.find(AgentRuntimeHost.HOME_ID).name)
+    }
+
     private class FakeWorkspaceDirectory : WorkspaceDirectory {
         val entries = mutableListOf<RuntimeWorkspace>()
+        var homeDefaultModel: ModelConfig? = null
+        var homeProfile: HomeWorkspaceProfile = HomeWorkspaceProfile()
 
         override suspend fun read(): List<RuntimeWorkspace> = entries.toList()
 
@@ -221,6 +267,18 @@ class RuntimeWorkspacesTest {
 
         override suspend fun remove(id: String) {
             entries.removeAll { it.id == id }
+        }
+
+        override suspend fun readHomeDefaultModel(): ModelConfig? = homeDefaultModel
+
+        override suspend fun updateHomeDefaultModel(model: ModelConfig?) {
+            homeDefaultModel = model
+        }
+
+        override suspend fun readHomeProfile(): HomeWorkspaceProfile = homeProfile
+
+        override suspend fun updateHomeProfile(profile: HomeWorkspaceProfile) {
+            homeProfile = profile
         }
     }
 

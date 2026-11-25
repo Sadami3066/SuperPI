@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.whywood.superpi.plugin.ride"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.3.1"
+        versionCode = 10
+        versionName = "1.3.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

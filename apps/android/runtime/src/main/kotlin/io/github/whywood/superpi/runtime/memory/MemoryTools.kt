@@ -1,17 +1,17 @@
 package io.github.whywood.superpi.runtime.memory
 
-import io.github.whywood.superpi.runtime.EntityKind
-import io.github.whywood.superpi.runtime.MemoryConfidence
-import io.github.whywood.superpi.runtime.MemoryDraft
-import io.github.whywood.superpi.runtime.MemoryEntityRef
-import io.github.whywood.superpi.runtime.MemoryFilter
-import io.github.whywood.superpi.runtime.MemoryItemStatus
-import io.github.whywood.superpi.runtime.MemoryKind
+import io.github.whywood.superpi.runtime.MemoryAccessScope
+import io.github.whywood.superpi.runtime.MemoryDispatchIntent
+import io.github.whywood.superpi.runtime.MemoryDomains
+import io.github.whywood.superpi.runtime.MemoryEventFilter
 import io.github.whywood.superpi.runtime.MemorySearchHit
-import io.github.whywood.superpi.runtime.MemorySourceKind
+import io.github.whywood.superpi.sdk.ai.RequestAbortedException
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import io.github.whywood.superpi.sdk.coding.tools.textResult
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -27,354 +27,385 @@ import kotlinx.serialization.json.put
 
 private const val DEFAULT_SEARCH_LIMIT = 8
 private const val MAX_SEARCH_LIMIT = 25
-private const val FORGET_CONFIDENT_SCORE = 0.4
-private const val FORGET_SINGLE_HIT_SCORE = 0.25
+private const val MAX_SEARCH_OUTPUT_CHARS = 16_000
 
-private fun stringProperty(description: String, values: List<String>? = null): JsonObject = buildJsonObject {
+private val DISPATCH_INTENTS = listOf("REMEMBER", "UPDATE", "FORGET", "ORGANIZE")
+
+private fun strProp(description: String, values: List<String>? = null): JsonObject = buildJsonObject {
     put("type", "string")
     put("description", description)
     if (values != null) put("enum", buildJsonArray { values.forEach { add(JsonPrimitive(it)) } })
 }
 
-private fun stringArrayProperty(description: String): JsonObject = buildJsonObject {
+private fun strArrayProp(description: String): JsonObject = buildJsonObject {
     put("type", "array")
     put("description", description)
     put("items", buildJsonObject { put("type", "string") })
 }
 
-private fun integerProperty(description: String): JsonObject = buildJsonObject {
+private fun intProp(description: String): JsonObject = buildJsonObject {
     put("type", "integer")
     put("description", description)
 }
 
-private fun booleanProperty(description: String): JsonObject = buildJsonObject {
+private fun boolProp(description: String): JsonObject = buildJsonObject {
     put("type", "boolean")
     put("description", description)
 }
-
-private val memoryKinds = listOf("IDENTITY", "ACTIVE", "HABIT", "EPISODIC")
 
 private val searchParameters: JsonObject = buildJsonObject {
     put("type", "object")
     put("properties", buildJsonObject {
         put(
-            "queries",
-            stringArrayProperty(
-                "2 to 4 short distinctive keywords, synonyms, or entity names to search in personal memory.",
-            ),
+            "description",
+            strProp("Short plain-language description of why you are searching memory for UI display."),
         )
         put(
-            "kinds",
-            buildJsonObject {
-                put("type", "array")
-                put("description", "Optional filter by category.")
-                put(
-                    "items",
-                    stringProperty("Memory category", memoryKinds),
-                )
-            },
+            "queries",
+            strArrayProp("2 to 4 distinctive keywords, synonyms, or names to search across personal memory."),
         )
-        put("tag", stringProperty("Optional topic tag filter, such as work, health, food, or study."))
-        put("entity", stringProperty("Optional person, project, place, or topic entity name."))
-        put("since", stringProperty("Optional start date filter in yyyy-MM-dd format."))
-        put("until", stringProperty("Optional end date filter in yyyy-MM-dd format."))
+        put("domain", strProp("Optional life domain filter such as PERSONAL, RELATIONSHIPS, LIFE, HEALTH, WORK, STUDY."))
+        put("entity", strProp("Optional person, place, organization, or project name filter."))
+        put("since", strProp("Optional event start date in yyyy-MM-dd format."))
+        put("until", strProp("Optional event end date in yyyy-MM-dd format."))
         put(
             "includeHistory",
-            booleanProperty(
-                "Set true when the user asks about superseded/outdated past facts, old addresses, or earlier plans.",
-            ),
+            boolProp("Set true when looking up superseded, expired, resolved, or archived historical facts."),
         )
-        put("limit", integerProperty("Maximum hits to return (1-25, default 8)."))
+        put("limit", intProp("Maximum results to return (1-25, default 8)."))
     })
-    put("required", buildJsonArray { add(JsonPrimitive("queries")) })
+    put("required", buildJsonArray { add(JsonPrimitive("queries")); add(JsonPrimitive("description")) })
 }
 
-private val saveParameters: JsonObject = buildJsonObject {
+private val inspectEntityParameters: JsonObject = buildJsonObject {
+    put("type", "object")
+    put("properties", buildJsonObject {
+        put("name", strProp("Canonical name, alias, or ID of the person, place, organization, or topic to inspect."))
+        put("includeHistory", boolProp("Set true to also include historical invalidated relations and non-active events."))
+        put("description", strProp("Short plain-language description for UI display."))
+    })
+    put("required", buildJsonArray { add(JsonPrimitive("name")); add(JsonPrimitive("description")) })
+}
+
+private val readArchiveParameters: JsonObject = buildJsonObject {
+    put("type", "object")
+    put("properties", buildJsonObject {
+        put("slug", strProp("Optional archived profile slug from the Deep Memory Index."))
+        put("month", strProp("Optional month in yyyy-MM format to browse past events."))
+        put("limit", intProp("Maximum events to list when reading by month (default 20)."))
+        put("description", strProp("Short plain-language description for UI display."))
+    })
+    put("required", buildJsonArray { add(JsonPrimitive("description")) })
+}
+
+private val dispatchParameters: JsonObject = buildJsonObject {
     put("type", "object")
     put("properties", buildJsonObject {
         put(
-            "content",
-            stringProperty(
-                "Concise, standalone statement in the user's language keeping exact names, projects, and terms (max 8192 chars).",
-            ),
+            "intent",
+            strProp("Intended memory operation type.", DISPATCH_INTENTS),
         )
         put(
-            "kind",
-            stringProperty(
-                "IDENTITY: durable traits, identity, relationships, stable preferences. " +
-                    "ACTIVE: current ongoing work, near-term plans, commitments, reminders. " +
-                    "HABIT: reusable collaboration preferences or workflow lessons. " +
-                    "EPISODIC: notable dated events or decisions.",
-                memoryKinds,
-            ),
+            "detail",
+            strProp("Complete natural-language description of what to remember, update, forget, or organize, preserving context and dates."),
         )
-        put("tags", stringArrayProperty("Short topic tags, e.g. ['咖啡', '饮食'] or ['工作', 'SuperPI']."))
-        put("entities", stringArrayProperty("People, projects, places, or key topics referenced."))
-        put("validUntil", stringProperty("Optional expiry date (yyyy-MM-dd) for time-bounded ACTIVE items."))
-        put("supersedesId", stringProperty("Optional memory ID returned by memory_search that this update replaces."))
-        put("summary", stringProperty("Optional ultra-short 1-line summary if content is detailed."))
+        put(
+            "description",
+            strProp("Short plain-language description for UI display."),
+        )
     })
-    put("required", buildJsonArray { add(JsonPrimitive("content")); add(JsonPrimitive("kind")) })
-}
-
-private val forgetParameters: JsonObject = buildJsonObject {
-    put("type", "object")
-    put("properties", buildJsonObject {
-        put("id", stringProperty("Exact memory ID returned by memory_search to delete."))
-        put("tag", stringProperty("Delete all active memories under a topic tag when asked to forget a topic."))
-        put("query", stringProperty("Keywords to locate specific memory entries when exact ID is unknown."))
-    })
-}
-
-private val overviewParameters: JsonObject = buildJsonObject {
-    put("type", "object")
-    put("properties", buildJsonObject {})
+    put(
+        "required",
+        buildJsonArray {
+            add(JsonPrimitive("intent"))
+            add(JsonPrimitive("detail"))
+            add(JsonPrimitive("description"))
+        },
+    )
 }
 
 fun memoryTools(
     store: MemoryStore,
-    sessionId: () -> String?,
+    agentService: MemoryAgentService? = null,
+    scope: () -> MemoryAccessScope = { MemoryAccessScope.PERSONAL },
+    allowDispatch: () -> Boolean = { false },
+    sessionId: () -> String? = { null },
     isSessionExcluded: suspend (String) -> Boolean = { false },
-): List<CodingTool> = listOf(
-    CodingTool(
-        name = "memory_search",
-        label = "Search personal memory",
-        description = "Search long-term personal memory across profile traits, active plans, collaboration habits, events, and entity aliases.",
-        parameters = searchParameters,
-        promptSnippet = "Search personal memory before answering past-context questions",
-        promptGuidelines = listOf(
-            "Use stored memory silently to align tone, choices, and defaults; do not show off or say 'as you told me last Tuesday' unnecessarily.",
-            "Only bring up active follow-ups in conversation when the user brings up a fitting context; never invent proactive notifications.",
-            "Search memory with 2-4 synonymous or entity keywords before guessing past facts; set includeHistory=true when asking about earlier or changed states.",
-            "If memory_search finds nothing relevant, say so honestly instead of fabricating a memory.",
-        ),
-    ) { _, args, signal, _ ->
-        signal?.throwIfAborted()
-        withContext(Dispatchers.IO) {
-            try {
-                val queries = args.stringArrayArg("queries").ifEmpty {
-                    listOfNotNull(args.stringArg("query").takeIf { it.isNotBlank() })
-                }
-                val kinds = args.stringArrayArg("kinds")
-                    .mapNotNull { MemoryKind.fromWire(it) }
-                    .toSet()
-                val filter = MemoryFilter(
-                    kinds = kinds,
-                    tag = args.stringArg("tag").takeIf { it.isNotBlank() },
-                    entityName = args.stringArg("entity").takeIf { it.isNotBlank() },
-                    sinceEpochMs = args.stringArg("since").takeIf { it.isNotBlank() }?.let(::parseDateStart),
-                    untilEpochMs = args.stringArg("until").takeIf { it.isNotBlank() }?.let(::parseDateEnd),
-                    includeHistory = args.booleanArg("includeHistory") ?: false,
-                    limit = args.intArg("limit")?.coerceIn(1, MAX_SEARCH_LIMIT) ?: DEFAULT_SEARCH_LIMIT,
-                )
-                val hits = if (queries.isEmpty()) {
-                    store.list(filter).map { MemorySearchHit(record = it, score = 1.0) }
-                } else {
-                    store.search(queries, filter)
-                }
-                textResult(formatSearchHits(hits))
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                textResult("memory_search failed: ${error.message}", isError = true)
-            }
-        }
-    },
-    CodingTool(
-        name = "memory_save",
-        label = "Save personal memory",
-        description = "Save or update an explicit durable personal memory entry.",
-        parameters = saveParameters,
-        promptSnippet = "Save explicit user preferences, facts, plans, or updates",
-        promptGuidelines = listOf(
-            "When the user explicitly asks to remember or update something, call memory_save immediately.",
-            "When replacing a changed fact (like moving cities or changing preferences), search first and pass supersedesId so old state is marked superseded cleanly.",
-            "Only pass durable personal understanding, active commitments, or reusable habits; leave out casual banter, sarcasm, and secrets.",
-        ),
-    ) { _, args, signal, _ ->
-        signal?.throwIfAborted()
-        withContext(Dispatchers.IO) {
-            try {
-                val activeSession = sessionId()?.takeIf { it.isNotBlank() }
-                if (activeSession != null && isSessionExcluded(activeSession)) {
-                    return@withContext textResult(
-                        "Memory recording is paused for this conversation, so nothing was saved. " +
-                            "Let the user know they can re-enable memory recording from the top-right menu if needed.",
+): List<CodingTool> = if (scope() == MemoryAccessScope.OFF) {
+    emptyList()
+} else {
+    buildList {
+    add(
+        CodingTool(
+            name = "memory_search",
+            label = "Search personal memory",
+            description = "Search long-term memory across living profiles, entity relationships, and bi-temporal events.",
+            parameters = searchParameters,
+            promptSnippet = "Search personal memory before answering past-context or preference questions",
+            promptGuidelines = listOf(
+                "Use stored memory naturally without awkwardly announcing you looked it up.",
+                "Check the Deep Memory Index at the bottom of <memory> and search before guessing older personal facts.",
+                "Set includeHistory=true when asking about past residences, former plans, or changed preferences.",
+                "If memory_search returns nothing relevant, say so honestly instead of guessing.",
+            ),
+        ) { _, args, signal, _ ->
+            signal?.throwIfAborted()
+            withContext(Dispatchers.IO) {
+                try {
+                    val activeScope = scope()
+                    if (activeScope == MemoryAccessScope.OFF) {
+                        return@withContext textResult("Memory is disabled for this conversation.")
+                    }
+                    val queries = args.stringArrayArg("queries").ifEmpty {
+                        listOfNotNull(args.stringArg("query").takeIf { it.isNotBlank() })
+                    }
+                    val domainSet = args.stringArg("domain").takeIf { it.isNotBlank() }
+                        ?.let { setOf(MemoryDomains.normalize(it)) }
+                        ?: emptySet()
+                    val filter = MemoryEventFilter(
+                        domains = domainSet,
+                        entityName = args.stringArg("entity").takeIf { it.isNotBlank() },
+                        sinceEventTimeMs = args.stringArg("since").takeIf { it.isNotBlank() }?.let { requireDateStart(it, "since") },
+                        untilEventTimeMs = args.stringArg("until").takeIf { it.isNotBlank() }?.let { requireDateEnd(it, "until") },
+                        includeHistory = args.booleanArg("includeHistory") ?: false,
+                        scope = activeScope,
+                        limit = args.intArg("limit")?.coerceIn(1, MAX_SEARCH_LIMIT) ?: DEFAULT_SEARCH_LIMIT,
                     )
+                    val hits = if (queries.isEmpty()) {
+                        store.listEvents(filter).map { MemorySearchHit(event = it, score = 1.0) }
+                    } else {
+                        store.search(queries, filter, recordAccess = true)
+                    }
+                    textResult(formatSearchHits(hits))
+                } catch (aborted: RequestAbortedException) {
+                    throw aborted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    textResult("memory_search failed: ${error.message}", isError = true)
                 }
-                val rawContent = args.stringArg("content").trim()
-                if (rawContent.isEmpty()) {
-                    return@withContext textResult("Nothing saved: content cannot be empty.", isError = true)
-                }
-                val content = MemoryLimits.clampText(rawContent, MemoryLimits.MAX_CONTENT_CHARS)
-                val truncatedNote = if (rawContent.length > MemoryLimits.MAX_CONTENT_CHARS) {
-                    " (truncated to ${MemoryLimits.MAX_CONTENT_CHARS} chars)"
-                } else {
-                    ""
-                }
-                val kind = MemoryKind.fromWire(args.stringArg("kind")) ?: MemoryKind.ACTIVE
-                val tags = args.stringArrayArg("tags")
-                    .map { MemoryLimits.clampText(it, MemoryLimits.MAX_TAG_CHARS) }
-                    .filter { it.isNotEmpty() }
-                    .take(MemoryLimits.MAX_TAGS_PER_MEMORY)
-                val entities = args.stringArrayArg("entities")
-                    .map { MemoryLimits.clampText(it, MemoryLimits.MAX_ENTITY_NAME_CHARS) }
-                    .filter { it.isNotEmpty() }
-                    .take(MemoryLimits.MAX_ENTITIES_PER_MEMORY)
-                    .map { MemoryEntityRef(name = it, kind = EntityKind.TOPIC) }
-                val validUntil = args.stringArg("validUntil").takeIf { it.isNotBlank() }?.let(::parseDateEnd)
-                val supersedesId = MemoryLimits.clampOptionalText(args.stringArg("supersedesId"), MemoryLimits.MAX_ID_LENGTH)
-                val summary = MemoryLimits.clampOptionalText(args.stringArg("summary"), MemoryLimits.MAX_SUMMARY_CHARS)
-                val record = store.save(
-                    draft = MemoryDraft(
-                        kind = kind,
-                        content = content,
-                        summary = summary,
-                        tags = tags,
-                        entities = entities,
-                        confidence = MemoryConfidence.CONFIRMED,
-                        importance = if (kind == MemoryKind.IDENTITY || kind == MemoryKind.HABIT) 4 else 3,
-                        validUntil = validUntil,
-                        sourceKind = MemorySourceKind.CHAT_EXPLICIT,
-                        sourceSessionId = activeSession,
-                    ),
-                    supersedesId = supersedesId,
-                )
-                textResult("Saved$truncatedNote (${record.kind.wire}, id=${record.id}): ${record.content}")
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                textResult("memory_save failed: ${error.message}", isError = true)
             }
-        }
-    },
-    CodingTool(
-        name = "memory_forget",
-        label = "Forget personal memory",
-        description = "Delete a specific memory by id, forget a topic tag, or remove closely matching memories when asked to forget.",
-        parameters = forgetParameters,
-        promptSnippet = "Forget requested memories cleanly",
-        promptGuidelines = listOf(
-            "When the user asks you to forget something or stop assuming a preference, call memory_forget immediately.",
-        ),
-    ) { _, args, signal, _ ->
-        signal?.throwIfAborted()
-        withContext(Dispatchers.IO) {
-            try {
-                val id = args.stringArg("id").trim()
-                val tag = args.stringArg("tag").trim()
-                val query = args.stringArg("query").trim()
-                when {
-                    id.isNotEmpty() -> {
-                        val removed = store.softDelete(id)
-                        if (removed) textResult("Forgot memory $id.") else textResult("Memory $id was not found.")
-                    }
-                    tag.isNotEmpty() -> {
-                        val count = store.deleteByTag(tag)
-                        textResult("Forgot $count memory item(s) under tag #$tag.")
-                    }
-                    query.isNotEmpty() -> {
-                        val hits = store.search(listOf(query), MemoryFilter(limit = 5))
-                        val strong = hits.filter { it.score >= FORGET_CONFIDENT_SCORE }
-                        when {
-                            hits.isEmpty() -> textResult("No matching memory found for \"$query\".")
-                            strong.size == 1 -> {
-                                val target = strong.single()
-                                store.softDelete(target.record.id)
-                                textResult("Forgot 1 memory item:\n- ${target.record.content}")
-                            }
-                            hits.size == 1 && hits.single().score >= FORGET_SINGLE_HIT_SCORE -> {
-                                val target = hits.single()
-                                store.softDelete(target.record.id)
-                                textResult("Forgot 1 memory item:\n- ${target.record.content}")
-                            }
-                            else -> {
-                                val candidates = strong.ifEmpty { hits }
-                                val options = candidates.joinToString("\n") { "- [${it.record.id}] ${it.record.content}" }
-                                textResult(
-                                    "Multiple or low-confidence memories matched \"$query\". Call memory_forget with the exact id(s) to remove:\n$options",
-                                )
-                            }
-                        }
-                    }
-                    else -> textResult("Provide id, tag, or query to forget.", isError = true)
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                textResult("memory_forget failed: ${error.message}", isError = true)
-            }
-        }
-    },
-    CodingTool(
-        name = "memory_overview",
-        label = "Personal memory overview",
-        description = "Show a summary of stored personal memory counts and top topics.",
-        parameters = overviewParameters,
-        promptSnippet = "Inspect personal memory summary",
-    ) { _, _, signal, _ ->
-        signal?.throwIfAborted()
-        withContext(Dispatchers.IO) {
-            try {
-                val overview = store.overview()
-                textResult(buildString {
-                    appendLine("Active memories: ${overview.totalActive}")
-                    appendLine("- About me: ${overview.byKind[MemoryKind.IDENTITY] ?: 0}")
-                    appendLine("- Active & follow-ups: ${overview.byKind[MemoryKind.ACTIVE] ?: 0}")
-                    appendLine("- Collaboration habits: ${overview.byKind[MemoryKind.HABIT] ?: 0}")
-                    appendLine("- Episodes & diary: ${overview.byKind[MemoryKind.EPISODIC] ?: 0}")
-                    appendLine("Tracked entities: ${overview.entityCount}")
-                    if (overview.topTags.isNotEmpty()) {
-                        appendLine("Top tags: ${overview.topTags.take(10).joinToString(", ") { "#${it.tag}(${it.count})" }}")
-                    }
-                }.trim())
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                textResult("memory_overview failed: ${error.message}", isError = true)
-            }
-        }
-    },
-)
+        },
+    )
 
-private fun formatSearchHits(hits: List<MemorySearchHit>): String {
-    if (hits.isEmpty()) return "No matching personal memories found."
-    return buildString {
-        hits.forEachIndexed { index, hit ->
-            val r = hit.record
-            val stateLabel = when (r.status) {
-                MemoryItemStatus.ACTIVE -> ""
-                MemoryItemStatus.SUPERSEDED -> " [SUPERSEDED by ${r.supersededBy ?: "newer"}]"
-                MemoryItemStatus.EXPIRED -> " [EXPIRED]"
-                MemoryItemStatus.ARCHIVED -> " [ARCHIVED]"
+    add(
+        CodingTool(
+            name = "memory_inspect_entity",
+            label = "Inspect memory entity",
+            description = "Inspect structured attributes, relationship graph edges, and linked timeline events for a person or topic.",
+            parameters = inspectEntityParameters,
+            promptSnippet = "Inspect a person, place, or topic relationship card from memory",
+            promptGuidelines = listOf(
+                "Use memory_inspect_entity when answering questions involving family members, friends, colleagues, or places.",
+            ),
+        ) { _, args, signal, _ ->
+            signal?.throwIfAborted()
+            withContext(Dispatchers.IO) {
+                try {
+                    val activeScope = scope()
+                    if (activeScope == MemoryAccessScope.OFF) {
+                        return@withContext textResult("Memory is disabled for this conversation.")
+                    }
+                    val name = args.stringArg("name").trim()
+                    if (name.isEmpty()) {
+                        return@withContext textResult("Entity name cannot be empty.", isError = true)
+                    }
+                    val includeHistory = args.booleanArg("includeHistory") ?: false
+                    val detail = store.inspectEntity(name, activeScope, includeHistory)
+                        ?: return@withContext textResult("No visible memory entry found for '$name'.")
+                    textResult(formatEntityDetail(detail))
+                } catch (aborted: RequestAbortedException) {
+                    throw aborted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    textResult("memory_inspect_entity failed: ${error.message}", isError = true)
+                }
             }
-            val tags = if (r.tags.isEmpty()) "" else " tags=[${r.tags.joinToString(", ")}]"
-            val entities = if (r.entities.isEmpty()) "" else " entities=[${r.entities.joinToString(", ")}]"
-            val date = MemorySnapshotRenderer.formatDate(r.validFrom)
-            appendLine("${index + 1}. [id=${r.id}] [${r.kind.wire}]$stateLabel ($date, ${r.confidence.wire}, score=${String.format(Locale.US, "%.2f", hit.score)})")
-            appendLine("   ${r.content}$tags$entities")
-        }
-    }.trim()
+        },
+    )
+
+    add(
+        CodingTool(
+            name = "memory_read_archive",
+            label = "Read archived memory",
+            description = "Read an archived living profile block or historical monthly events listed in the Deep Memory Index.",
+            parameters = readArchiveParameters,
+            promptSnippet = "Read archived profiles or past monthly timelines from memory",
+            promptGuidelines = listOf(
+                "Use slug or month pointers listed under Deep Memory Index to retrieve older context.",
+            ),
+        ) { _, args, signal, _ ->
+            signal?.throwIfAborted()
+            withContext(Dispatchers.IO) {
+                try {
+                    val activeScope = scope()
+                    if (activeScope == MemoryAccessScope.OFF) {
+                        return@withContext textResult("Memory is disabled for this conversation.")
+                    }
+                    val slug = args.stringArg("slug").takeIf { it.isNotBlank() }
+                    val month = args.stringArg("month").takeIf { it.isNotBlank() }
+                    val limit = args.intArg("limit")?.coerceIn(1, 50) ?: 20
+                    textResult(store.readArchive(slug = slug, month = month, scope = activeScope, limit = limit))
+                } catch (aborted: RequestAbortedException) {
+                    throw aborted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    textResult("memory_read_archive failed: ${error.message}", isError = true)
+                }
+            }
+        },
+    )
+
+    if (agentService != null && allowDispatch()) {
+        add(
+            CodingTool(
+                name = "memory_dispatch",
+                label = "Dispatch memory update",
+                description = "Delegate remembering, updating, correcting, or forgetting personal facts cleanly to the dedicated memory agent.",
+                parameters = dispatchParameters,
+                promptSnippet = "Send durable personal facts, updates, or forgetting requests to the memory agent",
+                promptGuidelines = listOf(
+                    "Invoke memory_dispatch asynchronously whenever the user shares lasting personal preferences, relationship changes, commitments, corrections, or asks to forget something.",
+                    "Provide full unambiguous detail including relative dates resolved against current time and situational qualifiers.",
+                ),
+            ) { _, args, signal, _ ->
+                signal?.throwIfAborted()
+                withContext(Dispatchers.IO) {
+                    try {
+                        val activeScope = scope()
+                        if (activeScope == MemoryAccessScope.OFF) {
+                            return@withContext textResult(
+                                "Memory is turned off for this assistant, so nothing was queued.",
+                            )
+                        }
+                        val activeSession = sessionId()?.takeIf { it.isNotBlank() }
+                        if (activeSession != null && isSessionExcluded(activeSession)) {
+                            return@withContext textResult(
+                                "Memory recording is paused for this conversation, so nothing was queued.",
+                            )
+                        }
+                        val detail = args.stringArg("detail").trim()
+                        if (detail.isEmpty()) {
+                            return@withContext textResult("Nothing dispatched: detail cannot be empty.", isError = true)
+                        }
+                        val intent = MemoryDispatchIntent.fromWire(args.stringArg("intent"))
+                        val jobId = agentService.enqueueDispatch(
+                            sessionId = activeSession,
+                            intent = intent,
+                            detail = detail,
+                        )
+                        textResult("Memory update queued ($intent, id=$jobId). Continue responding naturally without blocking.")
+                    } catch (aborted: RequestAbortedException) {
+                        throw aborted
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        textResult("memory_dispatch failed: ${error.message}", isError = true)
+                    }
+                }
+            },
+        )
+    }
+    }
 }
 
-private fun parseDateStart(raw: String): Long? =
-    MemorySnapshotRenderer.parseDayStartMs(raw)
-        ?: runCatching { Instant.parse(raw.trim()).toEpochMilli() }.getOrNull()
+private fun formatSearchHits(hits: List<MemorySearchHit>): String {
+    if (hits.isEmpty()) return "No matching memories found."
+    val sb = StringBuilder()
+    hits.forEachIndexed { index, hit ->
+        val ev = hit.event
+        val dateStr = formatDate(ev.eventTime)
+        val entities = if (ev.entityNames.isEmpty()) "" else " entities=[${ev.entityNames.joinToString(", ")}]"
+        val relTag = if (hit.matchedViaRelation) " via_relation" else ""
+        val pinTag = if (ev.pinned) " PINNED" else ""
+        val line = buildString {
+            append("${index + 1}. [id=${ev.id}] [${ev.eventKind.wire}] [${ev.domain}] [${ev.status.wire}$pinTag] ")
+            append("($dateStr, ${ev.epistemicTier.wire}, score=${"%.2f".format(Locale.US, hit.score)}$relTag)\n")
+            append("   ${ev.summary?.takeIf { it.isNotBlank() } ?: ev.content}")
+            if (ev.tags.isNotEmpty()) append(" tags=[${ev.tags.joinToString(", ")}]")
+            append(entities)
+        }
+        if (sb.length + line.length + 2 > MAX_SEARCH_OUTPUT_CHARS) return@forEachIndexed
+        if (sb.isNotEmpty()) sb.append("\n")
+        sb.append(line)
+    }
+    return sb.toString()
+}
 
-private fun parseDateEnd(raw: String): Long? =
-    MemorySnapshotRenderer.parseDayStartMs(raw)?.let { it + 86_399_999L }
-        ?: runCatching { Instant.parse(raw.trim()).toEpochMilli() }.getOrNull()
+private fun formatEntityDetail(detail: io.github.whywood.superpi.runtime.MemoryEntityDetail): String = buildString {
+    val entity = detail.entity
+    appendLine("${entity.canonicalName} [${entity.entityType}] (${entity.domain})")
+    if (entity.aliases.isNotEmpty()) appendLine("Aliases: ${entity.aliases.joinToString(", ")}")
+    if (entity.attributes.isNotEmpty()) {
+        appendLine("Attributes: ${entity.attributes.entries.joinToString(", ") { "${it.key}: ${it.value}" }}")
+    }
+    if (!entity.summary.isNullOrBlank()) appendLine("Summary: ${entity.summary}")
+    if (detail.outgoingRelations.isNotEmpty() || detail.incomingRelations.isNotEmpty()) {
+        appendLine("Relationships:")
+        detail.outgoingRelations.forEach { rel ->
+            val state = if (rel.isActive) "" else " [historical]"
+            val note = rel.label?.let { " ($it)" }.orEmpty()
+            appendLine("- ${rel.relationType} -> ${rel.toEntityName}$note$state")
+        }
+        detail.incomingRelations.forEach { rel ->
+            val state = if (rel.isActive) "" else " [historical]"
+            val note = rel.label?.let { " ($it)" }.orEmpty()
+            appendLine("- ${rel.fromEntityName} ${rel.relationType} -> ${entity.canonicalName}$note$state")
+        }
+    }
+    if (detail.linkedEvents.isNotEmpty()) {
+        appendLine("Linked timeline events:")
+        detail.linkedEvents.take(15).forEach { ev ->
+            appendLine("- [${formatDate(ev.eventTime)} ${ev.status.wire}] ${ev.summary ?: ev.content}")
+        }
+    }
+}.trim()
 
-private fun JsonObject.stringArg(name: String): String =
-    (this[name] as? JsonPrimitive)?.contentOrNull.orEmpty()
+private fun formatDate(epochMs: Long): String =
+    DateTimeFormatter.ISO_LOCAL_DATE.format(
+        Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate(),
+    )
 
-private fun JsonObject.stringArrayArg(name: String): List<String> =
-    (this[name] as? JsonArray)
-        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
-        .orEmpty()
+private fun requireDateStart(raw: String, fieldName: String): Long {
+    val clean = raw.trim()
+    val zone = ZoneId.systemDefault()
+    runCatching { LocalDate.parse(clean) }.getOrNull()?.let { date ->
+        return date.atStartOfDay(zone).toInstant().toEpochMilli()
+    }
+    runCatching { Instant.parse(clean) }.getOrNull()?.let { instant ->
+        return instant.toEpochMilli()
+    }
+    throw IllegalArgumentException("Invalid $fieldName format '$raw': expected yyyy-MM-dd or ISO instant")
+}
 
-private fun JsonObject.intArg(name: String): Int? =
-    (this[name] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+private fun requireDateEnd(raw: String, fieldName: String): Long {
+    val clean = raw.trim()
+    val zone = ZoneId.systemDefault()
+    runCatching { LocalDate.parse(clean) }.getOrNull()?.let { date ->
+        return date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1L
+    }
+    runCatching { Instant.parse(clean) }.getOrNull()?.let { instant ->
+        return instant.toEpochMilli()
+    }
+    throw IllegalArgumentException("Invalid $fieldName format '$raw': expected yyyy-MM-dd or ISO instant")
+}
 
-private fun JsonObject.booleanArg(name: String): Boolean? =
-    (this[name] as? JsonPrimitive)?.booleanOrNull
+private fun JsonObject.stringArg(key: String): String =
+    (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+private fun JsonObject.stringArrayArg(key: String): List<String> {
+    val element = this[key] ?: return emptyList()
+    return when (element) {
+        is JsonArray -> element.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
+        is JsonPrimitive -> element.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }?.let(::listOf) ?: emptyList()
+        else -> emptyList()
+    }
+}
+
+private fun JsonObject.booleanArg(key: String): Boolean? =
+    (this[key] as? JsonPrimitive)?.booleanOrNull
+
+private fun JsonObject.intArg(key: String): Int? =
+    (this[key] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()

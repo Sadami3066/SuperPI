@@ -113,6 +113,7 @@ internal fun MailThreadPage(
     var fallback by remember(request) { mutableStateOf<MailDetailState?>(null) }
     var attachmentBusyId by remember { mutableStateOf<String?>(null) }
     var attachmentError by remember { mutableStateOf<String?>(null) }
+    var attachmentRetry by remember { mutableStateOf<Pair<String, MailAttachment>?>(null) }
     var viewer by remember { mutableStateOf<MailThreadViewer?>(null) }
     var fallbackAttempt by remember { mutableIntStateOf(0) }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -156,6 +157,7 @@ internal fun MailThreadPage(
     fun openAttachment(messageId: String, attachment: MailAttachment) {
         if (attachmentBusyId != null) return
         attachmentError = null
+        attachmentRetry = null
         attachmentBusyId = attachment.id
         scope.launch {
             val result = runCatching { repository.loadAttachment(request.accountId, messageId, attachment.id) }
@@ -168,6 +170,7 @@ internal fun MailThreadPage(
                     host.ui().share(shareRequest(filePath = path, mimeType = attachment.mimeType))
                 }
             } else {
+                attachmentRetry = messageId to attachment
                 attachmentError = result.exceptionOrNull()?.let { error ->
                     host.readableError(
                         error,
@@ -386,7 +389,17 @@ internal fun MailThreadPage(
             }
             attachmentError?.let { error ->
                 Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
-                    MailNoticeBar(text = error, tone = colors.danger)
+                    MailNoticeBar(
+                        text = error,
+                        tone = colors.danger,
+                        actionLabel = host.t("重试", "Retry"),
+                        actionDescription = host.t("重新下载附件", "Download the attachment again"),
+                        onAction = {
+                            attachmentRetry?.let { (messageId, attachment) ->
+                                openAttachment(messageId, attachment)
+                            }
+                        },
+                    )
                 }
             }
             DdHairline()

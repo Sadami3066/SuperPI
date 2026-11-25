@@ -205,6 +205,8 @@ class ScreenRouterTest {
         val result = router().typeText(null, "hello")
         assertEquals("hello", virtual.typed)
         assertEquals(BACKEND_HELPER, result.backend)
+        assertEquals("", result.text)
+        assertFalse(result.verified)
     }
 
     @Test
@@ -228,6 +230,8 @@ class ScreenRouterTest {
         accessibility.connected = false
         val result = router().typeText(null, "hello")
         assertEquals(BACKEND_HELPER, result.backend)
+        assertEquals("", result.text)
+        assertFalse(result.verified)
     }
 
     @Test

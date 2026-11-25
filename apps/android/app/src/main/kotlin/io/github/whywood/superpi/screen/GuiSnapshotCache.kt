@@ -1,11 +1,12 @@
 package io.github.whywood.superpi.screen
 
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 internal class GuiSnapshotCache {
     private val snapshots = ConcurrentHashMap<Int, GuiSnapshot>()
     private val knownNodes = ConcurrentHashMap<String, GuiSnapshotNode>()
+    private val generationSeq = AtomicLong()
 
     fun clear() {
         snapshots.clear()
@@ -20,7 +21,7 @@ internal class GuiSnapshotCache {
 
     fun store(displayId: Int, snapshot: GuiSnapshot): GuiSnapshot {
         require(displayId >= 0) { "Display id must not be negative" }
-        val generation = UUID.randomUUID().toString()
+        val generation = "g${generationSeq.incrementAndGet().toString(36)}"
         val stamped = snapshot.copy(nodes = snapshot.nodes.mapIndexed { index, node ->
             node.copy(ref = "$displayId:$generation:$index")
         })

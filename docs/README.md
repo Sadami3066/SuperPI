@@ -4,8 +4,8 @@ Docs are organized by role so users, plugin authors, and core contributors each 
 
 ## For Users
 
-- [Getting Started](user/getting-started.md) — Android installation, model setup, system access tiers, Linux, mini-apps, multi-device sync, and FAQ.
-- [Self-Hosting Relay](user/self-hosting-relay.md) — Deploying `apps/relay` with Docker or Node.js 24, TLS certificates, pairing links, and Desktop client setup.
+- [Getting Started](user/getting-started.md) — Android installation, Super Mode, Memory v3, system access tiers, Linux, mini-apps, multi-device sync, and FAQ.
+- [Self-Hosting Relay](user/self-hosting-relay.md) — Deploying `apps/relay` with Docker or Node.js 24, TLS certificates, pairing links, and multi-device setup.
 
 ## For Plugin Authors
 
@@ -18,7 +18,7 @@ Docs are organized by role so users, plugin authors, and core contributors each 
 
 ## For Contributors & Maintainers
 
-- [Architecture](contributing/architecture.md) — Monorepo layout, Android modules, Desktop/Relay pipeline, Memory v2, plugins, and update contract.
+- [Architecture](contributing/architecture.md) — Monorepo layout, Android modules, Super Mode, Memory v3, Relay/Protocol, plugins, and update contract.
 - [Developer Guide](contributing/development.md) — Toolchains, Gradle locking, local SDK `includeBuild`, E2E scripts, and conventions.
 - [Release Engineering](contributing/release.md) — Versioning, Secrets, and tag-driven CI releases (`v*`, `desktop-v*`, `relay-v*`, `plugin-api-v*`, `plugin-*-v*`, SDK `v*`).
 - [Prompt & Context Reference](contributing/context/README.md) — Internal reference map of system prompts, tools, memory, and compaction formatting.

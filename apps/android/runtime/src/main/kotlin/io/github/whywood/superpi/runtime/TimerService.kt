@@ -5,6 +5,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.time.Clock
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +46,11 @@ class TimerService(
 
     private val deliveryMutex = Mutex()
     private val wake = Channel<Unit>(Channel.CONFLATED)
+    private val transientRetryCounts = ConcurrentHashMap<String, Int>()
     private var job: Job? = null
+
+    @Volatile
+    var externalReminderHandler: (suspend (sessionId: String, text: String, reminder: String?) -> Boolean)? = null
 
     fun start() {
         if (job?.isActive == true) return
@@ -121,14 +126,28 @@ class TimerService(
     )
 
     suspend fun update(id: String, patch: TimerPatch): Timer? {
+        transientRetryCounts.remove(id)
         val updated = withContext(ioDispatcher) { store.update(id, patch) }
         refresh()
         return updated
     }
 
     suspend fun delete(id: String): Boolean {
+        transientRetryCounts.remove(id)
         val deleted = withContext(ioDispatcher) { store.delete(id) }
         refresh()
+        return deleted
+    }
+
+    suspend fun deleteBySession(sessionId: String): Boolean {
+        val deleted = withContext(ioDispatcher) { store.deleteBySession(sessionId) }
+        if (deleted) {
+            transientRetryCounts.clear()
+        }
+        if (deleted) {
+            refresh()
+            wake.trySend(Unit)
+        }
         return deleted
     }
 
@@ -140,6 +159,7 @@ class TimerService(
         val error = deliverTimers(listOf(timer))
         val now = clock.millis()
         if (error == null) {
+            transientRetryCounts.remove(id)
             withContext(ioDispatcher) { store.markRunNow(id, now) }
             removeIntent(intent.dedupeKey)
             refresh()
@@ -167,6 +187,7 @@ class TimerService(
 
     internal suspend fun recoverPending() = deliveryMutex.withLock {
         val intents = loadIntents()
+        withContext(ioDispatcher) { store.recomputeTargetsIfZoneChanged() }
         if (intents.isEmpty()) {
             refresh()
             return@withLock
@@ -189,11 +210,7 @@ class TimerService(
             group.forEach { intent ->
                 val timer = timers[intent.timerId]
                 if (timer != null) {
-                    if (error == null) {
-                        withContext(ioDispatcher) { store.markDelivered(timer.id, at) }
-                    } else {
-                        withContext(ioDispatcher) { store.markDeliveryFailed(timer.id, error, at) }
-                    }
+                    applyDeliveryOutcome(timer, error, at)
                 }
                 removeIntent(intent.dedupeKey)
             }
@@ -226,13 +243,38 @@ class TimerService(
         intents.forEach { addIntent(it) }
         val error = deliverTimers(group)
         val at = clock.millis()
-        if (error == null) {
-            withContext(ioDispatcher) { group.forEach { store.markDelivered(it.id, at) } }
-        } else {
-            withContext(ioDispatcher) { group.forEach { store.markDeliveryFailed(it.id, error, at) } }
-        }
+        group.forEach { applyDeliveryOutcome(it, error, at) }
         intents.forEach { removeIntent(it.dedupeKey) }
     }
+
+    private suspend fun applyDeliveryOutcome(timer: Timer, error: TimerError?, at: Long) {
+        withContext(ioDispatcher) {
+            if (error == null) {
+                transientRetryCounts.remove(timer.id)
+                store.markDelivered(timer.id, at)
+            } else if (timer.trigger is TimerTrigger.Once && isTransientError(error)) {
+                val attempt = (transientRetryCounts[timer.id] ?: 0) + 1
+                if (attempt <= TRANSIENT_RETRY_DELAYS_MS.size) {
+                    transientRetryCounts[timer.id] = attempt
+                    store.markDeliveryDeferred(
+                        timer.id,
+                        error,
+                        at + TRANSIENT_RETRY_DELAYS_MS[attempt - 1],
+                        at,
+                    )
+                } else {
+                    transientRetryCounts.remove(timer.id)
+                    store.markDeliveryFailed(timer.id, error, at)
+                }
+            } else {
+                transientRetryCounts.remove(timer.id)
+                store.markDeliveryFailed(timer.id, error, at)
+            }
+        }
+    }
+
+    private fun isTransientError(error: TimerError): Boolean =
+        error == TimerError.OPEN_FAILED || error == TimerError.DELIVERY_FAILED
 
     private fun intentFor(timer: Timer, now: Long): DeliveryIntent {
         val runAt = timer.nextRunAt
@@ -314,6 +356,17 @@ class TimerService(
 
     private suspend fun deliverTimers(group: List<Timer>): TimerError? {
         val anchor = group.firstOrNull() ?: return null
+        val (text, reminder) = reminderText(group)
+        if (SuperRuntime.isSuperManagedSessionId(anchor.sessionId)) {
+            val handler = externalReminderHandler ?: return TimerError.OPEN_FAILED
+            return try {
+                if (handler(anchor.sessionId, text, reminder)) null else TimerError.DELIVERY_FAILED
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                TimerError.DELIVERY_FAILED
+            }
+        }
         if (anchor.sessionFile.isBlank() || !File(anchor.sessionFile).isFile) {
             return TimerError.SESSION_MISSING
         }
@@ -324,7 +377,6 @@ class TimerService(
         } catch (_: Exception) {
             return TimerError.OPEN_FAILED
         }
-        val (text, reminder) = reminderText(group)
         return try {
             runtime.deliverReminder(opened.sessionId, text, reminder)
             null
@@ -374,6 +426,7 @@ class TimerService(
         const val INTENT_SCHEMA_VERSION = 2
         const val FILE_NAME = "delivery-intents.json"
         const val TAG = "TimerService"
+        val TRANSIENT_RETRY_DELAYS_MS = longArrayOf(30_000L, 120_000L, 300_000L)
     }
 }
 

@@ -2,6 +2,7 @@ package io.github.whywood.superpi.remote
 
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.relay.RemoteCallError
+import io.github.whywood.superpi.runtime.MemoryAccessScope
 import io.github.whywood.superpi.runtime.ThinkingLevel
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonArray
@@ -138,6 +139,8 @@ class RemoteBotControlClientTest {
                             put("mcpServers", buildJsonArray {})
                             put("screenTools", true)
                             put("miniappTools", false)
+                            put("memoryScope", "PERSONAL")
+                            put("memoryDispatch", false)
                         },
                     )
                     put(
@@ -162,6 +165,8 @@ class RemoteBotControlClientTest {
         val initial = (client.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research") as RemoteControlResult.Ok).value
         assertEquals(setOf("pdf"), initial.policy.skills)
         assertEquals(true, initial.policy.screenTools)
+        assertEquals(MemoryAccessScope.PERSONAL, initial.policy.memoryScope)
+        assertEquals(false, initial.policy.memoryDispatch)
         assertEquals("Notes", initial.plugins.single().name)
         assertEquals(listOf("github"), initial.mcpServers)
         assertEquals(true, initial.screenToolsReady)
@@ -173,6 +178,8 @@ class RemoteBotControlClientTest {
             mcpServers = setOf("github"),
             screenTools = false,
             miniappTools = true,
+            memoryScope = MemoryAccessScope.WORK_ONLY,
+            memoryDispatch = true,
         )
         val updated = (client.setCapabilities(FakeRemoteTransport.DEVICE_ID, "research", nextPolicy) as RemoteControlResult.Ok).value
         assertEquals(nextPolicy, updated.policy)
@@ -182,5 +189,46 @@ class RemoteBotControlClientTest {
         )
         val unsupported = legacyClient.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research")
         assertEquals(RemoteBotControlClient.CAPABILITY_UNAVAILABLE, (unsupported as RemoteControlResult.Error).code)
+    }
+
+    @Test
+    fun parsesStrictMemoryScopeValuesAndRejectsUnknownAsNull() = runTest {
+        val transport = FakeRemoteTransport(online = true)
+        val client = RemoteBotControlClient(transport)
+        var wireScope = "OFF"
+        transport.result = { call ->
+            when (call.method) {
+                "bot.capabilities.get" -> buildJsonObject {
+                    put("botId", "research")
+                    put("isHome", false)
+                    put(
+                        "policy",
+                        buildJsonObject {
+                            put("allCapabilities", false)
+                            put("memoryScope", wireScope)
+                            put("memoryDispatch", false)
+                        },
+                    )
+                    put("available", buildJsonObject {})
+                }
+                else -> buildJsonObject {}
+            }
+        }
+
+        wireScope = "personal"
+        val personal = (client.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research") as RemoteControlResult.Ok).value
+        assertEquals(MemoryAccessScope.PERSONAL, personal.policy.memoryScope)
+
+        wireScope = "work_only"
+        val workOnly = (client.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research") as RemoteControlResult.Ok).value
+        assertEquals(MemoryAccessScope.WORK_ONLY, workOnly.policy.memoryScope)
+
+        wireScope = "off"
+        val off = (client.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research") as RemoteControlResult.Ok).value
+        assertEquals(MemoryAccessScope.OFF, off.policy.memoryScope)
+
+        wireScope = "ALL"
+        val unknown = (client.getCapabilities(FakeRemoteTransport.DEVICE_ID, "research") as RemoteControlResult.Ok).value
+        assertEquals(null, unknown.policy.memoryScope)
     }
 }

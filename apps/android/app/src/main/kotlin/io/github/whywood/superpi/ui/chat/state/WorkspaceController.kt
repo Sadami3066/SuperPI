@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.ui.chat.state
 
 import io.github.whywood.superpi.runtime.ConversationQueries
+import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.WorkspaceAdmin
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import kotlinx.coroutines.CancellationException
@@ -51,6 +52,19 @@ internal class WorkspaceController(
         scope.launch {
             try {
                 withContext(ioDispatcher) { runtime.updateWorkspaceProfile(workspaceId, avatar, intro) }
+                refreshSessions()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                update { it.copy(error = userFacingError(error.message ?: createWorkspaceFailedText())) }
+            }
+        }
+    }
+
+    fun updateDefaultModel(workspaceId: String, model: ModelConfig?) {
+        scope.launch {
+            try {
+                withContext(ioDispatcher) { runtime.updateWorkspaceDefaultModel(workspaceId, model) }
                 refreshSessions()
             } catch (cancelled: CancellationException) {
                 throw cancelled

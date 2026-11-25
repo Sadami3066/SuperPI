@@ -1,8 +1,10 @@
 package io.github.whywood.superpi.runtime
 
 import io.github.whywood.superpi.sdk.agent.AgentToolResult
+import io.github.whywood.superpi.sdk.ai.RequestAbortedException
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import io.github.whywood.superpi.sdk.coding.tools.textResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -57,15 +59,16 @@ fun todoWriteTool(
     post: suspend (String, String, String, String) -> Boolean,
 ): CodingTool = CodingTool(
     name = "todo_write",
-    description = "Update the task list for this session. Send the complete list every time; omitted items are removed.",
+    description = "Update the task list for this session. Send the complete list every time (omitted items are removed), or an empty array [] to clear it.",
     parameters = todoParameters,
     label = "todo_write",
-    promptSnippet = "todo_write: maintain the session task list with pending, in-progress and completed items.",
+    promptSnippet = "Maintain the session task list with pending, in-progress and completed items",
     promptGuidelines = listOf(
         "Use todo_write for multi-step work so the user can follow progress.",
         "Send the complete list on every call; keep at most one item in_progress.",
     ),
-    execute = { _, args, _, _ ->
+    execute = { _, args, signal, _ ->
+        signal?.throwIfAborted()
         try {
             val todos = parseTodos(args)
             val id = sessionId() ?: error("todo_write requires an active session")
@@ -84,6 +87,10 @@ fun todoWriteTool(
                 error("todo_write could not be saved")
             }
             textResult(text)
+        } catch (error: RequestAbortedException) {
+            throw error
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             textResult(error.message ?: "todo_write failed", isError = true)
         }
@@ -92,7 +99,7 @@ fun todoWriteTool(
 
 private fun parseTodos(args: JsonObject): List<TodoEntry> {
     val raw = args["todos"] as? JsonArray ?: error("todos must be an array")
-    if (raw.isEmpty()) error("todos must not be empty")
+    if (raw.isEmpty()) return emptyList()
     val seen = HashSet<String>()
     var inProgress = 0
     val result = raw.mapIndexed { index, element ->
@@ -109,11 +116,11 @@ private fun parseTodos(args: JsonObject): List<TodoEntry> {
         TodoEntry(content, status)
     }
     if (inProgress > 1) error("at most one todo may be in_progress")
-    if (result.isEmpty()) error("todos must not be empty")
     return result
 }
 
 private fun summary(todos: List<TodoEntry>): String {
+    if (todos.isEmpty()) return "Cleared todo list."
     val pending = todos.count { it.status == TodoStatus.PENDING }
     val active = todos.count { it.status == TodoStatus.IN_PROGRESS }
     val completed = todos.count { it.status == TodoStatus.COMPLETED }

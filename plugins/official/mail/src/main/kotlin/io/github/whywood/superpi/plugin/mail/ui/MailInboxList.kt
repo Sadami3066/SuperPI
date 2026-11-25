@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.plugin.mail.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -284,13 +285,17 @@ internal fun MailAccountSwitcher(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MailAccountSwitchItem(selected = selectedAccountId == null, contentDescription = allLabel) {
-            DdPressable(
-                onClick = { onSelect(null) },
-                modifier = Modifier.size(34.dp),
-                shape = CircleShape,
-                background = if (selectedAccountId == null) colors.accentSoft else colors.wash,
-                contentDescription = allLabel,
+        MailAccountSwitchItem(
+            selected = selectedAccountId == null,
+            contentDescription = allLabel,
+            onClick = { onSelect(null) },
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(if (selectedAccountId == null) colors.accentSoft else colors.wash),
+                contentAlignment = Alignment.Center,
             ) {
                 DdIcon(
                     icon = DdIcons.Message,
@@ -303,12 +308,12 @@ internal fun MailAccountSwitcher(
             MailAccountSwitchItem(
                 selected = selectedAccountId == account.id,
                 contentDescription = account.email,
+                onClick = { onSelect(account.id) },
             ) {
                 DdAvatar(
                     initials = mailInitial(account.displayName, account.email),
                     size = 34.dp,
-                    contentDescription = account.email,
-                    onClick = { onSelect(account.id) },
+                    contentDescription = null,
                 )
             }
         }
@@ -319,11 +324,12 @@ internal fun MailAccountSwitcher(
 private fun MailAccountSwitchItem(
     selected: Boolean,
     contentDescription: String,
+    onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     val colors = superPiColors()
     Box(
-        modifier = Modifier.size(42.dp),
+        modifier = Modifier.size(44.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (selected) {
@@ -334,8 +340,15 @@ private fun MailAccountSwitchItem(
                     .border(2.dp, colors.accent, CircleShape),
             )
         }
-        Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-            content()
+        DdPressable(
+            onClick = onClick,
+            modifier = Modifier.size(44.dp),
+            shape = CircleShape,
+            contentDescription = contentDescription,
+        ) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                content()
+            }
         }
     }
 }

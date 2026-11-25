@@ -154,14 +154,14 @@ class MiniappToolsTest {
         assertEquals(appDirectory.absolutePath, json.getValue("path").jsonPrimitive.content)
         assertEquals("present", json.getValue("delivery").jsonPrimitive.content)
         assertEquals(
-            "Deliver this app with present: {items:[{type:miniapp, id:flow-app}]}. Do not restate the app details in your reply.",
+            "Deliver this app with present: {\"items\":[{\"type\":\"miniapp\",\"id\":\"flow-app\"}]}. Do not restate the app details in your reply.",
             json.getValue("next").jsonPrimitive.content,
         )
         assertTrue(File(appDirectory, "index.html").isFile)
         assertTrue(File(appDirectory, "app.js").isFile)
         assertTrue(store.load("flow-app") is MiniappEntry.Valid)
         assertTrue(store.drafts().isEmpty())
-        val expected = "{\"ok\":true,\"delivery\":\"present\",\"app\":{\"id\":\"flow-app\",\"name\":\"Flow App\",\"icon\":\"\",\"version\":\"1.0.0\"},\"path\":\"${appDirectory.absolutePath}\",\"next\":\"Deliver this app with present: {items:[{type:miniapp, id:flow-app}]}. Do not restate the app details in your reply.\"}"
+        val expected = "{\"ok\":true,\"delivery\":\"present\",\"app\":{\"id\":\"flow-app\",\"name\":\"Flow App\",\"icon\":\"\",\"version\":\"1.0.0\"},\"path\":\"${appDirectory.absolutePath}\",\"next\":\"Deliver this app with present: {\\\"items\\\":[{\\\"type\\\":\\\"miniapp\\\",\\\"id\\\":\\\"flow-app\\\"}]}. Do not restate the app details in your reply.\"}"
         assertEquals(expected, resultText(result))
     }
 
@@ -246,9 +246,10 @@ class MiniappToolsTest {
     @Test
     fun listReturnsAppsAndDrafts() = runTest {
         val empty = resultJson(execute("miniapp_list", buildJsonObject {}))
+        assertTrue(empty.getValue("ok").jsonPrimitive.boolean)
         assertEquals(0, empty.getValue("apps").jsonArray.size)
         assertEquals(0, empty.getValue("drafts").jsonArray.size)
-        assertEquals("{\"apps\":[],\"drafts\":[]}", resultText(execute("miniapp_list", buildJsonObject {})))
+        assertEquals("{\"ok\":true,\"apps\":[],\"drafts\":[]}", resultText(execute("miniapp_list", buildJsonObject {})))
 
         val flowPath = createDraft("Listed App")
         File(flowPath, "index.html").writeText("<html></html>")

@@ -34,7 +34,8 @@ internal val RELAY_CAPABILITIES = listOf(
     "sync-events",
     "bot-capabilities",
     "present-artifacts",
-    "memory-v2",
+    "super-worker",
+    "memory-v3",
 )
 
 internal val RELAY_CAPABILITIES_READONLY = listOf(
@@ -44,13 +45,25 @@ internal val RELAY_CAPABILITIES_READONLY = listOf(
     "bot-approval",
     "bot-live-sync",
     "sync-events",
-    "memory-v2",
+    "memory-v3",
+)
+
+data class RelayBotCapabilities(
+    val skills: List<String> = emptyList(),
+    val plugins: List<String> = emptyList(),
+    val mcpServers: List<String> = emptyList(),
+    val screenTools: Boolean = false,
+    val miniappTools: Boolean = false,
+    val memoryScope: String? = null,
+    val memoryDispatch: Boolean? = null,
 )
 
 data class RelayBot(
     val id: String,
     val name: String,
     val avatar: String? = null,
+    val intro: String = "",
+    val capabilities: RelayBotCapabilities? = null,
 )
 
 data class RelayDevice(
@@ -192,6 +205,9 @@ internal object RelayFrames {
     const val MAX_FILE_CHUNK_BASE64_CHARS = 360_000
     const val MAX_FILE_TRANSFER_BYTES = 50L * 1024L * 1024L
     const val MAX_AVATAR_DATA_URL_LENGTH = 65_536
+    const val MAX_BOT_INTRO_LENGTH = 256
+    private const val MAX_BOT_CAPABILITY_ITEMS = 64
+    private const val MAX_BOT_CAPABILITY_NAME_LENGTH = 128
     val SYNC_EVENT_KINDS = setOf("sessions_changed", "bot_activity", "approval_changed", "model_changed", "capabilities_changed")
     private val ALLOWED_IMAGE_MIME_TYPES = setOf(
         "image/jpeg",
@@ -282,6 +298,9 @@ internal object RelayFrames {
         }
         if ('\\' in raw) {
             throw IllegalArgumentException("path must use forward slashes")
+        }
+        if (':' in raw) {
+            throw IllegalArgumentException("path must not contain colon")
         }
         if (raw.startsWith('/') || raw.endsWith('/')) {
             throw IllegalArgumentException("path must be relative without leading or trailing slash")
@@ -429,12 +448,7 @@ internal object RelayFrames {
 
     fun parseRemoteBot(element: JsonElement?): RelayBot? {
         val json = element as? JsonObject ?: return null
-        val id = json.string("id") ?: return null
-        return RelayBot(
-            id = id,
-            name = json.string("name") ?: id,
-            avatar = json.string("avatar")?.takeIf { it.isNotBlank() },
-        )
+        return parseBot(json)
     }
 
     fun parseRemoteFileEntry(element: JsonElement?): RemoteFileEntryDto? {
@@ -594,15 +608,35 @@ internal object RelayFrames {
 
     private fun parseBots(element: JsonElement?): List<RelayBot> {
         if (element !is JsonArray) return emptyList()
-        return element.mapNotNull { item ->
-            val json = item as? JsonObject ?: return@mapNotNull null
-            val id = json.string("id") ?: return@mapNotNull null
-            RelayBot(
-                id = id,
-                name = json.string("name") ?: id,
-                avatar = json.string("avatar")?.takeIf { it.isNotBlank() },
-            )
-        }
+        return element.mapNotNull { item -> (item as? JsonObject)?.let(::parseBot) }
+    }
+
+    private fun parseBot(json: JsonObject): RelayBot? {
+        val id = json.string("id") ?: return null
+        return RelayBot(
+            id = id,
+            name = json.string("name") ?: id,
+            avatar = json.string("avatar")?.takeIf { it.isNotBlank() },
+            intro = json.string("intro")?.trim()?.take(MAX_BOT_INTRO_LENGTH).orEmpty(),
+            capabilities = parseBotCapabilities(json["capabilities"]),
+        )
+    }
+
+    private fun parseBotCapabilities(element: JsonElement?): RelayBotCapabilities? {
+        val json = element as? JsonObject ?: return null
+        fun boundedStrings(key: String): List<String> =
+            parseStrings(json[key])
+                .take(MAX_BOT_CAPABILITY_ITEMS)
+                .map { it.take(MAX_BOT_CAPABILITY_NAME_LENGTH) }
+        return RelayBotCapabilities(
+            skills = boundedStrings("skills"),
+            plugins = boundedStrings("plugins"),
+            mcpServers = boundedStrings("mcpServers"),
+            screenTools = json["screenTools"]?.jsonPrimitive?.booleanOrNull ?: false,
+            miniappTools = json["miniappTools"]?.jsonPrimitive?.booleanOrNull ?: false,
+            memoryScope = json.string("memoryScope")?.take(32),
+            memoryDispatch = json["memoryDispatch"]?.jsonPrimitive?.booleanOrNull,
+        )
     }
 
     private fun botsArray(bots: List<RelayBot>): JsonArray = JsonArray(
@@ -611,6 +645,36 @@ internal object RelayFrames {
                 put("id", bot.id)
                 put("name", bot.name)
                 bot.avatar?.takeIf { it.isNotBlank() }?.let { put("avatar", it) }
+                bot.intro.trim().take(MAX_BOT_INTRO_LENGTH).takeIf { it.isNotEmpty() }?.let { put("intro", it) }
+                bot.capabilities?.let { cap ->
+                    put(
+                        "capabilities",
+                        buildJsonObject {
+                            put(
+                                "skills",
+                                stringsArray(
+                                    cap.skills.take(MAX_BOT_CAPABILITY_ITEMS).map { it.take(MAX_BOT_CAPABILITY_NAME_LENGTH) },
+                                ),
+                            )
+                            put(
+                                "plugins",
+                                stringsArray(
+                                    cap.plugins.take(MAX_BOT_CAPABILITY_ITEMS).map { it.take(MAX_BOT_CAPABILITY_NAME_LENGTH) },
+                                ),
+                            )
+                            put(
+                                "mcpServers",
+                                stringsArray(
+                                    cap.mcpServers.take(MAX_BOT_CAPABILITY_ITEMS).map { it.take(MAX_BOT_CAPABILITY_NAME_LENGTH) },
+                                ),
+                            )
+                            put("screenTools", cap.screenTools)
+                            put("miniappTools", cap.miniappTools)
+                            cap.memoryScope?.takeIf { it.isNotBlank() }?.let { put("memoryScope", it) }
+                            cap.memoryDispatch?.let { put("memoryDispatch", it) }
+                        },
+                    )
+                }
             }
         },
     )

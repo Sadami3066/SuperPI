@@ -764,17 +764,28 @@ class ConversationStore(
         }
     }
 
+    suspend fun submitQueuedAwait(
+        sessionId: String,
+        prompt: String,
+        images: List<ImagePart> = emptyList(),
+        followUp: Boolean,
+    ) {
+        val text = prompt.trim()
+        if (text.isEmpty()) return
+        if (RemoteSessionRegistry.sendQueued(sessionId, text, images, followUp)) return
+        if (followUp) {
+            runtime.followUp(sessionId, text, images)
+        } else {
+            runtime.steer(sessionId, text, images)
+        }
+    }
+
     private fun enqueue(sessionId: String, prompt: String, images: List<ImagePart>, followUp: Boolean) {
         val text = prompt.trim()
         if (text.isEmpty()) return
         scope.launch {
             try {
-                if (RemoteSessionRegistry.sendQueued(sessionId, text, images, followUp)) return@launch
-                if (followUp) {
-                    runtime.followUp(sessionId, text, images)
-                } else {
-                    runtime.steer(sessionId, text, images)
-                }
+                submitQueuedAwait(sessionId, text, images, followUp)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {

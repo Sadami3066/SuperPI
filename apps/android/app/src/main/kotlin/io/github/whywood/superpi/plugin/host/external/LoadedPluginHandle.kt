@@ -210,7 +210,13 @@ internal class LoadedPluginHandle private constructor(
             dexBytes: List<ByteArray>,
         ): File {
             val directory = (context.codeCacheDir ?: context.cacheDir).let { File(it, "plugin-dex").apply { mkdirs() } }
-            val jar = File(directory, "plugin-${sanitize(pluginId)}-${bundleSha256.take(16)}.jar")
+            val prefix = "plugin-${sanitize(pluginId)}-"
+            val jar = File(directory, "$prefix${bundleSha256.take(16)}.jar")
+            directory.listFiles()?.forEach { candidate ->
+                if (candidate.isFile && candidate.name.startsWith(prefix) && candidate.name.endsWith(".jar") && candidate.name != jar.name) {
+                    candidate.delete()
+                }
+            }
             jar.delete()
             try {
                 ZipOutputStream(jar.outputStream().buffered()).use { zip ->

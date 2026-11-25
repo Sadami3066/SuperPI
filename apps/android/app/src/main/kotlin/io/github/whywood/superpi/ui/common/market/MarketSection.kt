@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -112,6 +115,8 @@ internal fun MarketTab(
     var tokenId by rememberSaveable { mutableStateOf<String?>(null) }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     var retrying by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable(type) { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
     val haptic = rememberHapticFeedback()
 
     val current = state
@@ -123,12 +128,34 @@ internal fun MarketTab(
         query,
         language,
     )
+    val slice = remember(visible, page) { paginateMarketEntries(visible, page) }
     val selected = entries.firstOrNull { it.id == selectedId }
     val confirm = entries.firstOrNull { it.id == confirmId }
     val tokenEntry = entries.firstOrNull { it.id == tokenId }
 
     LaunchedEffect(categories, category) {
         if (category != null && category !in categories) category = null
+    }
+
+    var previousFilter by remember(type) { mutableStateOf(activeCategory to query) }
+    LaunchedEffect(activeCategory, query) {
+        val nextFilter = activeCategory to query
+        if (nextFilter != previousFilter) {
+            previousFilter = nextFilter
+            if (page != 0) page = 0
+            if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+                listState.scrollToItem(0)
+            }
+        }
+    }
+
+    var previousPage by remember(type) { mutableIntStateOf(slice.page) }
+    LaunchedEffect(slice.page) {
+        if (slice.page != previousPage) {
+            previousPage = slice.page
+            if (page != slice.page) page = slice.page
+            listState.scrollToItem(0)
+        }
     }
 
     fun install(entry: MarketEntry, apiKey: String? = null) {
@@ -161,6 +188,7 @@ internal fun MarketTab(
     }
 
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxWidth().testTag("${testTagPrefix}_market"),
         contentPadding = PaddingValues(bottom = DdSpacing.Xxl),
     ) {
@@ -281,20 +309,33 @@ internal fun MarketTab(
                         )
                     }
 
-                    else -> itemsIndexed(visible, key = { _, entry -> entry.id }) { index, entry ->
-                        Column(Modifier.animateItem().padding(horizontal = DdSpacing.Lg)) {
-                            if (index > 0) DdRowDivider(leadingInset = DdSpacing.Xl)
-                            val installState = installStates[entry.id]
-                            MarketRow(
-                                entry = entry,
-                                language = language,
-                                status = marketEntryStatus(entry, installState, repository.installedVersion(entry)),
-                                progress = (installState as? MarketInstallState.Installing)?.progress,
-                                iconLoader = iconLoader,
-                                showIcons = showIcons,
-                                onClick = { selectedId = entry.id },
-                                modifier = Modifier.testTag("${testTagPrefix}_market_row_${entry.id}"),
-                            )
+                    else -> {
+                        itemsIndexed(slice.items, key = { _, entry -> entry.id }) { index, entry ->
+                            Column(Modifier.animateItem().padding(horizontal = DdSpacing.Lg)) {
+                                if (index > 0) DdRowDivider(leadingInset = DdSpacing.Xl)
+                                val installState = installStates[entry.id]
+                                MarketRow(
+                                    entry = entry,
+                                    language = language,
+                                    status = marketEntryStatus(entry, installState, repository.installedVersion(entry)),
+                                    progress = (installState as? MarketInstallState.Installing)?.progress,
+                                    iconLoader = iconLoader,
+                                    showIcons = showIcons,
+                                    onClick = { selectedId = entry.id },
+                                    modifier = Modifier.testTag("${testTagPrefix}_market_row_${entry.id}"),
+                                )
+                            }
+                        }
+                        if (slice.totalPages > 1) {
+                            item(key = "${testTagPrefix}_market_pagination") {
+                                MarketPaginationBar(
+                                    page = slice.page,
+                                    totalPages = slice.totalPages,
+                                    testTagPrefix = testTagPrefix,
+                                    onPrev = { page = (slice.page - 1).coerceAtLeast(0) },
+                                    onNext = { page = (slice.page + 1).coerceAtMost(slice.totalPages - 1) },
+                                )
+                            }
                         }
                     }
                 }
@@ -913,6 +954,87 @@ private fun MarketLinkAction(
 private fun openMarketUrl(context: Context, url: String) {
     runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+}
+
+@Composable
+private fun MarketPaginationBar(
+    page: Int,
+    totalPages: Int,
+    testTagPrefix: String,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val colors = superPiColors()
+    val hasPrev = page > 0
+    val hasNext = page + 1 < totalPages
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Lg)
+            .testTag("${testTagPrefix}_market_pagination"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        DdPressable(
+            onClick = onPrev,
+            enabled = hasPrev,
+            modifier = Modifier
+                .heightIn(min = 44.dp)
+                .testTag("${testTagPrefix}_market_page_prev"),
+            shape = DdShapes.Pill,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
+            ) {
+                DdIcon(
+                    icon = DdIcons.ChevronRight,
+                    modifier = Modifier.graphicsLayer { rotationZ = 180f },
+                    tint = if (hasPrev) colors.ink else colors.inkTertiary.copy(alpha = 0.38f),
+                    size = 14.dp,
+                )
+                Text(
+                    text = stringResource(R.string.market_page_prev),
+                    style = DdType.label,
+                    color = if (hasPrev) colors.ink else colors.inkTertiary.copy(alpha = 0.38f),
+                )
+            }
+        }
+        Text(
+            text = stringResource(R.string.market_page_indicator, page + 1, totalPages),
+            modifier = Modifier.testTag("${testTagPrefix}_market_page_indicator"),
+            style = DdType.numeric,
+            color = colors.inkSecondary,
+            maxLines = 1,
+            softWrap = false,
+        )
+        DdPressable(
+            onClick = onNext,
+            enabled = hasNext,
+            modifier = Modifier
+                .heightIn(min = 44.dp)
+                .testTag("${testTagPrefix}_market_page_next"),
+            shape = DdShapes.Pill,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = DdSpacing.Md, vertical = DdSpacing.Sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
+            ) {
+                Text(
+                    text = stringResource(R.string.market_page_next),
+                    style = DdType.label,
+                    color = if (hasNext) colors.ink else colors.inkTertiary.copy(alpha = 0.38f),
+                )
+                DdIcon(
+                    icon = DdIcons.ChevronRight,
+                    tint = if (hasNext) colors.ink else colors.inkTertiary.copy(alpha = 0.38f),
+                    size = 14.dp,
+                )
+            }
+        }
     }
 }
 

@@ -7,8 +7,6 @@
     <string name="drawer_nav_timer">定时任务</string>
     <string name="drawer_nav_memory">记忆</string>
     <string name="drawer_nav_relay">设备</string>
-    <string name="drawer_nav_more">展开更多</string>
-    <string name="drawer_nav_less">收起</string>
     <string name="drawer_account_hint">个人账户</string>
     <string name="drawer_archived_title">已归档</string>
     <string name="drawer_archived_empty">还没有已归档的对话</string>
@@ -81,7 +79,17 @@
     <string name="bot_tools_screen">屏幕工具</string>
     <string name="bot_tools_miniapp">小程序工具</string>
     <string name="bot_tools_screen_permission">需要在“系统访问”中开启更高级别的控制权限</string>
+    <string name="bot_memory_section">个人记忆</string>
+    <string name="bot_memory_scope">记忆范围</string>
+    <string name="bot_memory_scope_personal">全部记忆</string>
+    <string name="bot_memory_scope_work">工作学习</string>
+    <string name="bot_memory_scope_off">关闭</string>
+    <string name="bot_memory_dispatch">允许主动更新记忆</string>
     <string name="bot_instructions">设定</string>
+    <string name="bot_model_section">模型</string>
+    <string name="bot_default_model">默认模型</string>
+    <string name="bot_default_model_global">跟随全局默认</string>
+    <string name="bot_default_model_thinking_off">关闭</string>
     <string name="bot_created_toast">已创建，能力默认关闭，可在 Bot 设置里打开。</string>
     <string name="drawer_remote_loading">正在加载会话…</string>
     <string name="drawer_remote_relay_upgrade">当前服务器版本较旧，升级后可查看远程会话</string>

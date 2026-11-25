@@ -15,10 +15,9 @@ object WecomCli {
     const val PACKAGE_BINARY = "package/bin/wecom-cli"
 
     const val VERSION = "1.3.4"
-    const val ARCHIVE_NAME = "wecom-cli-linux-arm64-$VERSION.tgz"
+    private const val ARCHIVE_PREFIX = "cli-linux-arm64-"
+    const val ARCHIVE_NAME = "$ARCHIVE_PREFIX$VERSION.tgz"
     const val ARCHIVE_SHA256 = "833ab8efe327d7194a0107696104c63e56af9221db624dc181bf4f6bf8d91eba"
-
-    private const val ARCHIVE_PREFIX = "wecom-cli-linux-arm64-"
     private const val REGISTRY_BASE = "https://registry.npmjs.org/@wecom/cli-linux-arm64/-"
     private const val MIRROR_BASE = "https://registry.npmmirror.com/@wecom/cli-linux-arm64/-"
 

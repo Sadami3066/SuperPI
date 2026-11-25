@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="super_mode_switch_to_super">切换到超级助理模式</string>
+    <string name="super_mode_switch_to_normal">切换到普通模式</string>
+    <string name="super_drawer_team">团队</string>
+    <string name="super_drawer_team_enabled_count">%1$d</string>
+    <string name="super_drawer_workers_active">进行中</string>
+    <string name="super_drawer_workers_saved">已保留</string>
+    <string name="super_drawer_workers_empty">还没有分配过任务\n在对话中交代需要持久处理的事情即可开始</string>
+    <string name="super_drawer_worker_delete">移除记录</string>
+    <string name="super_drawer_this_device">本机</string>
+    <string name="super_worker_status_queued">排队中</string>
+    <string name="super_worker_status_running">运行中</string>
+    <string name="super_worker_status_waiting">等待确认</string>
+    <string name="super_worker_status_stalled">暂无进展</string>
+    <string name="super_worker_status_idle">已完成</string>
+    <string name="super_worker_status_failed">失败</string>
+    <string name="super_chat_menu_team">团队</string>
+    <string name="super_chat_menu_archive">归档并重置</string>
+    <string name="super_chat_archive_title">归档并重置对话</string>
+    <string name="super_chat_archive_body">当前对话内容将归档保存，并开启一段干净的新对话。</string>
+    <string name="super_chat_archive_confirm">归档并重置</string>
+    <string-array name="super_chat_empty_greetings_named">
+        <item>算力全开，{name}。</item>
+        <item>进入无理数领域。</item>
+        <item>限制器已解除。</item>
+        <item>深度推演已就绪。</item>
+        <item>超频运行中，{name}。</item>
+        <item>Super PI 已接管。</item>
+        <item>交给高阶算力。</item>
+        <item>说吧，多难的问题？</item>
+        <item>这次，我们往深处挖。</item>
+        <item>全功率待命。</item>
+        <item>欢迎来到无限不循环。</item>
+        <item>奇点已连接，{name}。</item>
+        <item>规则已重写。</item>
+    </string-array>
+    <string-array name="super_chat_empty_greetings_plain">
+        <item>算力全开。</item>
+        <item>进入无理数领域。</item>
+        <item>限制器已解除。</item>
+        <item>深度推演已就绪。</item>
+        <item>超频运行中。</item>
+        <item>Super PI 已接管。</item>
+        <item>交给高阶算力。</item>
+        <item>说吧，多难的问题？</item>
+        <item>这次，我们往深处挖。</item>
+        <item>全功率待命。</item>
+        <item>欢迎来到无限不循环。</item>
+        <item>奇点已连接。</item>
+        <item>规则已重写。</item>
+    </string-array>
+    <string-array name="super_starter_prompts">
+        <item>拉团队分头开干，最后汇总给我：</item>
+        <item>按我的想法做一个可交互小程序：</item>
+        <item>深挖这个议题，出一份可落地的研报：</item>
+        <item>把这个复杂目标拆解成可执行路线：</item>
+        <item>结合我的日程和记忆，帮我排一下优先级：</item>
+        <item>开个后台长线任务，有进展再汇报：</item>
+        <item>对这个决策做一次多角度红蓝推演：</item>
+        <item>连上远程设备一起排查这个问题：</item>
+        <item>把这些零散资料整合成一份正式文档：</item>
+        <item>定时追踪这条线索，关键节点叫我：</item>
+    </string-array>
+    <string name="super_chat_empty_team_summary">已启用 %1$d 个团队成员</string>
+    <string name="super_chat_empty_team_action">设置团队成员</string>
+    <string name="super_team_idle_slots">空闲 · 上限 %1$d</string>
+    <string name="super_settings_advanced_expand">展开高级调度（5 项）</string>
+    <string name="super_settings_advanced_collapse">收起高级调度</string>
+    <string name="super_chat_error_retry">重试</string>
+    <string name="super_chat_error_dismiss">关闭</string>
+    <string name="super_chat_worker_approval_title">%1$s 需要确认</string>
+    <string name="super_chat_worker_approval_dismiss">忽略</string>
+    <string name="super_chat_worker_approval_open">查看详情</string>
+    <string name="super_team_title">团队</string>
+    <string name="super_team_back">返回</string>
+    <string name="super_team_refresh">刷新</string>
+    <string name="super_team_device_local">本机</string>
+    <string name="super_team_device_offline">离线</string>
+    <string name="super_team_slots">%1$d/%2$d</string>
+    <string name="super_team_unsupported">该设备版本较旧，暂不支持加入团队</string>
+    <string name="super_team_cap_skills">%1$d 技能</string>
+    <string name="super_team_cap_plugins">%1$d 插件</string>
+    <string name="super_team_cap_mcp">%1$d 连接器</string>
+    <string name="super_team_cap_screen">屏幕</string>
+    <string name="super_team_cap_miniapp">小程序</string>
+    <string name="super_team_empty">暂无可加入的 Bot</string>
+    <string name="super_worker_monitor_title">任务对话</string>
+    <string name="super_worker_monitor_delete">移除记录</string>
+    <string name="super_worker_monitor_missing">该记录已移除</string>
+    <string name="super_worker_empty_chat">暂无对话记录，可以直接发送消息参与协作</string>
+    <string name="super_worker_remote_offline">远程设备已离线，恢复在线后可继续发送</string>
+    <string name="super_worker_delete_title">移除这条记录</string>
+    <string name="super_worker_delete_body">将清除「%1$s」的任务记录与本地临时文件，该操作无法撤销。</string>
+    <string name="super_worker_delete_confirm">移除</string>
+    <string name="super_worker_cancel">取消</string>
+    <string name="super_team_refresh_failed">刷新失败，请稍后重试</string>
+    <string name="settings_super">SuperPI 设置</string>
+    <string name="super_settings_title">SuperPI 设置</string>
+    <string name="super_settings_instructions">设定</string>
+    <string name="super_settings_instructions_subtitle">为 Super PI 补充长期遵守的偏好与分工规则</string>
+    <string name="super_agents_doc_note">保存后，下一条消息立即生效。</string>
+    <string name="super_settings_reset">恢复默认</string>
+    <string name="super_settings_reset_title">恢复默认设置</string>
+    <string name="super_settings_reset_body">将 SuperPI 设置恢复为默认？</string>
+    <string name="super_settings_reset_confirm">恢复</string>
+    <string name="super_settings_section_concurrency">协作规模</string>
+    <string name="super_settings_concurrency_title">同时执行数量</string>
+    <string name="super_settings_concurrency_value">最多 %1$d 个</string>
+    <string name="super_settings_slots_title">单个助理保留任务数</string>
+    <string name="super_settings_slots_value">%1$d 个</string>
+    <string name="super_settings_stall_title">无进展提醒</string>
+    <string name="super_settings_stall_desc">超时提醒，不打断</string>
+    <string name="super_settings_question_timeout_title">待确认超时转交</string>
+    <string name="super_settings_question_timeout_desc">超时由超级助理代为处理</string>
+    <string name="super_settings_job_wake_title">后台任务完成后主动汇报</string>
+    <string name="super_settings_coalesce_title">结果汇总等待</string>
+    <string name="super_settings_coalesce_desc">合并相近的完成汇报</string>
+    <string name="super_settings_receipt_chars_title">单条汇报字数上限</string>
+    <string name="super_settings_idle_evict_title">空闲会话休眠</string>
+    <string name="super_settings_idle_evict_desc">休眠后保留对话记录</string>
+    <string name="super_settings_section_context">成员上下文</string>
+    <string name="super_settings_compaction_override_title">单独设置成员自动压缩</string>
+    <string name="super_settings_compaction_override_desc">关闭时跟随全局阈值</string>
+    <string name="super_settings_compaction_threshold_title">成员压缩触发阈值</string>
+    <string name="super_settings_compaction_threshold_value">已用 %1$d%%</string>
+    <string name="super_settings_off">关闭</string>
+    <string name="super_settings_never_handoff">始终等待我</string>
+    <string name="super_settings_minutes">%1$d 分钟</string>
+    <string name="super_settings_immediate">立即汇报</string>
+    <string name="super_settings_seconds_decimal">%1$.1f 秒</string>
+    <string name="super_settings_seconds_int">%1$d 秒</string>
+    <string name="super_settings_chars_count">%1$d 字</string>
+    <string name="super_worker_failed_fallback">任务未能完成</string>
+    <string name="super_miniapp_create_prompt">帮我创建一个新的小程序：</string>
+    <string name="memory_source_worker_removed">这条记忆来自的后台任务已移除</string>
+</resources>

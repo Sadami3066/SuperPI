@@ -167,4 +167,18 @@ class PluginPromptOverridesTest {
         )
         assertEquals("body", merge.pluginsBody)
     }
+
+    @Test
+    fun legacyBodyIsBudgetedWithinTotalPromptBudget() {
+        val legacy = "L".repeat(PLUGIN_PROMPT_TOTAL_BUDGET + 500)
+        val merge = merge(
+            PluginPromptOverrides(
+                listOf(contribution("alpha", sections = listOf(section("alpha", "s", "section body", 0)))),
+            ),
+            legacyBody = legacy,
+        )
+        assertTrue(merge.pluginsBody.orEmpty().length <= PLUGIN_PROMPT_TOTAL_BUDGET)
+        assertTrue(merge.pluginsBody.orEmpty().contains("...(truncated)"))
+        assertTrue(merge.pluginsBody.orEmpty().contains("section body"))
+    }
 }

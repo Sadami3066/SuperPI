@@ -42,9 +42,9 @@ class McpUiDemoPlugin : SuperPIPlugin {
         override val pages = listOf(
             pluginPage(
                 id = "demo",
-                title = localizedText(default = "MCP UI", zh = "MCP UI", en = "MCP UI"),
+                title = localizedText(default = "天气卡片", zh = "天气卡片", en = "Weather card"),
             ) {
-                DemoPage()
+                DemoPage(host)
             },
         )
 
@@ -58,24 +58,25 @@ class McpUiDemoPlugin : SuperPIPlugin {
                 ),
                 priority = 10,
             ) { state ->
-                WeatherCard(state.structuredContent as? JsonObject)
+                WeatherCard(host, state.structuredContent as? JsonObject)
             },
         )
     }
 }
 
 @Composable
-private fun DemoPage() {
+private fun DemoPage(host: PluginHost) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = DdSpacing.Xl, vertical = DdSpacing.Lg),
     ) {
         WeatherCard(
-            buildJsonObject {
-                put("city", "杭州")
+            host = host,
+            data = buildJsonObject {
+                put("city", host.t("杭州", "Hangzhou"))
                 put("temperature", 26)
-                put("condition", "晴")
+                put("condition", host.t("晴", "Sunny"))
                 put("high", 29)
                 put("low", 20)
             },
@@ -84,11 +85,11 @@ private fun DemoPage() {
 }
 
 @Composable
-private fun WeatherCard(data: JsonObject?) {
+private fun WeatherCard(host: PluginHost, data: JsonObject?) {
     val colors = superPiColors()
-    val city = data?.get("city")?.jsonPrimitive?.content ?: "杭州"
+    val city = data?.get("city")?.jsonPrimitive?.content ?: host.t("杭州", "Hangzhou")
     val temp = data?.get("temperature")?.jsonPrimitive?.intOrNull ?: 26
-    val condition = data?.get("condition")?.jsonPrimitive?.content ?: "晴"
+    val condition = data?.get("condition")?.jsonPrimitive?.content ?: host.t("晴", "Sunny")
     val high = data?.get("high")?.jsonPrimitive?.intOrNull
     val low = data?.get("low")?.jsonPrimitive?.intOrNull
     DdGroupCard(modifier = Modifier.fillMaxWidth()) {
@@ -114,7 +115,7 @@ private fun WeatherCard(data: JsonObject?) {
             }
             if (high != null && low != null) {
                 DdText(
-                    text = "最高 $high° / 最低 $low°",
+                    text = host.t("最高 $high° / 最低 $low°", "High $high° / Low $low°"),
                     style = DdType.bodySmall,
                     color = colors.inkTertiary,
                 )
@@ -122,3 +123,6 @@ private fun WeatherCard(data: JsonObject?) {
         }
     }
 }
+
+private fun PluginHost.t(zh: String, en: String): String =
+    text(localizedText(default = zh, zh = zh, en = en))

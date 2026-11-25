@@ -103,6 +103,8 @@ private val presentParameters: JsonObject = buildJsonObject {
 
 fun presentTool(
     miniappLookup: (suspend (String) -> PresentedMiniapp?)? = null,
+    cardExists: ((String) -> Boolean)? = null,
+    artifactResolver: (suspend (String) -> File?)? = null,
     session: () -> BoundSession?,
 ): CodingTool = CodingTool(
     name = "present",
@@ -117,7 +119,7 @@ fun presentTool(
             textResult("Session is not bound", isError = true)
         } else {
             try {
-                val items = parsePresentedItems(args, File(bound.cwd), miniappLookup)
+                val items = parsePresentedItems(args, File(bound.cwd), miniappLookup, cardExists, artifactResolver)
                 textResult(presentedItemsJson(items).toString())
             } catch (error: RequestAbortedException) {
                 throw error
@@ -134,6 +136,8 @@ private suspend fun parsePresentedItems(
     args: JsonObject,
     cwd: File,
     miniappLookup: (suspend (String) -> PresentedMiniapp?)?,
+    cardExists: ((String) -> Boolean)?,
+    artifactResolver: (suspend (String) -> File?)?,
 ): List<JsonObject> {
     val items = args["items"] as? JsonArray
         ?: throw IllegalArgumentException("items must be an array")
@@ -141,7 +145,7 @@ private suspend fun parsePresentedItems(
         throw IllegalArgumentException("items needs 1..$MAX_PRESENTED_ITEMS entries")
     }
     return items.mapIndexed { index, element ->
-        normalizeItem(index, element, cwd, miniappLookup)
+        normalizeItem(index, element, cwd, miniappLookup, cardExists, artifactResolver)
     }
 }
 
@@ -150,6 +154,8 @@ private suspend fun normalizeItem(
     element: JsonElement,
     cwd: File,
     miniappLookup: (suspend (String) -> PresentedMiniapp?)?,
+    cardExists: ((String) -> Boolean)?,
+    artifactResolver: (suspend (String) -> File?)?,
 ): JsonObject {
     val item = element as? JsonObject
         ?: throw IllegalArgumentException("items[$index] must be an object")
@@ -157,21 +163,26 @@ private suspend fun normalizeItem(
         ?: throw IllegalArgumentException("items[$index].type is required")
     val title = item.argumentString("title")
     return when (type) {
-        "file" -> fileItem(index, item, cwd, title, PresentKind.FILE)
-        "image" -> fileItem(index, item, cwd, title, PresentKind.IMAGE)
-        "video" -> fileItem(index, item, cwd, title, PresentKind.VIDEO)
-        "html" -> fileItem(index, item, cwd, title, PresentKind.HTML)
+        "file" -> fileItem(index, item, cwd, title, PresentKind.FILE, artifactResolver)
+        "image" -> fileItem(index, item, cwd, title, PresentKind.IMAGE, artifactResolver)
+        "video" -> fileItem(index, item, cwd, title, PresentKind.VIDEO, artifactResolver)
+        "html" -> fileItem(index, item, cwd, title, PresentKind.HTML, artifactResolver)
         "miniapp" -> miniappItem(index, item, title, miniappLookup)
-        "card" -> cardItem(index, item)
+        "card" -> cardItem(index, item, cardExists)
         else -> throw IllegalArgumentException(
             "items[$index].type must be one of file, image, video, html, miniapp, card",
         )
     }
 }
 
-private fun cardItem(index: Int, item: JsonObject): JsonObject {
+private fun cardItem(index: Int, item: JsonObject, cardExists: ((String) -> Boolean)?): JsonObject {
     val id = item.argumentString("id")
         ?: throw IllegalArgumentException("items[$index].id is required for card")
+    if (cardExists != null && !cardExists(id)) {
+        throw IllegalArgumentException(
+            "card not found in this session: $id (use a tool call id from a completed tool result)",
+        )
+    }
     return buildJsonObject {
         put("type", "card")
         put("id", id)
@@ -186,16 +197,22 @@ private enum class PresentKind(val json: String) {
     HTML("html"),
 }
 
-private fun fileItem(
+private suspend fun fileItem(
     index: Int,
     item: JsonObject,
     cwd: File,
     title: String?,
     kind: PresentKind,
+    artifactResolver: (suspend (String) -> File?)?,
 ): JsonObject {
     val rawPath = item.argumentString("path")
         ?: throw IllegalArgumentException("items[$index].path is required")
-    val file = resolvePresentedFile(rawPath, cwd)
+    val file = if (rawPath.startsWith(SuperRuntime.WORKER_ARTIFACT_SCHEME)) {
+        artifactResolver?.invoke(rawPath)
+            ?: throw IllegalArgumentException("artifact not found: $rawPath")
+    } else {
+        artifactResolver?.invoke(rawPath) ?: resolvePresentedFile(rawPath, cwd)
+    }
     if (kind != PresentKind.FILE) {
         val extension = file.extension.lowercase(Locale.US)
         if (kind == PresentKind.IMAGE && extension !in IMAGE_EXTENSIONS) {

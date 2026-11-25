@@ -409,7 +409,7 @@ private fun MirrorPicker(
         color = colors.inkSecondary,
     )
     for ((index, mirror) in ApkMirrors.all.withIndex()) {
-        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+        if (index > 0) DdRowDivider()
         val checked = mirror.id in mirrors
         DdListRow(
             title = stringResource(mirror.nameRes),

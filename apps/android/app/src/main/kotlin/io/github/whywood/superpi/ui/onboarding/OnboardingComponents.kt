@@ -77,7 +77,7 @@ import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.ui.common.ProviderIcon
 
-internal const val ONBOARDING_STEP_COUNT = 6
+internal const val ONBOARDING_STEP_COUNT = 9
 
 internal const val KEY_STATE_IDLE = 0
 internal const val KEY_STATE_SAVING = 1
@@ -169,51 +169,53 @@ internal fun UnderlineField(
     val motionEnabled = LocalDdMotionEnabled.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val underline by animateColorAsState(
-        targetValue = if (focused) colors.accent else colors.hairline,
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) colors.accent else colors.surfaceRim,
         animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
-        label = "onboarding-underline",
+        label = "onboarding-field-border",
     )
-    val textStyle = DdType.body.copy(fontSize = 20.sp, lineHeight = 28.sp)
-    Column(modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
-                textStyle = textStyle.copy(color = colors.ink),
-                cursorBrush = SolidColor(colors.accent),
-                singleLine = true,
-                keyboardOptions = keyboardOptions,
-                visualTransformation = visualTransformation,
-                interactionSource = interaction,
-                decorationBox = { innerTextField ->
-                    Box {
-                        if (value.isEmpty()) {
-                            Text(
-                                text = placeholder,
-                                style = textStyle,
-                                color = colors.inkTertiary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        innerTextField()
+    val textStyle = DdType.body.copy(fontSize = 18.sp, lineHeight = 26.sp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clip(DdShapes.Medium)
+            .background(colors.surface)
+            .border(1.dp, borderColor, DdShapes.Medium)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .weight(1f)
+                .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
+            textStyle = textStyle.copy(color = colors.ink),
+            cursorBrush = SolidColor(colors.accent),
+            singleLine = true,
+            keyboardOptions = keyboardOptions,
+            visualTransformation = visualTransformation,
+            interactionSource = interaction,
+            decorationBox = { innerTextField ->
+                Box {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            style = textStyle,
+                            color = colors.inkTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                },
-            )
-            if (trailing != null) {
-                Spacer(Modifier.width(DdSpacing.Md))
-                trailing()
-            }
+                    innerTextField()
+                }
+            },
+        )
+        if (trailing != null) {
+            Spacer(Modifier.width(DdSpacing.Md))
+            trailing()
         }
-        Spacer(Modifier.height(DdSpacing.Xs))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(underline))
     }
 }
 

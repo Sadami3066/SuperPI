@@ -541,6 +541,25 @@ class HistoryMapperTest {
         assertNotNull(messages[1].summary?.fromId)
     }
 
+    @Test
+    fun contextEditWithNullReplacementHidesTargetedToolResult() {
+        val targeted = toolResult("call-1", "huge log output", 2L)
+        val targetedId = (targeted as SessionMessageEntry).id
+        val messages = HistoryMapper.mapEntries(
+            listOf(
+                user("check", 1L),
+                assistant(content = listOf(toolCall("call-1", "bash")), stopReason = StopReason.ToolUse, timestamp = 2L),
+                targeted,
+                contextEdit(targetedId),
+                assistant(content = listOf(TextContent("done")), stopReason = StopReason.Stop, timestamp = 3L),
+            ),
+        )
+        assertEquals(2, messages.size)
+        val steps = messages[1].steps
+        assertEquals(2, steps.size)
+        assertNull((steps[0] as AssistantStep.Tool).trace.output)
+    }
+
     private fun nextId(): String = "entry-${entryId++}"
 
     private fun messageEntry(message: Message): SessionMessageEntry = SessionMessageEntry(
@@ -626,6 +645,25 @@ class HistoryMapperTest {
         display = true,
         details = null,
     )
+
+    @Test
+    fun skipsInternalWorkerUpdateUserMessagesWhilePreservingAssistantReply() {
+        val entries = listOf(
+            user("帮我看一下文件", 10L),
+            assistant(listOf(TextContent("已安排处理。")), timestamp = 20L),
+            user("  [Worker update] wrk-1 finished", 30L),
+            assistant(listOf(TextContent("结果已整理完毕。")), timestamp = 40L),
+        )
+
+        val mapped = HistoryMapper.mapEntries(entries)
+        assertEquals(3, mapped.size)
+        assertEquals(AssistantRole.USER, mapped[0].role)
+        assertEquals("帮我看一下文件", mapped[0].text)
+        assertEquals(AssistantRole.ASSISTANT, mapped[1].role)
+        assertEquals("已安排处理。", mapped[1].text)
+        assertEquals(AssistantRole.ASSISTANT, mapped[2].role)
+        assertEquals("结果已整理完毕。", mapped[2].text)
+    }
 
     private companion object {
         const val TIMESTAMP = "2026-10-29T10:00:00Z"

@@ -133,8 +133,8 @@ internal class DataGraph(private val deps: DataGraphDeps) {
         persistence = QuestionPersistence(File(deps.appContext.filesDir, "questions")),
     )
 
-    fun reloadCustomProviders() {
-        providerCatalog.setCustomProviders(customProviderStore.entries.value.map { entry -> entry.toProviderConfig() })
+    suspend fun reloadCustomProviders() {
+        providerCatalog.updateCustomProviders(customProviderStore.entries.value.map { entry -> entry.toProviderConfig() })
     }
 
 

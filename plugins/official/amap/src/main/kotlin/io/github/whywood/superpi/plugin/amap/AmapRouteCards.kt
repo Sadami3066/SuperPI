@@ -71,12 +71,19 @@ internal fun AmapRouteCard(host: PluginHost, state: ToolResultState) {
             return
         }
         AmapCardPhase.ERROR -> {
+            val invalidKey = amapInvalidKey(result)
             AmapMessageCard(
                 host = host,
                 icon = DdIcons.Target,
                 title = host.t("路线规划失败", "Route planning failed"),
                 message = result?.text.orEmpty().ifBlank { host.t("请稍后再试。", "Try again later.") },
                 danger = true,
+                actionLabel = if (invalidKey) host.t("去插件页", "Open plugin") else null,
+                onAction = if (invalidKey) {
+                    { host.openAmapPage() }
+                } else {
+                    null
+                },
             )
             return
         }

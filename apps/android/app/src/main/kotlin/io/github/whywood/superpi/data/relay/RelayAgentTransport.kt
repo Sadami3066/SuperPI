@@ -2,6 +2,7 @@ package io.github.whywood.superpi.data.relay
 
 import io.github.whywood.superpi.remote.RemoteAgentTransport
 import io.github.whywood.superpi.remote.RemoteDeviceSummary
+import io.github.whywood.superpi.remote.RemoteStreamClosed
 import io.github.whywood.superpi.remote.RemoteSyncEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharedFlow
@@ -17,6 +18,8 @@ class RelayAgentTransport(
     scope: CoroutineScope,
 ) : RemoteAgentTransport {
     override val remoteEvents: SharedFlow<RemoteEvent> = live.remoteEvents
+
+    override val streamClosures: SharedFlow<RemoteStreamClosed> = live.streamClosures
 
     override val onlineDevices: StateFlow<Set<String>> = live.remoteBots
         .map { bots -> bots.filter { it.online }.map { it.deviceId }.toSet() }

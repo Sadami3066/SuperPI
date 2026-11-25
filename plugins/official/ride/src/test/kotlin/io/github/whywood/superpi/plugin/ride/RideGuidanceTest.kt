@@ -78,6 +78,8 @@ class RideGuidanceTest {
         assertEquals(RideErrorKind.PARAM, rideErrorKind(-32010, null))
         assertEquals(RideErrorKind.PARAM, rideErrorKind(null, "参数错误"))
         assertEquals(RideErrorKind.AUTH, rideErrorKind(-32002, null))
+        assertEquals(RideErrorKind.AUTH, rideErrorKind(null, "还没有配置滴滴账号凭证"))
+        assertEquals(RideErrorKind.AUTH, rideErrorKind(null, "账号凭证无效或没有权限"))
         assertEquals(RideErrorKind.NETWORK, rideErrorKind(null, "网络连接失败"))
         assertEquals(RideErrorKind.UPSTREAM, rideErrorKind(-32040, "订单已经取消过了"))
     }
@@ -94,7 +96,7 @@ class RideGuidanceTest {
     fun noOrderAndParamGuidanceTellTheNextStep() {
         assertTrue(rideErrorGuidance(RideErrorKind.NO_ORDER, -32011, zh).contains("历史订单在滴滴 App"))
         assertTrue(rideErrorGuidance(RideErrorKind.PARAM, -32010, zh).contains("经纬度"))
-        assertTrue(rideErrorGuidance(RideErrorKind.AUTH, -32002, zh).contains("滴滴 Key"))
+        assertTrue(rideErrorGuidance(RideErrorKind.AUTH, -32002, zh).contains("重新连接滴滴账号"))
         assertTrue(rideErrorGuidance(RideErrorKind.UPSTREAM, -32040, zh).contains("已经取消"))
     }
 

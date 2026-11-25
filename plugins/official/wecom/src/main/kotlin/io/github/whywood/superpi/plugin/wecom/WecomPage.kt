@@ -89,7 +89,7 @@ internal data class WecomUpdateState(
 
 internal data class WecomPageState(
     val checked: Boolean = false,
-    val checking: Boolean = false,
+    val checking: Boolean = true,
     val operation: WecomOperation = WecomOperation.NONE,
     val cancelling: Boolean = false,
     val canCancel: Boolean = true,
@@ -127,9 +127,19 @@ internal class WecomPageController(
     private val updateChecker = CliUpdateCheckController(releaseSource, WecomReleases.THROTTLE_MS)
 
     private var operationJob: Job? = null
+    private var refreshing = false
 
     suspend fun refresh() {
-        if (state.checking) return
+        if (refreshing) return
+        refreshing = true
+        try {
+            refreshState()
+        } finally {
+            refreshing = false
+        }
+    }
+
+    private suspend fun refreshState() {
         state = state.copy(checking = true, error = null, failedOperation = null)
         try {
             if (!host.linux().available) {
@@ -158,9 +168,7 @@ internal class WecomPageController(
             }
             val statusResult = host.linux().exec(WecomCli.authStatusCommand(), timeoutMs = STATUS_TIMEOUT_MS)
             val authorized = WecomCli.parseAuthStatus(statusResult.stdout)
-                ?: throw IllegalStateException(
-                    host.text(WecomTexts.statusError, statusResult.stdout.takeLast(200).trim()),
-                )
+                ?: throw IllegalStateException(statusFailure(host, statusResult.stdout))
             val botId = if (authorized) {
                 val showResult = host.linux().exec(WecomCli.authShowCommand(), timeoutMs = STATUS_TIMEOUT_MS)
                 WecomCli.parseBotId(showResult.stdout)
@@ -183,9 +191,10 @@ internal class WecomPageController(
             state = state.copy(checking = false)
             throw error
         } catch (error: Exception) {
+            runCatching { host.logs().warn("wecom status refresh failed", error) }
             state = state.copy(
                 checking = false,
-                error = error.message ?: error.javaClass.simpleName,
+                error = host.text(WecomTexts.statusError),
                 failedOperation = null,
             )
         }
@@ -255,8 +264,9 @@ internal class WecomPageController(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                runCatching { host.logs().warn("wecom operation failed", error) }
                 state = state.copy(
-                    error = error.message ?: error.javaClass.simpleName,
+                    error = error.message ?: host.text(WecomTexts.errorUnknown),
                     failedOperation = operation,
                 )
             }
@@ -301,8 +311,15 @@ internal class WecomPageController(
 
     private suspend fun handleUpdateResult(result: CliUpdateCheck) {
         if (result.failed) {
-            val reason = releaseSource.failure ?: host.t("网络不可用", "Network unavailable")
-            failUpdate(host.text(WecomTexts.updateCheckFailed, reason))
+            releaseSource.failure?.let { detail ->
+                runCatching { host.logs().warn("wecom update check failed: $detail") }
+            }
+            failUpdate(
+                host.text(
+                    WecomTexts.updateCheckFailed,
+                    host.t("暂时无法获取更新信息，请稍后重试", "Couldn't fetch update info. Try again later."),
+                ),
+            )
             return
         }
         val release = result.release?.let { WecomReleases.fromCheck(it, System.currentTimeMillis()) }
@@ -462,9 +479,8 @@ internal class WecomPageController(
                 throw IllegalStateException(host.text(WecomTexts.errorTimeout))
             }
             if (exitCode != 0) {
-                throw IllegalStateException(
-                    host.text(WecomTexts.errorAuth, failureDetail(outputTail, exitCode ?: -1)),
-                )
+                host.logs().warn("wecom authorization failed: exit=${exitCode} output=${redactWecomAuthLog(outputTail.toString())}")
+                throw IllegalStateException(host.text(WecomTexts.errorAuth))
             }
             state = state.copy(stage = WecomTexts.stageFinishing, progress = 0.95f, canCancel = false)
             refresh()
@@ -473,9 +489,7 @@ internal class WecomPageController(
                 return
             }
             if (!state.authorized) {
-                throw IllegalStateException(
-                    host.text(WecomTexts.errorAuth, host.text(WecomTexts.notConnected)),
-                )
+                throw IllegalStateException(host.text(WecomTexts.errorAuth))
             }
             state = state.copy(progress = 1f)
             host.requestContributionsRefresh()
@@ -490,9 +504,8 @@ internal class WecomPageController(
         val result = host.linux().exec(WecomCli.logoutCommand(), timeoutMs = LOGOUT_TIMEOUT_MS)
         state = state.copy(progress = 0.8f, canCancel = false)
         if (result.exitCode != 0) {
-            throw IllegalStateException(
-                host.text(WecomTexts.errorLogout, result.stdout.takeLast(300).trim()),
-            )
+            host.logs().warn("wecom logout failed: ${result.stdout.takeLast(300).trim()}")
+            throw IllegalStateException(host.text(WecomTexts.errorLogout))
         }
         state = state.copy(authorized = false, botId = null, progress = 0.95f)
         refresh()
@@ -527,8 +540,10 @@ internal class WecomPageController(
         if (tail.length > ERROR_TAIL) tail.delete(0, tail.length - ERROR_TAIL)
     }
 
-    private fun failureDetail(tail: StringBuilder, exitCode: Int): String =
-        tail.toString().trim().ifEmpty { host.text(WecomTexts.errorExitCode, exitCode) }
+    private fun statusFailure(host: PluginHost, output: String): String {
+        runCatching { host.logs().warn("wecom status read failed: ${output.takeLast(300).trim()}") }
+        return host.text(WecomTexts.statusError)
+    }
 
     private companion object {
         const val QR_POLL_INTERVAL_MS = 400L
@@ -622,7 +637,7 @@ internal fun WecomPage(plugin: WecomPlugin, host: PluginHost) {
                 DdLoadingBlock(text = host.text(WecomTexts.checkingStatus))
             }
             when {
-                page.busy -> OperationCard(host = host, page = page, controller = controller)
+                page.operation != WecomOperation.NONE -> OperationCard(host = host, page = page, controller = controller)
                 page.checked && page.linuxAvailable -> ActionSection(
                     host = host,
                     page = page,
@@ -861,12 +876,14 @@ private fun ConnectCard(host: PluginHost, page: WecomPageState, controller: Weco
                     )
                 }
             }
-            DdText(
-                text = host.text(WecomTexts.scanHint),
-                style = DdType.bodySmall,
-                color = colors.inkSecondary,
-                textAlign = TextAlign.Center,
-            )
+            if (page.qrPath != null) {
+                DdText(
+                    text = host.text(WecomTexts.scanHint),
+                    style = DdType.bodySmall,
+                    color = colors.inkSecondary,
+                    textAlign = TextAlign.Center,
+                )
+            }
             DdTextAction(
                 text = host.text(WecomTexts.openLink),
                 onClick = { page.qrUrl?.let { host.ui().openUrl(it) } },
@@ -875,5 +892,16 @@ private fun ConnectCard(host: PluginHost, page: WecomPageState, controller: Weco
         }
     }
 }
+
+private fun redactWecomAuthLog(output: String): String {
+    val tail = output.trim().takeLast(300)
+    val withoutUrls = WECOM_AUTH_URL_REGEX.replace(tail, "[redacted-url]")
+    return WECOM_AUTH_SECRET_REGEX.replace(withoutUrls, "$1$2[redacted]")
+}
+
+private val WECOM_AUTH_URL_REGEX = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
+private val WECOM_AUTH_SECRET_REGEX = Regex(
+    "(?i)\\b(device_code|user_code|access_token|refresh_token|token|secret|code|state|key|uuid)\\b(\\s*[:=]\\s*)\"?[^\\s,\"'}]+\"?",
+)
 
 private val QrCodeSize = 220.dp

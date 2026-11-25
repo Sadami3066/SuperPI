@@ -387,6 +387,34 @@ class RootFileSystemTest {
         assertUnsupported { fs.openReadWrite(path) }
     }
 
+    @Test
+    fun nonRegularFilesReportFalseAndSymlinksBypassListMetadataCache() {
+        val dir = tempDir()
+        try {
+            fs.createDirectories(dir)
+            val target = dir / "regular.txt"
+            fs.write(target) { writeUtf8("data") }
+            val link = dir / "sym.txt"
+            val pipe = dir / "pipe.fifo"
+            assertTrue(ProcessBuilder("ln", "-s", target.toString(), link.toString()).start().waitFor() == 0)
+            assertTrue(ProcessBuilder("mkfifo", pipe.toString()).start().waitFor() == 0)
+
+            assertFalse(fs.metadata(pipe).isRegularFile)
+            assertFalse(fs.metadata(pipe).isDirectory)
+
+            val entries = fs.list(dir)
+            assertTrue(entries.contains(target))
+            assertTrue(entries.contains(link))
+            assertTrue(fs.metadata(target).isRegularFile)
+            val cachedOrStatLink = fs.metadataOrNull(link)
+            assertNotNull(cachedOrStatLink)
+            assertFalse(cachedOrStatLink!!.isRegularFile)
+            assertEquals(target.toString(), cachedOrStatLink.symlinkTarget.toString())
+        } finally {
+            cleanup(dir)
+        }
+    }
+
     private fun tempDir(): Path {
         val file = File.createTempFile("rootfs-test-", "")
         file.delete()

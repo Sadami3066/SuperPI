@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "generatedAt": "2026-11-19T14:48:00Z",
+  "generatedAt": "2026-11-25T12:01:55Z",
   "keyId": "ec256:db63256431bd66db",
   "entries": [
     {
@@ -31,11 +31,11 @@
         "en": "Search places, explore nearby spots, turn coordinates into addresses, plan driving, transit, walking and cycling routes, and check weather. Results appear as cards you can open in Amap Maps. The key stays on this device; navigation and rides happen inside Amap Maps."
       },
       "icon": "icons/amap.png?v=1186c72c5414",
-      "version": "1.5.3",
+      "version": "1.5.4",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/amap-1.5.3.ddp",
-        "sha256": "af73873381f16ba5bbb9f163448c82c539662eeda596d2ec32867481d217c94a",
-        "size": 1104633
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/amap-1.5.4.ddp",
+        "sha256": "4927cebd7dc9a323951fd50088c6fd871b0054b2e8a0261e0e706e6fa17cb2a3",
+        "size": 1107291
       },
       "plugin": {
         "apiLevel": 7,
@@ -43,7 +43,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "1.5.3"
+        "version": "1.5.4"
       },
       "category": "life"
     },
@@ -75,11 +75,11 @@
           "Meeting"
         ]
       },
-      "version": "2.7.1",
+      "version": "2.7.2",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/feishu-2.7.1.ddp",
-        "sha256": "ade98a305cde346278a8e53f0c63b2bb45e74a22be420ebba09967aeefc6f636",
-        "size": 992926
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/feishu-2.7.2.ddp",
+        "sha256": "9881a5f18e7d99ebf81bc356508c7335d4509f8be7bc11655df25f7e9f409fd5",
+        "size": 995084
       },
       "plugin": {
         "apiLevel": 7,
@@ -87,7 +87,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "2.7.1"
+        "version": "2.7.2"
       },
       "category": "office"
     },
@@ -119,11 +119,11 @@
         "en": "Connect RollingGo to filter hotels by budget, distance, tags and brand, view live rooms, create a pending booking, check orders and cancel a booking from chat. Results appear as cards; payment happens on the official RollingGo page. The plugin page manages installation, updates and sign-in, with no API key."
       },
       "icon": "icons/hotel.png?v=59c14774ffbd",
-      "version": "1.4.1",
+      "version": "1.4.2",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/hotel-1.4.1.ddp",
-        "sha256": "8419705f769c1f0fbbb3e5cdf8ef54583fbb5bde6ec1049884627769f5f0a8ce",
-        "size": 1465100
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/hotel-1.4.2.ddp",
+        "sha256": "d53f66546e030ea51b838385b6c53c954338441b2ff2a96cbd2f4ac4e7c4f1ca",
+        "size": 1465468
       },
       "plugin": {
         "apiLevel": 7,
@@ -131,7 +131,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "1.4.1"
+        "version": "1.4.2"
       },
       "category": "life"
     },
@@ -163,11 +163,11 @@
           "Efficiency"
         ]
       },
-      "version": "1.6.2",
+      "version": "1.6.3",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/mail-1.6.2.ddp",
-        "sha256": "50a62acb8da671234eb1210e37bcbc8a411065273d609ed3da6b9ddcc7682341",
-        "size": 1819332
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/mail-1.6.3.ddp",
+        "sha256": "9571584534842712cf7550fab25353329508b48dcf4a204356d269739726c57a",
+        "size": 1824230
       },
       "plugin": {
         "apiLevel": 7,
@@ -175,7 +175,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "1.6.2"
+        "version": "1.6.3"
       },
       "category": "office"
     },
@@ -207,11 +207,11 @@
           "Efficiency"
         ]
       },
-      "version": "2.7.4",
+      "version": "2.7.5",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/micloud-2.7.4.ddp",
-        "sha256": "ff17c29a61d48e259c1819a9d93428c81f1a97846ab114dc4f36887828291e14",
-        "size": 1128456
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/micloud-2.7.5.ddp",
+        "sha256": "00fcbb7a4dcd7e02ccfd159c13f68129e1f418d2b8a31c22d9c8cd715525423a",
+        "size": 1128197
       },
       "plugin": {
         "apiLevel": 7,
@@ -219,7 +219,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "2.7.4"
+        "version": "2.7.5"
       },
       "category": "office"
     },
@@ -293,11 +293,11 @@
         "en": "Search places, estimate ride options and fares, create Didi orders, and check orders and driver locations from chat; also generate Didi app or mini program booking links. The Didi key is stored encrypted on this device; payment happens in Didi and the plugin never pays automatically."
       },
       "icon": "icons/ride.png?v=d8c97028398c",
-      "version": "1.3.1",
+      "version": "1.3.2",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/ride-1.3.1.ddp",
-        "sha256": "ea1b828c20b169b0799a518569c3afbd14cc6d989e451a7a71cf01a101677127",
-        "size": 1015821
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/ride-1.3.2.ddp",
+        "sha256": "a1688c33c06ba023bf1a035a058a3225f0e8bda903cd0c81bf2f1a2bf89f7658",
+        "size": 1017385
       },
       "plugin": {
         "apiLevel": 7,
@@ -305,7 +305,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "1.3.1"
+        "version": "1.3.2"
       },
       "category": "life"
     },
@@ -335,11 +335,11 @@
           "Exams"
         ]
       },
-      "version": "2.7.3",
+      "version": "2.7.4",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/sysu-2.7.3.ddp",
-        "sha256": "c4b51c156a3f2fdb8811660550b4e5b2c609ca4640b4c34ff7c6848b98ffc119",
-        "size": 1023631
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/sysu-2.7.4.ddp",
+        "sha256": "f54e19d8d59cb50788716cce9bdefdf46c47e985ebf11f57d1c8628e1a92ba0a",
+        "size": 1026954
       },
       "plugin": {
         "apiLevel": 7,
@@ -347,7 +347,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "2.7.3",
+        "version": "2.7.4",
         "previews": [
           "https://raw.githubusercontent.com/Sadami3066/SuperPI-Market/master/previews/sysu-1.jpg",
           "https://raw.githubusercontent.com/Sadami3066/SuperPI-Market/master/previews/sysu-2.jpg"
@@ -411,8 +411,8 @@
         "en": "Export complete WeChat records for a date range and let the agent summarize"
       },
       "description": {
-        "zh": "在 Linux 运行环境里同步并解密微信本地数据库，按日期范围导出完整聊天记录，交给 Agent 阅读和总结。导出保留全部会话与消息，不做筛选或摘要；公众号、文件传输助手、服务通知和支付记录都会保留。需要把系统访问切到 Root。",
-        "en": "Sync and decrypt the local WeChat database in the Linux runtime, then export complete chat records for a date range for the agent to read and summarize. Every conversation and message is kept, with no filtering or summarizing; official accounts, file transfer, service notices and payments are included. Requires Root system access."
+        "zh": "在运行环境里同步并解密微信本地数据库，按日期范围导出完整聊天记录，交给 Agent 阅读和总结。导出保留全部会话与消息，不做筛选或摘要；公众号、文件传输助手、服务通知和支付记录都会保留。需要把系统访问切到 Root。",
+        "en": "Sync and decrypt the local WeChat database in the built-in runtime, then export complete chat records for a date range for the agent to read and summarize. Every conversation and message is kept, with no filtering or summarizing; official accounts, file transfer, service notices and payments are included. Requires Root system access."
       },
       "icon": "icons/wechat.png?v=885720bd6786",
       "tags": {
@@ -427,11 +427,11 @@
           "Efficiency"
         ]
       },
-      "version": "0.5.2",
+      "version": "0.5.3",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/wechat-0.5.2.ddp",
-        "sha256": "e7845ec35ef4946413774250028b59fd42e6c87eb7a322dcb079c78a4ffce339",
-        "size": 894544
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/wechat-0.5.3.ddp",
+        "sha256": "ddf6416b5c7a6798aa06e55920d0fff61cf55709f4f6b1f0f93320683c60eba8",
+        "size": 895469
       },
       "plugin": {
         "apiLevel": 7,
@@ -439,7 +439,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "root",
-        "version": "0.5.2"
+        "version": "0.5.3"
       },
       "category": "office"
     },
@@ -471,11 +471,11 @@
           "Email"
         ]
       },
-      "version": "2.6.2",
+      "version": "2.6.3",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/wecom-2.6.2.ddp",
-        "sha256": "fe05a8b49335063273f7cfdb53323e7fce2b2d2b0ec39fa8869a0451cf804051",
-        "size": 1029110
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/wecom-2.6.3.ddp",
+        "sha256": "6bc0c5262b292e9fc8798b508a3d7cee40bbf1e8fb1c0a2bec64fa4d72a96b06",
+        "size": 1031303
       },
       "plugin": {
         "apiLevel": 7,
@@ -483,7 +483,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "2.6.2"
+        "version": "2.6.3"
       },
       "category": "office"
     },
@@ -515,11 +515,11 @@
           "Services"
         ]
       },
-      "version": "1.0.18",
+      "version": "1.0.19",
       "artifact": {
-        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261121/zanao-1.0.18.ddp",
-        "sha256": "40fb2ebfef7e4daf62151c3ca9b75edfd2b42ff88e45c8065c9f2671709d9116",
-        "size": 1724396
+        "url": "https://github.com/Sadami3066/SuperPI-Market/releases/download/plugins-20261125/zanao-1.0.19.ddp",
+        "sha256": "0f81d64798954f4cb8919ba68d5ceec997b00324233b5cf5bbbebbe2e3025d78",
+        "size": 1730763
       },
       "plugin": {
         "apiLevel": 7,
@@ -527,7 +527,7 @@
         "publisherKeyId": "ed25519:cb08701a59d66606aa5cf461d1c865e3787dbf571ef53b2cd2c3d750a6b53ee2",
         "publisherName": "milous",
         "requiredAccess": "normal",
-        "version": "1.0.18"
+        "version": "1.0.19"
       },
       "category": "life"
     },

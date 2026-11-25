@@ -195,9 +195,12 @@ class RootfsBootstrap internal constructor(
             appendLine("PROFILE=${ChrootExecutor.shellQuote(ChrootExecutor.suPath(profileFile.absolutePath))}")
             appendLine("mkdir -p \"\$LINUX\"")
             appendLine("chmod 700 \"\$LINUX\" 2>/dev/null || true")
-            appendLine("if [ -f \"\$ROOT/.superpi-ready\" ] && [ -x \"\$ROOT/bin/bash\" ] && /system/bin/chroot \"\$ROOT\" /bin/bash -c 'echo SUPERPI_PROBE_OK' >/dev/null 2>&1; then")
+            appendLine("SHELL_BIN=\"\"")
+            appendLine("if [ -x \"\$ROOT/bin/bash\" ]; then SHELL_BIN=/bin/bash; elif [ -x \"\$ROOT/bin/sh\" ]; then SHELL_BIN=/bin/sh; fi")
+            appendLine("if [ -f \"\$ROOT/.superpi-ready\" ] && [ -n \"\$SHELL_BIN\" ] && /system/bin/chroot \"\$ROOT\" \"\$SHELL_BIN\" -c 'echo SUPERPI_PROBE_OK' >/dev/null 2>&1; then")
             appendLine("  cp \"\$RUN_SCRIPT\" \"\$LINUX/run.sh\" || { echo $PREPARE_COPY_FAILED; exit 12; }")
             appendLine("  chmod 700 \"\$LINUX/run.sh\"")
+            appendLine("  mkdir -p \"\$ROOT/etc/profile.d\" 2>/dev/null || true")
             appendLine("  cp \"\$PROFILE\" \"\$ROOT/etc/profile.d/superpi.sh\" 2>/dev/null || true")
             appendLine("  if [ -L \"\$ROOT/sdcard\" ]; then rm -f \"\$ROOT/sdcard\"; fi")
             appendLine("  [ -e \"\$ROOT/sdcard\" ] || ln -s /storage/emulated/0 \"\$ROOT/sdcard\"")
@@ -220,8 +223,10 @@ class RootfsBootstrap internal constructor(
             appendLine("chmod 700 \"\$LINUX/run.sh\"")
             appendLine("rm -rf \"\$ROOT\"")
             appendLine("mv \"\$TMP\" \"\$ROOT\"")
+            appendLine("SHELL_BIN=\"\"")
+            appendLine("if [ -x \"\$ROOT/bin/bash\" ]; then SHELL_BIN=/bin/bash; elif [ -x \"\$ROOT/bin/sh\" ]; then SHELL_BIN=/bin/sh; fi")
+            appendLine("[ -n \"\$SHELL_BIN\" ] && /system/bin/chroot \"\$ROOT\" \"\$SHELL_BIN\" -c 'echo SUPERPI_PROBE_OK' >/dev/null 2>&1 || { echo $PREPARE_PROBE_FAILED; exit 11; }")
             appendLine("touch \"\$ROOT/.superpi-ready\"")
-            appendLine("/system/bin/chroot \"\$ROOT\" /bin/bash -c 'echo SUPERPI_PROBE_OK' >/dev/null 2>&1 || { echo $PREPARE_PROBE_FAILED; exit 11; }")
             appendLine("echo $PREPARE_READY")
         }
 
@@ -284,7 +289,10 @@ class RootfsBootstrap internal constructor(
                 appendLine("  ln -sfn /system/usr/share/zoneinfo \"\$ROOT/usr/share/zoneinfo\"")
                 appendLine("  if [ -e \"\$ROOT/system/usr/share/zoneinfo/\$TZ_NAME\" ]; then ln -sfn \"/usr/share/zoneinfo/\$TZ_NAME\" \"\$ROOT/etc/localtime\"; fi")
                 appendLine("fi")
-                appendLine("exec /system/bin/env -i HOME=/root TERM=dumb LANG=C.UTF-8 TZ=\"\$TZ_NAME\" SUPERPI_CWD=\"\$1\" chroot \"\$ROOT\" /bin/bash -ls 2>&1")
+                appendLine("SHELL_BIN=\"\"")
+                appendLine("if [ -x \"\$ROOT/bin/bash\" ]; then SHELL_BIN=/bin/bash; elif [ -x \"\$ROOT/bin/sh\" ]; then SHELL_BIN=/bin/sh; fi")
+                appendLine("[ -n \"\$SHELL_BIN\" ] || { echo \"superpi root shell: no shell found in rootfs\" >&2; exit 91; }")
+                appendLine("exec /system/bin/env -i HOME=/root TERM=dumb LANG=C.UTF-8 TZ=\"\$TZ_NAME\" SUPERPI_CWD=\"\$1\" chroot \"\$ROOT\" \"\$SHELL_BIN\" -ls 2>&1")
                 appendLine("' superpi \"\$WS\" \"\" \"\$RESOLV\"")
             }
         }

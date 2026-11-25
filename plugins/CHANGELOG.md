@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-25
+
+- feat: the 2.0.3 plugin batch aligns the official and personal plugins on the SuperPI contract line (API level 7, `minHostVersion` 2.0.0; SDK release `plugin-api` 2.0.2 / `design` 1.1.0, while the modules still compile against `plugin-api` 2.0.1 / `design` 1.0.0): Feishu 2.7.2, WeCom 2.6.3, Xiaomi Cloud 2.7.5, Mail 1.6.3, DiDi Ride 1.3.2, RollingGo Hotels 1.4.2, Amap 1.5.4, 12306 1.4.0, Themes 1.0.1, MCP UI Demo 0.1.1; personal plugins SYSU 2.7.4, WeChat 0.5.3 and Zanao 1.0.19 [release] [versions]
+- feat: plugin copy and cards converge on no filler, readable output and one-tap retry; dead compatibility branches and internal jargon are removed, and every failure states what happened next [ui] [plugin]
+- feat: Feishu/WeCom install checks and log redaction, Xiaomi Cloud parameter hints, Amap/DiDi "open the official page" prompts on failure, SYSU per-site login state, and Zanao list incremental refresh [plugin]
+- feat: WeChat and Zanao gain log diagnostics, while the CLI plugins share the same update/install and error-mapping path [plugin] [tooling]
+- docs: plugin READMEs, quick start, manifest, runtime API and UI docs align on `plugin-api 2.0.2` / `design 1.1.0`, API level 7, `ui.apiLevel` 3, 39 capabilities and the current 36 host service accessors [docs]
+
 ## 2026-11-13
 
 - docs: the plugin development guide and both READMEs now cover `plugin-api 1.1.0` / `design 0.7.0` (an addition within API level 6, host 1.0.6+): 38 capabilities, the `permissions`/`components` manifest fields, 18 new host services (settings, device, clipboard, permissions, app management, elevated execution, intents and dynamic broadcasts, standalone windows and foreground services, background tasks, location, contacts, SMS, calendar, media, speech, web, host credentials, accessibility), notification listening and actions, system event hooks, page arguments and interactive pickers, design 0.7.0 components, and the 1.0.x → 1.1.0 migration notes [docs] [capabilities]

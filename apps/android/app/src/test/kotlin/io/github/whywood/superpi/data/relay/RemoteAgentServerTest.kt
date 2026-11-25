@@ -9,6 +9,7 @@ import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.CompactionOutcome
 import io.github.whywood.superpi.runtime.ConversationSummary
+import io.github.whywood.superpi.runtime.MemoryAccessScope
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ProviderDirectory
@@ -961,6 +962,8 @@ class RemoteAgentServerTest {
                             put("mcpServers", kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive("github")) })
                             put("screenTools", true)
                             put("miniappTools", true)
+                            put("memoryScope", "WORK_ONLY")
+                            put("memoryDispatch", true)
                         },
                     )
                 },
@@ -973,8 +976,15 @@ class RemoteAgentServerTest {
         assertEquals(setOf("github"), stored.mcpServers)
         assertEquals(true, stored.screenTools)
         assertEquals(true, stored.miniappTools)
+        assertEquals(MemoryAccessScope.WORK_ONLY, stored.memoryScope)
+        assertEquals(true, stored.memoryDispatch)
         assertEquals("capabilities_changed", syncEvents.last().kind)
         assertEquals(botId, syncEvents.last().botId)
+
+        server.handle(RelayServerFrame.Route("cg-2", "dev-2", "bot.capabilities.get", buildJsonObject { put("botId", botId) }))
+        val afterPolicy = sent.last().getValue("result").jsonObject.getValue("policy").jsonObject
+        assertEquals("WORK_ONLY", afterPolicy.getValue("memoryScope").jsonPrimitive.content)
+        assertEquals(true, afterPolicy.getValue("memoryDispatch").jsonPrimitive.boolean)
 
         server.handle(
             RelayServerFrame.Route(
@@ -1319,5 +1329,460 @@ class RemoteAgentServerTest {
         host.emitFor("s-restarted", RuntimeEvent.RunStarted("run-3", 500L, "no offline send"))
         runCurrent()
         assertFalse(sent.any { it["id"]?.jsonPrimitive?.content == "r-stale-resume" })
+    }
+
+    @Test
+    fun appliesOptionalModelOnNewSessionPromptValidatesProvidersAndReplaysLiveBufferedTools() = runTest {
+        val host = FakeAgentRuntime()
+        val ws = temp.newFolder("prompt-model-ws")
+        val created = host.createWorkspace("WorkBot", ws.absolutePath)
+        val botId = created.id
+        val catalog = object : ProviderDirectory {
+            override val summaries = listOf(ProviderSummary("openai", "OpenAI", 1, null, false, true))
+            override fun summary(providerId: String) = summaries.firstOrNull { it.id == providerId }
+            override fun models(providerId: String) = when (providerId) {
+                "openai" -> listOf(ModelOption("openai", "gpt-5", "GPT-5", listOf(ThinkingLevel.LOW, ThinkingLevel.HIGH)))
+                else -> emptyList()
+            }
+            override fun resolveConfig(config: ModelConfig) = config
+            override fun sdkModel(providerId: String, modelId: String): Model? = null
+            override fun modelReference(providerId: String, modelId: String) = "$providerId/$modelId"
+        }
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(
+            host = host,
+            bots = { listOf(RelayBot("home", "PI"), RelayBot(botId, "WorkBot")) },
+            send = { sent.add(it); true },
+            scope = backgroundScope,
+            providerCatalog = { catalog },
+            configuredProviderIds = { setOf("openai") },
+        )
+        runCurrent()
+
+        val initialNewCalls = host.newSessionCalls.size
+        server.handle(
+            RelayServerFrame.Route(
+                id = "p-bad-prov",
+                from = "dev-2",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("provider", "anthropic")
+                    put("modelId", "claude-sonnet")
+                    put("text", "hi")
+                },
+            ),
+        )
+        assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+        assertEquals(initialNewCalls, host.newSessionCalls.size)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "p-bad-model",
+                from = "dev-2",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("provider", "openai")
+                    put("modelId", "gpt-unknown")
+                    put("text", "hi")
+                },
+            ),
+        )
+        assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+        assertEquals(initialNewCalls, host.newSessionCalls.size)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "p-bad-think",
+                from = "dev-2",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("provider", "openai")
+                    put("modelId", "gpt-5")
+                    put("thinkingLevel", "galaxy")
+                    put("text", "hi")
+                },
+            ),
+        )
+        assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+        assertEquals(initialNewCalls, host.newSessionCalls.size)
+
+        host.onSend = { sid, _ ->
+            host.setBusy(setOf(sid))
+        }
+        server.handle(
+            RelayServerFrame.Route(
+                id = "p-ok",
+                from = "dev-2",
+                method = "bot.prompt",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("provider", "openai")
+                    put("modelId", "gpt-5")
+                    put("thinkingLevel", "high")
+                    put("text", "run tools")
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        val sid = sent.last().getValue("result").jsonObject.getValue("sessionId").jsonPrimitive.content
+        assertEquals("openai", host.sessionModels[sid]?.providerId)
+        assertEquals("gpt-5", host.sessionModels[sid]?.modelId)
+        assertEquals(ThinkingLevel.HIGH, host.sessionModels[sid]?.thinkingLevel)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "sm-unconf",
+                from = "dev-2",
+                method = "bot.set_model",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("sessionId", sid)
+                    put("provider", "anthropic")
+                    put("modelId", "claude-sonnet")
+                },
+            ),
+        )
+        assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "sm-busy",
+                from = "dev-2",
+                method = "bot.set_model",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("sessionId", sid)
+                    put("provider", "openai")
+                    put("modelId", "gpt-5")
+                },
+            ),
+        )
+        assertEquals("conflict", sent.last().getValue("code").jsonPrimitive.content)
+
+        host.emitFor(sid, RuntimeEvent.RunStarted("r-live", 10L, "run tools"))
+        host.emitFor(
+            sid,
+            RuntimeEvent.ToolStarted(
+                runId = "r-live",
+                callId = "call-live-1",
+                name = "bash",
+                arguments = mapOf("command" to "pwd"),
+                startedAt = 11L,
+            ),
+        )
+        host.emitFor(
+            sid,
+            RuntimeEvent.ToolFinished(
+                runId = "r-live",
+                callId = "call-live-1",
+                name = "bash",
+                result = "/home",
+                isError = false,
+                durationMs = 5L,
+            ),
+        )
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "hist-live",
+                from = "dev-2",
+                method = "bot.history",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("sessionId", sid)
+                },
+            ),
+        )
+        val histMessages = sent.last().getValue("result").jsonObject.getValue("messages").jsonArray
+        assertTrue(
+            histMessages.any { msg ->
+                val obj = msg.jsonObject
+                obj["role"]?.jsonPrimitive?.content == "assistant" &&
+                    obj["content"]?.jsonArray?.any { blk ->
+                        blk.jsonObject["type"]?.jsonPrimitive?.content == "toolCall" &&
+                            blk.jsonObject["id"]?.jsonPrimitive?.content == "call-live-1"
+                    } == true
+            },
+        )
+        assertTrue(
+            histMessages.any { msg ->
+                val obj = msg.jsonObject
+                obj["role"]?.jsonPrimitive?.content == "toolResult" &&
+                    obj["toolCallId"]?.jsonPrimitive?.content == "call-live-1" &&
+                    obj["toolName"]?.jsonPrimitive?.content == "bash"
+            },
+        )
+    }
+
+    @Test
+    fun validatesStrictMemoryScopeNullResetAndIntroSerialization() = runTest {
+        val ws = temp.newFolder("cap-strict-ws")
+        val policyFile = temp.newFile("strict-policies.json")
+        val policyStore = WorkspaceToolPolicyStore(policyFile)
+        val delegate = FakeAgentRuntime()
+        val created = delegate.createWorkspace("IntroBot", ws.absolutePath, intro = "Initial bio")
+        val botId = created.id
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(
+            host = delegate,
+            bots = { listOf(RelayBot("home", "PI"), RelayBot(botId, created.name, intro = created.intro.orEmpty())) },
+            send = { sent.add(it); true },
+            scope = backgroundScope,
+            workspaceToolPolicies = { policyStore },
+        )
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "c-create",
+                from = "dev-2",
+                method = "bot.create",
+                params = buildJsonObject {
+                    put("name", "Researcher")
+                    put("intro", "Finds papers")
+                },
+            ),
+        )
+        val createBot = sent.last().getValue("result").jsonObject.getValue("bot").jsonObject
+        assertEquals("Finds papers", createBot.getValue("intro").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "c-update",
+                from = "dev-2",
+                method = "bot.update",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("intro", "Updated bio")
+                },
+            ),
+        )
+        val updatedBot = sent.last().getValue("result").jsonObject.getValue("bot").jsonObject
+        assertEquals("Updated bio", updatedBot.getValue("intro").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "cap-bad-scope",
+                from = "dev-2",
+                method = "bot.capabilities.set",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("policy", buildJsonObject { put("memoryScope", "INVALID_SCOPE") })
+                },
+            ),
+        )
+        assertEquals("bad_request", sent.last().getValue("code").jsonPrimitive.content)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "cap-off",
+                from = "dev-2",
+                method = "bot.capabilities.set",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put(
+                        "policy",
+                        buildJsonObject {
+                            put("memoryScope", "OFF")
+                            put("memoryDispatch", true)
+                        },
+                    )
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        val offStored = policyStore.policyForCwd(ws.absolutePath)
+        assertEquals(MemoryAccessScope.OFF, offStored.memoryScope)
+        assertEquals(false, offStored.memoryDispatch)
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "cap-null-reset",
+                from = "dev-2",
+                method = "bot.capabilities.set",
+                params = buildJsonObject {
+                    put("botId", botId)
+                    put("policy", buildJsonObject { put("memoryScope", kotlinx.serialization.json.JsonNull) })
+                },
+            ),
+        )
+        assertEquals("route_ok", sent.last().getValue("type").jsonPrimitive.content)
+        assertEquals(null, policyStore.policyForCwd(ws.absolutePath).memoryScope)
+    }
+
+    @Test
+    fun historyPreservesLivePostToolTextAndResolvesCommittedToolName() = runTest {
+        val ws = temp.newFolder("hist-live-ws")
+        val sid = "s-live-post"
+        val host = FakeAgentRuntime().apply {
+            val bot = createWorkspace("LiveBot", ws.absolutePath)
+            sessions = listOf(ConversationSummary(sid, "Live", 10L, "/live.jsonl", ws.absolutePath))
+            histories = mapOf(
+                sid to listOf(
+                    AssistantMessage(id = 1L, role = AssistantRole.USER, text = "Check files"),
+                    AssistantMessage(
+                        id = 2L,
+                        role = AssistantRole.ASSISTANT,
+                        text = "",
+                        steps = listOf(
+                            AssistantStep.Text(10L, "Checking now."),
+                            AssistantStep.Tool(
+                                ToolTrace(
+                                    id = 11L,
+                                    name = "bash",
+                                    arguments = mapOf("command" to "ls"),
+                                    output = "ok",
+                                    status = ToolActivityStatus.DONE,
+                                    toolCallId = "call-done",
+                                ),
+                            ),
+                            AssistantStep.Tool(
+                                ToolTrace(
+                                    id = 12L,
+                                    name = "read",
+                                    arguments = mapOf("path" to "a.txt"),
+                                    status = ToolActivityStatus.RUNNING,
+                                    toolCallId = "call-pending-name",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            val sent = mutableListOf<JsonObject>()
+            val server = RemoteAgentServer(
+                host = this,
+                bots = { listOf(RelayBot(bot.id, bot.name)) },
+                send = { sent.add(it); true },
+                scope = backgroundScope,
+            )
+            runCurrent()
+
+            emitFor(sid, RuntimeEvent.RunStarted("r-1", 100L, "Checking"))
+            emitFor(sid, RuntimeEvent.ReasoningDelta("r-1", "Need final summary"))
+            emitFor(sid, RuntimeEvent.TextDelta("r-1", "After tool answer"))
+            emitFor(
+                sid,
+                RuntimeEvent.ToolFinished(
+                    runId = "r-1",
+                    callId = "call-pending-name",
+                    name = "",
+                    result = "file body",
+                    isError = false,
+                    durationMs = 4L,
+                ),
+            )
+            emitFor(sid, RuntimeEvent.TextDelta("r-1", "Final tail"))
+            runCurrent()
+
+            server.handle(
+                RelayServerFrame.Route(
+                    id = "hist-post-tool",
+                    from = "dev-2",
+                    method = "bot.history",
+                    params = buildJsonObject {
+                        put("botId", bot.id)
+                        put("sessionId", sid)
+                    },
+                ),
+            )
+            val messages = sent.last().getValue("result").jsonObject.getValue("messages").jsonArray
+            assertTrue(
+                messages.any { msg ->
+                    val obj = msg.jsonObject
+                    obj["role"]?.jsonPrimitive?.content == "toolResult" &&
+                        obj["toolCallId"]?.jsonPrimitive?.content == "call-pending-name" &&
+                        obj["toolName"]?.jsonPrimitive?.content == "read"
+                },
+            )
+            assertTrue(
+                messages.any { msg ->
+                    val obj = msg.jsonObject
+                    obj["role"]?.jsonPrimitive?.content == "assistant" &&
+                        obj["content"]?.jsonArray?.any { blk ->
+                            blk.jsonObject["type"]?.jsonPrimitive?.content == "text" &&
+                                blk.jsonObject["text"]?.jsonPrimitive?.content == "Final tail"
+                        } == true
+                },
+            )
+            assertTrue(
+                messages.any { msg ->
+                    val obj = msg.jsonObject
+                    obj["role"]?.jsonPrimitive?.content == "assistant" &&
+                        obj["content"]?.jsonArray?.any { blk ->
+                            blk.jsonObject["type"]?.jsonPrimitive?.content == "thinking" &&
+                                blk.jsonObject["thinking"]?.jsonPrimitive?.content == "Need final summary"
+                        } == true
+                },
+            )
+        }
+        assertTrue(host.sessions.isNotEmpty())
+    }
+
+    @Test
+    fun botHistoryCapsOversizedToolOutputAndDropsOldestMessagesWithinWireBudget() = runTest {
+        val ws = temp.newFolder("hist-budget-ws")
+        val sid = "s-budget"
+        val bigToolOut = "A".repeat(200_000)
+        val manyMessages = buildList {
+            for (i in 1..22) {
+                add(AssistantMessage(id = (i * 2 - 1).toLong(), role = AssistantRole.USER, text = "Q$i"))
+                add(
+                    AssistantMessage(
+                        id = (i * 2).toLong(),
+                        role = AssistantRole.ASSISTANT,
+                        text = "",
+                        steps = listOf(
+                            AssistantStep.Tool(
+                                ToolTrace(
+                                    id = (i * 100).toLong(),
+                                    name = "read",
+                                    arguments = mapOf("path" to "f$i.txt"),
+                                    output = bigToolOut,
+                                    status = ToolActivityStatus.DONE,
+                                    toolCallId = "tc-$i",
+                                ),
+                            ),
+                            AssistantStep.Text((i * 100 + 1).toLong(), if (i == 22) "Newest answer" else "Mid answer $i"),
+                        ),
+                    ),
+                )
+            }
+        }
+        FakeAgentRuntime().apply {
+            val bot = createWorkspace("BudgetBot", ws.absolutePath)
+            sessions = listOf(ConversationSummary(sid, "Budget", 10L, "/budget.jsonl", ws.absolutePath))
+            histories = mapOf(sid to manyMessages)
+            val sent = mutableListOf<JsonObject>()
+            val server = RemoteAgentServer(
+                host = this,
+                bots = { listOf(RelayBot(bot.id, bot.name)) },
+                send = { sent.add(it); true },
+                scope = backgroundScope,
+            )
+            runCurrent()
+
+            server.handle(
+                RelayServerFrame.Route(
+                    id = "hist-budget",
+                    from = "dev-2",
+                    method = "bot.history",
+                    params = buildJsonObject {
+                        put("botId", bot.id)
+                        put("sessionId", sid)
+                    },
+                ),
+            )
+            val result = sent.last().getValue("result").jsonObject
+            assertEquals(true, result.getValue("truncated").jsonPrimitive.boolean)
+            assertTrue(result.toString().length <= 2_700_000)
+            val serializedText = result.getValue("messages").toString()
+            assertTrue(serializedText.contains("Newest answer"))
+            assertTrue(serializedText.contains("...[truncated]"))
+        }
     }
 }

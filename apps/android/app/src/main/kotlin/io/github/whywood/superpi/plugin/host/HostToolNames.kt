@@ -1,33 +1,25 @@
 package io.github.whywood.superpi.plugin.host
 
 internal object HostToolNames {
-    private val engine = setOf("read", "write", "edit", "bash")
+    private val engine = setOf("read", "write", "edit", "bash", "ls", "grep", "find")
 
     private val hostTools = setOf(
         "ask_user_question",
         "present",
         "system_shell",
-        "get_goal",
-        "create_goal",
-        "update_goal",
-        "job_start",
-        "job_output",
-        "job_list",
-        "job_kill",
-        "timer_create",
-        "timer_list",
-        "timer_update",
-        "timer_delete",
+        "goal",
+        "job",
+        "timer",
         "miniapp_create",
         "miniapp_load",
         "miniapp_list",
         "miniapp_delete",
-        "miniapp_edit",
+        "miniapp_data",
         "todo_write",
         "memory_search",
-        "memory_save",
-        "memory_forget",
-        "memory_overview",
+        "memory_inspect_entity",
+        "memory_read_archive",
+        "memory_dispatch",
         "web_search",
         "web_fetch",
         "calendar",
@@ -43,6 +35,8 @@ internal object HostToolNames {
         "screen_wait",
         "screen_list_apps",
         "screen_launch",
+        "screen_batch",
+        "worker",
     )
 
     private val sdkTools = setOf(

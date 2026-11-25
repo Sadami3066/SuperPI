@@ -11,15 +11,21 @@ import io.github.whywood.superpi.sdk.ai.ToolResultMessage
 import io.github.whywood.superpi.sdk.ai.UserMessage
 import io.github.whywood.superpi.sdk.coding.session.BranchSummaryEntry
 import io.github.whywood.superpi.sdk.coding.session.CompactionEntry
+import io.github.whywood.superpi.sdk.coding.session.ContextEditEntry
 import io.github.whywood.superpi.sdk.coding.session.CustomMessageEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionMessageEntry
 import kotlinx.serialization.json.JsonObject
 
 private const val REMINDER_PREFIX = "[Reminder]"
+private const val WORKER_UPDATE_PREFIX = "[Worker update]"
 
 object HistoryMapper {
     fun mapEntries(entries: List<SessionEntry>): List<AssistantMessage> {
+        val omittedEntryIds = entries.asSequence()
+            .filterIsInstance<ContextEditEntry>()
+            .filter { it.replacement == null }
+            .mapTo(HashSet()) { it.targetId }
         val result = mutableListOf<AssistantMessage>()
         val traces = mutableMapOf<String, ToolTrace>()
         val toolOwners = mutableMapOf<String, Int>()
@@ -40,6 +46,7 @@ object HistoryMapper {
         }
 
         for ((entryIndex, entry) in entries.withIndex()) {
+            if (entry.id in omittedEntryIds) continue
             when (entry) {
                 is CustomMessageEntry -> {
                     if (!entry.display) continue
@@ -87,6 +94,9 @@ object HistoryMapper {
                     is UserMessage -> {
                         flush()
                         val text = message.content.asText()
+                        if (text.trimStart().startsWith(WORKER_UPDATE_PREFIX)) {
+                            continue
+                        }
                         if (text.isNotBlank()) {
                             val reminder = parseReminder(text)
                             if (reminder == null) {

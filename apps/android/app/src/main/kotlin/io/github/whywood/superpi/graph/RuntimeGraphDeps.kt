@@ -11,6 +11,7 @@ import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.data.PersonalizationStore
 import io.github.whywood.superpi.plugin.manager.PluginHostManager
+import io.github.whywood.superpi.runtime.BotBlueprint
 import io.github.whywood.superpi.runtime.GoalService
 import io.github.whywood.superpi.runtime.JobRegistry
 import io.github.whywood.superpi.runtime.MiniappStore
@@ -27,7 +28,7 @@ import io.github.whywood.superpi.runtime.TimerService
 import io.github.whywood.superpi.runtime.WorkspaceStore
 import io.github.whywood.superpi.runtime.host.HostAccessController
 import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
-import io.github.whywood.superpi.runtime.memory.MemoryDreamCoordinator
+import io.github.whywood.superpi.runtime.superagent.RemoteWorkerGateway
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 
@@ -70,5 +71,12 @@ internal class RuntimeGraphDeps(
     val postCustomMessage: suspend (String, String, String, String) -> Boolean,
     val screenTools: () -> List<CodingTool>,
     val virtualScreenTools: () -> List<CodingTool>,
-    val memoryDreamCoordinator: () -> MemoryDreamCoordinator? = { null },
+    val remoteWorkerGateway: () -> RemoteWorkerGateway? = { null },
+    val remoteBotsProvider: suspend () -> List<BotBlueprint> = { emptyList() },
+    val localDeviceNameProvider: () -> String = { "This phone" },
+    val onSuperSettingsChanged: () -> Unit = {},
+    val memoryDeviceIdProvider: () -> String? = { null },
+    val memoryConsolidationCoordinator: () -> io.github.whywood.superpi.runtime.memory.MemoryConsolidationCoordinator = {
+        io.github.whywood.superpi.runtime.memory.MemoryConsolidationCoordinator.NOOP
+    },
 )

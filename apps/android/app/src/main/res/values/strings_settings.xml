@@ -4,11 +4,10 @@
     <string name="usage_habits_mode_voice">语音模式</string>
     <string name="usage_habits_mode_camera">拍照模式</string>
     <string name="usage_habits_mode_none">无</string>
-    <string name="settings_group_model">模型与运行</string>
-    <string name="settings_group_appearance">外观与语言</string>
-    <string name="settings_group_conversation">交互与会话</string>
-    <string name="settings_group_notifications">通知与隐私</string>
-    <string name="settings_group_about">关于</string>
+    <string name="settings_group_ai">AI 与协作</string>
+    <string name="settings_group_system">系统与能力</string>
+    <string name="settings_group_appearance">外观与阅读</string>
+    <string name="settings_group_support">数据与支持</string>
     <string name="settings_title">设置</string>
     <string name="settings_back">返回</string>
 
@@ -24,7 +23,6 @@
     <string name="settings_language_system">跟随系统</string>
     <string name="settings_language_chinese">简体中文</string>
     <string name="settings_language_english">English</string>
-    <string name="settings_auto_collapse_process">过程自动折叠</string>
     <string name="settings_auto_retry">自动重试</string>
     <string name="settings_send_while_running">运行中发送</string>
     <string name="settings_send_while_running_steer">插话</string>
@@ -38,7 +36,7 @@
 
     <string name="settings_provider">服务商</string>
     <string name="settings_access">系统访问</string>
-    <string name="settings_android">安卓配置</string>
+    <string name="settings_android">系统入口与浮层</string>
     <string name="settings_theme">主题</string>
     <string name="settings_theme_appearance">外观模式</string>
     <string name="settings_theme_appearance_system">跟随系统</string>
@@ -120,6 +118,11 @@
     <string name="settings_provider_model_count">模型数量</string>
     <string name="settings_provider_base_url">接口地址</string>
     <string name="settings_provider_default_base_url">默认</string>
+    <string name="settings_provider_default_model_section">默认模型</string>
+    <string name="settings_provider_models_section">模型列表</string>
+    <string name="settings_provider_model_search">搜索模型…</string>
+    <string name="settings_provider_no_model_result">没有匹配的模型</string>
+    <string name="settings_provider_default_badge">默认</string>
 
     <string name="personalization_nickname_title">称呼</string>
     <string name="personalization_nickname_hint">你的名字</string>
@@ -204,7 +207,6 @@
     <string name="dev_package_pkgconf">编译时查找依赖库</string>
     <string name="settings_background_job_wake">后台任务完成时唤醒</string>
     <string name="settings_oauth_manual_hint">浏览器没有自动返回？也可以手动粘贴授权码或回调链接。</string>
-    <string name="settings_new_chat_model">新会话默认模型</string>
     <string name="settings_assistant">系统助手</string>
     <string name="assistant_settings_title">系统助手</string>
     <string name="assistant_settings_role">默认助手</string>

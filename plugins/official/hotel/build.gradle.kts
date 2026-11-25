@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.whywood.superpi.plugin.hotel"
         minSdk = 29
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.4.1"
+        versionCode = 23
+        versionName = "1.4.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

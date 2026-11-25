@@ -33,6 +33,7 @@ fun DdMenu(
     menuWidth: Dp = 160.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (!expanded) return
     val colors = superPiColors()
     DropdownMenu(
         expanded = expanded,

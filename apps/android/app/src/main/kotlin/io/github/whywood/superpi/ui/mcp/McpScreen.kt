@@ -463,6 +463,7 @@ private fun McpServerRow(
 private fun rowStatus(entry: McpServerEntry, result: McpProbeResult?): McpRowStatus {
     val colors = superPiColors()
     val styled = when {
+        !entry.config.enabled -> stringResource(R.string.mcp_status_disabled) to colors.inkTertiary
         entry.config !is McpServerConfig.Http -> stringResource(R.string.mcp_status_unsupported) to colors.inkTertiary
         result == null -> stringResource(R.string.mcp_status_untested) to colors.inkTertiary
         result.state == McpProbeState.OK -> stringResource(R.string.mcp_row_tools, result.toolCount) to colors.success

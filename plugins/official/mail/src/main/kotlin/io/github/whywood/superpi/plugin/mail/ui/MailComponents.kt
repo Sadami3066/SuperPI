@@ -106,7 +106,7 @@ internal fun MailNoticeBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 38.dp)
+                .heightIn(min = 44.dp)
                 .clip(RoundedCornerShape(DdRadius.Medium))
                 .background(colors.wash)
                 .then(if (clickable) Modifier.padding(horizontal = 12.dp) else Modifier.padding(horizontal = 12.dp, vertical = 8.dp)),

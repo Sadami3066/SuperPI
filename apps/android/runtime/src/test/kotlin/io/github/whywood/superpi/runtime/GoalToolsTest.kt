@@ -81,12 +81,13 @@ class GoalToolsTest {
     }
 
     @Test
-    fun toolsSeparateReadingCreationAndUpdates() {
-        assertEquals(listOf("get_goal", "create_goal", "update_goal"), tools.map { it.name })
-        val actions = tools.last().parameters.getValue("properties").jsonObject
+    fun toolsExposeConsolidatedGoalWithAllActions() {
+        assertEquals(listOf("goal"), tools.map { it.name })
+        val actions = tools.single().parameters.getValue("properties").jsonObject
             .getValue("action").jsonObject.getValue("enum").toString()
-        listOf("edit", "pause", "resume", "complete", "blocked").forEach { assertTrue(actions.contains(it)) }
-        assertTrue(!actions.contains("create"))
+        listOf("get", "create", "edit", "pause", "resume", "complete", "blocked").forEach {
+            assertTrue(actions.contains(it))
+        }
     }
 
     @Test
@@ -209,7 +210,7 @@ class GoalToolsTest {
         )
 
         assertTrue(error, error.contains("already active"))
-        assertTrue(error, error.contains("get_goal"))
+        assertTrue(error, error.contains("goal(action=get)"))
     }
 
     @Test
@@ -245,14 +246,21 @@ class GoalToolsTest {
         val timers = TimerService(io.github.whywood.superpi.runtime.testing.FakeAgentRuntime(), TimerStore(File(root, "timers")), backgroundScope)
         val jobs = JobRegistry(backgroundScope, notifier = { _, _, _ -> })
         val entries = tools + jobTools(binding, jobs) + timerTools(timers, binding)
-        assertEquals(11, entries.size)
+        assertEquals(listOf("goal", "job", "timer"), entries.map { it.name })
         for (entry in entries) {
             val wrong = entry.execute("bad", buildJsonObject { put("unrelated", true) }, null, null)
             assertEquals(entry.name, true, wrong.isError)
-            val required = entry.parameters["required"].toString()
-            if (required != "[]") assertEquals(entry.name, true, entry.execute("missing", buildJsonObject {}, null, null).isError)
+            assertEquals(entry.name, true, entry.execute("missing", buildJsonObject {}, null, null).isError)
         }
-        assertEquals(true, entries.first { it.name == "job_list" }.execute("old", buildJsonObject { put("action", "list") }, null, null).isError)
+        assertEquals(
+            true,
+            entries.first { it.name == "job" }.execute(
+                "old",
+                buildJsonObject { put("action", "list"); put("old", true) },
+                null,
+                null,
+            ).isError,
+        )
     }
 
     @Test
@@ -262,31 +270,32 @@ class GoalToolsTest {
         val store = TimerStore(File(root, "timers"))
         val service = TimerService(io.github.whywood.superpi.runtime.testing.FakeAgentRuntime(), store, backgroundScope)
         val entries = timerTools(service, SessionBinding().apply { attach(session) })
-        val create = entries.first { it.name == "timer_create" }
+        val timer = entries.first { it.name == "timer" }
         val args = buildJsonObject {
+            put("action", "create")
             put("prompt", "检查输出")
             put("frequency", "cron")
             put("cron", "0 9 * * *")
             put("enabled", false)
         }
-        val result = create.execute("create", args, null, null)
+        val result = timer.execute("create", args, null, null)
         assertNull(result.content.toString(), result.isError)
         assertEquals(false, store.list().single().enabled)
         val conflicting = JsonObject(args + ("date" to kotlinx.serialization.json.JsonPrimitive("2028-01-01")))
-        assertEquals(true, create.execute("conflict", conflicting, null, null).isError)
+        assertEquals(true, timer.execute("conflict", conflicting, null, null).isError)
         assertEquals(1, store.list().size)
         val invalidType = JsonObject(args + ("enabled" to kotlinx.serialization.json.JsonPrimitive("false")))
-        assertEquals(true, create.execute("type", invalidType, null, null).isError)
+        assertEquals(true, timer.execute("type", invalidType, null, null).isError)
     }
 
     @Test
     fun updatesRejectFractionalRevisionsAndIrrelevantActionFields() = runTest {
         val created = service.create(session.sessionId, "目标", 5)!!.goal
-        val update = tools.first { it.name == "update_goal" }
+        val goalTool = tools.first { it.name == "goal" }
         val fractional = buildJsonObject { put("goalId", created.id); put("revision", 1.5); put("action", "complete") }
-        assertEquals(true, update.execute("fractional", fractional, null, null).isError)
+        assertEquals(true, goalTool.execute("fractional", fractional, null, null).isError)
         val irrelevant = buildJsonObject { put("goalId", created.id); put("revision", created.revision); put("action", "pause"); put("objective", "不应改写") }
-        assertEquals(true, update.execute("irrelevant", irrelevant, null, null).isError)
+        assertEquals(true, goalTool.execute("irrelevant", irrelevant, null, null).isError)
         assertEquals(created, service.goals.value.getValue(session.sessionId).goal)
     }
 
@@ -294,21 +303,18 @@ class GoalToolsTest {
     fun backgroundJobReadAndKillRequireOwningConversation() = runTest {
         val registry = JobRegistry(backgroundScope, BackgroundCommandRunner { _, _ -> kotlinx.coroutines.awaitCancellation() }, notifier = { _, _, _ -> })
         val other = registry.start("other-session", "sleep", "other").id!!
-        val entries = jobTools(SessionBinding().apply { attach(session) }, registry)
-        for (name in listOf("job_output", "job_kill")) {
-            assertEquals(true, entries.first { it.name == name }.execute("other", buildJsonObject { put("jobId", other) }, null, null).isError)
+        val jobTool = jobTools(SessionBinding().apply { attach(session) }, registry).first { it.name == "job" }
+        for (action in listOf("output", "kill")) {
+            assertEquals(true, jobTool.execute("other", buildJsonObject { put("action", action); put("jobId", other) }, null, null).isError)
         }
         val own = registry.start(session.sessionId, "sleep", "own").id!!
-        assertEquals(true, entries.first { it.name == "job_output" }.execute("wait", buildJsonObject { put("jobId", own); put("timeoutMs", 50) }, null, null).isError)
+        assertEquals(true, jobTool.execute("wait", buildJsonObject { put("action", "output"); put("jobId", own); put("timeoutMs", 50) }, null, null).isError)
         registry.finishSession(session.sessionId)
         registry.finishSession("other-session")
     }
 
-    private suspend fun execute(args: JsonObject): io.github.whywood.superpi.sdk.agent.AgentToolResult {
-        val action = args.getValue("action").jsonPrimitive.content
-        val name = when (action) { "get" -> "get_goal"; "create" -> "create_goal"; else -> "update_goal" }
-        return tools.first { it.name == name }.execute("call", if (name == "update_goal") args else JsonObject(args - "action"), null, null)
-    }
+    private suspend fun execute(args: JsonObject): io.github.whywood.superpi.sdk.agent.AgentToolResult =
+        tools.first { it.name == "goal" }.execute("call", args, null, null)
 
     private suspend fun executeOk(args: JsonObject): JsonObject {
         val result = execute(args)

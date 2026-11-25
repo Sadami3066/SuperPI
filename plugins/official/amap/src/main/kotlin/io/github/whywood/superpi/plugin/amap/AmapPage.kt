@@ -133,7 +133,7 @@ internal fun AmapPage(host: PluginHost) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Card, vertical = DdSpacing.Sm),
             ) {
                 DdStatusRow(
-                    label = host.t("高德 Key", "Amap key"),
+                    label = host.t("高德地图服务", "Amap Maps service"),
                     value = if (configured) {
                         host.t("已配置", "Configured")
                     } else {
@@ -172,7 +172,7 @@ internal fun AmapPage(host: PluginHost) {
                             modifier = Modifier.testTag("amap_verify"),
                         )
                         DdTextAction(
-                            text = host.t("更换 Key", "Change key"),
+                            text = host.t("更换服务凭证", "Change credential"),
                             onClick = {
                                 keyInput = ""
                                 error = null
@@ -203,20 +203,20 @@ internal fun AmapPage(host: PluginHost) {
                     verticalArrangement = Arrangement.spacedBy(DdSpacing.Sm),
                 ) {
                     DdText(
-                        text = host.t("填写高德 Key", "Enter your Amap key"),
+                        text = host.t("填写服务凭证", "Enter your service credential"),
                         style = DdType.body,
                         color = colors.ink,
                     )
                     DdText(
                         text = host.t(
-                            "在高德开放平台创建应用后获取 Key。",
-                            "Create an app on the Amap open platform to get a key.",
+                            "在高德开放平台创建应用后获取服务凭证。",
+                            "Create an app on the Amap open platform to get a service credential.",
                         ),
                         style = DdType.micro,
                         color = colors.inkTertiary,
                     )
                     DdTextAction(
-                        text = host.t("去高德开放平台获取 Key", "Get a key on the Amap open platform"),
+                        text = host.t("去高德开放平台获取服务凭证", "Get a service credential on the Amap open platform"),
                         onClick = { runCatching { host.ui().openUrl(AMAP_KEY_DOC_URL) } },
                         modifier = Modifier.testTag("amap_key_doc"),
                     )
@@ -226,7 +226,7 @@ internal fun AmapPage(host: PluginHost) {
                             keyInput = it.trim()
                             error = null
                         },
-                        placeholder = host.t("粘贴高德 Key", "Paste your Amap key"),
+                        placeholder = host.t("粘贴服务凭证", "Paste your service credential"),
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Password,
@@ -264,8 +264,8 @@ internal fun AmapPage(host: PluginHost) {
                     }
                     DdText(
                         text = host.t(
-                            "Key 只保存在本机，用于向高德请求地图数据。",
-                            "The key stays on this device and is used only for Amap requests.",
+                            "服务凭证只保存在本机，用于连接高德地图。",
+                            "The service credential stays on this device and is used only to connect to Amap Maps.",
                         ),
                         style = DdType.micro,
                         color = colors.inkTertiary,

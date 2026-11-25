@@ -64,10 +64,16 @@ internal class ScreenPluginService(
     }
 
     override suspend fun observe(target: ScreenTarget, packageName: String?): ScreenObservation =
-        controllerFor(target).observe(GUI_MAX_DEPTH, GUI_MAX_NODES, packageName).snapshot.toPluginObservation()
+        controllerFor(target).let { controller ->
+            controller.withExecutionLock {
+                controller.observe(GUI_MAX_DEPTH, GUI_MAX_NODES, packageName).snapshot.toPluginObservation()
+            }
+        }
 
     override suspend fun screenshot(target: ScreenTarget): ScreenScreenshot {
-        val capture = controllerFor(target).screenshot()
+        val capture = controllerFor(target).let { controller ->
+            controller.withExecutionLock { controller.screenshot() }
+        }
         val directory = screenshotDir ?: throw IllegalStateException("screenshot directory is not available")
         directory.mkdirs()
         val file = File(directory, "plugin-${System.currentTimeMillis()}.png")
@@ -85,15 +91,19 @@ internal class ScreenPluginService(
     }
 
     override suspend fun launch(packageName: String, target: ScreenTarget): Boolean =
-        controllerFor(target).launch(packageName).ok
+        controllerFor(target).let { controller ->
+            controller.withExecutionLock { controller.launch(packageName).ok }
+        }
 
     override suspend fun tap(x: Int, y: Int, target: ScreenTarget): Boolean {
-        controllerFor(target).tap(GuiSelector.Point(x, y), TAP_DURATION_MS)
+        val controller = controllerFor(target)
+        controller.withExecutionLock { controller.tap(GuiSelector.Point(x, y), TAP_DURATION_MS) }
         return true
     }
 
     override suspend fun tapNode(ref: String, target: ScreenTarget): Boolean {
-        controllerFor(target).tap(GuiSelector.Ref(ref), TAP_DURATION_MS)
+        val controller = controllerFor(target)
+        controller.withExecutionLock { controller.tap(GuiSelector.Ref(ref), TAP_DURATION_MS) }
         return true
     }
 
@@ -105,29 +115,35 @@ internal class ScreenPluginService(
         durationMs: Int,
         target: ScreenTarget,
     ): Boolean {
-        controllerFor(target).swipe(fromX, fromY, toX, toY, durationMs.toLong())
+        val controller = controllerFor(target)
+        controller.withExecutionLock { controller.swipe(fromX, fromY, toX, toY, durationMs.toLong()) }
         return true
     }
 
     override suspend fun scroll(deltaY: Int, target: ScreenTarget): Boolean {
         val direction = if (deltaY >= 0) GuiScrollDirection.DOWN else GuiScrollDirection.UP
         val amount = (abs(deltaY) / SCROLL_PIXELS_PER_STEP).coerceIn(1, MAX_SCROLL_STEPS)
-        controllerFor(target).scroll(direction, amount, null)
+        val controller = controllerFor(target)
+        controller.withExecutionLock { controller.scroll(direction, amount, null) }
         return true
     }
 
     override suspend fun type(text: String, target: ScreenTarget): Boolean {
-        controllerFor(target).typeText(null, text)
+        val controller = controllerFor(target)
+        controller.withExecutionLock { controller.typeText(null, text) }
         return true
     }
 
     override suspend fun key(keyCode: String, target: ScreenTarget): Boolean {
-        controllerFor(target).key(keyCode)
+        val controller = controllerFor(target)
+        controller.withExecutionLock { controller.key(keyCode) }
         return true
     }
 
     override suspend fun waitFor(text: String, timeoutMs: Long, target: ScreenTarget): Boolean =
-        controllerFor(target).waitFor(null, text, null, timeoutMs).matched
+        controllerFor(target).let { controller ->
+            controller.withExecutionLock { controller.waitFor(null, text, null, timeoutMs).matched }
+        }
 
     private fun controllerFor(target: ScreenTarget): ScreenController = when (target) {
         ScreenTarget.VIRTUAL -> virtual ?: throw IllegalStateException("screen control is not available")

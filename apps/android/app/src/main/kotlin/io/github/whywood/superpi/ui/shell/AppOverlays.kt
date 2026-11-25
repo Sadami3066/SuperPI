@@ -19,6 +19,7 @@ import io.github.whywood.superpi.core.AppDependencies
 import io.github.whywood.superpi.data.AttachmentExport
 import io.github.whywood.superpi.data.BotAvatarStore
 import io.github.whywood.superpi.data.AttachmentRef
+import io.github.whywood.superpi.data.COMPACTION_TRIGGER_DEFAULT
 import io.github.whywood.superpi.data.exportShareIntent
 import io.github.whywood.superpi.plugin.host.services.PluginPageRequest
 import io.github.whywood.superpi.remote.RemoteAdminResult
@@ -117,6 +118,7 @@ internal fun AppOverlays(
     remoteTargets: List<RemoteHostTarget> = emptyList(),
     remoteBotNamesByDevice: Map<String, List<String>> = emptyMap(),
     drawerController: ShellDrawerController? = null,
+    compactionTriggerPercent: Int = COMPACTION_TRIGGER_DEFAULT,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -212,7 +214,11 @@ internal fun AppOverlays(
                     !state.compacting &&
                     state.messages.isNotEmpty() &&
                     activeWorkspace?.remote?.online != false
-                ShellOverlay.Usage(usage, canCompact = canCompact)
+                ShellOverlay.Usage(
+                    usage = usage,
+                    canCompact = canCompact,
+                    compactionTriggerPercent = compactionTriggerPercent,
+                )
             },
             jobs = ShellOverlay.Jobs(activeJobs, overlays.selectedJobId, overlays.jobOutput).takeIf { overlays.jobsSheetOpen },
         ),

@@ -134,6 +134,22 @@ class CardsTest {
     }
 
     @Test
+    fun deliverIsIdempotentForRichResults() {
+        val card = Cards.descriptor(null, "标题", null)
+        val initial = richResult(
+            listOf(textBlock("正文")),
+            buildJsonObject { put(Cards.KEY, card) },
+        )
+
+        val once = Cards.deliver("call-7", initial)
+        val twice = Cards.deliver("call-7", once)
+
+        assertEquals(once.blocks, twice.blocks)
+        val allText = twice.blocks.filterIsInstance<TextBlock>().joinToString("\n") { it.text }
+        assertEquals(1, Regex("present\\(").findAll(allText).count())
+    }
+
+    @Test
     fun displayFallsBackToGuidanceWithoutCard() {
         val result = textResult(
             "",

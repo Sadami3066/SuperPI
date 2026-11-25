@@ -2,7 +2,9 @@ import type { Server } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
+  ERROR_CODES,
   PROTOCOL_VERSION,
+  ProtocolError,
   RELAY_CAPABILITIES,
   RouteValidationError,
   UnknownRouteMethodError,
@@ -67,7 +69,9 @@ const ROUTE_TTL_MS = 30 * 60 * 1000
 const MAX_ROUTE_LIFETIME_MS = 2 * 60 * 60 * 1000
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000
-const MAX_WS_PAYLOAD_BYTES = 4 * 1024 * 1024
+const MAX_WS_PAYLOAD_BYTES = 8 * 1024 * 1024
+const MAX_ROUTE_RESULT_BYTES = 4 * 1024 * 1024
+const ALLOWED_ERROR_CODES = new Set<string>(ERROR_CODES)
 const MAX_PENDING_SOCKETS = 256
 const MAX_PENDING_PER_DEVICE = 8
 const MAX_PENDING_ROUTES = 2048
@@ -97,7 +101,7 @@ export function createRealtimeHub(
     const idleCutoff = current - ROUTE_TTL_MS
     const hardCutoff = current - MAX_ROUTE_LIFETIME_MS
     for (const [id, pending] of pendingRoutes) {
-      if (pending.method === 'bot.resume' && pending.accepted) {
+      if ((pending.method === 'bot.resume' || pending.method === 'worker.resume') && pending.accepted) {
         const requesterAlive = connections.get(pending.from)?.state === 'active'
         const targetAlive = connections.get(pending.to)?.state === 'active'
         if (requesterAlive && targetAlive) continue
@@ -277,11 +281,13 @@ export function createRealtimeHub(
     const sessionKey =
       frame.method === 'bot.resume'
         ? `${typeof frame.params.botId === 'string' ? frame.params.botId : ''}:${typeof frame.params.sessionId === 'string' ? frame.params.sessionId : ''}`
-        : undefined
+        : frame.method === 'worker.resume'
+          ? `worker:${typeof frame.params.botId === 'string' ? frame.params.botId : ''}:${typeof frame.params.workerId === 'string' ? frame.params.workerId : ''}`
+          : undefined
     if (sessionKey !== undefined) {
       const resumeEntries: Array<[string, PendingRoute]> = []
       for (const [existingId, existingRoute] of pendingRoutes) {
-        if (existingRoute.from !== connection.deviceId || existingRoute.method !== 'bot.resume') continue
+        if (existingRoute.from !== connection.deviceId || existingRoute.method !== frame.method) continue
         if (existingRoute.to === frame.to && existingRoute.sessionKey === sessionKey) {
           pendingRoutes.delete(existingId)
         } else {
@@ -333,7 +339,12 @@ export function createRealtimeHub(
       return
     }
     const streaming =
-      frame.method === 'bot.prompt' || frame.method === 'bot.resume' || frame.method === 'session.retry'
+      frame.method === 'bot.prompt' ||
+      frame.method === 'bot.resume' ||
+      frame.method === 'session.retry' ||
+      frame.method === 'worker.start' ||
+      frame.method === 'worker.continue' ||
+      frame.method === 'worker.resume'
     const current = now()
     pendingRoutes.set(frame.id, {
       from: connection.deviceId,
@@ -392,7 +403,7 @@ export function createRealtimeHub(
       }
       if (requester) send(requester, frame as unknown as ServerFrame)
       const event = (frame as { event?: { type?: string } }).event
-      if (event?.type === 'agent_settled' && pending.method !== 'bot.resume') {
+      if (event?.type === 'agent_settled' && pending.method !== 'bot.resume' && pending.method !== 'worker.resume') {
         pendingRoutes.delete(frame.id)
       }
       return
@@ -407,17 +418,34 @@ export function createRealtimeHub(
         })
         return
       }
+      const outFrame: ServerFrame = { type: 'route_ok', id: frame.id, result: frame.result }
+      const encoded = encodeFrame(outFrame)
+      if (Buffer.byteLength(encoded, 'utf8') > MAX_ROUTE_RESULT_BYTES) {
+        pendingRoutes.delete(frame.id)
+        if (requester) {
+          send(requester, {
+            type: 'route_error',
+            id: frame.id,
+            code: 'payload_too_large',
+            message: 'route result exceeds maximum size',
+          })
+        }
+        return
+      }
       pending.accepted = true
-      if (requester) send(requester, { type: 'route_ok', id: frame.id, result: frame.result })
+      if (requester && requester.state !== 'closed' && requester.socket.readyState === WebSocket.OPEN) {
+        requester.socket.send(encoded)
+      }
       if (!pending.streaming) pendingRoutes.delete(frame.id)
       return
     }
     pendingRoutes.delete(frame.id)
     if (!requester) return
+    const code = ALLOWED_ERROR_CODES.has(String(frame.code)) ? (frame.code as RouteErrorFrame['code']) : 'internal'
     send(requester, {
       type: 'route_error',
       id: frame.id,
-      code: frame.code as RouteErrorFrame['code'],
+      code,
       message: String(frame.message),
     })
   }
@@ -507,6 +535,33 @@ export function createRealtimeHub(
             message: error.message,
           })
           return
+        }
+        if (error instanceof ProtocolError && connections.get(deviceId) === connection) {
+          let rawObj: unknown = null
+          try {
+            rawObj = JSON.parse(raw.toString())
+          } catch {}
+          if (
+            rawObj !== null &&
+            typeof rawObj === 'object' &&
+            !Array.isArray(rawObj) &&
+            (rawObj as Record<string, unknown>).type === 'route_error' &&
+            typeof (rawObj as Record<string, unknown>).id === 'string' &&
+            (rawObj as Record<string, unknown>).id !== '' &&
+            typeof (rawObj as Record<string, unknown>).message === 'string'
+          ) {
+            const rec = rawObj as Record<string, unknown>
+            const normalizedCode = ALLOWED_ERROR_CODES.has(String(rec.code))
+              ? (rec.code as RouteErrorFrame['code'])
+              : 'internal'
+            forwardRouteResult(connection, {
+              type: 'route_error',
+              id: rec.id as string,
+              code: normalizedCode,
+              message: (rec.message as string).slice(0, 2048),
+            })
+            return
+          }
         }
         connection.state = 'closed'
         safeClose(socket, 1008, 'protocol error')

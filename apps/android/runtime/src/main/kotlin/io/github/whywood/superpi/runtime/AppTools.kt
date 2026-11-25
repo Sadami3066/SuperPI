@@ -16,9 +16,12 @@ fun appTools(
     context: AppToolContext,
     binding: SessionBinding,
     session: () -> AgentSession? = { null },
+    includeDeferredTools: Boolean = true,
 ): List<CodingTool> = buildList {
     add(askUserQuestionTool(context.questionCenter, binding))
     addAll(context.pluginTools(binding))
-    addAll(deferredTools(context, binding, session))
+    if (includeDeferredTools) {
+        addAll(deferredTools(context, binding, session))
+    }
     context.extraToolFactories.forEach { factory -> addAll(factory(cwd, binding)) }
 }

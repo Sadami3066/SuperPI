@@ -1,8 +1,15 @@
 package io.github.whywood.superpi.ui.chat
 
+import io.github.whywood.superpi.runtime.AssistantMessage
+import io.github.whywood.superpi.runtime.AssistantRole
+import io.github.whywood.superpi.runtime.AssistantStep
+import io.github.whywood.superpi.runtime.ToolTrace
 import io.github.whywood.superpi.ui.common.chat.formatElapsed
+import io.github.whywood.superpi.ui.common.chat.processDurationMs
+import io.github.whywood.superpi.ui.common.chat.processDurationSeconds
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DurationFormatTest {
@@ -50,5 +57,61 @@ class DurationFormatTest {
     fun negativeClampsToZero() {
         assertEquals("0s", en(-5))
         assertEquals("0 秒", zh(-5))
+    }
+
+    @Test
+    fun processDurationFloorsSubSecondToOneSecondAndComputesTotalWhenFollowedByText() {
+        assertEquals(1L, processDurationSeconds(0L))
+        assertEquals(1L, processDurationSeconds(350L))
+        assertEquals(5L, processDurationSeconds(5999L))
+
+        val completed = AssistantMessage(
+            id = 1L,
+            role = AssistantRole.ASSISTANT,
+            text = "",
+            startedAt = 1_000L,
+            finishedAt = 1_250L,
+            streaming = false,
+        )
+        assertEquals(
+            250L,
+            processDurationMs(
+                steps = listOf(AssistantStep.Reasoning(id = 1L, text = "ok")),
+                message = completed,
+                running = false,
+                showTotalDuration = true,
+            ),
+        )
+
+        val multiBlockSteps = listOf(
+            AssistantStep.Tool(TraceTool.trace(1L, durationMs = 200L)),
+            AssistantStep.Tool(TraceTool.trace(2L, durationMs = 300L)),
+        )
+        assertEquals(
+            500L,
+            processDurationMs(
+                steps = multiBlockSteps,
+                message = completed,
+                running = false,
+                showTotalDuration = false,
+            ),
+        )
+        assertNull(
+            processDurationMs(
+                steps = listOf(AssistantStep.Reasoning(id = 2L, text = "only thought")),
+                message = completed,
+                running = false,
+                showTotalDuration = false,
+            ),
+        )
+    }
+
+    private object TraceTool {
+        fun trace(id: Long, durationMs: Long?): ToolTrace = ToolTrace(
+            id = id,
+            name = "read",
+            arguments = emptyMap(),
+            durationMs = durationMs,
+        )
     }
 }

@@ -53,6 +53,7 @@ import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdText
+import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
@@ -61,8 +62,22 @@ import io.github.whywood.superpi.plugin.api.PluginToolResult
 import io.github.whywood.superpi.plugin.api.ToolResultState
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 internal enum class AmapCardPhase { LOADING, ERROR, EMPTY, READY }
+
+internal const val AMAP_PAGE_ID = "main"
+
+internal fun PluginHost.openAmapPage() {
+    runCatching { ui().openPage(AMAP_PAGE_ID) }.onFailure {
+        runCatching { ui().toast(t("无法打开高德页面", "Couldn't open the Amap page")) }
+    }
+}
+internal const val AMAP_FAILURE_KEY = "failure"
+
+internal fun amapInvalidKey(result: PluginToolResult?): Boolean =
+    (result?.details?.get(AMAP_FAILURE_KEY) as? JsonPrimitive)?.contentOrNull == AmapFailure.INVALID_KEY.name.lowercase()
 
 internal fun placesCardPhase(result: PluginToolResult?): AmapCardPhase = when {
     result == null -> AmapCardPhase.LOADING
@@ -105,12 +120,19 @@ internal fun AmapPlacesCard(host: PluginHost, state: ToolResultState, around: Bo
             return
         }
         AmapCardPhase.ERROR -> {
+            val invalidKey = amapInvalidKey(result)
             AmapMessageCard(
                 host = host,
                 icon = DdIcons.Search,
                 title = if (around) host.t("附近查询失败", "Nearby search failed") else host.t("地点查询失败", "Place search failed"),
                 message = result?.text.orEmpty().ifBlank { host.t("请稍后再试。", "Try again later.") },
                 danger = true,
+                actionLabel = if (invalidKey) host.t("去插件页", "Open plugin") else null,
+                onAction = if (invalidKey) {
+                    { host.openAmapPage() }
+                } else {
+                    null
+                },
             )
             return
         }
@@ -364,12 +386,19 @@ internal fun AmapRegeoCard(host: PluginHost, state: ToolResultState) {
             return
         }
         AmapCardPhase.ERROR -> {
+            val invalidKey = amapInvalidKey(result)
             AmapMessageCard(
                 host = host,
                 icon = DdIcons.Pin,
                 title = host.t("位置查询失败", "Location lookup failed"),
                 message = result?.text.orEmpty().ifBlank { host.t("请稍后再试。", "Try again later.") },
                 danger = true,
+                actionLabel = if (invalidKey) host.t("去插件页", "Open plugin") else null,
+                onAction = if (invalidKey) {
+                    { host.openAmapPage() }
+                } else {
+                    null
+                },
             )
             return
         }
@@ -547,6 +576,8 @@ internal fun AmapMessageCard(
     title: String,
     message: String,
     danger: Boolean,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     val colors = superPiColors()
     DdGroupCard(modifier = Modifier.amapCardEntrance()) {
@@ -573,6 +604,9 @@ internal fun AmapMessageCard(
                 maxLines = 8,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (actionLabel != null && onAction != null) {
+                DdTextAction(text = actionLabel, onClick = onAction, modifier = Modifier.heightIn(min = 44.dp))
+            }
         }
     }
 }

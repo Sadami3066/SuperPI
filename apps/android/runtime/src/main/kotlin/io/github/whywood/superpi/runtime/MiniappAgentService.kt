@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.runtime
 
 import io.github.whywood.superpi.sdk.agent.asAssistantMessage
+import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
 import io.github.whywood.superpi.sdk.ai.StopReason
 import io.github.whywood.superpi.sdk.agent.AgentEvent
 import io.github.whywood.superpi.sdk.ai.TextDeltaEvent
@@ -35,7 +36,7 @@ import okio.FileSystem
 import okio.Path.Companion.toPath
 
 internal val ONE_SHOT_UNAVAILABLE_TOOLS = setOf(
-    "get_goal", "create_goal", "update_goal", "timer_create", "timer_list", "timer_update", "timer_delete", "present",
+    "goal", "timer", "present",
 )
 
 class MiniappAgentService(
@@ -59,6 +60,7 @@ class MiniappAgentService(
     private val shellExecutorFor: suspend (File) -> ShellExecutor? = { null },
     private val backgroundRunnerFactory: ((String?) -> BackgroundCommandRunner)? = null,
     private val hooksFactory: (() -> RuntimeHooks)? = null,
+    private val hostEnvironment: HostEnvironmentProvider? = null,
 ) : MiniappAgentGateway {
     override suspend fun models(): List<MiniappAgentModel> =
         buildMiniappAgentModels(providers, configuredProviders())
@@ -169,7 +171,6 @@ class MiniappAgentService(
                     }
                 }
                 created.mcp.reload(configs)
-                created.agent.state.tools = created.agent.state.tools.filter { it.name in selectedTools }.toMutableList()
             }
             val turns = AtomicInteger(0)
             unsubscribe = created.subscribe { sessionEvent ->
@@ -275,6 +276,7 @@ class MiniappAgentService(
         credentials = credentials,
         transport = transport,
         shellExecutor = shellExecutorFor(workspace),
+        hostEnvironment = hostEnvironment,
         providers = providers,
         personalization = personalization,
         sharedStorage = sharedStorage,
@@ -288,6 +290,7 @@ class MiniappAgentService(
         toolFs = FileSystem.SYSTEM,
         supportsChatDelivery = false,
         hooks = hooks,
+        promptAppDataDir = agentDir.parentFile?.parentFile ?: agentDir.parentFile ?: agentDir,
     )
 
     private suspend fun discoverSkills(cwd: File): List<Skill> = runCatching {

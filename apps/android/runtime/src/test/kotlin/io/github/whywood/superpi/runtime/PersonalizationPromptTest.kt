@@ -160,7 +160,8 @@ class PersonalizationPromptTest {
         )
 
         assertEquals("custom preamble", result.getValue("preamble"))
-        assertEquals("<rules>\n- custom rule\n</rules>", result.getValue("rules"))
+        assertEquals("<plugin_rules>\n- custom rule\n</plugin_rules>", result.getValue("plugin_rules"))
+        assertFalse(result.containsKey("rules"))
         assertEquals("<plugins>\nplugin body\n</plugins>", result.getValue("plugins"))
         assertTrue(result.getValue("environment").startsWith("<environment>"))
     }
@@ -177,6 +178,7 @@ class PersonalizationPromptTest {
 
         assertTrue(result.getValue("preamble").contains("You are PI"))
         assertFalse(result.getValue("preamble").contains("SuperPI"))
+        assertFalse(result.containsKey("plugin_rules"))
         assertFalse(result.containsKey("rules"))
         assertFalse(result.containsKey("plugins"))
     }

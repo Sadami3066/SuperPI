@@ -130,4 +130,7 @@
     <string name="market_plugin_api_retired">Plugin API %1$d is no longer supported; wait for a plugin update</string>
     <string name="market_plugin_requires_newer_app">Update PI to install this plugin</string>
     <string name="market_plugin_requires_host_version">PI %1$s or newer is required</string>
+    <string name="market_page_prev">Previous</string>
+    <string name="market_page_next">Next</string>
+    <string name="market_page_indicator">%1$d / %2$d</string>
 </resources>

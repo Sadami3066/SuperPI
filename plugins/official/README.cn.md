@@ -8,31 +8,32 @@ Super PI Agent 官方维护的外部插件源码仓库：把飞书、企业微�
 
 Super PI Agent 是一个运行在 Android 上的个人智能体（[宿主工程](../../apps/android)）。插件用 Kotlin 实现宿主契约 `plugin-api`，在 App 进程内加载，通过工具、技能、提示词和自绘页面扩展助手能力；插件只从 `.ddp` 安装，每个插件是一个独立的 Android application 模块。
 
-本仓库包含九个官方插件，发布者为 `milous`：
+本仓库包含九个市场上架插件，另附 `mcpui-demo` 开发示例，发布者为 `milous`：
 
 | 模块 | 插件 | 版本 | 作用 | 适合 |
 |---|---|---|---|---|
-| `feishu` | 飞书 | 2.7.1 | 通过官方 `lark-cli` 读写消息、日历、云文档、云空间、邮箱与任务 | 日常使用飞书的办公用户 |
-| `wecom` | 企业微信 | 2.6.2 | 通过官方 `wecom-cli` 操作消息、邮件、文档、日程与待办 | 使用企业微信的团队用户 |
-| `micloud` | 小米云服务 | 2.7.4 | 登录小米账号后读取笔记、待办、短信、联系人、相册与录音，笔记/待办可写；按真实返回解析 | 使用小米云服务的用户 |
-| `mail` | 邮箱 | 1.6.2 | 用授权码接入 IMAP/SMTP 邮箱：收件箱、会话、写信（含附件）、账户管理，聊天内邮件卡片，并让 Agent 搜信、读信、归档、起草与发送 | 使用 QQ、163、Gmail、iCloud 等标准 IMAP/SMTP 邮箱的用户 |
-| `ride` | 滴滴打车 | 1.3.1 | 滴滴车型预估、创建订单、订单与司机位置；支付在滴滴内完成 | 需要打车、比价或查司机状态的通勤/出行用户 |
-| `hotel` | RollingGo酒店 | 1.4.1 | 搜索并筛选 RollingGo 酒店、查看房型与订单、创建待支付订单、取消订单；支付在 RollingGo 完成 | 需要 AI 帮忙找酒店、查房型、预订或取消的用户 |
-| `amap` | 高德地图 | 1.5.3 | 高德 MCP：地点搜索、周边、坐标转地址、驾车/公交/步行/骑行路线与天气，卡片展示；需要高德 Key | 通勤、出行规划与查地点的用户 |
+| `feishu` | 飞书 | 2.7.2 | 通过官方 `lark-cli` 读写消息、日历、云文档、云空间、邮箱与任务 | 日常使用飞书的办公用户 |
+| `wecom` | 企业微信 | 2.6.3 | 通过官方 `wecom-cli` 操作消息、邮件、文档、日程与待办 | 使用企业微信的团队用户 |
+| `micloud` | 小米云服务 | 2.7.5 | 登录小米账号后读取笔记、待办、短信、联系人、相册与录音，笔记/待办可写；按真实返回解析 | 使用小米云服务的用户 |
+| `mail` | 邮箱 | 1.6.3 | 用授权码接入 IMAP/SMTP 邮箱：收件箱、会话、写信（含附件）、账户管理，聊天内邮件卡片，并让 Agent 搜信、读信、归档、起草与发送 | 使用 QQ、163、Gmail、iCloud 等标准 IMAP/SMTP 邮箱的用户 |
+| `ride` | 滴滴打车 | 1.3.2 | 滴滴车型预估、创建订单、订单与司机位置；支付在滴滴内完成 | 需要打车、比价或查司机状态的通勤/出行用户 |
+| `hotel` | RollingGo酒店 | 1.4.2 | 搜索并筛选 RollingGo 酒店、查看房型与订单、创建待支付订单、取消订单；支付在 RollingGo 完成 | 需要 AI 帮忙找酒店、查房型、预订或取消的用户 |
+| `amap` | 高德地图 | 1.5.4 | 高德 MCP：地点搜索、周边、坐标转地址、驾车/公交/步行/骑行路线与天气，卡片展示；需要高德 Key | 通勤、出行规划与查地点的用户 |
 | `rail` | 12306铁路 | 1.4.0 | 查询 12306 车次、时刻与余票，选好车次后去 12306 完成预订 | 坐高铁/火车出行，先看车次和余票的用户 |
 | `themes` | 主题包 | 1.0.1 | 给宿主提供 8 套浅色/深色主题配色，在设置的外观里一键切换 | 想换个界面气质的用户 |
+| `mcpui-demo` | MCP UI 示例 | 0.1.1 | 演示把 MCP 工具结果渲染成插件卡片的开发示例，不上市场 | 学习卡片/UI 管线的插件作者 |
 
 `cli-common/` 是仓库内部共享模块（CLI 更新/安装核心与文本、JSON 工具），不是插件、不进插件清单、不随市场发布。个人与校园向插件（`sysu`、`wechat`、`zanao`）已拆分至独立的 `SuperPI-Personal-Plugins` 仓库维护。
 
-版本以各模块 `src/main/assets/plugin.json` 的 `version` 为准。九个插件的清单均为 `apiLevel` 7、`minHostVersion` `2.0.0`，使用 `plugin-api` 2.0.1 与 `design` 1.0.0 构建。运行时依赖：飞书使用 `lark-cli` 1.0.100，企业微信使用 `wecom-cli` 1.3.4；高德地图插件通过高德 MCP 提供地点与路线，需要高德 Key；火车票插件直接查询 12306；酒店插件通过官方 `rgh` CLI 与 OAuth 登录（需要 Node.js/npm）；打车插件直接访问滴滴 MCP HTTP API（需要滴滴 Key，插件页配置）；小米云服务没有 CLI，通过插件页内 WebView 登录；邮箱插件不依赖 CLI，用 JVM 网络栈直连 IMAP/SMTP（QQ、163、126、腾讯企业邮、阿里云邮箱、Gmail、iCloud、Fastmail、Yahoo、Zoho 与自定义服务器）。
+版本以各模块 `src/main/assets/plugin.json` 的 `version` 为准。十个模块的清单均为 `apiLevel` 7、`minHostVersion` `2.0.0`，使用 `plugin-api` 2.0.1 与 `design` 1.0.0 构建。运行时依赖：飞书使用 `lark-cli` 1.0.100，企业微信使用 `wecom-cli` 1.3.4；高德地图插件通过高德 MCP 提供地点与路线，需要高德 Key；火车票插件直接查询 12306；酒店插件通过官方 `rgh` CLI 与 OAuth 登录（需要 Node.js/npm）；打车插件直接访问滴滴 MCP HTTP API（需要滴滴 Key，插件页配置）；小米云服务没有 CLI，通过插件页内 WebView 登录；邮箱插件不依赖 CLI，用 JVM 网络栈直连 IMAP/SMTP（QQ、163、126、腾讯企业邮、阿里云邮箱、Gmail、iCloud、Fastmail、Yahoo、Zoho 与自定义服务器）。
 
-开发示例：[`mcpui-demo/`](mcpui-demo/README.md) 演示把 MCP 工具结果渲染成插件卡片，不上市场，需要 `plugin-api 1.3.0` / 宿主 1.1.0+。
+开发示例：[`mcpui-demo/`](mcpui-demo/README.md) 演示把 MCP 工具结果渲染成插件卡片，不上市场，需要 `plugin-api 2.0.1` / 宿主 2.0.0+。
 
 ## 仓库里有什么
 
 | 路径 | 说明 |
 |---|---|
-| `feishu/`、`wecom/`、`micloud/`、`mail/`、`themes/`、`amap/`、`rail/`、`hotel/`、`ride/` | 九个插件模块：Kotlin 源码、`src/main/assets/plugin.json` 清单、图标与页面 |
+| `feishu/`、`wecom/`、`micloud/`、`mail/`、`themes/`、`amap/`、`rail/`、`hotel/`、`ride/`、`mcpui-demo/` | 十个插件模块：Kotlin 源码、`src/main/assets/plugin.json` 清单、图标与页面 |
 | `gradle/plugin-bundle.gradle.kts` | 共享打包脚本，提供 `assemblePlugin`、`signPlugin`、`verifyPlugin` 三个任务 |
 | `settings.gradle.kts` | 模块列表与仓库配置；依赖来自 `https://sadami3066.github.io/SuperPI-Maven` 的 `io.github.sadami3066.superpi:plugin-api`（版本以该仓库最新发布为准，`api()` 传递配套的 `design`）、Google 与 Maven Central |
 | `gradle/wrapper/`、`gradlew` | Gradle 9.8.2 wrapper，无需本机预装 Gradle |

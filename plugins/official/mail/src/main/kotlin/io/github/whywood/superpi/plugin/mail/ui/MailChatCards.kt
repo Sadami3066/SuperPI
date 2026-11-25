@@ -283,8 +283,8 @@ private fun SearchEmptyBody(host: PluginHost, payload: MailSearchCardPayload) {
         DdText(
             text = when {
                 moreMatches -> host.tf(
-                    "共 %d 封，可以减小 offset 或换个关键词。",
-                    "%d messages matched. Lower the offset or try another keyword.",
+                    "共 %d 封，可以继续往后翻或换个关键词。",
+                    "%d messages matched. Keep paging or try another keyword.",
                     payload.total,
                 )
                 payload.query.isBlank() -> host.t("邮箱里暂时没有可显示的邮件。", "There's no mail to show right now.")

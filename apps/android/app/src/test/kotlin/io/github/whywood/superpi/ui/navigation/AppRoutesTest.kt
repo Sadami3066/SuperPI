@@ -21,6 +21,7 @@ class AppRoutesTest {
         AppDestination.Privacy,
         AppDestination.AndroidSettings,
         AppDestination.AgentSettings,
+        AppDestination.MemorySettings,
         AppDestination.WebSearch,
         AppDestination.Search,
         AppDestination.Skills,
@@ -31,6 +32,8 @@ class AppRoutesTest {
         AppDestination.MiniappDetail("demo-miniapp"),
         AppDestination.PluginPage("demo-plugin", "home"),
         AppDestination.WorkspaceSettings("workspace-1"),
+        AppDestination.SuperTeam,
+        AppDestination.WorkerMonitor("wrk-1"),
     )
     private val detailDestinations = allDestinations.filter {
         it is AppDestination.PluginPage ||
@@ -40,7 +43,7 @@ class AppRoutesTest {
 
     @Test
     fun allRoutesRoundTripThroughRouteKey() {
-        assertEquals(23, allDestinations.size)
+        assertEquals(26, allDestinations.size)
         allDestinations.forEach { assertEquals(it, AppDestination.fromRouteKey(it.routeKey)) }
     }
 
@@ -111,5 +114,13 @@ class AppRoutesTest {
         assertEquals(destination, AppDestination.fromRouteKey(destination.routeKey))
         assertNull(AppDestination.fromRouteKey("remote-files/only-one"))
         assertNull(AppDestination.fromRouteKey("remote-files/a/b/c"))
+    }
+
+    @Test
+    fun superRoutesRoundTripAndRejectMalformedWorkerMonitorKey() {
+        assertEquals(AppDestination.SuperTeam, AppDestination.fromRouteKey("super/team"))
+        val monitor = AppDestination.WorkerMonitor("wrk-a/b:c")
+        assertEquals(monitor, AppDestination.fromRouteKey(monitor.routeKey))
+        assertNull(AppDestination.fromRouteKey("super/worker/"))
     }
 }

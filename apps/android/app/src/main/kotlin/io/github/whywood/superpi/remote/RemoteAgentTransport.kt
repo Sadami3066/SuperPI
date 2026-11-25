@@ -32,7 +32,16 @@ data class RemoteSyncEvent(
     val ts: Long = 0L,
 )
 
+sealed interface RemoteStreamClosed {
+    data object TransportDisconnected : RemoteStreamClosed
+
+    data class PeerOffline(val deviceId: String) : RemoteStreamClosed
+
+    data class RouteRejected(val routeId: String, val code: String, val message: String) : RemoteStreamClosed
+}
+
 private object EmptyTransportFlows {
+    val streamClosures: SharedFlow<RemoteStreamClosed> = MutableSharedFlow<RemoteStreamClosed>().asSharedFlow()
     val syncEvents: SharedFlow<RemoteSyncEvent> = MutableSharedFlow<RemoteSyncEvent>().asSharedFlow()
     val devices: StateFlow<List<RemoteDeviceSummary>> = MutableStateFlow<List<RemoteDeviceSummary>>(emptyList()).asStateFlow()
     val isRelayOnline: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
@@ -40,6 +49,9 @@ private object EmptyTransportFlows {
 
 interface RemoteAgentTransport {
     val remoteEvents: SharedFlow<RemoteEvent>
+
+    val streamClosures: SharedFlow<RemoteStreamClosed>
+        get() = EmptyTransportFlows.streamClosures
 
     val onlineDevices: StateFlow<Set<String>>
 

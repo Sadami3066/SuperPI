@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +38,7 @@ import io.github.whywood.superpi.design.DdEmptyState
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdLoadingBlock
+import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdPrimaryButton
 import io.github.whywood.superpi.design.DdSearchField
 import io.github.whywood.superpi.design.DdSegmentedControl
@@ -113,13 +116,15 @@ internal fun MailPage(host: PluginHost, repository: MailRepository) {
 
     fun refresh() {
         scope.launch {
-            runCatching { repository.refresh() }.onFailure { error ->
-                refreshError = host.readableError(
-                    error,
-                    fallbackZh = "同步失败，请重试",
-                    fallbackEn = "Sync failed. Try again.",
-                )
-            }
+            runCatching { repository.refresh() }
+                .onSuccess { refreshError = null }
+                .onFailure { error ->
+                    refreshError = host.readableError(
+                        error,
+                        fallbackZh = "同步失败，请重试",
+                        fallbackEn = "Sync failed. Try again.",
+                    )
+                }
         }
     }
 
@@ -127,13 +132,15 @@ internal fun MailPage(host: PluginHost, repository: MailRepository) {
         if (pullRefreshing) return
         pullRefreshing = true
         scope.launch {
-            runCatching { repository.refresh() }.onFailure { error ->
-                refreshError = host.readableError(
-                    error,
-                    fallbackZh = "同步失败，请重试",
-                    fallbackEn = "Sync failed. Try again.",
-                )
-            }
+            runCatching { repository.refresh() }
+                .onSuccess { refreshError = null }
+                .onFailure { error ->
+                    refreshError = host.readableError(
+                        error,
+                        fallbackZh = "同步失败，请重试",
+                        fallbackEn = "Sync failed. Try again.",
+                    )
+                }
             pullRefreshing = false
         }
     }
@@ -329,7 +336,7 @@ internal fun MailPage(host: PluginHost, repository: MailRepository) {
                 MailAccountSwitcher(
                     accounts = accounts,
                     selectedAccountId = activeAccountId,
-                    allLabel = host.t("全部", "All"),
+                    allLabel = host.t("全部账户", "All accounts"),
                     onSelect = { selectedAccountId = it },
                 )
             }
@@ -610,12 +617,17 @@ private fun MailTopActions(
             tint = colors.ink,
         )
         if (activeAccount != null) {
-            DdAvatar(
-                initials = mailInitial(activeAccount.displayName, activeAccount.email),
-                size = 36.dp,
-                contentDescription = host.t("账户", "Accounts"),
+            DdPressable(
                 onClick = onAccounts,
-            )
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                contentDescription = host.t("账户", "Accounts"),
+            ) {
+                DdAvatar(
+                    initials = mailInitial(activeAccount.displayName, activeAccount.email),
+                    size = 36.dp,
+                )
+            }
         } else {
             DdIconButton(
                 icon = DdIcons.Plus,

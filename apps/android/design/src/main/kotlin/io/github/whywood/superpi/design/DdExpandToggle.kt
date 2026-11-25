@@ -25,6 +25,9 @@ fun DdExpandToggle(
 ) {
     val colors = superPiColors()
     val motionEnabled = LocalDdMotionEnabled.current
+    val rowShape = LocalDdRowShape.current
+    val rowHorizontalPadding = LocalDdRowHorizontalPadding.current
+    val inCard = rowHorizontalPadding > 0.dp
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
@@ -33,11 +36,14 @@ fun DdExpandToggle(
     DdPressable(
         onClick = onToggle,
         modifier = modifier.heightIn(min = 44.dp),
-        shape = DdShapes.Small,
+        shape = if (inCard) rowShape else DdShapes.Small,
         contentDescription = if (expanded) expandedLabel else collapsedLabel,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = DdSpacing.Sm, vertical = DdSpacing.Sm),
+            modifier = Modifier.padding(
+                horizontal = if (inCard) rowHorizontalPadding else DdSpacing.Sm,
+                vertical = if (inCard) 12.dp else DdSpacing.Sm,
+            ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
         ) {

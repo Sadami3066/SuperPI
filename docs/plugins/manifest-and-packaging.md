@@ -10,8 +10,8 @@ The manifest always lives at `assets/plugin.json` inside the package and is pars
 |---|---|---|---|
 | `id` | string | Yes | Lowercase reverse domain, at least two segments, regex `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$` (e.g. `com.example.myplugin`); the host uses it as the install directory and unique identity |
 | `version` | string | Yes | `major.minor.patch`, optionally with a `-dev`/`+build` suffix; the host records the installed version and decides upgrades |
-| `apiLevel` | int | No (default 6) | Contract level the plugin requires; must be within `MIN_SUPPORTED_API_LEVEL..PLUGIN_API_LEVEL` (currently 6..6), otherwise loading is refused. Omitted means `BASELINE_API_LEVEL` (6); level 5 plugins have been rejected since host 1.0.4 |
-| `minHostVersion` | string | No | Minimum host version. The host version comes from `BuildConfig.VERSION_NAME`; comparison looks only at `major.minor.patch` and ignores suffixes. Plugins using only capabilities that existed in 1.0.x can write `"1.0.4"`; plugins using 1.1.0 capabilities (including design 0.7.0 components) write `"1.0.6"`; plugins using design 0.8.0 components write `"1.0.7"`; plugins using design 1.0.0 components or plugin-api 2.0.0 capabilities write `"1.0.8"`; plugins using tool result renderers or other 1.3.0 capabilities write `"1.1.0"`; plugins using `host.images()`/`DdRemoteImage` write `"1.4.0"` |
+| `apiLevel` | int | No (default 7) | Contract level the plugin requires; must be within `MIN_SUPPORTED_API_LEVEL..PLUGIN_API_LEVEL` (currently 7..7), otherwise loading is refused. Omitted means `BASELINE_API_LEVEL` (7); host 2.0.0+ accepts only level 7 |
+| `minHostVersion` | string | No | Minimum host version. The host version comes from `BuildConfig.VERSION_NAME`; comparison looks only at `major.minor.patch` and ignores suffixes. For the current 2.0.x contract line write `"2.0.0"`; plugins that still run on older hosts can keep their previous threshold |
 | `entryClass` | string | Yes | Fully qualified name of the class implementing `SuperPIPlugin`; it must have a no-arg constructor |
 | `name` | LocalizedText | Yes | Plugin name, with at least `default` |
 | `summary` | LocalizedText | Yes | One-line description, with at least `default` |
@@ -19,10 +19,10 @@ The manifest always lives at `assets/plugin.json` inside the package and is pars
 | `homepage` | string | No | Must be an `http(s)://` link |
 | `changelog` | string | No | Release notes |
 | `icon` | string | No | Only `asset:<path inside package>` is supported, e.g. `asset:icon.png`; the list downsamples to display size and does not tint; a missing or broken icon falls back to a placeholder |
-| `ui` | object | No | `{ "apiLevel": 2, "kotlin"?: "2.4", "compose"?: "1.10.5" }`; part of Compose slot compatibility, see "UI extensions" |
+| `ui` | object | No | `{ "apiLevel": 3, "kotlin"?: "2.4", "compose"?: "1.10.5" }`; part of Compose slot compatibility, see "UI extensions" |
 | `publisher` | object | No | `{ "name": ..., "keyId": ... }`. `name` is the display name (e.g. `milous`), shown directly in the import confirmation and installed info; when missing the UI falls back to the first 12 characters of the signing `keyId`. `keyId` is descriptive only: publisher identity and trust always come from the `keyId` in the signature file `META-INF/plugin-signature.json` |
 | `provides` | object | No | Pre-install check of contributions, see below; must match the actual contributions |
-| `capabilities` | string[] | Yes | Host services and capabilities the plugin needs (38 items), see below; missing or unknown entries refuse loading |
+| `capabilities` | string[] | Yes | Host services and capabilities the plugin needs (39 items), see below; missing or unknown entries refuse loading |
 | `permissions` | string[] | No | System permissions the plugin will request, values in "Permission declarations"; must be declared in pairs with `capabilities` |
 | `components` | object | No | System component abilities proxied by the host, see "Component declarations"; every enabled item requires the matching capability |
 | `defaultEnabled` | bool | No (default true) | Whether the plugin is enabled by default after the first install |
@@ -39,7 +39,7 @@ The manifest does not support fields such as `source`/`installable`/`sizeLabel`/
 | `pages` | Plugin page id list |
 | `themes` | Theme id list; one-to-one with `id` in `assets/themes.json`, see "Theme packs" |
 
-`capabilities` declares the host services and capabilities the plugin actually uses; the install confirmation and plugin details show them, and the host injects only the declared services. **An undeclared service accessor throws `PluginServiceUnavailable` at runtime** (it does not return null). 1.3.0 has 38 items in four groups; accessors marked "experimental" need `@OptIn(PluginExperimentalApi::class)`.
+`capabilities` declares the host services and capabilities the plugin actually uses; the install confirmation and plugin details show them, and the host injects only the declared services. **An undeclared service accessor throws `PluginServiceUnavailable` at runtime** (it does not return null). The current SDK has 39 items in two groups: 18 base capabilities and 21 device/system capabilities; accessors marked "experimental" need `@OptIn(PluginExperimentalApi::class)`.
 
 **Base capabilities (since 1.0)**
 
@@ -84,6 +84,7 @@ The manifest does not support fields such as `source`/`installable`/`sizeLabel`/
 | `media` | `host.media()` | Save to Downloads/gallery, scan, open, share, preview, image read, URI import | returns null/false for unreadable paths; request `manage-storage` separately for all-files access |
 | `speech` | `host.speech()` | TTS read-aloud and speech recognition | returns false/error results when `speakAvailable`/`recognizeAvailable` is false |
 | `web` | `host.web()` | Host web search and body fetch | returns an empty list/null when `available=false` |
+| `images` | `host.images()` | Load a remote image into memory/private cache and return a bitmap for cards | returns null on failure; images never enter shared storage |
 | `credentials` | `host.credentials()` (experimental) | Read host provider and MCP credential information | returns an empty list/null when the host is not configured; read-only, no writes |
 | `accessibility` | `host.accessibility()` (experimental) | Accessibility event stream and global actions | with `enabled=false` the stream is empty and actions return false |
 | `share` | no accessor | Receive system shares (with `components.share`) | `shareReceived` is not dispatched when the component is undeclared |
@@ -226,8 +227,8 @@ Validation error codes (run by the host at install time, `PluginValidation`):
 | `INVALID_VERSION` | The version is not `major.minor.patch[suffix]` |
 | `INVALID_MIN_HOST_VERSION` | minHostVersion cannot be parsed |
 | `HOST_VERSION_UNSUPPORTED` | The host version is below minHostVersion |
-| `API_LEVEL_UNSUPPORTED` | apiLevel is not within `MIN_SUPPORTED_API_LEVEL..host level` (level 5 is rejected here since 1.0.4) |
-| `UI_API_LEVEL_UNSUPPORTED` | `ui.apiLevel` does not match the host `HOST_UI_API_LEVEL` (2) (**warning**: only Compose bindings are disabled, the plugin still loads) |
+| `API_LEVEL_UNSUPPORTED` | apiLevel is not within `MIN_SUPPORTED_API_LEVEL..host level` (host 2.0.0+ accepts only level 7) |
+| `UI_API_LEVEL_UNSUPPORTED` | `ui.apiLevel` does not match the host `HOST_UI_API_LEVEL` (3) (**warning**: only Compose bindings are disabled, the plugin still loads) |
 | `ENTRY_CLASS_MISSING` / `INVALID_ENTRY_CLASS` | Missing entry class or invalid class name |
 | `MISSING_TEXT` / `INVALID_TEXT` | name/summary lacks `default`, or uses resource text |
 | `INVALID_ICON` / `INVALID_URL` | Icon path or homepage is invalid |

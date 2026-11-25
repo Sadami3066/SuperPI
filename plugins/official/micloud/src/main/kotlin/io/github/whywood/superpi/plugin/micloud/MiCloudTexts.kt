@@ -323,7 +323,14 @@ internal fun requestFailureGuidance(
         )
     }
     if (error is IllegalArgumentException) {
-        return error.message?.takeIf { it.isNotBlank() } ?: t("参数无效。", "Invalid argument.")
+        return t(
+            String.format(Locale.ROOT, "小米云%s请求参数无效，请调整后重试。", zh),
+            String.format(
+                Locale.ROOT,
+                "Invalid Xiaomi Cloud %s request parameters. Adjust them and try again.",
+                en,
+            ),
+        )
     }
     if (error is SocketTimeoutException || error.message.orEmpty().containsTimeout()) {
         return t(
@@ -331,26 +338,9 @@ internal fun requestFailureGuidance(
             String.format(Locale.ROOT, "Xiaomi Cloud %s request timed out. Try again.", en),
         )
     }
-    if (error is MiCloudHttpException) {
-        return t(
-            String.format(
-                Locale.ROOT,
-                "小米云%s请求失败（HTTP %d），可稍后重试。",
-                zh,
-                error.status,
-            ),
-            String.format(
-                Locale.ROOT,
-                "Xiaomi Cloud %s request failed (HTTP %d). Try again later.",
-                en,
-                error.status,
-            ),
-        )
-    }
-    val detail = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
     return t(
-        String.format(Locale.ROOT, "小米云%s请求失败：%s。可稍后重试。", zh, detail),
-        String.format(Locale.ROOT, "Xiaomi Cloud %s request failed: %s. Try again later.", en, detail),
+        String.format(Locale.ROOT, "小米云%s暂时无法访问，请稍后重试。", zh),
+        String.format(Locale.ROOT, "Xiaomi Cloud %s is unavailable right now. Try again later.", en),
     )
 }
 

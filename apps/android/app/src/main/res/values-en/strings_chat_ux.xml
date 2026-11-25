@@ -2,6 +2,7 @@
 <resources>
     <string name="assistant_ux_process_running">Working</string>
     <string name="assistant_ux_process_done">Done</string>
+    <string name="assistant_process_worked_for">Done · %1$s</string>
     <string name="assistant_ux_process_failed">Failed</string>
     <string name="assistant_process_thinking">Thinking deeply</string>
     <string name="assistant_process_calling_tool">Calling tools</string>

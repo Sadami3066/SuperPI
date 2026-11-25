@@ -585,9 +585,9 @@ class MiniappAgentServiceTest {
                     val calls = listOf(
                         "read" to "{\"path\":${Json.encodeToString(kotlinx.serialization.json.JsonPrimitive(outside.absolutePath))}}",
                         "write" to "{\"path\":${Json.encodeToString(kotlinx.serialization.json.JsonPrimitive(artifact.absolutePath))},\"content\":\"retained\"}",
-                        "bash" to "{\"command\":\"printf ready\"}",
+                        "bash" to "{\"command\":\"printf ready\",\"description\":\"Print ready\"}",
                         "current_plugin" to "{}",
-                        "job_start" to "{\"command\":\"slow command\"}",
+                        "job" to "{\"action\":\"start\",\"command\":\"slow command\"}",
                     )
                     val toolCalls = calls.mapIndexed { index, (name, args) ->
                         "{\"index\":$index,\"id\":\"call_$index\",\"type\":\"function\",\"function\":{\"name\":\"$name\",\"arguments\":${Json.encodeToString(kotlinx.serialization.json.JsonPrimitive(args))}}}"
@@ -634,9 +634,9 @@ class MiniappAgentServiceTest {
             assertEquals(1, events.count { it.type == MiniappAgentEventType.RUN_END })
             val transcript = modelRequests.last().toString()
             assertTrue(transcript.contains("outside content"))
-            assertFalse(transcript.contains("create_goal"))
-            assertFalse(transcript.contains("timer_create"))
-            assertFalse(transcript.contains("Deliver finished work with present"))
+            assertFalse(transcript.contains("\"name\":\"goal\""))
+            assertFalse(transcript.contains("\"name\":\"timer\""))
+            assertFalse(transcript.contains("\"name\":\"present\""))
             modelCalls = 0
             cancelOnReply = true
             jobStopped = false

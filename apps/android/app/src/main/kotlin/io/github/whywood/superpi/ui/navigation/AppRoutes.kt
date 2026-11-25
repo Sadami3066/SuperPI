@@ -3,11 +3,20 @@ package io.github.whywood.superpi.ui.navigation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.whywood.superpi.data.AppMode
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.ui.mcp.McpScreen
 import io.github.whywood.superpi.ui.navigation.routes.AndroidSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.ArchivedRoute
 import io.github.whywood.superpi.ui.navigation.routes.AgentSettingsRoute
+import io.github.whywood.superpi.ui.navigation.routes.MemorySettingsRoute
+import io.github.whywood.superpi.ui.navigation.routes.SuperSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.WebSearchRoute
 import io.github.whywood.superpi.ui.navigation.routes.ChatSettingsRoute
 import io.github.whywood.superpi.ui.navigation.routes.FilesRoute
@@ -33,6 +42,10 @@ import io.github.whywood.superpi.ui.navigation.routes.MiniappRoute
 import io.github.whywood.superpi.ui.navigation.routes.WorkspaceSettingsRoute
 import io.github.whywood.superpi.ui.settings.AgreementScreen
 import io.github.whywood.superpi.ui.skills.SkillsScreen
+import io.github.whywood.superpi.ui.superagent.SuperTeamScreen
+import io.github.whywood.superpi.ui.superagent.WorkerChatViewModel
+import io.github.whywood.superpi.ui.superagent.WorkerMonitorScreen
+import java.io.File
 
 data class RouteSpec(
     val routeKey: String,
@@ -116,6 +129,19 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
             onBack = onBack,
         )
 
+        AppDestination.SuperSettings -> SuperSettingsRoute(
+            dependencies = dependencies,
+            scope = host.scope,
+            onBack = onBack,
+        )
+
+        AppDestination.MemorySettings -> MemorySettingsRoute(
+            dependencies = dependencies,
+            scope = host.scope,
+            configuredProviderIds = host.ui.configuredProviderIds,
+            onBack = onBack,
+        )
+
 
         AppDestination.WebSearch -> WebSearchRoute(dependencies, onBack)
 
@@ -183,7 +209,12 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
         AppDestination.Timers -> TimersRoute(
             dependencies = dependencies,
             chatViewModel = host.chatViewModel,
-            conversationId = host.chat.conversationId,
+            conversationId = if (host.ui.appMode == AppMode.SUPER) {
+                SuperRuntime.SUPER_THREAD_SESSION_ID
+            } else {
+                host.chat.conversationId
+            },
+            appMode = host.ui.appMode,
             navigator = host.navigator,
             onBack = onBack,
         )
@@ -192,8 +223,6 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
             dependencies = dependencies,
             chatViewModel = host.chatViewModel,
             navigator = host.navigator,
-            configuredProviderIds = host.ui.configuredProviderIds,
-            defaultModelConfig = host.ui.modelConfig,
             onBack = onBack,
         )
 
@@ -207,7 +236,10 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
             navigator = host.navigator,
             workspaces = host.chat.workspaces,
             workspaceId = destination.workspaceId,
+            configuredProviderIds = host.ui.configuredProviderIds,
+            globalModelConfig = host.ui.modelConfig,
             onUpdateProfile = host.chatViewModel::updateWorkspaceProfile,
+            onUpdateDefaultModel = host.chatViewModel::updateWorkspaceDefaultModel,
             onRenameWorkspace = host.chatViewModel::renameWorkspace,
             onBack = onBack,
         )
@@ -224,5 +256,69 @@ internal fun AppRouteContent(destination: AppDestination, host: AppRouteHost) {
             creationId = destination.id,
             onBack = onBack,
         )
+
+        AppDestination.SuperTeam -> SuperTeamScreen(
+            superRuntime = dependencies.superRuntime,
+            onBack = onBack,
+        )
+
+        is AppDestination.WorkerMonitor -> {
+            val superDir = File(dependencies.agentDir, "super")
+            val routerWorkspaceDir = File(superDir, "router/workspace")
+            val workerScope = rememberCoroutineScope()
+            val configuredProviderList = remember(
+                dependencies.providerCatalog.summaries,
+                host.ui.configuredProviderIds,
+            ) {
+                dependencies.providerCatalog.summaries.filter { it.id in host.ui.configuredProviderIds }
+            }
+            val viewModel = remember(destination.workerId, dependencies, workerScope) {
+                WorkerChatViewModel(
+                    workerId = destination.workerId,
+                    superRuntime = dependencies.superRuntime,
+                    providers = dependencies.providerCatalog,
+                    configuredProviderIds = dependencies::configuredProviderIds,
+                    attachmentStore = dependencies.attachmentStore,
+                    superDir = superDir,
+                    routerWorkspaceDir = routerWorkspaceDir,
+                    scope = workerScope,
+                    strings = host.ui.conversationStrings,
+                )
+            }
+            LaunchedEffect(viewModel, host.ui.conversationStrings) {
+                viewModel.updateStrings(host.ui.conversationStrings)
+            }
+            val workerUi by viewModel.state.collectAsStateWithLifecycle()
+            val relayState by dependencies.relayLive.state.collectAsStateWithLifecycle()
+            val worker = workerUi.worker
+            val remotePresentContext = rememberRemotePresentContext(
+                deviceId = worker?.deviceId?.takeIf { worker.isRemote },
+                deviceName = worker?.deviceName.orEmpty(),
+                botId = worker?.botId,
+                attachmentRoot = workerUi.attachmentRoot,
+                isRemoteOnline = workerUi.isRemoteOnline,
+                relayState = relayState,
+                remoteTransport = dependencies.remoteTransport,
+                remoteArtifactClient = dependencies.remoteArtifactClient,
+            )
+            WorkerMonitorScreen(
+                workerId = destination.workerId,
+                viewModel = viewModel,
+                attachmentStore = dependencies.attachmentStore,
+                superDir = superDir,
+                configuredProviders = configuredProviderList,
+                processDetail = host.ui.processDetail,
+                chatFontScale = host.ui.chatFontScale,
+                voiceLanguage = host.ui.voiceLanguage,
+                onBack = onBack,
+                onManageProviders = { host.navigator.push(AppDestination.Providers) },
+                onOpenMiniapp = { id -> host.navigator.push(AppDestination.MiniappDetail(id)) },
+                onOpenPluginPage = { pluginId, pageId ->
+                    host.navigator.push(AppDestination.PluginPage(pluginId, pageId))
+                },
+                remotePresentContext = remotePresentContext,
+                compactionTriggerPercent = host.ui.workerCompactionTriggerPercent,
+            )
+        }
     }
 }

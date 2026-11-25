@@ -3,6 +3,7 @@ package io.github.whywood.superpi.remote
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.relay.RemoteCallCodes
 import io.github.whywood.superpi.data.relay.RemoteCallOutcome
+import io.github.whywood.superpi.runtime.MemoryAccessScope
 import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.runtime.SessionUsage
@@ -372,6 +373,8 @@ class RemoteBotControlClient(
                     put("mcpServers", buildJsonArray { policy.mcpServers.sorted().forEach { add(JsonPrimitive(it)) } })
                     put("screenTools", policy.screenTools)
                     put("miniappTools", policy.miniappTools)
+                    policy.memoryScope?.let { put("memoryScope", it.wire) }
+                    policy.memoryDispatch?.let { put("memoryDispatch", it) }
                 },
             )
         }
@@ -398,6 +401,8 @@ class RemoteBotControlClient(
             mcpServers = parseStringSet(policyObj["mcpServers"]),
             screenTools = policyObj.bool("screenTools") ?: false,
             miniappTools = policyObj.bool("miniappTools") ?: false,
+            memoryScope = policyObj.str("memoryScope")?.let(::parseMemoryScopeStrict),
+            memoryDispatch = policyObj.bool("memoryDispatch"),
         )
         val plugins = (availableObj["plugins"] as? JsonArray).orEmpty().mapNotNull { item ->
             val obj = item as? JsonObject ?: return@mapNotNull null
@@ -588,5 +593,13 @@ class RemoteBotControlClient(
 
         private fun JsonObject.double(key: String): Double? =
             (this[key] as? JsonPrimitive)?.doubleOrNull
+
+        private fun parseMemoryScopeStrict(raw: String): MemoryAccessScope? =
+            when (raw.trim().uppercase()) {
+                "OFF" -> MemoryAccessScope.OFF
+                "WORK_ONLY" -> MemoryAccessScope.WORK_ONLY
+                "PERSONAL" -> MemoryAccessScope.PERSONAL
+                else -> null
+            }
     }
 }

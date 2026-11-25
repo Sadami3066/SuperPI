@@ -9,7 +9,36 @@ class ScreenRouter(
     private val apps: ScreenAppCatalog,
     private val accessibilityEnabled: () -> Boolean = { accessibility.connected },
 ) : ScreenController {
+    @Volatile
     private var screenInstance: String? = null
+    private val executionLock = ScreenExecutionLock()
+
+    override suspend fun <T> withExecutionLock(block: suspend () -> T): T = executionLock.withLock(block)
+
+    override suspend fun awaitQuiet(quietMs: Long, maxWaitMs: Long): Boolean? {
+        val online = virtual.state() as? VirtualScreenState.Online ?: return null
+        if (!accessibility.connected) return null
+        return accessibility.awaitQuiet(online.displayId, quietMs, maxWaitMs)
+    }
+
+    override suspend fun effectDisplayInfo(): ScreenDisplayInfo? {
+        val online = virtual.state() as? VirtualScreenState.Online ?: return null
+        return ScreenDisplayInfo(
+            displayId = online.displayId,
+            width = online.width,
+            height = online.height,
+            backend = BACKEND_HELPER,
+            nodeBackend = if (accessibility.connected) BACKEND_ACCESSIBILITY else BACKEND_NONE,
+            inputBackend = BACKEND_HELPER,
+        )
+    }
+
+    override suspend fun frameGrid(): ScreenFrameGrid? {
+        val bytes = virtual.latestFrameBytes() ?: return null
+        return ScreenFrameGrid.fromEncodedImage(bytes)
+    }
+
+    override fun screenScopeKey(): String = screenInstance?.let { "virtual:$it" } ?: "virtual"
 
     override suspend fun status(): ScreenStatusSnapshot {
         val state = virtual.state()
@@ -62,6 +91,7 @@ class ScreenRouter(
             requireAccessibility()
             accessibility.tap(online.displayId, selector, durationMs)
         }
+        invalidateIfInstanceChanged(online)
         return "Tapped virtual screen ${selector.describeSelector()}"
     }
 
@@ -69,6 +99,7 @@ class ScreenRouter(
         val online = requireVirtualOnline()
         invalidSwipeCoordinates(x1, y1, x2, y2, online.bounds())?.let { throw IllegalArgumentException(it) }
         virtual.swipe(x1, y1, x2, y2, durationMs).requireOk()
+        invalidateIfInstanceChanged(online)
         return "Swiped on virtual screen ($x1, $y1) -> ($x2, $y2)"
     }
 
@@ -82,9 +113,13 @@ class ScreenRouter(
             ?: throw IllegalArgumentException("Scroll target is not visible or too small to scroll; call screen_observe again")
         val steps = amount.coerceIn(1, 10)
         repeat(steps) {
-            requireVirtualOnline()
+            val active = requireVirtualOnline()
+            check(active.instanceId == online.instanceId) {
+                "Virtual screen restarted during scroll; observe the new screen first"
+            }
             virtual.swipe(path[0], path[1], path[2], path[3], 300).requireOk()
         }
+        invalidateIfInstanceChanged(online)
         return "Scrolled virtual screen ${direction.name.lowercase()} $steps times"
     }
 
@@ -94,17 +129,20 @@ class ScreenRouter(
         if (selector != null) {
             requireAccessibility()
             val result = accessibility.setText(online.displayId, selector, text)
-            return ScreenTextResult(BACKEND_ACCESSIBILITY, result.text, result.verified)
+            invalidateIfInstanceChanged(online)
+            return ScreenTextResult(BACKEND_ACCESSIBILITY, result.text, result.verified, result.secret)
         }
         require(isAsciiText(text)) { "Non-ASCII text needs accessibility plus a field ref or fieldText; call screen_observe first" }
         virtual.text(text).requireOk()
-        return ScreenTextResult(BACKEND_HELPER, text, false)
+        invalidateIfInstanceChanged(online)
+        return ScreenTextResult(BACKEND_HELPER, "", false)
     }
 
     override suspend fun key(name: String): String {
-        requireVirtualOnline()
+        val online = requireVirtualOnline()
         require(name in SCREEN_KEYS) { "Unsupported virtual screen key: $name" }
         virtual.key(name).requireOk()
+        invalidateIfInstanceChanged(online)
         return "Sent virtual screen key $name"
     }
 
@@ -161,6 +199,14 @@ class ScreenRouter(
         check(accessibility.connected) {
             if (accessibilityEnabled()) "Accessibility is enabled but the service is not connected; wait briefly and retry, or toggle PI accessibility off and on in system settings if it stays disconnected"
             else "Virtual screen node reading and Unicode input need accessibility; enable PI accessibility in system settings. Coordinate taps, swipes, keys and screenshots still work"
+        }
+    }
+
+    private suspend fun invalidateIfInstanceChanged(expected: VirtualScreenState.Online) {
+        val current = virtual.state() as? VirtualScreenState.Online
+        if (current == null || current.instanceId != expected.instanceId) {
+            accessibility.invalidateSnapshots()
+            screenInstance = current?.instanceId
         }
     }
 

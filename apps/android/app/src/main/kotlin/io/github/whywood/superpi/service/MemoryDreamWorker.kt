@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import io.github.whywood.superpi.SuperPIApplication
-import io.github.whywood.superpi.runtime.memory.DreamOutcome
+import io.github.whywood.superpi.runtime.memory.ConsolidationOutcome
 import kotlinx.coroutines.CancellationException
 
 class MemoryDreamWorker(
@@ -15,20 +15,15 @@ class MemoryDreamWorker(
         val app = applicationContext as? SuperPIApplication ?: return Result.success()
         return try {
             app.graph.credentials.preloadAll()
-            when (val outcome = app.graph.memoryDreamer.runFromWorker()) {
-                is DreamOutcome.Done,
-                DreamOutcome.Busy,
+            when (app.graph.memoryAgent.runConsolidationFromWorker()) {
+                is ConsolidationOutcome.Done,
+                ConsolidationOutcome.Busy,
+                ConsolidationOutcome.Paused,
+                ConsolidationOutcome.NoModel,
+                is ConsolidationOutcome.Skipped,
                 -> Result.success()
 
-                is DreamOutcome.Skipped -> {
-                    if (outcome.reason == "sync_offline" && runAttemptCount < MAX_RETRIES) {
-                        Result.retry()
-                    } else {
-                        Result.success()
-                    }
-                }
-
-                is DreamOutcome.Failed -> if (runAttemptCount < MAX_RETRIES) Result.retry() else Result.success()
+                is ConsolidationOutcome.Failed -> if (runAttemptCount < MAX_RETRIES) Result.retry() else Result.success()
             }
         } catch (cancelled: CancellationException) {
             throw cancelled

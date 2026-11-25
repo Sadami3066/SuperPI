@@ -154,6 +154,7 @@ class BundledSkills(
 
     companion object {
         const val SCREEN_OPS_SKILL = "superpi-gui"
+        const val MINIAPP_SKILL = "miniapp"
 
         fun fromAssets(assets: AssetManager, repoDir: File, activeDir: File): BundledSkills = BundledSkills(
             repoDir = repoDir,

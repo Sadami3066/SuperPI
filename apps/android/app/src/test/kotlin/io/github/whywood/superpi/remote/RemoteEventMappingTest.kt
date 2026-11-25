@@ -235,6 +235,20 @@ class RemoteEventMappingTest {
             ),
             queueUpdate,
         )
+
+        val customMessage = decode(
+            """{"type":"plugin_custom_message","customType":"weather_card","payload":"{\"temp\":22}","text":"Sunny","display":true}""",
+        )
+        assertEquals(
+            RemoteBotEvent.PluginCustomMessage(
+                customType = "weather_card",
+                payload = """{"temp":22}""",
+                text = "Sunny",
+                display = true,
+            ),
+            customMessage,
+        )
+        assertNull(decode("""{"type":"plugin_custom_message","text":"missing type"}"""))
     }
 
     private fun decode(json: String): RemoteBotEvent? =

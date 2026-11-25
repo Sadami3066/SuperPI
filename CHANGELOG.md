@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.0.3
+
+- feat: Super Mode turns a chat into a coordinator that creates and drives persistent local workers and workers on paired devices, with stage/progress/card delivery in the chat and a dedicated worker monitor [UI] [Runtime]
+- feat: Super Mode accepts streamed queued input while a worker waits for approval, dispatches queued follow-ups in order after resume/completion, and rolls back runs on cancel or disconnect [UI] [Runtime]
+- feat: Memory v3 replaces the old memory engine with structured living profiles, people and relations, recent events and to-dos, and a deep memory index; the Memory screen adds search, editing, pinning, archiving, duplicate merging and an activity log [Memory] [UI]
+- feat: Memory v3 adds per-bot memory scope, per-section quotas with one-tap reset to automatic allocation, manual consolidation, Markdown export, and per-conversation exclusion [Memory] [UI]
+- feat: Memory v3 syncs incrementally across devices through `@superpi/protocol 0.2.0` and `@superpi/relay 0.2.0` (`/v3/memory/push`, `/v3/memory/pull`, `/v3/memory/consolidation-lease`) with LWW merging, entity consolidation and a cooldown-aware lease [Memory] [Remote]
+- feat: `@superpi/relay 0.2.0` raises the WebSocket frame limit to 8 MiB, caps a single route result at 4 MiB with a structured `payload_too_large` error without dropping the connection, normalizes unknown `route_error.code` values to `internal`, and aligns HTTP body reads on a 30 s timeout [Remote]
+- feat: Android remote sessions add history and large-image budgets plus rollback/cleanup for stream disconnect, timeout and cancellation [Remote]
+- feat: the ADB shell daemon moves to protocol 3 with two-way HMAC-SHA256 challenge-response and a key rotated on every restart; the plaintext key is never sent in request headers [Security]
+- feat: switching back to Normal mode or turning off wireless debugging now stops the shell daemon instead of leaving it reachable [Security]
+- fix: miniapp scheduled reminders and remote incremental decoding no longer fail when `@Serializable` is missing from the compile plugin [Runtime] [Mini App]
+- feat: daily reminders are recomputed after boot or app update with time-zone/DST-safe advancement, and expired one-time reminders are cleaned up [Runtime]
+- fix: the first scheduled trigger is recomputed after an offline time-zone change; transient one-time delivery failures back off and show the reason plus a retry action in the list [Runtime] [UI]
+- fix: an OAuth callback deep link no longer falls through to the file-share path [Runtime] [UI]
+- fix: mini-app preview releases speech playback/recognition on exit, and writes/imports pre-check storage quota and clean up failed leftovers [Runtime] [Mini App]
+- fix: Coordinator regex search gains a backtracking-step budget and cancellation checks; virtual-screen text input reports readable rejection messages on restricted devices [Runtime] [Security]
+- feat: long conversations load in windows with "Load earlier"; Super task storage refreshes incrementally, streaming snapshots are throttled, timer lookups use a signature cache, `RootFileSystem` caches metadata for 3 s, and `LoadedPluginHandle` removes stale cached JARs [UI] [Runtime]
+- feat: release shrinking rules are tightened for core services, virtual screen and plugin loading, and stale keep rules are removed [Build]
+- feat: official plugins ship on the 2.0.3 batch — Feishu 2.7.2, WeCom 2.6.3, Xiaomi Cloud 2.7.5, Mail 1.6.3, DiDi Ride 1.3.2, RollingGo Hotels 1.4.2, Amap 1.5.4, 12306 1.4.0, Themes 1.0.1, MCP UI Demo 0.1.1; all declare API level 7 / `minHostVersion` 2.0.0 [Plugin]
+- feat: plugin copy, cards and retries follow one pipeline; Feishu/WeCom add checksum failure copy and auth log redaction, Xiaomi Cloud distinguishes invalid-parameter errors with details, Amap/DiDi show a toast when opening the plugin page fails, SYSU separates status-read failures from invalid verification codes, and Zanao keeps the feed visible while refreshing [Plugin]
+- chore: app 2.0.3 / versionCode 20003; plugin-api 2.0.2 (API level 7); design 1.1.0; `@superpi/protocol` 0.2.0; `@superpi/relay` 0.2.0; personal plugins SYSU 2.7.4, WeChat 0.5.3, Zanao 1.0.19 [Build]
+
 ## 2.0.1
 
 - feat: The drawer header becomes a brand mark: the waving PI mascot in a white circle followed by "Super PI."; the new-chat button switches to the solid PI primary style [UI]

@@ -5,6 +5,10 @@ class AccessibilityScreenBackend(private val actions: GuiActions) : ScreenAccess
     override val connected: Boolean get() = actions.connected
     override fun invalidateSnapshots() = actions.invalidateSnapshots()
     override fun bounds(displayId: Int, selector: GuiSelector): GuiBounds = actions.bounds(displayId, selector)
+    override suspend fun awaitQuiet(displayId: Int, quietMs: Long, maxWaitMs: Long): Boolean? =
+        actions.awaitQuiet(displayId, quietMs, maxWaitMs)
+    override suspend fun awaitDisplayChange(displayId: Int, timeoutMs: Long): Boolean? =
+        actions.awaitDisplayChange(displayId, timeoutMs)
     override suspend fun observe(displayId: Int, maxDepth: Int, maxNodes: Int, expectedPackage: String?): GuiSnapshot =
         actions.observe(displayId, maxDepth, maxNodes, expectedPackage)
     override suspend fun tap(displayId: Int, selector: GuiSelector, durationMs: Int) = actions.tap(displayId, selector, durationMs)

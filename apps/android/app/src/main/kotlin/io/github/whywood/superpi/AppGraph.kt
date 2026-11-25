@@ -4,8 +4,8 @@ import android.content.Context
 import io.github.whywood.superpi.sdk.ai.auth.oauth.OAuthRuntime
 import io.github.whywood.superpi.conversation.ConversationState
 import io.github.whywood.superpi.core.AppDependencies
-import io.github.whywood.superpi.runtime.memory.MemoryDreamer
-import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.MemoryAccessScope
+import io.github.whywood.superpi.runtime.memory.MemoryAgentService
 import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
 import io.github.whywood.superpi.conversation.ConversationStore
@@ -62,11 +62,14 @@ import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.ProviderOAuthService
 import io.github.whywood.superpi.runtime.QuestionCenter
 import io.github.whywood.superpi.runtime.RuntimeEvent
+import io.github.whywood.superpi.runtime.BotBlueprint
+import io.github.whywood.superpi.runtime.BotCapabilitiesSummary
 import io.github.whywood.superpi.runtime.McpConfigStore
 import io.github.whywood.superpi.runtime.McpOAuthService
 import io.github.whywood.superpi.runtime.McpServerProbe
 import io.github.whywood.superpi.runtime.SdkCredentialStore
 import io.github.whywood.superpi.runtime.SkillCatalog
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.TimerService
 import io.github.whywood.superpi.runtime.TurnNotice
 import io.github.whywood.superpi.runtime.MiniappAgentService
@@ -88,8 +91,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -149,12 +154,10 @@ class AppGraph(context: Context) : AppDependencies {
     override fun configuredProviderIds(): Set<String> =
         credentials.authKinds.value.keys + customProviderStore.entries.value.map { it.id }
 
-    override fun reloadCustomProviders() {
+    override suspend fun reloadCustomProviders() {
         dataGraph.reloadCustomProviders()
-        scope.launch {
-            reconcileModelSelection()
-            host.syncCustomProviders(dataGraph.providerCatalog.customSdkProviders())
-        }
+        reconcileModelSelection()
+        host.syncCustomProviders(dataGraph.providerCatalog.customSdkProviders())
     }
     override val providerOAuthService: ProviderOAuthService get() = dataGraph.providerOAuthService
     override val mcpConfigStore: McpConfigStore get() = dataGraph.mcpConfigStore
@@ -170,13 +173,27 @@ class AppGraph(context: Context) : AppDependencies {
     override val relayController: io.github.whywood.superpi.data.relay.RelayController get() = dataGraph.relayController
 
     private val remoteBots = MutableStateFlow<List<io.github.whywood.superpi.data.relay.RemoteBot>>(emptyList())
+    private val cachedRelayDeviceId = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
+    override val relayMemorySync: io.github.whywood.superpi.data.relay.RelayMemorySync by lazy {
+        val client = io.github.whywood.superpi.data.relay.RelayMemoryClient(
+            tokenProvider = dataGraph.relayStore::token,
+        )
+        io.github.whywood.superpi.data.relay.RelayMemorySync(
+            scope = scope,
+            accounts = dataGraph.relayStore,
+            memory = memory,
+            client = client,
+            relayCapabilities = { relayLive.relayCapabilities.value.toSet() },
+            onConsolidationTrigger = { memoryAgent.launchConsolidationIfDue() },
+        )
+    }
 
     override val relayLive: io.github.whywood.superpi.data.relay.RelayLive by lazy {
         io.github.whywood.superpi.data.relay.RelayLive(
             scope = scope,
             accounts = dataGraph.relayStore,
             host = host,
-            onRemoteMemoryChanged = { version -> memorySync.onRemoteVersionHint(version) },
             appVersion = BuildConfig.VERSION_NAME,
             questionCenter = dataGraph.questionCenter,
             avatarStorageDir = File(appContext.filesDir, "bot-avatars"),
@@ -224,12 +241,51 @@ class AppGraph(context: Context) : AppDependencies {
                 }
             },
             expandSkillPrompt = ::expandRemotePromptSkills,
+            localWorkerPool = runtimeGraph.localWorkerPool,
+            onRemoteMemoryChanged = { version -> relayMemorySync.onRemoteVersionHint(version) },
         ).also { live ->
             scope.launch {
-                live.remoteBots.collect { bots -> remoteBots.value = bots }
+                live.remoteBots.collect { bots ->
+                    remoteBots.value = bots
+                    runCatching { superRuntime.refreshBlueprints() }
+                }
             }
             scope.launch {
-                dataGraph.workspaceStore.workspaces.drop(1).collect { live.refreshBots() }
+                dataGraph.workspaceStore.workspaces.drop(1).collect {
+                    live.refreshBots()
+                    runCatching { superRuntime.refreshBlueprints() }
+                }
+            }
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            scope.launch {
+                merge(
+                    dataGraph.workspaceToolPolicies.changes.drop(1).map { Unit },
+                    dataGraph.skillRepository.changes.drop(1).map { Unit },
+                    dataGraph.mcpConfigStore.changes.drop(1).map { Unit },
+                    pluginManager.state
+                        .map { state -> state.plugins.filter { it.enabled }.map { it.id to it.name } }
+                        .distinctUntilChanged()
+                        .drop(1)
+                        .map { Unit },
+                    hostAccess.state
+                        .map { it.effective }
+                        .distinctUntilChanged()
+                        .drop(1)
+                        .map { Unit },
+                ).debounce(350).collect {
+                    live.refreshBots()
+                    host.workspaces()
+                        .filter { it.remote == null }
+                        .forEach { ws ->
+                            live.emitSyncEvent(
+                                io.github.whywood.superpi.data.relay.RelaySyncEvent(
+                                    kind = "capabilities_changed",
+                                    botId = ws.id,
+                                ),
+                            )
+                        }
+                    runCatching { superRuntime.refreshBlueprints() }
+                }
             }
         }
     }
@@ -250,8 +306,10 @@ class AppGraph(context: Context) : AppDependencies {
         val excludedPluginSkills = excludedPlugins.flatMapTo(mutableSetOf()) { pluginId ->
             pluginManager.skillIds(pluginId).mapTo(mutableSetOf()) { id -> nameById[id] ?: id }
         }
-        val excludedScreenSkill = if (policy.screenTools) emptySet() else setOf(BundledSkills.SCREEN_OPS_SKILL)
-        return policy.enabledSkills(allSkillNames) - excludedPluginSkills - excludedScreenSkill
+        val screenReady = policy.screenTools && hostEnvironmentProvider.current().capabilities.hasScreenControl
+        val excludedScreenSkill = if (screenReady) emptySet() else setOf(BundledSkills.SCREEN_OPS_SKILL)
+        val excludedMiniappSkill = if (policy.miniappTools) emptySet() else setOf(BundledSkills.MINIAPP_SKILL)
+        return policy.enabledSkills(allSkillNames) - excludedPluginSkills - excludedScreenSkill - excludedMiniappSkill
     }
 
     private suspend fun expandRemotePromptSkills(cwd: String, rawText: String): String {
@@ -328,6 +386,9 @@ class AppGraph(context: Context) : AppDependencies {
             override val remoteEvents
                 get() = relayTransport.remoteEvents
 
+            override val streamClosures
+                get() = relayTransport.streamClosures
+
             override val onlineDevices
                 get() = relayTransport.onlineDevices
 
@@ -402,6 +463,25 @@ class AppGraph(context: Context) : AppDependencies {
         )
     }
 
+    private val remoteWorkerClient: io.github.whywood.superpi.remote.RemoteWorkerClient by lazy {
+        io.github.whywood.superpi.remote.RemoteWorkerClient(
+            transport = remoteTransport,
+            taskStore = runtimeGraph.superTaskStore,
+            artifactClient = remoteArtifactClient,
+            remoteCacheRoot = File(agentDir, "super/remote-cache"),
+            scope = scope,
+            settingsProvider = { runtimeGraph.currentSuperSettings() },
+        )
+    }
+
+    override val superRuntime: SuperRuntime get() = runtimeGraph.superRuntime
+
+    val workerJobs: kotlinx.coroutines.flow.StateFlow<List<io.github.whywood.superpi.runtime.JobSnapshot>>
+        get() = runtimeGraph.workerJobs
+
+    val hasAnyRunningWorkerJobs: Boolean
+        get() = runtimeGraph.hasAnyRunningWorkerJobs()
+
     private val updateInstaller: AndroidUpdateInstaller by lazy { AndroidUpdateInstaller(appContext) }
 
     override val updateManager: UpdateManager by lazy {
@@ -425,19 +505,10 @@ class AppGraph(context: Context) : AppDependencies {
     override val host: AgentRuntimeHost get() = runtimeGraph.host
     override val conversationStore: ConversationStore get() = runtimeGraph.conversationStore
     override val memory: MemoryStore get() = runtimeGraph.memory
-    override val memoryIngestor: MemoryIngestor get() = runtimeGraph.memoryIngestor
-    override val memoryDreamer: MemoryDreamer get() = runtimeGraph.memoryDreamer
+    override val memoryAgent: MemoryAgentService get() = runtimeGraph.memoryAgent
     override val memoryPreferences: MemoryPreferencesStore get() = runtimeGraph.memoryPreferences
-    override val memorySync: io.github.whywood.superpi.data.relay.RelayMemorySync by lazy {
-        io.github.whywood.superpi.data.relay.RelayMemorySync(
-            store = runtimeGraph.memory,
-            accounts = dataGraph.relayStore,
-            client = io.github.whywood.superpi.data.relay.RelayMemoryClient(),
-            scope = scope,
-            relayCapabilities = { relayLive.relayCapabilities.value },
-            onPostMergeConsolidation = { runtimeGraph.memoryDreamer.launchPostMergeConsolidation() },
-        )
-    }
+    override val memoryModelRouter: io.github.whywood.superpi.runtime.memory.MemoryModelRouter
+        get() = runtimeGraph.memoryRouter
     override val miniappAgentService: MiniappAgentService get() = runtimeGraph.miniappAgentService
 
     val notificationCenter: NotificationCenter get() = serviceGraph.notificationCenter
@@ -481,6 +552,11 @@ class AppGraph(context: Context) : AppDependencies {
 
     init {
         scope.launch {
+            dataGraph.relayStore.account.collect { account ->
+                cachedRelayDeviceId.set(account?.deviceId)
+            }
+        }
+        scope.launch {
             dataGraph.credentials.authKinds.collect {
                 runCatching { reconcileModelSelection() }
             }
@@ -520,7 +596,6 @@ class AppGraph(context: Context) : AppDependencies {
             }
         }
         OAuthRuntime.callbackServerFactory = SuperPIOAuthCallbackServerFactory()
-        memorySync.start()
         scope.launch {
             host.sdkEvents.collect { event ->
                 pluginManager.onSessionSdkEvent(event.sessionId, event.event)
@@ -610,8 +685,43 @@ class AppGraph(context: Context) : AppDependencies {
         },
         screenTools = { platformGraph.screenToolset.tools() },
         virtualScreenTools = { platformGraph.virtualScreenFeature.tools() },
-        memoryDreamCoordinator = { memorySync },
+        remoteWorkerGateway = { remoteWorkerClient },
+        remoteBotsProvider = ::remoteBotBlueprints,
+        localDeviceNameProvider = ::localDeviceDisplayName,
+        onSuperSettingsChanged = { scope.launch { remoteWorkerClient.onSettingsChanged() } },
+        memoryDeviceIdProvider = { cachedRelayDeviceId.get() },
+        memoryConsolidationCoordinator = { relayMemorySync },
     )
+
+    private fun localDeviceDisplayName(): String =
+        android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "This phone"
+
+    private fun remoteBotBlueprints(): List<BotBlueprint> = remoteBots.value.map { bot ->
+        val caps = bot.botCapabilities?.let { c ->
+            BotCapabilitiesSummary(
+                skills = c.skills,
+                plugins = c.plugins,
+                mcpServers = c.mcpServers,
+                screenTools = c.screenTools,
+                miniappTools = c.miniappTools,
+                memoryDispatch = c.memoryDispatch ?: false,
+                memoryScope = MemoryAccessScope.fromWire(c.memoryScope),
+            )
+        } ?: BotCapabilitiesSummary()
+        BotBlueprint(
+            ref = SuperRuntime.remoteBotRef(bot.deviceId, bot.botId),
+            botId = bot.botId,
+            name = bot.botName,
+            avatar = bot.avatar,
+            intro = bot.intro,
+            deviceId = bot.deviceId,
+            deviceName = bot.deviceName,
+            online = bot.online,
+            capabilities = caps,
+            supportsSuperWorker = remoteTransport.supportsPeerCapability(bot.deviceId, "super-worker"),
+            defaultModel = null,
+        )
+    }
 
     private fun serviceGraphDeps(): ServiceGraphDeps = ServiceGraphDeps(
         appContext = appContext,
@@ -619,6 +729,7 @@ class AppGraph(context: Context) : AppDependencies {
         scope = scope,
         host = { host },
         conversationStore = { conversationStore },
+        superRuntime = { superRuntime },
         questionCenter = dataGraph.questionCenter,
         timerStore = dataGraph.timerStore,
         pluginManager = { pluginManager },
@@ -686,7 +797,6 @@ class AppGraph(context: Context) : AppDependencies {
         }
         credentials.preloadAll()
         reconcileModelSelection()
-        memorySync.start()
     }
 
     private suspend fun reconcileModelSelection() {

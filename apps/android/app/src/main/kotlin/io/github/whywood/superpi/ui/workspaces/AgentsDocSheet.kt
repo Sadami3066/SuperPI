@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.ui.workspaces
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,7 +8,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.ui.common.rememberHapticFeedback
@@ -50,6 +51,23 @@ fun AgentsDocSheet(
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    AgentsDocSheet(
+        cwd = workspace.cwd,
+        agentDocStore = agentDocStore,
+        onSaved = onSaved,
+        onDismiss = onDismiss,
+        noteRes = R.string.agents_doc_note,
+    )
+}
+
+@Composable
+fun AgentsDocSheet(
+    cwd: String,
+    agentDocStore: AgentDocStore,
+    onSaved: () -> Unit,
+    onDismiss: () -> Unit,
+    @StringRes noteRes: Int = R.string.agents_doc_note,
+) {
     val colors = superPiColors()
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(true) }
@@ -57,8 +75,8 @@ fun AgentsDocSheet(
     var hasDoc by remember { mutableStateOf(false) }
     var fileName by remember { mutableStateOf("") }
     var initial by remember { mutableStateOf("") }
-    var draft by rememberSaveable(workspace.cwd) { mutableStateOf("") }
-    var draftRestored by rememberSaveable(workspace.cwd) { mutableStateOf(false) }
+    var draft by rememberSaveable(cwd) { mutableStateOf("") }
+    var draftRestored by rememberSaveable(cwd) { mutableStateOf(false) }
     var errorRes by remember { mutableStateOf<Int?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
     var discardedFromOutside by remember { mutableStateOf(false) }
@@ -66,8 +84,8 @@ fun AgentsDocSheet(
     var sheetEpoch by remember { mutableStateOf(0) }
     val defaultFileName = stringResource(R.string.agents_doc_default_file)
 
-    LaunchedEffect(workspace.cwd) {
-        val doc = agentDocStore.read(workspace.cwd)
+    LaunchedEffect(cwd) {
+        val doc = agentDocStore.read(cwd)
         hasDoc = doc != null
         fileName = doc?.fileName ?: defaultFileName
         initial = doc?.content.orEmpty()
@@ -104,7 +122,7 @@ fun AgentsDocSheet(
                 saving = true
                 errorRes = null
                 scope.launch {
-                    val ok = agentDocStore.save(workspace.cwd, draft)
+                    val ok = agentDocStore.save(cwd, draft)
                     saving = false
                     if (ok) {
                         onSaved()
@@ -122,7 +140,7 @@ fun AgentsDocSheet(
             saving = true
             errorRes = null
             scope.launch {
-                val ok = agentDocStore.delete(workspace.cwd)
+                val ok = agentDocStore.delete(cwd)
                 saving = false
                 if (ok) {
                     onSaved()
@@ -140,7 +158,6 @@ fun AgentsDocSheet(
                 Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.94f)
-                    .imePadding()
                     .testTag("agents_doc_sheet"),
             ) {
                 DdSheetHeader(
@@ -182,7 +199,7 @@ fun AgentsDocSheet(
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = stringResource(R.string.agents_doc_note),
+                                text = stringResource(noteRes),
                                 modifier = Modifier.weight(1f),
                                 style = DdType.bodySmall,
                                 color = colors.inkTertiary,
@@ -390,7 +407,6 @@ fun RemoteAgentsDocSheet(
                 Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.94f)
-                    .imePadding()
                     .testTag("remote_agents_doc_sheet"),
             ) {
                 DdSheetHeader(
@@ -417,6 +433,7 @@ fun RemoteAgentsDocSheet(
                             text = loadError.orEmpty(),
                             style = DdType.bodySmall,
                             color = colors.danger,
+                            textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(10.dp))
                         DdTextAction(

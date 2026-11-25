@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -79,6 +80,8 @@ private fun RideCardShell(
     title: String,
     subtitle: String? = null,
     footer: String? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
     content: @Composable () -> Unit = {},
 ) {
     val colors = superPiColors()
@@ -109,6 +112,9 @@ private fun RideCardShell(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                if (actionLabel != null && onAction != null) {
+                    DdTextAction(text = actionLabel, onClick = onAction, modifier = Modifier.heightIn(min = 44.dp))
+                }
             }
         }
     }
@@ -132,9 +138,25 @@ private fun RideErrorCard(host: PluginHost, title: String, error: RideCardError)
         "rate_limit" -> host.t("查询次数已达上限，请约 1 分钟后重试。", "The query quota is used up. Retry in about a minute.")
         "no_order" -> host.t("历史订单在滴滴 App 查看。", "Historical orders are in the DiDi app.")
         "param" -> host.t("检查参数后重试，坐标来自地点搜索。", "Check the parameters and retry; coordinates come from place search.")
+        "auth" -> host.t("账号连接已失效，到插件页重新连接后重试。", "The account connection expired. Reconnect on the plugin page and retry.")
         else -> host.t("可以稍后在对话里重试。", "Try again in the chat later.")
     }
-    RideCardShell(title = title, subtitle = error.message, footer = footer)
+    val reconnect = error.kind == "auth"
+    RideCardShell(
+        title = title,
+        subtitle = error.message,
+        footer = footer,
+        actionLabel = if (reconnect) host.t("去插件页", "Open plugin") else null,
+        onAction = if (reconnect) {
+            {
+                runCatching { host.ui().openPage("main") }.onFailure {
+                    runCatching { host.ui().toast(host.t("无法打开滴滴页面", "Couldn't open the DiDi page")) }
+                }
+            }
+        } else {
+            null
+        },
+    )
 }
 
 @Composable

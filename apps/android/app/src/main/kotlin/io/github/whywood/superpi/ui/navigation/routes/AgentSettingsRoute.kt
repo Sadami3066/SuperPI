@@ -35,6 +35,10 @@ internal fun AgentSettingsRoute(
     }
     AgentSettingsScreen(
         onOpenWebSearch = { navigator.push(AppDestination.WebSearch) },
+        compactionTriggerPercent = preferences.compactionTriggerPercent,
+        onCompactionTriggerPercentChange = { percent ->
+            scope.launch { dependencies.appPreferences.setCompactionTriggerPercent(percent) }
+        },
         metadataMode = preferences.metadataMode,
         metadataModelLabel = selectedModel?.displayName,
         metadataModels = models,

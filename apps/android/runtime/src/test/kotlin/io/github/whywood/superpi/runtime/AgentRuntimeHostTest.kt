@@ -593,6 +593,27 @@ class AgentRuntimeHostTest {
         }
     }
 
+    @Test
+    fun newSessionInheritsBotDefaultModelAndFallsBackToGlobal() = runTest {
+        val fixture = Fixture(backgroundScope)
+        try {
+            val global = ModelConfig("deepseek", "deepseek-chat", ThinkingLevel.OFF)
+            fixture.settings.save(global)
+            val bot = fixture.host.createWorkspace("Coder")
+            val botDefault = ModelConfig("openai", "gpt-5", ThinkingLevel.HIGH)
+            fixture.host.updateWorkspaceDefaultModel(bot.id, botDefault)
+
+            fixture.host.newSession(bot.id)
+            assertEquals(botDefault, fixture.engine.configs.last())
+
+            fixture.host.updateWorkspaceDefaultModel(bot.id, null)
+            fixture.host.newSession(bot.id)
+            assertEquals(global, fixture.engine.configs.last())
+        } finally {
+            fixture.close()
+        }
+    }
+
     private fun toolEnd(name: String): SessionEvent = SessionEvent.AgentEventReceived(
         AgentEvent.ToolExecutionEnd("call-$name", name, AgentToolResult(), false),
     )
@@ -706,9 +727,25 @@ class AgentRuntimeHostTest {
     }
 
     private class FakeWorkspaceDirectory : WorkspaceDirectory {
-        override suspend fun read(): List<RuntimeWorkspace> = emptyList()
-        override suspend fun add(workspace: RuntimeWorkspace) = Unit
-        override suspend fun remove(id: String) = Unit
+        private val entries = mutableListOf<RuntimeWorkspace>()
+        private var homeDefaultModel: ModelConfig? = null
+
+        override suspend fun read(): List<RuntimeWorkspace> = entries.toList()
+
+        override suspend fun add(workspace: RuntimeWorkspace) {
+            entries.removeAll { it.id == workspace.id }
+            entries += workspace
+        }
+
+        override suspend fun remove(id: String) {
+            entries.removeAll { it.id == id }
+        }
+
+        override suspend fun readHomeDefaultModel(): ModelConfig? = homeDefaultModel
+
+        override suspend fun updateHomeDefaultModel(model: ModelConfig?) {
+            homeDefaultModel = model
+        }
     }
 
     private class FakeProviderDirectory : ProviderDirectory {

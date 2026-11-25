@@ -17,6 +17,8 @@ private val Context.workspaceStore by preferencesDataStore(name = "workspaces")
 class WorkspaceStore(context: Context) {
     private val store = context.applicationContext.workspaceStore
     private val key = stringPreferencesKey("entries")
+    private val homeModelKey = stringPreferencesKey("home_default_model")
+    private val homeProfileKey = stringPreferencesKey("home_profile")
 
     val workspaces: Flow<List<RuntimeWorkspace>> = store.data
         .map { values -> decode(values[key]) }
@@ -25,6 +27,44 @@ class WorkspaceStore(context: Context) {
         }
 
     suspend fun read(): List<RuntimeWorkspace> = workspaces.first()
+
+    suspend fun readHomeDefaultModel(): ModelConfig? {
+        val raw = store.data
+            .map { values -> values[homeModelKey] }
+            .catch { error ->
+                if (error is IOException) emit(null) else throw error
+            }
+            .first()
+            ?: return null
+        return decodeModelConfig(runCatching { JSONObject(raw) }.getOrNull())
+    }
+
+    suspend fun updateHomeDefaultModel(model: ModelConfig?) {
+        store.edit { values ->
+            if (model == null) {
+                values.remove(homeModelKey)
+            } else {
+                values[homeModelKey] = encodeModelConfig(model).toString()
+            }
+        }
+    }
+
+    suspend fun readHomeProfile(): HomeWorkspaceProfile {
+        val raw = store.data
+            .map { values -> values[homeProfileKey] }
+            .catch { error ->
+                if (error is IOException) emit(null) else throw error
+            }
+            .first()
+            ?: return HomeWorkspaceProfile()
+        return decodeHomeProfile(runCatching { JSONObject(raw) }.getOrNull())
+    }
+
+    suspend fun updateHomeProfile(profile: HomeWorkspaceProfile) {
+        store.edit { values ->
+            values[homeProfileKey] = encodeHomeProfile(profile).toString()
+        }
+    }
 
     suspend fun add(workspace: RuntimeWorkspace) {
         store.edit { values ->
@@ -69,6 +109,7 @@ class WorkspaceStore(context: Context) {
                             createdAt = item.optLong("createdAt", 0L),
                             avatar = item.optString("avatar").trim().takeIf { it.isNotEmpty() },
                             intro = item.optString("intro").trim().takeIf { it.isNotEmpty() },
+                            defaultModel = decodeModelConfig(item.optJSONObject("defaultModel")),
                         ),
                     )
                 }
@@ -86,8 +127,40 @@ class WorkspaceStore(context: Context) {
                 .put("createdAt", workspace.createdAt)
             workspace.avatar?.let { item.put("avatar", it) }
             workspace.intro?.let { item.put("intro", it) }
+            workspace.defaultModel?.let { item.put("defaultModel", encodeModelConfig(it)) }
             array.put(item)
         }
         return array.toString()
+    }
+
+    private fun decodeModelConfig(obj: JSONObject?): ModelConfig? {
+        if (obj == null) return null
+        val providerId = obj.optString("providerId").trim()
+        val modelId = obj.optString("modelId").trim()
+        if (providerId.isEmpty() || modelId.isEmpty()) return null
+        val rawThinking = obj.optString("thinkingLevel").trim()
+        val thinking = ThinkingLevel.entries.firstOrNull { it.name.equals(rawThinking, ignoreCase = true) }
+            ?: ThinkingLevel.OFF
+        return ModelConfig(providerId = providerId, modelId = modelId, thinkingLevel = thinking)
+    }
+
+    private fun encodeModelConfig(config: ModelConfig): JSONObject = JSONObject()
+        .put("providerId", config.providerId)
+        .put("modelId", config.modelId)
+        .put("thinkingLevel", config.thinkingLevel.name)
+
+    private fun decodeHomeProfile(obj: JSONObject?): HomeWorkspaceProfile {
+        if (obj == null) return HomeWorkspaceProfile()
+        val name = obj.optString("name").trim().ifEmpty { AgentRuntimeHost.HOME_NAME }
+        val avatar = obj.optString("avatar").trim().takeIf { it.isNotEmpty() }
+        val intro = obj.optString("intro").trim().takeIf { it.isNotEmpty() }
+        return HomeWorkspaceProfile(name = name, avatar = avatar, intro = intro)
+    }
+
+    private fun encodeHomeProfile(profile: HomeWorkspaceProfile): JSONObject {
+        val obj = JSONObject().put("name", profile.name.trim().ifEmpty { AgentRuntimeHost.HOME_NAME })
+        profile.avatar?.trim()?.takeIf { it.isNotEmpty() }?.let { obj.put("avatar", it) }
+        profile.intro?.trim()?.takeIf { it.isNotEmpty() }?.let { obj.put("intro", it) }
+        return obj
     }
 }

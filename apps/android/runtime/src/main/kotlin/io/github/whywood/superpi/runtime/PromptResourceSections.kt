@@ -11,6 +11,7 @@ internal class PromptResourceSections(
     private val agentDir: Path,
     private val fs: FileSystem,
     private val excludedSkills: Set<String>,
+    private val selectedTools: List<String> = emptyList(),
 ) {
     private val trackedKeys = setOf("skills", "project_context", "addendum")
     @Volatile
@@ -44,6 +45,7 @@ internal class PromptResourceSections(
                 addendum = resources.appendSystemPrompt,
                 projectInstructions = resources.contextFiles,
                 skills = resources.skills,
+                selectedTools = selectedTools,
                 cwd = cwd,
             ),
         ).sections

@@ -86,7 +86,7 @@ private fun toolErrorResult(
 ): PluginToolResult {
     val raw = when (error) {
         is MiCloudHttpException -> error.body.ifBlank { error.message.orEmpty() }
-        is IllegalArgumentException -> ""
+        is IllegalArgumentException -> error.message.orEmpty().take(200)
         else -> error.message.orEmpty()
     }
     return textResult(

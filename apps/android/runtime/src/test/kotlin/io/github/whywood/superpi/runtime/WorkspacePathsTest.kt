@@ -48,6 +48,38 @@ class WorkspacePathsTest {
     }
 
     @Test
+    fun wrappedReadUsesInjectedFileSystemForAbsolutePaths() = runBlocking {
+        val mapped = File(root, "root-mapped").apply { mkdirs() }
+        File(mapped, "secret.txt").writeText("from-injected-fs")
+        val injectedFs = object : okio.ForwardingFileSystem(FileSystem.SYSTEM) {
+            private fun remap(path: Path): Path =
+                if (path.toString().startsWith("/virtual/")) {
+                    (mapped.absolutePath + path.toString().removePrefix("/virtual")).toPath()
+                } else {
+                    path
+                }
+
+            override fun metadataOrNull(path: Path): okio.FileMetadata? =
+                super.metadataOrNull(remap(path))
+
+            override fun canonicalize(path: Path): Path = remap(path)
+
+            override fun source(file: Path): okio.Source = super.source(remap(file))
+        }
+        val readTool = defaultCodingTools(cwd, injectedFs, mutationQueue = FileMutationQueue())
+            .first { it.name == "read" }
+            .withAbsolutePaths(injectedFs)
+        val result = readTool.execute(
+            "r-injected",
+            buildJsonObject { put("path", "/virtual/secret.txt") },
+            null,
+            null,
+        )
+        val text = result.content.filterIsInstance<TextContent>().joinToString("\n") { it.text }
+        assertTrue(text.contains("from-injected-fs"))
+    }
+
+    @Test
     fun rejectsRelativeAndHomePaths() {
         listOf("tool-test/a.txt", "~/notes/a.txt", "").forEach { path ->
             assertThrows(IllegalArgumentException::class.java) { requireAbsolutePath(path) }
@@ -102,29 +134,19 @@ class WorkspacePathsTest {
     }
 
     @Test
-    fun lsGrepFindAcceptWorkspacePrefix() = runBlocking {
-        File(workspace, "sub").mkdirs()
-        File(workspace, "sub/a.txt").writeText("needle\n")
-
-        assertTrue(runTool("ls", buildJsonObject { put("path", File(workspace, "sub").absolutePath) }).contains("a.txt"))
-        assertTrue(
-            runTool(
-                "grep",
-                buildJsonObject {
-                    put("pattern", "needle")
-                    put("path", workspace.absolutePath)
-                },
-            ).contains("sub/a.txt"),
-        )
-        assertTrue(
-            runTool(
-                "find",
-                buildJsonObject {
-                    put("pattern", "*.txt")
-                    put("path", workspace.absolutePath)
-                },
-            ).contains("sub/a.txt"),
-        )
+    fun wrappedReadRejectsSymlinkToDirectory() = runBlocking {
+        val dir = File(workspace, "linked-target").apply { mkdirs() }
+        val symlink = File(workspace, "dir-link")
+        Files.createSymbolicLink(symlink.toPath(), dir.toPath())
+        val readTool = defaultCodingTools(cwd, FileSystem.SYSTEM, mutationQueue = FileMutationQueue())
+            .first { it.name == "read" }
+            .withAbsolutePaths(FileSystem.SYSTEM)
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                readTool.execute("r-dir", buildJsonObject { put("path", symlink.absolutePath) }, null, null)
+            }
+        }
+        Unit
     }
 
     @Test
@@ -150,6 +172,6 @@ class WorkspacePathsTest {
     }
 
     private companion object {
-        val FILE_TOOLS = setOf("read", "write", "edit", "ls", "grep", "find")
+        val FILE_TOOLS = setOf("read", "write", "edit")
     }
 }

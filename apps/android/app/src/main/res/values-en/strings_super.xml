@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="super_mode_switch_to_super">Switch to Super mode</string>
+    <string name="super_mode_switch_to_normal">Switch to Normal mode</string>
+    <string name="super_drawer_team">Team</string>
+    <string name="super_drawer_team_enabled_count">%1$d</string>
+    <string name="super_drawer_workers_active">Active</string>
+    <string name="super_drawer_workers_saved">Saved</string>
+    <string name="super_drawer_workers_empty">No delegated tasks yet\nAsk for multi-step work in chat to get started</string>
+    <string name="super_drawer_worker_delete">Remove</string>
+    <string name="super_drawer_this_device">This phone</string>
+    <string name="super_worker_status_queued">Queued</string>
+    <string name="super_worker_status_running">Running</string>
+    <string name="super_worker_status_waiting">Needs input</string>
+    <string name="super_worker_status_stalled">No progress</string>
+    <string name="super_worker_status_idle">Idle</string>
+    <string name="super_worker_status_failed">Failed</string>
+    <string name="super_chat_menu_team">Team</string>
+    <string name="super_chat_menu_archive">Archive &amp; reset</string>
+    <string name="super_chat_archive_title">Archive and reset chat</string>
+    <string name="super_chat_archive_body">Your current conversation will be archived and replaced with a fresh thread.</string>
+    <string name="super_chat_archive_confirm">Archive &amp; reset</string>
+    <string-array name="super_chat_empty_greetings_named">
+        <item>Overdrive engaged, {name}.</item>
+        <item>Entering irrational territory.</item>
+        <item>Limiters off.</item>
+        <item>Deep compute online.</item>
+        <item>Overclocked and ready, {name}.</item>
+        <item>Super PI in control.</item>
+        <item>Heavy lifting, engaged.</item>
+        <item>Give me your hardest problem.</item>
+        <item>Let\'s go deeper.</item>
+        <item>Full power.</item>
+        <item>Welcome to the infinite.</item>
+        <item>Singularity linked, {name}.</item>
+        <item>Rules rewritten.</item>
+    </string-array>
+    <string-array name="super_chat_empty_greetings_plain">
+        <item>Overdrive engaged.</item>
+        <item>Entering irrational territory.</item>
+        <item>Limiters off.</item>
+        <item>Deep compute online.</item>
+        <item>Overclocked and ready.</item>
+        <item>Super PI in control.</item>
+        <item>Heavy lifting, engaged.</item>
+        <item>Give me your hardest problem.</item>
+        <item>Let\'s go deeper.</item>
+        <item>Full power.</item>
+        <item>Welcome to the infinite.</item>
+        <item>Singularity linked.</item>
+        <item>Rules rewritten.</item>
+    </string-array>
+    <string-array name="super_starter_prompts">
+        <item>Dispatch the team in parallel and bring me one brief: </item>
+        <item>Design and build an interactive miniapp for: </item>
+        <item>Deep-research this topic and compile an actionable brief: </item>
+        <item>Break this ambitious goal into an execution roadmap: </item>
+        <item>Use my schedule and memory to prioritize: </item>
+        <item>Run a background task and report back on milestones: </item>
+        <item>Red-team this decision from multiple angles: </item>
+        <item>Coordinate across my devices to troubleshoot: </item>
+        <item>Synthesize these scattered inputs into a clean doc: </item>
+        <item>Track this on a schedule and alert me on shifts: </item>
+    </string-array>
+    <string name="super_chat_empty_team_summary">%1$d team members enabled</string>
+    <string name="super_chat_empty_team_action">Set up team</string>
+    <string name="super_team_idle_slots">Idle · Limit %1$d</string>
+    <string name="super_settings_advanced_expand">Show advanced scheduling (5)</string>
+    <string name="super_settings_advanced_collapse">Hide advanced scheduling</string>
+    <string name="super_chat_error_retry">Retry</string>
+    <string name="super_chat_error_dismiss">Dismiss</string>
+    <string name="super_chat_worker_approval_title">%1$s needs input</string>
+    <string name="super_chat_worker_approval_dismiss">Dismiss</string>
+    <string name="super_chat_worker_approval_open">Details</string>
+    <string name="super_team_title">Team</string>
+    <string name="super_team_back">Back</string>
+    <string name="super_team_refresh">Refresh</string>
+    <string name="super_team_device_local">This phone</string>
+    <string name="super_team_device_offline">Offline</string>
+    <string name="super_team_slots">%1$d/%2$d</string>
+    <string name="super_team_unsupported">This device needs an app update to join the team</string>
+    <string name="super_team_cap_skills">%1$d skills</string>
+    <string name="super_team_cap_plugins">%1$d plugins</string>
+    <string name="super_team_cap_mcp">%1$d connectors</string>
+    <string name="super_team_cap_screen">Screen</string>
+    <string name="super_team_cap_miniapp">Miniapps</string>
+    <string name="super_team_empty">No Bots available to add</string>
+    <string name="super_worker_monitor_title">Task conversation</string>
+    <string name="super_worker_monitor_delete">Remove</string>
+    <string name="super_worker_monitor_missing">This entry was removed</string>
+    <string name="super_worker_empty_chat">No messages yet. Send a message directly to continue.</string>
+    <string name="super_worker_remote_offline">Remote device is offline. Reconnect to send messages.</string>
+    <string name="super_worker_delete_title">Remove task record</string>
+    <string name="super_worker_delete_body">Remove “%1$s” and its saved files? This cannot be undone.</string>
+    <string name="super_worker_delete_confirm">Remove</string>
+    <string name="super_worker_cancel">Cancel</string>
+    <string name="super_team_refresh_failed">Couldn\'t refresh. Please try again.</string>
+    <string name="settings_super">SuperPI Settings</string>
+    <string name="super_settings_title">SuperPI Settings</string>
+    <string name="super_settings_instructions">Instructions</string>
+    <string name="super_settings_instructions_subtitle">Add persistent guidance and rules for Super PI</string>
+    <string name="super_agents_doc_note">Changes apply on the next message.</string>
+    <string name="super_settings_reset">Reset to defaults</string>
+    <string name="super_settings_reset_title">Reset SuperPI settings</string>
+    <string name="super_settings_reset_body">Restore SuperPI settings to defaults?</string>
+    <string name="super_settings_reset_confirm">Reset</string>
+    <string name="super_settings_section_concurrency">Team capacity</string>
+    <string name="super_settings_concurrency_title">Parallel tasks</string>
+    <string name="super_settings_concurrency_value">Up to %1$d</string>
+    <string name="super_settings_slots_title">Saved tasks per assistant</string>
+    <string name="super_settings_slots_value">%1$d</string>
+    <string name="super_settings_stall_title">Idle progress check-in</string>
+    <string name="super_settings_stall_desc">Remind without interrupting</string>
+    <string name="super_settings_question_timeout_title">Confirmation timeout handoff</string>
+    <string name="super_settings_question_timeout_desc">Let Super decide on timeout</string>
+    <string name="super_settings_job_wake_title">Wake assistant on background jobs</string>
+    <string name="super_settings_coalesce_title">Report batching delay</string>
+    <string name="super_settings_coalesce_desc">Batch nearby updates</string>
+    <string name="super_settings_receipt_chars_title">Report length per task</string>
+    <string name="super_settings_idle_evict_title">Idle session sleep</string>
+    <string name="super_settings_idle_evict_desc">History stays saved</string>
+    <string name="super_settings_section_context">Member context</string>
+    <string name="super_settings_compaction_override_title">Custom member auto-compaction</string>
+    <string name="super_settings_compaction_override_desc">Uses global threshold when off</string>
+    <string name="super_settings_compaction_threshold_title">Member compaction threshold</string>
+    <string name="super_settings_compaction_threshold_value">At %1$d%% used</string>
+    <string name="super_settings_off">Off</string>
+    <string name="super_settings_never_handoff">Wait for me</string>
+    <string name="super_settings_minutes">%1$d min</string>
+    <string name="super_settings_immediate">Immediate</string>
+    <string name="super_settings_seconds_decimal">%1$.1f s</string>
+    <string name="super_settings_seconds_int">%1$d s</string>
+    <string name="super_settings_chars_count">%1$d chars</string>
+    <string name="super_worker_failed_fallback">Task failed</string>
+    <string name="super_miniapp_create_prompt">Create a new miniapp for me: </string>
+    <string name="memory_source_worker_removed">The background task this memory came from has been removed</string>
+</resources>

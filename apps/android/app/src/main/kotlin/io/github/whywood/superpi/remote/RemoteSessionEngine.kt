@@ -8,6 +8,7 @@ import io.github.whywood.superpi.runtime.SessionEngine
 import io.github.whywood.superpi.runtime.SessionHandle
 import io.github.whywood.superpi.runtime.SessionRuntimeEvent
 import io.github.whywood.superpi.runtime.SessionUsage
+import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.sdk.mcp.config.McpServerConfig
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -59,6 +60,22 @@ object RemoteSessionRegistry {
     }
 
     fun peerSessionId(sessionId: String): String? = handles[sessionId]?.currentPeerSessionId()
+
+    fun setPendingModel(
+        sessionId: String,
+        providerId: String,
+        modelId: String,
+        thinkingLevel: ThinkingLevel?,
+    ) {
+        handles[sessionId]?.setPendingModel(providerId, modelId, thinkingLevel)
+    }
+
+    fun setPendingThinking(sessionId: String, thinkingLevel: ThinkingLevel) {
+        handles[sessionId]?.setPendingThinking(thinkingLevel)
+    }
+
+    fun pendingModelSelection(sessionId: String): RemotePendingModelSelection? =
+        handles[sessionId]?.pendingModelSelection()
 }
 
 class RemoteSessionEngine(

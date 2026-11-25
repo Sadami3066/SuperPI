@@ -1,5 +1,12 @@
 package io.github.whywood.superpi.runtime
 
+import io.github.whywood.superpi.runtime.memory.MemoryAgentGateway
+import io.github.whywood.superpi.runtime.memory.MemoryAgentService
+import io.github.whywood.superpi.runtime.memory.MemoryAgentStepResult
+import io.github.whywood.superpi.runtime.memory.MemoryModelTier
+import io.github.whywood.superpi.runtime.memory.MemoryStore
+import io.github.whywood.superpi.runtime.memory.memoryTools
+import io.github.whywood.superpi.sdk.ai.Context
 import io.github.whywood.superpi.sdk.ai.RunSignal
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import io.github.whywood.superpi.sdk.coding.tools.ShellExecutor
@@ -39,10 +46,22 @@ class ToolTextPolicyTest {
 
     @Test
     fun runtimeToolTextStaysTaskOriented() {
+        val allowedSnippets = setOf(
+            "present", "todo_write", "memory_search", "memory_inspect_entity",
+            "memory_read_archive", "memory_dispatch", "tool_search", "tool_execute",
+        )
         tools().forEach { tool ->
             assertTrue("${tool.name} description is empty", tool.description.isNotBlank())
-            if (tool.name != "present") {
+            if (tool.name !in allowedSnippets) {
                 assertNull("${tool.name} should not send promptSnippet", tool.promptSnippet)
+            } else {
+                val snippet = tool.promptSnippet.orEmpty()
+                assertTrue("${tool.name} promptSnippet is blank", snippet.isNotBlank())
+                assertFalse("${tool.name} promptSnippet should stay one line", snippet.contains("\n"))
+                assertFalse(
+                    "${tool.name} promptSnippet must not duplicate tool name prefix",
+                    snippet.lowercase().startsWith("${tool.name.lowercase()}:"),
+                )
             }
             tool.promptGuidelines.orEmpty().forEach { guideline ->
                 assertTrue("${tool.name} guideline is empty", guideline.isNotBlank())
@@ -80,13 +99,38 @@ class ToolTextPolicyTest {
         val binding = SessionBinding()
         val registry = JobRegistry(scope = scope, notifier = { _, _, _ -> })
         val store = MiniappStore(File(root, "miniapp"))
+        val timers = TimerService(
+            io.github.whywood.superpi.runtime.testing.FakeAgentRuntime(),
+            TimerStore(File(root, "timers")),
+            scope,
+        )
+        val memoryStore = MemoryStore(File(root, "memory"))
+        val memoryAgent = MemoryAgentService(
+            store = memoryStore,
+            gateway = object : MemoryAgentGateway {
+                override suspend fun step(tier: MemoryModelTier, context: Context): MemoryAgentStepResult =
+                    MemoryAgentStepResult.NoModel
+            },
+            scope = scope,
+        )
         return buildList {
             add(askUserQuestionTool(QuestionCenter(), binding))
             add(presentTool(null) { null })
             addAll(goalTools(binding, GoalService()))
             addAll(jobTools(binding, registry))
+            addAll(timerTools(timers, binding))
             addAll(miniappTools(store))
-            add(miniappEditTool(store))
+            add(miniappDataTool(store))
+            add(todoWriteTool({ "session-1" }) { _, _, _, _ -> true })
+            addAll(
+                memoryTools(
+                    store = memoryStore,
+                    agentService = memoryAgent,
+                    allowDispatch = { true },
+                    sessionId = { "session-1" },
+                ),
+            )
+            addAll(deferredTools(AppToolContext(QuestionCenter()), binding))
             add(
                 systemShellTool {
                     object : ShellExecutor {

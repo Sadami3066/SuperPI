@@ -87,7 +87,8 @@ class WecomReleasesTest {
         assertEquals(2, urls.size)
         assertTrue(urls[0].startsWith("https://registry.npmjs.org/"))
         assertTrue(urls[1].contains("registry.npmmirror.com"))
-        assertEquals("wecom-cli-linux-arm64-1.3.4.tgz", WecomCli.archiveName("1.3.4"))
+        assertEquals("cli-linux-arm64-1.3.4.tgz", WecomCli.archiveName("1.3.4"))
+        assertTrue(urls.all { it.substringAfterLast('/') == WecomCli.archiveName("1.3.4") })
     }
 
     @Test
@@ -95,7 +96,7 @@ class WecomReleasesTest {
         val release = (WecomReleases.parseRegistryRelease(wecomFixture("registry-latest.json"), 0L) as WecomReleaseResult.Success).release
         val shared = WecomReleases.toCliRelease(release)
         assertEquals("1.3.4", shared.version)
-        assertEquals("wecom-cli-linux-arm64-1.3.4.tgz", shared.archiveName)
+        assertEquals("cli-linux-arm64-1.3.4.tgz", shared.archiveName)
         assertEquals(release.sha512, shared.sha512Base64)
         assertEquals("", shared.sha256)
         assertEquals(2, shared.downloadUrls.size)

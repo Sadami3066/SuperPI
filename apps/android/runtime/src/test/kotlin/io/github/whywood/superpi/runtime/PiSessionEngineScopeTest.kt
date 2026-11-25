@@ -1,7 +1,9 @@
 package io.github.whywood.superpi.runtime
 
+import io.github.whywood.superpi.sdk.ai.PlainTextContent
 import io.github.whywood.superpi.sdk.ai.RunSignal
 import io.github.whywood.superpi.sdk.ai.TextContent
+import io.github.whywood.superpi.sdk.ai.UserMessage
 import io.github.whywood.superpi.sdk.ai.auth.Credential
 import io.github.whywood.superpi.sdk.ai.auth.CredentialInfo
 import io.github.whywood.superpi.sdk.ai.auth.CredentialStore
@@ -32,6 +34,7 @@ import kotlinx.serialization.json.put
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -185,7 +188,7 @@ class PiSessionEngineScopeTest {
             val tools = engine.availableTools().associateBy { it.name }
             val bash = tools.getValue("bash")
             assertTrue(bash.description.contains("[exit: N]"))
-            assertTrue(runTool(bash, buildJsonObject { put("command", "true") }).contains("[exit: 0]"))
+            assertTrue(runTool(bash, buildJsonObject { put("command", "true"); put("description", "Verify shell") }).contains("[exit: 0]"))
 
             val read = tools.getValue("read")
             val prepared = read.prepareArguments!!.invoke(buildJsonObject { put("path", File(workspace, "notes.txt").absolutePath) })
@@ -229,11 +232,19 @@ class PiSessionEngineScopeTest {
             fs = FileSystem.SYSTEM,
         )
         try {
+            val nonShellSession = engine.createSession(
+                file = null,
+                config = null,
+                shellEnabled = false,
+                mcpEnabled = false,
+            )
+            nonShellSession.close()
+
             val failure = runCatching {
                 engine.createSession(
                     file = null,
                     config = null,
-                    shellEnabled = false,
+                    shellEnabled = true,
                     mcpEnabled = false,
                 )
             }.exceptionOrNull()
@@ -243,6 +254,107 @@ class PiSessionEngineScopeTest {
                 "Root Linux is not ready; retry after preparation finishes",
                 failure?.message,
             )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun openSessionPreservesRestoredModelOverDefaultModelConfig() = runTest {
+        val root = Files.createTempDirectory("superpi-engine-model").toFile()
+        val workspace = File(root, "workspace").apply { mkdirs() }
+        val agentDir = File(root, "agent").apply { mkdirs() }
+        val catalog = ProviderCatalog(transport, credentials)
+        val models = catalog.models("deepseek")
+        assertTrue(models.size >= 2)
+        val firstModel = models[0]
+        val secondModel = models[1]
+        val engine = PiSessionEngine(
+            workspace = workspace,
+            agentDir = agentDir,
+            credentials = credentials,
+            transport = transport,
+            shellExecutor = null,
+            providers = catalog,
+            fs = FileSystem.SYSTEM,
+        )
+        try {
+            val created = engine.createSession(
+                file = null,
+                config = ModelConfig("deepseek", firstModel.id, ThinkingLevel.OFF),
+                shellEnabled = false,
+                mcpEnabled = false,
+            )
+            val filePath = created.sessionFile!!
+            created.sessionManager.appendMessage(
+                UserMessage(content = PlainTextContent("hello"), timestamp = 1_000L),
+            )
+            created.sessionManager.appendModelChange("deepseek", firstModel.id)
+            created.close()
+
+            val reopened = engine.createSession(
+                file = filePath,
+                config = ModelConfig("deepseek", secondModel.id, ThinkingLevel.HIGH),
+                shellEnabled = false,
+                mcpEnabled = false,
+            )
+            try {
+                assertEquals("deepseek", reopened.model.provider)
+                assertEquals(firstModel.id, reopened.model.id)
+            } finally {
+                reopened.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun superReadOnlyConfigExposesQueryToolsWithoutSkillsOrProjectContextLeak() = runTest {
+        val root = Files.createTempDirectory("superpi-engine-super-ro").toFile()
+        val workspace = File(root, "workspace").apply { mkdirs() }
+        val agentDir = File(root, "agent").apply { mkdirs() }
+        val skillDir = File(agentDir, "skills/secret-skill").apply { mkdirs() }
+        File(skillDir, "SKILL.md").writeText("---\nname: secret-skill\ndescription: Secret\n---\nbody")
+        File(agentDir, "APPEND_SYSTEM.md").writeText("APPEND_SECRET")
+        File(workspace, "AGENTS.md").writeText("Workspace instructions")
+        File(workspace, "readme.txt").writeText("hello")
+        val catalog = ProviderCatalog(transport, credentials)
+        val engine = PiSessionEngine(
+            workspace = workspace,
+            agentDir = agentDir,
+            credentials = credentials,
+            transport = transport,
+            shellExecutor = null,
+            providers = catalog,
+            fs = FileSystem.SYSTEM,
+            includePromptResources = false,
+            readOnlyPathsPrompt = true,
+            enableReadOnlyQueryTools = true,
+            defaultShellEnabled = false,
+            defaultMcpEnabled = false,
+            defaultToolsFilter = { it.name in setOf("read", "ls", "grep", "find") },
+        )
+        try {
+            val session = engine.createSession(
+                file = null,
+                config = ModelConfig(),
+                shellEnabled = false,
+                toolsFilter = { it.name in setOf("read", "ls", "grep", "find") },
+                mcpEnabled = false,
+            )
+            try {
+                assertEquals(
+                    listOf("find", "grep", "ls", "read"),
+                    session.activeToolNames.sorted(),
+                )
+                assertFalse(session.systemPrompt.contains("secret-skill"))
+                assertFalse(session.systemPrompt.contains("Workspace instructions"))
+                assertFalse(session.systemPrompt.contains("APPEND_SECRET"))
+                assertTrue(engine.capabilitySnapshot(session).skills.isEmpty())
+            } finally {
+                session.close()
+            }
         } finally {
             root.deleteRecursively()
         }

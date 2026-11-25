@@ -60,8 +60,8 @@ internal fun weatherGuidance(localizer: AmapLocalizer, hasWeather: Boolean): Str
 
 internal fun failureGuidance(localizer: AmapLocalizer, failure: AmapFailure): String = when (failure) {
     AmapFailure.INVALID_KEY -> localizer.t(
-        "到插件页重新填写并验证高德 Key；地图预览还需要开通静态地图服务。",
-        "Re-enter and verify the Amap key on the plugin page. The map preview also needs the static map service enabled.",
+        "到插件页重新填写并验证服务凭证，改好后重试；地图预览还需要开通静态地图服务。",
+        "Re-enter and verify the service credential on the plugin page, then retry. The map preview also needs the static map service enabled.",
     )
     AmapFailure.QUOTA -> localizer.t(
         "稍后再试，或到高德开放平台确认今日额度和并发限制。",
@@ -80,12 +80,12 @@ internal fun failureGuidance(localizer: AmapLocalizer, failure: AmapFailure): St
         "The request did not reach Amap. Check the connection and retry; this is not an error returned by Amap.",
     )
     AmapFailure.PROTOCOL -> localizer.t(
-        "高德返回的协议响应无法识别，稍后重试；持续失败时到插件页重新验证 Key。",
-        "Amap returned an unrecognized protocol response. Try again later; if it keeps failing, verify the key on the plugin page.",
+        "高德返回的内容无法识别，稍后重试；持续失败时到插件页重新验证服务凭证。",
+        "Amap returned an unrecognized response. Try again later; if it keeps failing, verify the service credential on the plugin page.",
     )
     AmapFailure.INTERNAL -> localizer.t(
-        "插件处理高德返回时出错，原始返回已保留；稍后重试。",
-        "The plugin failed while processing the Amap response; the upstream output is preserved. Try again later.",
+        "插件处理高德返回时出错，已保留返回内容；稍后重试。",
+        "The plugin failed while processing the Amap response; the response is preserved. Try again later.",
     )
     AmapFailure.UNKNOWN -> localizer.t(
         "高德返回了无法识别的结果，稍后重试。",

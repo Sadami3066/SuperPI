@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -102,6 +104,8 @@ fun SettingsScreen(
     onOpenAccess: () -> Unit = {},
     accessLabel: String? = null,
     onOpenAgentSettings: () -> Unit = {},
+    onOpenSuperSettings: () -> Unit = {},
+    onOpenMemorySettings: () -> Unit = {},
     onOpenAndroidSettings: () -> Unit = {},
     onOpenPersonalization: () -> Unit,
     onOpenFonts: () -> Unit,
@@ -161,7 +165,7 @@ fun SettingsScreen(
                 onClick = onOpenPersonalization,
             )
 
-            SettingsSectionLabel(stringResource(R.string.settings_group_model))
+            SettingsSectionLabel(stringResource(R.string.settings_group_ai))
             DdGroupCard {
                 DdListRow(
                     icon = DdIcons.Cloud,
@@ -173,6 +177,41 @@ fun SettingsScreen(
                 )
                 DdRowDivider(leadingInset = SettingsDividerInset)
                 DdListRow(
+                    icon = DdIcons.Sparkles,
+                    title = stringResource(R.string.settings_agent),
+                    onClick = onOpenAgentSettings,
+                    showChevron = true,
+                    modifier = Modifier.testTag("settings_agent"),
+                )
+                DdRowDivider(leadingInset = SettingsDividerInset)
+                DdListRow(
+                    icon = DdIcons.ChatPreferences,
+                    title = stringResource(R.string.settings_chat),
+                    onClick = onOpenChatSettings,
+                    showChevron = true,
+                    modifier = Modifier.testTag("settings_chat"),
+                )
+                DdRowDivider(leadingInset = SettingsDividerInset)
+                DdListRow(
+                    icon = DdIcons.Target,
+                    title = stringResource(R.string.settings_super),
+                    onClick = onOpenSuperSettings,
+                    showChevron = true,
+                    modifier = Modifier.testTag("settings_super"),
+                )
+                DdRowDivider(leadingInset = SettingsDividerInset)
+                DdListRow(
+                    icon = DdIcons.Brain,
+                    title = stringResource(R.string.memory_settings_title),
+                    onClick = onOpenMemorySettings,
+                    showChevron = true,
+                    modifier = Modifier.testTag("settings_memory"),
+                )
+            }
+
+            SettingsSectionLabel(stringResource(R.string.settings_group_system))
+            DdGroupCard {
+                DdListRow(
                     icon = DdIcons.Shield,
                     title = stringResource(R.string.settings_access),
                     value = accessLabel,
@@ -182,19 +221,19 @@ fun SettingsScreen(
                 )
                 DdRowDivider(leadingInset = SettingsDividerInset)
                 DdListRow(
-                    icon = DdIcons.Sparkles,
-                    title = stringResource(R.string.settings_agent),
-                    onClick = onOpenAgentSettings,
-                    showChevron = true,
-                    modifier = Modifier.testTag("settings_agent"),
-                )
-                DdRowDivider(leadingInset = SettingsDividerInset)
-                DdListRow(
                     icon = DdIcons.Phone,
                     title = stringResource(R.string.settings_android),
                     onClick = onOpenAndroidSettings,
                     showChevron = true,
                     modifier = Modifier.testTag("settings_android"),
+                )
+                DdRowDivider(leadingInset = SettingsDividerInset)
+                DdListRow(
+                    icon = DdIcons.Scan,
+                    title = stringResource(R.string.scan_settings_title),
+                    onClick = onOpenScan,
+                    showChevron = true,
+                    modifier = Modifier.testTag("settings_scan"),
                 )
             }
 
@@ -233,15 +272,9 @@ fun SettingsScreen(
                 )
             }
 
-            SettingsSectionLabel(stringResource(R.string.settings_group_conversation))
+            SettingsSectionLabel(stringResource(R.string.settings_group_support))
             DdGroupCard {
-                DdListRow(
-                    icon = DdIcons.ChatPreferences,
-                    title = stringResource(R.string.settings_chat),
-                    onClick = onOpenChatSettings,
-                    showChevron = true,
-                    modifier = Modifier.testTag("settings_chat"),
-                )
+                NotificationRow()
                 DdRowDivider(leadingInset = SettingsDividerInset)
                 DdListRow(
                     icon = DdIcons.Archive,
@@ -257,44 +290,31 @@ fun SettingsScreen(
                 )
                 DdRowDivider(leadingInset = SettingsDividerInset)
                 DdListRow(
-                    icon = DdIcons.Scan,
-                    title = stringResource(R.string.scan_settings_title),
-                    onClick = onOpenScan,
-                    showChevron = true,
-                    modifier = Modifier.testTag("settings_scan"),
-                )
-            }
-
-            SettingsSectionLabel(stringResource(R.string.settings_group_notifications))
-            DdGroupCard {
-                NotificationRow()
-                DdRowDivider(leadingInset = SettingsDividerInset)
-                DdListRow(
-                    icon = DdIcons.Privacy,
-                    title = stringResource(R.string.settings_privacy_agreement),
-                    onClick = onOpenPrivacy,
-                    showChevron = true,
-                    modifier = Modifier.testTag("settings_privacy_agreement"),
-                )
-            }
-
-            SettingsSectionLabel(stringResource(R.string.settings_group_about))
-            DdGroupCard {
-                DdListRow(
                     icon = DdIcons.Download,
                     title = stringResource(R.string.settings_update),
                     value = if (updateVersion == null) versionName else null,
                     trailing = if (updateVersion != null) {
                         {
-                            Text(
-                                text = stringResource(R.string.settings_update_available, updateVersion),
-                                style = DdType.bodySmall,
-                                color = colors.accent,
-                                modifier = Modifier.widthIn(max = 140.dp),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.signal),
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_update_available, updateVersion),
+                                    style = DdType.bodySmall,
+                                    color = colors.inkSecondary,
+                                    modifier = Modifier.widthIn(max = 140.dp),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     } else {
                         null
@@ -314,6 +334,14 @@ fun SettingsScreen(
                         modifier = Modifier.testTag("settings_crash_log"),
                     )
                 }
+                DdRowDivider(leadingInset = SettingsDividerInset)
+                DdListRow(
+                    icon = DdIcons.Privacy,
+                    title = stringResource(R.string.settings_privacy_agreement),
+                    onClick = onOpenPrivacy,
+                    showChevron = true,
+                    modifier = Modifier.testTag("settings_privacy_agreement"),
+                )
                 DdRowDivider(leadingInset = SettingsDividerInset)
                 DdListRow(
                     icon = DdIcons.License,
@@ -457,11 +485,7 @@ private fun AccountCard(
 ) {
     val colors = superPiColors()
     val noModel = stringResource(R.string.settings_account_no_model)
-    val modelLabel = if (activeModel.isBlank() || activeModel == noModel) {
-        noModel
-    } else {
-        "${stringResource(R.string.settings_new_chat_model)} · $activeModel"
-    }
+    val modelLabel = if (activeModel.isBlank()) noModel else activeModel
     DdGroupCard {
         DdPressable(
             onClick = onClick,
@@ -615,7 +639,7 @@ private fun LicenseSheet(onClose: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = DdSpacing.Xs),
+                .padding(horizontal = DdSpacing.Xxl),
         ) {
             Spacer(Modifier.height(8.dp))
             LicenseRow(
@@ -623,31 +647,31 @@ private fun LicenseSheet(onClose: () -> Unit) {
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(OPEN_RUNDE_URL) },
             )
-            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+            DdRowDivider()
             LicenseRow(
                 title = stringResource(R.string.settings_license_fredoka),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(FREDOKA_URL) },
             )
-            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+            DdRowDivider()
             LicenseRow(
                 title = stringResource(R.string.settings_license_manrope),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(MANROPE_URL) },
             )
-            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+            DdRowDivider()
             LicenseRow(
                 title = stringResource(R.string.settings_license_lora),
                 subtitle = stringResource(R.string.settings_license_ofl),
                 onClick = { uriHandler.openUri(LORA_URL) },
             )
-            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+            DdRowDivider()
             LicenseRow(
                 title = stringResource(R.string.settings_license_icons),
                 subtitle = stringResource(R.string.settings_license_mit),
                 onClick = { uriHandler.openUri(TABLER_ICONS_URL) },
             )
-            DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+            DdRowDivider()
             LicenseRow(
                 title = stringResource(R.string.settings_license_provider_icons),
                 subtitle = stringResource(R.string.settings_license_provider_icons_body),

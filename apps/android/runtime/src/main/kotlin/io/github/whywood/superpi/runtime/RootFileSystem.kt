@@ -48,12 +48,22 @@ internal class RootFileSystem(
     private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
     private val appUid: Int = -1,
     private val appGid: Int = -1,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : ForwardingFileSystem(FileSystem.SYSTEM) {
 
-    private val listed = java.util.concurrent.ConcurrentHashMap<String, FileMetadata>()
+    private data class CachedMetadata(
+        val metadata: FileMetadata,
+        val expiresAtMs: Long,
+    )
+
+    private val listed = java.util.concurrent.ConcurrentHashMap<String, CachedMetadata>()
 
     override fun metadataOrNull(path: Path): FileMetadata? {
-        listed[path.toString()]?.let { return it }
+        val key = path.toString()
+        listed[key]?.let { cached ->
+            if (clock() <= cached.expiresAtMs) return cached.metadata
+            listed.remove(key, cached)
+        }
         val quoted = quote(path)
         val result = run("LC_ALL=C stat -c '%F|%s' -- $quoted")
         if (result.exitCode != 0) return null
@@ -88,7 +98,7 @@ internal class RootFileSystem(
                     extras = emptyMap(),
                 )
             }
-            else -> FileMetadata(
+            type == "regular file" || type == "regular empty file" -> FileMetadata(
                 isRegularFile = true,
                 isDirectory = false,
                 symlinkTarget = null,
@@ -98,16 +108,28 @@ internal class RootFileSystem(
                 lastAccessedAtMillis = null,
                 extras = emptyMap(),
             )
+            else -> FileMetadata(
+                isRegularFile = false,
+                isDirectory = false,
+                symlinkTarget = null,
+                size = null,
+                createdAtMillis = null,
+                lastModifiedAtMillis = null,
+                lastAccessedAtMillis = null,
+                extras = emptyMap(),
+            )
         }
     }
 
-    private fun listedMetadata(type: String, size: Long?): FileMetadata {
+    private fun listedMetadata(type: String, size: Long?): FileMetadata? {
         val directory = type == "directory"
+        val regular = type == "regular file" || type == "regular empty file"
+        if (!directory && !regular) return null
         return FileMetadata(
-            isRegularFile = !directory && !type.contains("link"),
+            isRegularFile = regular,
             isDirectory = directory,
             symlinkTarget = null,
-            size = if (directory || type.contains("link")) null else size,
+            size = if (directory) null else size,
             createdAtMillis = null,
             lastModifiedAtMillis = null,
             lastAccessedAtMillis = null,
@@ -123,8 +145,8 @@ internal class RootFileSystem(
         return value.toPath()
     }
 
-    override fun source(path: Path): Source {
-        val process = runner.start("cat -- ${quote(path)}")
+    override fun source(file: Path): Source {
+        val process = runner.start("cat -- ${quote(file)}")
         val input = process.inputStream.source().buffer()
         return object : Source {
             override fun read(sink: Buffer, byteCount: Long): Long = input.read(sink, byteCount)
@@ -138,11 +160,11 @@ internal class RootFileSystem(
         }
     }
 
-    override fun sink(path: Path, mustCreate: Boolean): Sink {
+    override fun sink(file: Path, mustCreate: Boolean): Sink {
         val command = if (mustCreate) {
-            "set -C; cat > ${quote(path)}"
+            "set -C; cat > ${quote(file)}"
         } else {
-            "cat > ${quote(path)}"
+            "cat > ${quote(file)}"
         }
         val process = runner.start(command)
         val output = process.outputStream.sink().buffer()
@@ -158,7 +180,8 @@ internal class RootFileSystem(
                 if (!waitForProcess(process)) {
                     throw IOException("root write failed: ${readError(process)}")
                 }
-                chown(path)
+                chown(file)
+                listed.clear()
             }
         }
     }
@@ -185,13 +208,15 @@ internal class RootFileSystem(
                     throw IOException("root append failed: ${readError(process)}")
                 }
                 chown(file)
+                listed.clear()
             }
         }
     }
 
     override fun list(dir: Path): List<Path> {
-        val quoted = quote(dir)
-        val result = run("LC_ALL=C stat -c '%F|%s|%n' -- $quoted/* $quoted/.[!.]* $quoted/..?* 2>/dev/null")
+        val rawDir = dir.toString()
+        val globPrefix = if (rawDir == "/") "" else quote(dir)
+        val result = run("LC_ALL=C stat -c '%F|%s|%n' -- $globPrefix/* $globPrefix/.[!.]* $globPrefix/..?* 2>/dev/null")
         val lines = result.stdout.lineSequence().filter { it.isNotBlank() }.toList()
         if (lines.isEmpty()) {
             if (result.exitCode != 0 && metadataOrNull(dir)?.isDirectory != true) {
@@ -202,8 +227,10 @@ internal class RootFileSystem(
         return lines.mapNotNull { line ->
             val parts = line.split('|', limit = 3)
             val raw = parts.getOrNull(2) ?: return@mapNotNull null
-            val path = raw.toPath()
-            listed[path.toString()] = listedMetadata(parts[0], parts[1].trim().toLongOrNull())
+            val path = raw.toPath(normalize = true)
+            listedMetadata(parts[0], parts[1].trim().toLongOrNull())?.let { meta ->
+                listed[path.toString()] = CachedMetadata(meta, clock() + LISTED_TTL_MS)
+            }
             path
         }
     }
@@ -236,11 +263,13 @@ internal class RootFileSystem(
 
     override fun createDirectory(dir: Path, mustCreate: Boolean) {
         val result = run(createDirectoryCommand(dir.toString(), mustCreate, if (shouldChown(dir)) chownTarget() else null))
+        listed.clear()
         if (result.exitCode != 0) throw IOException("root mkdir failed: ${result.stderr.trim()}")
     }
 
     override fun atomicMove(source: Path, target: Path) {
         val result = run("mv -f -- ${quote(source)} ${quote(target)}")
+        listed.clear()
         if (result.exitCode != 0) throw IOException("root move failed: ${result.stderr.trim()}")
     }
 
@@ -248,11 +277,13 @@ internal class RootFileSystem(
         val quotedSource = quote(source)
         val quotedTarget = quote(target)
         val result = run("[ -f $quotedSource ] || exit 4; [ ! -e $quotedTarget ] || exit 3; cp -- $quotedSource $quotedTarget")
+        listed.clear()
         if (result.exitCode != 0) throw IOException("root copy failed: ${result.stderr.trim()}")
     }
 
     override fun createSymlink(source: Path, target: Path) {
         val result = run("ln -s -- ${quote(target)} ${quote(source)}")
+        listed.clear()
         if (result.exitCode != 0) throw IOException("root symlink failed: ${result.stderr.trim()}")
     }
 
@@ -270,6 +301,7 @@ internal class RootFileSystem(
             "rm -rf -- $quoted"
         }
         val result = run(command)
+        listed.clear()
         if (result.exitCode != 0) throw IOException("root delete failed: ${result.stderr.trim()}")
     }
 
@@ -277,6 +309,7 @@ internal class RootFileSystem(
         if (!shouldChown(path)) return
         val target = chownTarget() ?: return
         val result = run("chown $target -- ${quote(path)}")
+        listed.clear()
         if (result.exitCode != 0) throw IOException("root chown failed: ${result.stderr.trim()}")
     }
 
@@ -295,7 +328,6 @@ internal class RootFileSystem(
     private data class Result(val exitCode: Int, val stdout: String, val stderr: String)
 
     private fun run(command: String): Result {
-        listed.clear()
         val process = runner.start(command)
         val stdout = ByteArrayOutputStream()
         val stderr = ByteArrayOutputStream()
@@ -342,6 +374,7 @@ internal class RootFileSystem(
 
     internal companion object {
         private const val DEFAULT_TIMEOUT_MILLIS = 30_000L
+        private const val LISTED_TTL_MS = 3_000L
 
         internal fun createDirectoryCommand(path: String, mustCreate: Boolean, chownTo: String?): String {
             val quoted = "'" + path.replace("'", "'\\''") + "'"

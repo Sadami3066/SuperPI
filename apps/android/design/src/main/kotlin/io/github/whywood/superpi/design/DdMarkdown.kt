@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -93,11 +94,16 @@ fun DdMarkdown(
     onImage: (@Composable (DdMarkdownImage) -> Unit)? = null,
 ) {
     val colors = superPiColors()
+    val streamText = rememberCoalescedStreamText(text, live)
+    var mounted by remember { mutableStateOf(false) }
+    SideEffect { mounted = true }
+    val animateNewBlocks = live && mounted
+    val animateInitialText = live && (mounted || streamText.length <= STREAM_INITIAL_ANIMATE_MAX_LENGTH)
     val planner = remember { MarkdownStreamPlanner() }
-    val plan = remember(text) {
+    val plan = remember(streamText) {
         Trace.beginSection("superpi.markdown.parse")
         try {
-            planner.plan(text)
+            planner.plan(streamText)
         } finally {
             Trace.endSection()
         }
@@ -127,6 +133,8 @@ fun DdMarkdown(
                     onFileClick = fileClick,
                     onLinkClick = linkClick,
                     live = live,
+                    animateNewBlocks = animateNewBlocks,
+                    animateOnFirstFill = animateInitialText,
                     codeLabel = codeLabel,
                     copyCodeLabel = copyCodeLabel,
                     onCopyCode = copyCode,
@@ -204,6 +212,8 @@ private fun MarkdownBlocks(
     onFileClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
     live: Boolean,
+    animateNewBlocks: Boolean,
+    animateOnFirstFill: Boolean,
     codeLabel: String,
     copyCodeLabel: String,
     onCopyCode: ((String) -> Unit)?,
@@ -222,6 +232,8 @@ private fun MarkdownBlocks(
                 onFileClick = onFileClick,
                 onLinkClick = onLinkClick,
                 live = live,
+                animateNewBlocks = animateNewBlocks,
+                animateOnFirstFill = animateOnFirstFill,
                 codeLabel = codeLabel,
                 copyCodeLabel = copyCodeLabel,
                 onCopyCode = onCopyCode,
@@ -254,6 +266,8 @@ private fun MarkdownBlockItem(
     onFileClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
     live: Boolean,
+    animateNewBlocks: Boolean,
+    animateOnFirstFill: Boolean,
     codeLabel: String,
     copyCodeLabel: String,
     onCopyCode: ((String) -> Unit)?,
@@ -268,53 +282,85 @@ private fun MarkdownBlockItem(
                 else -> mdHeading3
             },
             color = colors.ink,
+            live = live,
+            animateOnFirstFill = animateOnFirstFill,
         )
 
         is MarkdownBlock.Paragraph -> InlineCodeText(
             rendered = rememberedInline(block.text, document, colors, onFileClick, onLinkClick),
             style = mdBody,
             color = colors.ink,
+            live = live,
+            animateOnFirstFill = animateOnFirstFill,
         )
 
-        is MarkdownBlock.Code -> CodeBlock(block.language, block.code, colors, live, codeLabel, copyCodeLabel, onCopyCode)
+        is MarkdownBlock.Code -> CodeBlock(
+            language = block.language,
+            code = block.code,
+            colors = colors,
+            live = live,
+            animateNewBlocks = animateNewBlocks,
+            codeLabel = codeLabel,
+            copyCodeLabel = copyCodeLabel,
+            onCopyCode = onCopyCode,
+        )
 
-        is MarkdownBlock.Quote -> QuoteBlock(
-            block = block,
+        is MarkdownBlock.Quote -> StreamingBlockReveal(animateOnMount = animateNewBlocks) {
+            QuoteBlock(
+                block = block,
+                document = document,
+                colors = colors,
+                onFileClick = onFileClick,
+                onLinkClick = onLinkClick,
+                live = live,
+                animateNewBlocks = animateNewBlocks,
+                animateOnFirstFill = animateOnFirstFill,
+                codeLabel = codeLabel,
+                copyCodeLabel = copyCodeLabel,
+                onCopyCode = onCopyCode,
+                onImage = onImage,
+            )
+        }
+
+        is MarkdownBlock.Image -> MarkdownImageBlock(block, onImage)
+
+        is MarkdownBlock.ListBlock -> ListBlockBody(
+            items = block.items,
             document = document,
             colors = colors,
             onFileClick = onFileClick,
             onLinkClick = onLinkClick,
+            depth = 0,
             live = live,
-            codeLabel = codeLabel,
-            copyCodeLabel = copyCodeLabel,
-            onCopyCode = onCopyCode,
-            onImage = onImage,
+            animateOnFirstFill = animateOnFirstFill,
         )
 
-        is MarkdownBlock.Image -> MarkdownImageBlock(block, onImage)
-
-        is MarkdownBlock.ListBlock -> ListBlockBody(block.items, document, colors, onFileClick, onLinkClick, depth = 0)
-
-        is MarkdownBlock.Table -> TableBlock(block, document, colors, onFileClick, onLinkClick, live)
-
-        is MarkdownBlock.Math -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            DdText(
-                text = block.text,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.wash)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                style = DdType.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    lineHeight = 22.sp,
-                ),
-                color = colors.inkSecondary,
-                textAlign = TextAlign.Center,
-            )
+        is MarkdownBlock.Table -> StreamingBlockReveal(animateOnMount = animateNewBlocks) {
+            TableBlock(block, document, colors, onFileClick, onLinkClick, live, animateOnFirstFill)
         }
 
-        MarkdownBlock.Rule -> DdHairline(Modifier.padding(vertical = DdSpacing.Xxs))
+        is MarkdownBlock.Math -> StreamingBlockReveal(animateOnMount = animateNewBlocks) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                DdText(
+                    text = block.text,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.wash)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    style = DdType.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp,
+                        lineHeight = 22.sp,
+                    ),
+                    color = colors.inkSecondary,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+
+        MarkdownBlock.Rule -> StreamingBlockReveal(animateOnMount = animateNewBlocks) {
+            DdHairline(Modifier.padding(vertical = DdSpacing.Xxs))
+        }
     }
 }
 
@@ -343,6 +389,8 @@ private fun QuoteBlock(
     onFileClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
     live: Boolean,
+    animateNewBlocks: Boolean,
+    animateOnFirstFill: Boolean,
     codeLabel: String,
     copyCodeLabel: String,
     onCopyCode: ((String) -> Unit)?,
@@ -372,6 +420,8 @@ private fun QuoteBlock(
             onFileClick = onFileClick,
             onLinkClick = onLinkClick,
             live = live,
+            animateNewBlocks = animateNewBlocks,
+            animateOnFirstFill = animateOnFirstFill,
             codeLabel = codeLabel,
             copyCodeLabel = copyCodeLabel,
             onCopyCode = onCopyCode,
@@ -421,6 +471,7 @@ private fun CodeBlock(
     code: String,
     colors: SuperPIColors,
     live: Boolean,
+    animateNewBlocks: Boolean,
     codeLabel: String,
     copyCodeLabel: String,
     onCopyCode: ((String) -> Unit)?,
@@ -437,53 +488,61 @@ private fun CodeBlock(
     }
     val displayText = if (!live && highlighted.text == code) highlighted else plainText
     var copied by remember(code) { mutableStateOf(false) }
+    val animated = rememberStreamAnimatedText(
+        base = displayText,
+        defaultColor = colors.ink,
+        live = live,
+        animateOnFirstFill = false,
+    )
     LaunchedEffect(copied) {
         if (copied) {
             delay(1500)
             copied = false
         }
     }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(DdShapes.Medium)
-            .background(colors.codeBackground)
-            .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Medium)
-            .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 14.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            DdText(
-                text = language?.uppercase().orEmpty().ifBlank { codeLabel },
-                modifier = Modifier.weight(1f),
-                style = DdType.micro,
-                color = colors.inkTertiary,
-            )
-            if (onCopyCode != null) {
-                DdIconButton(
-                    icon = if (copied) DdIcons.Check else DdIcons.Copy,
-                    onClick = {
-                        onCopyCode(code)
-                        copied = true
-                    },
-                    contentDescription = copyCodeLabel,
-                    modifier = Modifier.testTag("markdown_code_copy"),
-                    size = 44.dp,
-                    iconSize = 15.dp,
-                    tint = if (copied) colors.success else colors.inkTertiary,
+    StreamingBlockReveal(animateOnMount = animateNewBlocks) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(DdShapes.Medium)
+                .background(colors.codeBackground)
+                .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Medium)
+                .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 14.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                DdText(
+                    text = language?.uppercase().orEmpty().ifBlank { codeLabel },
+                    modifier = Modifier.weight(1f),
+                    style = DdType.micro,
+                    color = colors.inkTertiary,
+                )
+                if (onCopyCode != null) {
+                    DdIconButton(
+                        icon = if (copied) DdIcons.Check else DdIcons.Copy,
+                        onClick = {
+                            onCopyCode(code)
+                            copied = true
+                        },
+                        contentDescription = copyCodeLabel,
+                        modifier = Modifier.testTag("markdown_code_copy"),
+                        size = 44.dp,
+                        iconSize = 15.dp,
+                        tint = if (copied) colors.success else colors.inkTertiary,
+                    )
+                }
+            }
+            Box(Modifier.fillMaxWidth().padding(end = 8.dp).horizontalScroll(rememberScrollState())) {
+                DdText(
+                    text = animated.text,
+                    style = DdType.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 21.sp,
+                    ),
+                    color = colors.ink,
+                    softWrap = false,
                 )
             }
-        }
-        Box(Modifier.fillMaxWidth().padding(end = 8.dp).horizontalScroll(rememberScrollState())) {
-            DdText(
-                text = displayText,
-                style = DdType.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 21.sp,
-                ),
-                color = colors.ink,
-                softWrap = false,
-            )
         }
     }
 }
@@ -496,9 +555,22 @@ private fun ListBlockBody(
     onFileClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
     depth: Int,
+    live: Boolean,
+    animateOnFirstFill: Boolean,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items.forEach { item -> ListItemBody(item, document, colors, onFileClick, onLinkClick, depth) }
+        items.forEach { item ->
+            ListItemBody(
+                item = item,
+                document = document,
+                colors = colors,
+                onFileClick = onFileClick,
+                onLinkClick = onLinkClick,
+                depth = depth,
+                live = live,
+                animateOnFirstFill = animateOnFirstFill,
+            )
+        }
     }
 }
 
@@ -510,6 +582,8 @@ private fun ListItemBody(
     onFileClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
     depth: Int,
+    live: Boolean,
+    animateOnFirstFill: Boolean,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
@@ -523,11 +597,22 @@ private fun ListItemBody(
                 } else {
                     colors.ink
                 },
+                live = live,
+                animateOnFirstFill = animateOnFirstFill,
             )
         }
         if (item.children.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().padding(start = DdSpacing.Xl, top = DdSpacing.Xxs)) {
-                ListBlockBody(item.children, document, colors, onFileClick, onLinkClick, depth + 1)
+                ListBlockBody(
+                    items = item.children,
+                    document = document,
+                    colors = colors,
+                    onFileClick = onFileClick,
+                    onLinkClick = onLinkClick,
+                    depth = depth + 1,
+                    live = live,
+                    animateOnFirstFill = animateOnFirstFill,
+                )
             }
         }
     }
@@ -578,6 +663,7 @@ private fun TableBlock(
     onFileClick: ((String) -> Unit)?,
     onLinkClick: ((String) -> Unit)?,
     live: Boolean,
+    animateOnFirstFill: Boolean,
 ) {
     val columns = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
     if (columns == 0) return
@@ -678,6 +764,8 @@ private fun TableBlock(
                     header = true,
                     horizontalPadding,
                     verticalPadding,
+                    live = live,
+                    animateOnFirstFill = animateOnFirstFill,
                 )
                 DdHairline()
                 renderedRows.forEachIndexed { index, row ->
@@ -688,6 +776,8 @@ private fun TableBlock(
                         header = false,
                         horizontalPadding,
                         verticalPadding,
+                        live = live,
+                        animateOnFirstFill = animateOnFirstFill,
                     )
                     if (index != renderedRows.lastIndex) DdHairline()
                 }
@@ -704,6 +794,8 @@ private fun TableRow(
     header: Boolean,
     horizontalPadding: Dp,
     verticalPadding: Dp,
+    live: Boolean = false,
+    animateOnFirstFill: Boolean = false,
 ) {
     val style = if (header) tableHeaderStyle else tableCellStyle
     Row(
@@ -719,6 +811,8 @@ private fun TableRow(
                     rendered = cell,
                     style = style,
                     color = colors.ink,
+                    live = live,
+                    animateOnFirstFill = animateOnFirstFill,
                 )
             }
         }
@@ -773,24 +867,32 @@ private fun InlineCodeText(
     style: TextStyle,
     color: Color,
     modifier: Modifier = Modifier,
+    live: Boolean = false,
+    animateOnFirstFill: Boolean = false,
 ) {
+    val animated = rememberStreamAnimatedText(
+        base = rendered.text,
+        defaultColor = color,
+        live = live,
+        animateOnFirstFill = animateOnFirstFill,
+    )
     if (rendered.codeRanges.isEmpty()) {
         DdText(
-            text = rendered.text,
+            text = animated.text,
             modifier = modifier,
             style = style,
             color = color,
         )
         return
     }
-    val colors = superPiColors()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val colors = superPiColors()
     DdText(
-        text = rendered.text,
+        text = animated.text,
         modifier = modifier.drawBehind {
             val textLayout = layout ?: return@drawBehind
             if (rendered.codeRanges.isEmpty()) return@drawBehind
-            if (textLayout.layoutInput.text != rendered.text) return@drawBehind
+            if (textLayout.layoutInput.text.text != rendered.text.text) return@drawBehind
             val textLength = textLayout.layoutInput.text.length
             val horizontalPadding = 3.dp.toPx()
             val fontSize = style.fontSize.takeOrElse { 15.sp }.toPx()
@@ -799,6 +901,9 @@ private fun InlineCodeText(
             val cornerRadius = CornerRadius(4.dp.toPx())
             rendered.codeRanges.forEach { range ->
                 if (range.first < 0 || range.last >= textLength || range.first > range.last) return@forEach
+                val bgAlpha = colors.inlineCodeBackground.alpha * animated.alphaAt(range.first)
+                if (bgAlpha <= 0.001f) return@forEach
+                val bgColor = colors.inlineCodeBackground.copy(alpha = bgAlpha)
                 val firstLine = textLayout.getLineForOffset(range.first)
                 val lastLine = textLayout.getLineForOffset(range.last)
                 for (line in firstLine..lastLine) {
@@ -813,7 +918,7 @@ private fun InlineCodeText(
                     val top = baseline - ascent
                     val bottom = baseline + descent
                     drawRoundRect(
-                        color = colors.inlineCodeBackground,
+                        color = bgColor,
                         topLeft = Offset(left - horizontalPadding, top),
                         size = Size(right - left + horizontalPadding * 2, bottom - top),
                         cornerRadius = cornerRadius,

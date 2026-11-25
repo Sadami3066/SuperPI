@@ -93,7 +93,13 @@ fun askUserQuestionTool(questionCenter: QuestionCenter, binding: SessionBinding)
                     questionCenter.ask(sessionId, toolCallId, questions, signal)
                 }
                 when (outcome) {
-                    null -> textResult("Timed out waiting for the user's answer.")
+                    null -> textResult(
+                        buildJsonObject {
+                            put("timedOut", true)
+                            put("message", "Timed out waiting for the user's answer.")
+                        }.toString(),
+                        isError = true,
+                    )
                     is QuestionOutcome.Answered -> textResult(answersJson(questions, outcome.answers).toString())
                     QuestionOutcome.Cancelled -> textResult("The user cancelled the question", isError = true)
                 }
@@ -160,7 +166,13 @@ private fun answersJson(questions: List<UserQuestion>, answers: List<QuestionAns
     putJsonArray("answers") {
         questions.forEach { question ->
             val answer = byQuestion[question.id] ?: return@forEach
-            if (answer.skipped) return@forEach
+            if (answer.skipped) {
+                add(buildJsonObject {
+                    put("id", question.id)
+                    put("skipped", true)
+                })
+                return@forEach
+            }
             val selected = answer.selected.map { it.trim() }.filter { it.isNotEmpty() }
             val custom = answer.custom?.trim()?.takeIf { it.isNotEmpty() }
             if (selected.isEmpty() && custom == null) return@forEach

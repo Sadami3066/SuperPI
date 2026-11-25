@@ -66,15 +66,15 @@ internal val ERROR_LINUX = literal(
     "Linux 运行环境不可用：请先安装并启用 Linux 运行环境。",
     "The Linux environment is unavailable: install and enable it first.",
 )
-internal val ERROR_DOWNLOAD = literal("下载安装包失败：%s", "Install package download failed: %s")
-internal val ERROR_VERSION = literal("安装包版本不匹配：%s", "Package version mismatch: %s")
-internal val ERROR_INSTALL = literal("安装失败：%s", "Install failed: %s")
-internal val ERROR_AUTH = literal("没有拿到飞书授权链接", "No Feishu authorization link was returned")
-internal val ERROR_AUTH_OUTPUT = literal("飞书授权失败：%s", "Feishu authorization failed: %s")
-internal val ERROR_LOGOUT = literal("退出登录失败：%s", "Sign-out failed: %s")
-internal val ERROR_STATUS = literal("状态检测失败：%s", "Status check failed: %s")
+internal val ERROR_DOWNLOAD = literal("下载安装包失败，请检查网络后重试。", "Couldn't download the package. Check your network and try again.")
+internal val ERROR_INTEGRITY_MISMATCH = literal("下载的文件校验未通过，请重试。", "The downloaded file failed verification. Try again.")
+internal val ERROR_VERSION = literal("安装包校验没有通过，请重试。", "The package didn't pass verification. Try again.")
+internal val ERROR_INSTALL = literal("安装没有完成，请重试。", "The installation didn't finish. Try again.")
+internal val ERROR_AUTH = literal("没有拿到飞书授权链接，请重试。", "Couldn't get the Feishu authorization link. Try again.")
+internal val ERROR_AUTH_OUTPUT = literal("飞书授权没有完成，请重试。", "Feishu authorization didn't complete. Try again.")
+internal val ERROR_LOGOUT = literal("退出登录失败，请重试。", "Couldn't sign out. Try again.")
+internal val ERROR_STATUS = literal("无法读取飞书状态，请重试。", "Couldn't read the Feishu status. Try again.")
 internal val ERROR_UNKNOWN = literal("操作失败，请重试。", "The operation failed; try again.")
-internal val ERROR_UPDATE_CHECK = literal("暂时无法检查更新", "Update check unavailable")
 
 internal val UPDATE_STATUS_AVAILABLE = literal("可更新", "Update available")
 internal val UPDATE_STATUS_CHECKING = literal("正在检查更新…", "Checking for updates…")
@@ -90,10 +90,10 @@ internal val UPDATE_FAILED_NOTICE = literal(
 internal const val NOTIFY_CLI_ID = "feishu-cli"
 internal const val ACTION_OPEN_PAGE = "open-page"
 internal val ACTION_OPEN_PAGE_LABEL = literal("打开插件页", "Open plugin page")
-internal val NOTIFY_CLI_TITLE = literal("飞书 CLI 已就绪", "Feishu CLI is ready")
+internal val NOTIFY_CLI_TITLE = literal("飞书组件已就绪", "Feishu component is ready")
 internal val NOTIFY_CLI_BODY = literal(
-    "CLI 安装完成。",
-    "The CLI is installed. Open the plugin page to create the Feishu app and authorize your account.",
+    "飞书组件安装完成，回到插件页创建应用并登录账号。",
+    "The Feishu component is installed. Open the plugin page to create the app and sign in.",
 )
 
 internal val SNACKBAR_INSTALL_DONE = literal("飞书组件安装完成", "Feishu component installed")

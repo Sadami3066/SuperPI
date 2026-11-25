@@ -69,12 +69,21 @@ internal object FeishuInstall {
         onEvent: (CliInstallEvent) -> Unit,
     ) {
         val messages = object : CliInstallMessages {
-            override fun downloadFailed(cause: Throwable?): String =
-                host.text(ERROR_DOWNLOAD, cause?.message?.takeLast(300).orEmpty())
+            override fun downloadFailed(cause: Throwable?): String {
+                if (cause?.message == "sha512 mismatch") return host.text(ERROR_INTEGRITY_MISMATCH)
+                runCatching { host.logs().warn("feishu install download failed: ${cause?.message?.takeLast(300).orEmpty()}") }
+                return host.text(ERROR_DOWNLOAD)
+            }
 
-            override fun versionMismatch(output: String): String = host.text(ERROR_VERSION, output)
+            override fun versionMismatch(output: String): String {
+                runCatching { host.logs().warn("feishu install version mismatch: ${output.takeLast(300)}") }
+                return host.text(ERROR_VERSION)
+            }
 
-            override fun installFailed(output: String): String = host.text(ERROR_INSTALL, output)
+            override fun installFailed(output: String): String {
+                runCatching { host.logs().warn("feishu install failed: ${output.takeLast(300)}") }
+                return host.text(ERROR_INSTALL)
+            }
         }
         runner.run(
             linux = linux,

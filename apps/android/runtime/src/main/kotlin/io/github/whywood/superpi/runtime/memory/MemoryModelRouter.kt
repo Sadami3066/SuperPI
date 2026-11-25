@@ -5,11 +5,15 @@ import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ModelSettings
 import io.github.whywood.superpi.runtime.ProviderCatalog
 import io.github.whywood.superpi.runtime.ProviderDirectory
+import io.github.whywood.superpi.sdk.ai.AssistantMessage as SdkAssistantMessage
+import io.github.whywood.superpi.sdk.ai.Context
+import io.github.whywood.superpi.sdk.ai.StopReason
+import io.github.whywood.superpi.sdk.ai.ToolCall
 import kotlinx.coroutines.CancellationException
 
 enum class MemoryModelTier {
-    FAST,
-    DREAM,
+    HOT,
+    COLD,
 }
 
 data class ResolvedMemoryModel(
@@ -27,23 +31,28 @@ sealed interface MemoryModelResolution {
     data object Unavailable : MemoryModelResolution
 }
 
-data class MemoryCompletionResponse(
-    val modelRef: String,
-    val text: String,
-)
+sealed interface MemoryAgentStepResult {
+    data class Success(
+        val modelRef: String,
+        val message: SdkAssistantMessage,
+    ) : MemoryAgentStepResult
 
-sealed interface MemoryCompletionResult {
-    data class Success(val response: MemoryCompletionResponse) : MemoryCompletionResult
+    data object Paused : MemoryAgentStepResult
 
-    data object Paused : MemoryCompletionResult
+    data object NoModel : MemoryAgentStepResult
 
-    data object NoModel : MemoryCompletionResult
-
-    data class Failed(val reason: String) : MemoryCompletionResult
+    data class Failed(val reason: String) : MemoryAgentStepResult
 }
 
-interface MemoryCompletionGateway {
-    suspend fun complete(tier: MemoryModelTier, prompt: String): MemoryCompletionResult
+interface MemoryAgentGateway {
+    suspend fun step(tier: MemoryModelTier, context: Context): MemoryAgentStepResult
+
+    suspend fun step(
+        tier: MemoryModelTier,
+        context: Context,
+        sessionId: String?,
+        maxTokens: Int,
+    ): MemoryAgentStepResult = step(tier, context)
 }
 
 class MemoryModelRouter(
@@ -55,6 +64,9 @@ class MemoryModelRouter(
     suspend fun resolve(tier: MemoryModelTier): ResolvedMemoryModel? =
         (resolveDetailed(tier) as? MemoryModelResolution.Ready)?.model
 
+    suspend fun resolve(isColdPath: Boolean): ResolvedMemoryModel? =
+        resolve(if (isColdPath) MemoryModelTier.COLD else MemoryModelTier.HOT)
+
     suspend fun resolveDetailed(tier: MemoryModelTier): MemoryModelResolution {
         val currentSettings = memorySettings.read()
         if (currentSettings.mode == MemoryModelMode.PAUSED) return MemoryModelResolution.Paused
@@ -63,8 +75,16 @@ class MemoryModelRouter(
         if (configured.isEmpty()) return MemoryModelResolution.Unavailable
 
         if (currentSettings.mode == MemoryModelMode.FIXED) {
-            val fixedProvider = currentSettings.fixedProviderId
-            val fixedModel = currentSettings.fixedModelId
+            val fixedProvider = if (tier == MemoryModelTier.COLD) {
+                currentSettings.effectiveColdProviderId()
+            } else {
+                currentSettings.effectiveHotProviderId()
+            }
+            val fixedModel = if (tier == MemoryModelTier.COLD) {
+                currentSettings.effectiveColdModelId()
+            } else {
+                currentSettings.effectiveHotModelId()
+            }
             if (!fixedProvider.isNullOrBlank() &&
                 !fixedModel.isNullOrBlank() &&
                 fixedProvider in configured &&
@@ -81,81 +101,167 @@ class MemoryModelRouter(
             providers.summaries.firstOrNull { it.id in configured }?.id ?: return MemoryModelResolution.Unavailable
         }
 
-        val models = providers.models(providerId)
-        val fallbackId = models.firstOrNull { it.id == defaultConfig.modelId }?.id
-            ?: models.firstOrNull()?.id
-            ?: return MemoryModelResolution.Unavailable
+        val allModels = providers.models(providerId)
+        val candidates = allModels.filter(::isToolCapableTextModel).ifEmpty { allModels }
+        if (candidates.isEmpty()) return MemoryModelResolution.Unavailable
 
-        if (tier == MemoryModelTier.DREAM) {
+        val fallbackId = candidates.firstOrNull { it.id == defaultConfig.modelId }?.id
+            ?: selectBestModel(candidates).id
+
+        if (tier == MemoryModelTier.COLD) {
             return MemoryModelResolution.Ready(ResolvedMemoryModel(providerId, fallbackId))
         }
 
-        val fastCandidate = pickFastModel(models, fallbackId)
+        val fastCandidate = selectFastestModel(candidates, fallbackId)
         return MemoryModelResolution.Ready(ResolvedMemoryModel(providerId, fastCandidate.id))
     }
 
-    internal fun pickFastModel(models: List<ModelOption>, fallbackId: String): ModelOption {
+    internal fun isToolCapableTextModel(model: ModelOption): Boolean {
+        val tokens = "${model.id.lowercase()} ${model.displayName.lowercase()}"
+            .split(TOKEN_SPLIT_REGEX)
+            .filter { it.isNotEmpty() }
+            .toSet()
+        val idLower = model.id.lowercase()
+        return NON_TOOL_TOKENS.none { it in tokens } &&
+            !idLower.contains("search-preview") &&
+            !idLower.contains("dall-e")
+    }
+
+    internal fun selectBestModel(models: List<ModelOption>): ModelOption {
+        val pool = models.filter(::isToolCapableTextModel).ifEmpty { models }
+        return pool.sortedWith(
+            compareByDescending<ModelOption> { bestScore(it) }
+                .thenComparator { a, b -> compareVersionsDescending(a.id, b.id) }
+                .thenByDescending { it.id },
+        ).first()
+    }
+
+    internal fun selectFastestModel(models: List<ModelOption>, fallbackId: String): ModelOption {
         if (models.isEmpty()) return ModelOption("", fallbackId, fallbackId, emptyList())
-        val ranked = models.sortedWith(
-            compareByDescending<ModelOption> { fastScore(it.id, fallbackId) }
-                .thenBy { it.id },
+        val pool = models.filter(::isToolCapableTextModel).ifEmpty { models }
+        val ranked = pool.sortedWith(
+            compareByDescending<ModelOption> { fastScore(it.id) }
+                .thenComparator { a, b -> compareVersionsDescending(a.id, b.id) }
+                .thenByDescending { it.id == fallbackId }
+                .thenByDescending { it.id },
         )
         val best = ranked.first()
-        return if (fastScore(best.id, fallbackId) > fastScore(fallbackId, fallbackId)) {
+        val fallbackScore = pool.firstOrNull { it.id == fallbackId }?.let { fastScore(it.id) } ?: Int.MIN_VALUE
+        return if (fastScore(best.id) > fallbackScore) {
             best
         } else {
-            models.firstOrNull { it.id == fallbackId } ?: best
+            pool.firstOrNull { it.id == fallbackId } ?: best
         }
     }
 
-    internal fun fastScore(modelId: String, fallbackId: String): Int {
-        val id = modelId.lowercase()
-        var score = 0
-        if (id.contains("flash")) score += 100
-        if (id.contains("haiku")) score += 95
-        if (id.contains("mini")) score += 90
-        if (id.contains("nano")) score += 85
-        if (id.contains("lite")) score += 80
-        if (id.contains("fast")) score += 75
-        if (id.contains("chat")) score += 40
-        if (id.contains("reasoner")) score -= 80
-        if (id.contains("thinking")) score -= 80
-        if (id.contains("-r1") || id == "r1") score -= 80
-        if (id.contains("opus")) score -= 70
-        if (id.contains("pro")) score -= 25
-        if (Regex("(^|[-/])o[134]($|[-/])").containsMatchIn(id)) score -= 70
-        if (modelId == fallbackId) score += 5
-        return score
+    internal fun bestScore(model: ModelOption): Int {
+        val tokens = model.id.lowercase().split(TOKEN_SPLIT_REGEX).filter { it.isNotEmpty() }.toSet()
+        return when {
+            isReasoningModelTokens(tokens) -> 120
+            "opus" in tokens || "ultra" in tokens || "max" in tokens -> 115
+            "sonnet" in tokens || "pro" in tokens -> 110
+            "lite" in tokens || "nano" in tokens -> 60
+            "flash" in tokens || "haiku" in tokens || "mini" in tokens -> 80
+            else -> 100
+        }
+    }
+
+    internal fun fastScore(modelId: String): Int {
+        val tokens = modelId.lowercase().split(TOKEN_SPLIT_REGEX).filter { it.isNotEmpty() }.toSet()
+        if (isReasoningModelTokens(tokens)) return 50
+        val isLiteOrNano = "lite" in tokens || "nano" in tokens
+        return when {
+            !isLiteOrNano && ("flash" in tokens || "haiku" in tokens || "mini" in tokens) -> 400
+            "fast" in tokens || "chat" in tokens || "turbo" in tokens || "air" in tokens -> 300
+            isLiteOrNano -> 200
+            "opus" in tokens || "pro" in tokens || "sonnet" in tokens || "max" in tokens || "ultra" in tokens -> 80
+            else -> 150
+        }
+    }
+
+    private fun isReasoningModelTokens(tokens: Set<String>): Boolean =
+        "reasoner" in tokens ||
+            "thinking" in tokens ||
+            "r1" in tokens ||
+            "o1" in tokens ||
+            "o3" in tokens ||
+            "o4" in tokens ||
+            tokens.any { it.contains("reasoner") || it.contains("thinking") }
+
+    private fun compareVersionsDescending(aId: String, bId: String): Int {
+        val va = VERSION_TOKEN_REGEX.findAll(aId).mapNotNull { it.value.toIntOrNull() }.toList()
+        val vb = VERSION_TOKEN_REGEX.findAll(bId).mapNotNull { it.value.toIntOrNull() }.toList()
+        val maxLen = maxOf(va.size, vb.size)
+        for (i in 0 until maxLen) {
+            val left = va.getOrElse(i) { 0 }
+            val right = vb.getOrElse(i) { 0 }
+            if (left != right) return right.compareTo(left)
+        }
+        return 0
+    }
+
+    private companion object {
+        private val TOKEN_SPLIT_REGEX = Regex("[^a-z0-9]+")
+        private val VERSION_TOKEN_REGEX = Regex("\\d+")
+        private val NON_TOOL_TOKENS = setOf(
+            "audio",
+            "tts",
+            "image",
+            "realtime",
+            "embed",
+            "embedding",
+            "embeddings",
+            "whisper",
+            "transcribe",
+            "moderation",
+            "sora",
+            "veo",
+            "imagen",
+        )
     }
 }
 
-class CatalogMemoryCompletionGateway(
+class CatalogMemoryAgentGateway(
     private val providers: ProviderCatalog,
     private val router: MemoryModelRouter,
-) : MemoryCompletionGateway {
-    override suspend fun complete(tier: MemoryModelTier, prompt: String): MemoryCompletionResult {
+) : MemoryAgentGateway {
+    override suspend fun step(tier: MemoryModelTier, context: Context): MemoryAgentStepResult =
+        step(tier = tier, context = context, sessionId = null, maxTokens = 4096)
+
+    override suspend fun step(
+        tier: MemoryModelTier,
+        context: Context,
+        sessionId: String?,
+        maxTokens: Int,
+    ): MemoryAgentStepResult {
         val target = when (val resolution = router.resolveDetailed(tier)) {
             is MemoryModelResolution.Ready -> resolution.model
-            MemoryModelResolution.Paused -> return MemoryCompletionResult.Paused
-            MemoryModelResolution.Unavailable -> return MemoryCompletionResult.NoModel
+            MemoryModelResolution.Paused -> return MemoryAgentStepResult.Paused
+            MemoryModelResolution.Unavailable -> return MemoryAgentStepResult.NoModel
         }
         return try {
-            val text = providers.complete(
+            val message = providers.completeWithTools(
                 providerId = target.providerId,
                 modelId = target.modelId,
-                prompt = prompt,
+                context = context,
                 temperature = MEMORY_TEMPERATURE,
                 timeoutMs = MEMORY_TIMEOUT_MS,
-            )?.takeIf { it.isNotBlank() }
-            if (text == null) {
-                MemoryCompletionResult.Failed("empty completion from ${target.ref}")
+                maxTokens = maxTokens,
+                sessionId = sessionId,
+            )
+            if (message == null) {
+                MemoryAgentStepResult.Failed("empty response from ${target.ref}")
+            } else if (message.stopReason == StopReason.Error) {
+                MemoryAgentStepResult.Failed(message.errorMessage ?: "error from ${target.ref}")
+            } else if (message.stopReason == StopReason.Length && message.content.none { it is ToolCall }) {
+                MemoryAgentStepResult.Failed("truncated response from ${target.ref}")
             } else {
-                MemoryCompletionResult.Success(MemoryCompletionResponse(modelRef = target.ref, text = text))
+                MemoryAgentStepResult.Success(modelRef = target.ref, message = message)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            MemoryCompletionResult.Failed(error.message ?: "completion failed")
+            MemoryAgentStepResult.Failed(error.message ?: "completion failed")
         }
     }
 

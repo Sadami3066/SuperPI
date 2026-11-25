@@ -1,7 +1,6 @@
 <resources>
     <string name="relay_title">Connect devices</string>
     <string name="relay_back">Back</string>
-    <string name="relay_intro">Once connected, your devices share one memory and can use each other\'s bots.</string>
     <string name="relay_link_label">Pairing link</string>
     <string name="relay_link_placeholder">https://server:8443/#fp=…&amp;code=…</string>
     <string name="relay_fingerprint_label">Server fingerprint</string>
@@ -18,7 +17,7 @@
     <string name="relay_account_since">Connected</string>
     <string name="relay_sign_out">Sign out</string>
     <string name="relay_sign_out_title">Sign out</string>
-    <string name="relay_sign_out_message">This device will stop syncing memory, and other devices can no longer use its bots.</string>
+    <string name="relay_sign_out_message">This device will disconnect from your account, and other devices can no longer use its bots.</string>
     <string name="relay_sign_out_confirm">Sign out</string>
     <string name="relay_cancel">Cancel</string>
     <string name="relay_error_invalid_link">That link does not look right. Check it and try again.</string>
@@ -63,4 +62,23 @@
     <string name="relay_device_rename_title">Rename device</string>
     <string name="relay_device_rename_confirm">Save</string>
     <string name="relay_device_rename_saving">Saving…</string>
+    <string name="relay_memory_sync_title">Memory sync</string>
+    <string name="relay_memory_sync_idle">Ready; changes save automatically</string>
+    <string name="relay_memory_sync_running">Syncing…</string>
+    <string name="relay_memory_sync_done">Last synced %1$s</string>
+    <string name="relay_memory_sync_error">Sync ran into an issue. Try again.</string>
+    <string name="relay_memory_sync_error_offline">Network unavailable. Check connection and try again.</string>
+    <string name="relay_memory_sync_error_unauthorized">Connection expired. Pair again.</string>
+    <string name="relay_memory_sync_unsupported">This server does not support memory sync yet.</string>
+    <string name="relay_memory_sync_action">Sync now</string>
+    <string name="relay_memory_sync_retry">Retry</string>
+    <string name="relay_memory_switch_action">Resolve</string>
+    <string name="relay_memory_switch_pending_title">Existing local memories found</string>
+    <string name="relay_memory_switch_pending_subtitle">%1$d local memories found. Choose merge or replace</string>
+    <string name="relay_memory_switch_dialog_title">Combine local memories?</string>
+    <string name="relay_memory_switch_dialog_body">This device has %1$d existing memories from another account. You can merge both sets or replace local memories with your account copy.</string>
+    <string name="relay_memory_switch_merge">Merge both</string>
+    <string name="relay_memory_switch_merge_hint">Keep memories from both this device and your account</string>
+    <string name="relay_memory_switch_replace">Replace local</string>
+    <string name="relay_memory_switch_replace_hint">Clear local memories and use the account copy</string>
 </resources>

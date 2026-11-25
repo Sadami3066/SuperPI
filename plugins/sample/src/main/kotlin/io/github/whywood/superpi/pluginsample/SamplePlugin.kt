@@ -1,10 +1,15 @@
 package io.github.whywood.superpi.pluginsample
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import io.github.whywood.superpi.design.DdSpacing
+import io.github.whywood.superpi.design.DdText
+import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.api.Contributions
 import io.github.whywood.superpi.plugin.api.SuperPIPlugin
 import io.github.whywood.superpi.plugin.api.PluginAvailability
@@ -40,10 +45,10 @@ class SamplePlugin : SuperPIPlugin {
             pluginPage(
                 id = PAGE_ID,
                 title = localizedText(
-                    mapOf("default" to "Sample Page", "zh" to "示例页面", "en" to "Sample Page"),
+                    mapOf("default" to "Sample page", "zh" to "示例页面", "en" to "Sample page"),
                 ),
                 icon = assetIcon(ICON_ASSET),
-                content = { SamplePage() },
+                content = { SamplePage(host) },
             ),
         )
     }
@@ -115,6 +120,31 @@ class SamplePlugin : SuperPIPlugin {
 }
 
 @Composable
-private fun SamplePage() {
-    Text(text = "Sample plugin page", modifier = Modifier.padding(20.dp))
+private fun SamplePage(host: PluginHost) {
+    val colors = superPiColors()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = DdSpacing.ScreenHorizontal, vertical = DdSpacing.Lg),
+        verticalArrangement = Arrangement.spacedBy(DdSpacing.Xs),
+    ) {
+        DdText(
+            text = host.text(
+                localizedText(default = "Sample page", zh = "示例页面", en = "Sample page"),
+            ),
+            style = DdType.heading,
+            color = colors.ink,
+        )
+        DdText(
+            text = host.text(
+                localizedText(
+                    default = "The sample plugin is active. This page confirms that plugin pages open correctly.",
+                    zh = "示例插件已启用，这个页面用来确认插件页面可以正常打开。",
+                    en = "The sample plugin is active. This page confirms that plugin pages open correctly.",
+                ),
+            ),
+            style = DdType.bodySmall,
+            color = colors.inkSecondary,
+        )
+    }
 }

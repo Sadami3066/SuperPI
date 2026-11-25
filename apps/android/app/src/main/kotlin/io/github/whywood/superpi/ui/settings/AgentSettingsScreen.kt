@@ -1,9 +1,7 @@
 package io.github.whywood.superpi.ui.settings
 
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -20,14 +18,16 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
+import io.github.whywood.superpi.data.COMPACTION_TRIGGER_DEFAULT
+import io.github.whywood.superpi.data.COMPACTION_TRIGGER_MAX
+import io.github.whywood.superpi.data.COMPACTION_TRIGGER_MIN
 import io.github.whywood.superpi.data.SessionNamingMode
+import io.github.whywood.superpi.data.normalizeCompactionTriggerPercent
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
-import io.github.whywood.superpi.design.DdMenu
-import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSectionLabel
@@ -40,6 +40,8 @@ import io.github.whywood.superpi.runtime.ModelOption
 @Composable
 fun AgentSettingsScreen(
     onOpenWebSearch: () -> Unit,
+    compactionTriggerPercent: Int = COMPACTION_TRIGGER_DEFAULT,
+    onCompactionTriggerPercentChange: (Int) -> Unit = {},
     metadataMode: SessionNamingMode,
     metadataModelLabel: String?,
     metadataModels: List<ModelOption>,
@@ -85,61 +87,67 @@ fun AgentSettingsScreen(
                     title = stringResource(R.string.agent_web_search),
                     value = stringResource(R.string.agent_web_search_value),
                     onClick = onOpenWebSearch,
+                    showChevron = true,
                     modifier = Modifier.testTag("agent_web_search"),
                 )
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
             DdSectionLabel(
-                stringResource(R.string.agent_section_metadata),
+                stringResource(R.string.agent_section_context),
                 Modifier.padding(start = DdSpacing.Xs),
             )
             Spacer(Modifier.height(DdSpacing.Sm))
             DdGroupCard {
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    DdListRow(
-                        title = stringResource(R.string.agent_metadata_title),
-                        subtitle = stringResource(R.string.agent_metadata_summary),
-                        subtitleMaxLines = 2,
-                        value = stringResource(
-                            when (metadataMode) {
+                SteppedIntSliderRow(
+                    title = stringResource(R.string.agent_compaction_threshold_title),
+                    subtitle = stringResource(R.string.agent_compaction_threshold_summary),
+                    valueText = { p -> stringResource(R.string.agent_compaction_threshold_value, p) },
+                    value = compactionTriggerPercent,
+                    min = COMPACTION_TRIGGER_MIN,
+                    max = COMPACTION_TRIGGER_MAX,
+                    stepSize = 5,
+                    normalize = ::normalizeCompactionTriggerPercent,
+                    onChange = onCompactionTriggerPercentChange,
+                    sliderTag = "agent_compaction_threshold_slider",
+                )
+                DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                SettingsDropdownRow(
+                    title = stringResource(R.string.agent_metadata_title),
+                    subtitle = stringResource(R.string.agent_metadata_summary),
+                    value = stringResource(
+                        when (metadataMode) {
+                            SessionNamingMode.AUTO -> R.string.agent_metadata_auto
+                            SessionNamingMode.MANUAL -> R.string.agent_metadata_manual
+                        },
+                    ),
+                    expanded = modeMenu,
+                    onExpandedChange = { modeMenu = it },
+                    options = listOf(SessionNamingMode.AUTO, SessionNamingMode.MANUAL),
+                    selected = metadataMode,
+                    optionLabel = { mode ->
+                        stringResource(
+                            when (mode) {
                                 SessionNamingMode.AUTO -> R.string.agent_metadata_auto
                                 SessionNamingMode.MANUAL -> R.string.agent_metadata_manual
                             },
-                        ),
-                        onClick = { modeMenu = true },
-                        modifier = Modifier.testTag("agent_metadata_mode"),
-                    )
-                    DdMenu(
-                        expanded = modeMenu,
-                        onDismissRequest = { modeMenu = false },
-                        menuWidth = maxWidth,
-                    ) {
-                        DdMenuItem(
-                            text = stringResource(R.string.agent_metadata_auto),
-                            onClick = {
-                                modeMenu = false
-                                onMetadataModeChange(SessionNamingMode.AUTO)
-                            },
-                            selected = metadataMode == SessionNamingMode.AUTO,
-                            testTag = "agent_metadata_auto",
                         )
-                        DdMenuItem(
-                            text = stringResource(R.string.agent_metadata_manual),
-                            onClick = {
-                                modeMenu = false
-                                onMetadataModeChange(SessionNamingMode.MANUAL)
-                            },
-                            selected = metadataMode == SessionNamingMode.MANUAL,
-                            testTag = "agent_metadata_manual",
-                        )
-                    }
-                }
+                    },
+                    onSelect = onMetadataModeChange,
+                    rowTag = "agent_metadata_mode",
+                    optionTag = { mode ->
+                        when (mode) {
+                            SessionNamingMode.AUTO -> "agent_metadata_auto"
+                            SessionNamingMode.MANUAL -> "agent_metadata_manual"
+                        }
+                    },
+                )
                 if (metadataMode == SessionNamingMode.MANUAL) {
                     DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
                     DdListRow(
                         title = stringResource(R.string.agent_metadata_model),
                         value = metadataModelLabel ?: stringResource(R.string.agent_metadata_model_pick),
                         onClick = { modelPicker = true },
+                        showChevron = true,
                         modifier = Modifier.testTag("agent_metadata_model"),
                     )
                 }

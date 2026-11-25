@@ -1,6 +1,6 @@
 {
   "name": "@superpi/relay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Relay, account, presence and shared memory server for SuperPI devices",

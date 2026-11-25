@@ -130,7 +130,7 @@ internal class AmapClient(private val host: PluginHost) {
             throw AmapException(
                 AmapFailure.INVALID_KEY,
                 null,
-                host.t("请先填写高德 Key", "Enter your Amap key first"),
+                host.t("请先填写高德地图服务凭证", "Enter your Amap Maps service credential first"),
             )
         }
         val opened = openSession(key)
@@ -153,8 +153,8 @@ internal class AmapClient(private val host: PluginHost) {
             AmapFailure.INVALID_KEY,
             null,
             host.t(
-                "还没有配置高德 Key，请先在插件页填写并验证",
-                "Amap key is not configured. Add and verify it on the plugin page first.",
+                "还没有配置高德地图服务凭证，请先在插件页填写并验证",
+                "Amap Maps service credential is not configured. Add and verify it on the plugin page first.",
             ),
         )
         var current = ensureSession(key)
@@ -435,8 +435,8 @@ internal class AmapClient(private val host: PluginHost) {
 
     private fun failureMessage(failure: AmapFailure): String = when (failure) {
         AmapFailure.INVALID_KEY -> host.t(
-            "高德 Key 无效、过期或没有开通这项服务，请到插件页重新验证",
-            "The Amap key is invalid, expired, or not enabled for this service. Verify it on the plugin page.",
+            "高德地图服务凭证无效、过期或没有开通这项服务，请到插件页重新验证",
+            "The Amap Maps service credential is invalid, expired, or not enabled for this service. Verify it on the plugin page.",
         )
         AmapFailure.QUOTA -> host.t(
             "高德调用太频繁或今日额度已用完，请稍后再试",

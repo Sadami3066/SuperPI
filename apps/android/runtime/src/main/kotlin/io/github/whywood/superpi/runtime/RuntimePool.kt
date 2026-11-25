@@ -26,6 +26,7 @@ internal class RuntimePool(
     private val emitListChanged: suspend () -> Unit,
     private val onSessionClosed: (String, SessionCloseReason) -> Unit,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val resolveDefaultModel: suspend (String) -> ModelConfig = { modelSettings.read() },
 ) {
     private val closingSessions = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
     private val closingFiles = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
@@ -235,7 +236,7 @@ internal class RuntimePool(
         val existing = handles.values.firstOrNull { it.cwd == cwd && it.session.sessionFile == file }
         if (existing != null && file != null) return existing
         val engine = engineFactory(File(cwd))
-        val config = modelSettings.read()
+        val config = resolveDefaultModel(cwd)
         val session = engine.create(file, config)
         val handle = RuntimeHandle(
             engine = engine,

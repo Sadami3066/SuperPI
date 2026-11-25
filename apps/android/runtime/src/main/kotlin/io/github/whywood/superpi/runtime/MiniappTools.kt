@@ -6,6 +6,8 @@ import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import io.github.whywood.superpi.sdk.coding.tools.textResult
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -118,8 +120,21 @@ private fun miniappLoadTool(store: MiniappStore, supportsChatDelivery: Boolean):
                 put("path", creation.directory.absolutePath)
                 put(
                     "next",
-                    if (supportsChatDelivery) "Deliver this app with present: {items:[{type:miniapp, id:${creation.manifest.id}}]}. Do not restate the app details in your reply."
-                    else "Return the installed app id, absolute path and final text to the calling page.",
+                    if (supportsChatDelivery) {
+                        val presentPayload = buildJsonObject {
+                            putJsonArray("items") {
+                                add(
+                                    buildJsonObject {
+                                        put("type", "miniapp")
+                                        put("id", creation.manifest.id)
+                                    },
+                                )
+                            }
+                        }
+                        "Deliver this app with present: $presentPayload. Do not restate the app details in your reply."
+                    } else {
+                        "Return the installed app id, absolute path and final text to the calling page."
+                    },
                 )
             }
             textResult(result.toString())
@@ -138,6 +153,7 @@ private fun miniappListTool(store: MiniappStore): CodingTool = CodingTool(
             val scan = store.scan()
             val drafts = store.drafts()
             val result = buildJsonObject {
+                put("ok", true)
                 putJsonArray("apps") {
                     scan.creations.forEach { creation ->
                         add(
@@ -194,20 +210,21 @@ private fun miniappDeleteTool(store: MiniappStore): CodingTool = CodingTool(
 )
 
 private const val MINIAPP_DATA_MAX_VALUE_CHARS = 256 * 1024
+private const val MINIAPP_DATA_GET_MAX_CHARS = 16_000
 private val MINIAPP_DATA_KEY_REGEX = Regex("[a-z0-9][a-z0-9_-]{0,63}")
-private val MINIAPP_EDIT_ACTIONS = buildJsonArray {
+private val MINIAPP_DATA_ACTIONS = buildJsonArray {
     add(JsonPrimitive("get"))
     add(JsonPrimitive("set"))
     add(JsonPrimitive("delete"))
     add(JsonPrimitive("keys"))
 }
 
-private val miniappEditParameters: JsonObject = buildJsonObject {
+private val miniappDataParameters: JsonObject = buildJsonObject {
     put("type", "object")
     putJsonObject("properties") {
         putJsonObject("action") {
             put("type", "string")
-            put("enum", MINIAPP_EDIT_ACTIONS)
+            put("enum", MINIAPP_DATA_ACTIONS)
             put("description", "Operation: get reads one key, set writes it, delete removes it, keys lists all keys")
         }
         putJsonObject("app") {
@@ -228,31 +245,31 @@ private val miniappEditParameters: JsonObject = buildJsonObject {
     })
 }
 
-fun miniappEditTool(store: MiniappStore): CodingTool =
-    miniappEditTool(store) { file -> SqliteMiniappData(file) }
+fun miniappDataTool(store: MiniappStore): CodingTool =
+    miniappDataTool(store) { file -> SqliteMiniappData(file) }
 
-internal fun miniappEditTool(store: MiniappStore, dataFactory: (File) -> MiniappData): CodingTool = CodingTool(
-    name = "miniapp_edit",
+internal fun miniappDataTool(store: MiniappStore, dataFactory: (File) -> MiniappData): CodingTool = CodingTool(
+    name = "miniapp_data",
     description = "Read or edit one JSON value in a miniapp's persisted data layer (not its code): action get reads a key, set writes or overwrites it, delete removes it, keys lists all keys.",
-    parameters = miniappEditParameters,
-    label = "miniapp_edit",
+    parameters = miniappDataParameters,
+    label = "miniapp_data",
     execute = { _, args, signal, _ ->
         signal?.throwIfAborted()
         miniappToolResult {
             val action = args.requiredMiniappString("action").lowercase()
             val app = args.requiredMiniappString("app")
             when (action) {
-                "get" -> miniappEditGet(store, app, args, dataFactory)
-                "set" -> miniappEditSet(store, app, args, dataFactory)
-                "delete" -> miniappEditDelete(store, app, args, dataFactory)
-                "keys" -> miniappEditKeys(store, app, dataFactory)
+                "get" -> miniappDataGet(store, app, args, dataFactory)
+                "set" -> miniappDataSet(store, app, args, dataFactory)
+                "delete" -> miniappDataDelete(store, app, args, dataFactory)
+                "keys" -> miniappDataKeys(store, app, dataFactory)
                 else -> throw IllegalArgumentException("action must be get, set, delete or keys")
             }
         }
     },
 )
 
-private suspend fun miniappEditGet(
+private suspend fun miniappDataGet(
     store: MiniappStore,
     app: String,
     args: JsonObject,
@@ -262,17 +279,24 @@ private suspend fun miniappEditGet(
     val key = miniappDataKey(args.requiredMiniappString("key"))
     return withMiniappData(store, creation, dataFactory) { data ->
         val value = data.get(key)
+        val encoded = value?.let { Json.encodeToString(JsonElement.serializer(), it) }
         val result = buildJsonObject {
             put("ok", true)
             put("app", creation.manifest.id)
             put("key", key)
-            put("value", value ?: JsonNull)
+            if (encoded != null && encoded.length > MINIAPP_DATA_GET_MAX_CHARS) {
+                put("truncated", true)
+                put("totalChars", encoded.length)
+                put("valuePreview", encoded.take(MINIAPP_DATA_GET_MAX_CHARS) + "...")
+            } else {
+                put("value", value ?: JsonNull)
+            }
         }
         textResult(result.toString())
     }
 }
 
-private suspend fun miniappEditSet(
+private suspend fun miniappDataSet(
     store: MiniappStore,
     app: String,
     args: JsonObject,
@@ -296,7 +320,7 @@ private suspend fun miniappEditSet(
     }
 }
 
-private suspend fun miniappEditDelete(
+private suspend fun miniappDataDelete(
     store: MiniappStore,
     app: String,
     args: JsonObject,
@@ -316,7 +340,7 @@ private suspend fun miniappEditDelete(
     }
 }
 
-private suspend fun miniappEditKeys(
+private suspend fun miniappDataKeys(
     store: MiniappStore,
     app: String,
     dataFactory: (File) -> MiniappData,

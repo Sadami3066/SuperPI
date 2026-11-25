@@ -1,11 +1,8 @@
 package io.github.whywood.superpi.runtime
 
-import kotlinx.serialization.Serializable
-
 const val CAPABILITIES_NOTICE_CUSTOM_TYPE: String = "superpi.capabilities"
 const val CAPABILITIES_BASELINE_CUSTOM_TYPE: String = "superpi.capabilities.baseline"
 
-@Serializable
 data class CapabilityDelta(
     val toolsAdded: List<String> = emptyList(),
     val toolsRemoved: List<String> = emptyList(),

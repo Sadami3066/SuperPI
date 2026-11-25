@@ -18,9 +18,17 @@ class OnboardingPreferences(context: Context) {
         preferences.edit { putBoolean(KEY_COMPLETED, true) }
     }
 
+    fun hasRequestedNotificationPermission(): Boolean =
+        preferences.getBoolean(KEY_NOTIFICATION_REQUESTED, false)
+
+    fun markNotificationPermissionRequested() {
+        preferences.edit { putBoolean(KEY_NOTIFICATION_REQUESTED, true) }
+    }
+
     companion object {
         private const val FILE_NAME = "onboarding"
         private const val KEY_COMPLETED = "completed"
         private const val KEY_STARTED = "started"
+        private const val KEY_NOTIFICATION_REQUESTED = "notification_requested"
     }
 }

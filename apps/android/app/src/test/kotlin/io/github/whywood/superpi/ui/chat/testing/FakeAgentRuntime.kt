@@ -80,7 +80,14 @@ class FakeAgentRuntime : AgentRuntime {
         intro: String?,
     ): RuntimeWorkspace {
         createdWorkspaceDirectories += directory
-        val workspace = RuntimeWorkspace("workspace-$name", name, directory ?: "/workspaces/$name", createdAt = 1L)
+        val workspace = RuntimeWorkspace(
+            id = "workspace-$name",
+            name = name,
+            cwd = directory ?: "/workspaces/$name",
+            createdAt = 1L,
+            avatar = avatar,
+            intro = intro,
+        )
         extraProjects += workspace
         return workspace
     }

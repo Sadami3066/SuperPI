@@ -32,6 +32,12 @@ class GuiAccessibilityActions(
 
     override fun invalidateSnapshots() = snapshots.clear()
 
+    override suspend fun awaitQuiet(displayId: Int, quietMs: Long, maxWaitMs: Long): Boolean? =
+        serviceProvider()?.awaitQuiet(displayId, quietMs, maxWaitMs)
+
+    override suspend fun awaitDisplayChange(displayId: Int, timeoutMs: Long): Boolean? =
+        serviceProvider()?.awaitDisplayChange(displayId, timeoutMs)
+
     override fun bounds(displayId: Int, selector: GuiSelector): GuiBounds = requireNode(displayId, selector).bounds
 
     override suspend fun observe(
@@ -68,6 +74,7 @@ class GuiAccessibilityActions(
             packageName = root?.packageName?.toString(),
             title = window.title?.toString()?.trim()?.takeIf { it.isNotEmpty() },
             bounds = GuiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom),
+            id = window.id,
         )
     }
 
@@ -80,6 +87,8 @@ class GuiAccessibilityActions(
             focused = candidate.focused,
             active = candidate.active,
             readable = candidate.readable,
+            id = candidate.id,
+            layer = candidate.layer,
         )
     }
 
@@ -91,7 +100,6 @@ class GuiAccessibilityActions(
     ): GuiSnapshot {
         val root = window.root
             ?: throw IllegalStateException("Cannot read the selected screen content; check that accessibility can read that window")
-        val generation = java.util.UUID.randomUUID().toString()
         val nodes = ArrayList<GuiSnapshotNode>()
         var truncated = false
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
@@ -101,11 +109,19 @@ class GuiAccessibilityActions(
             }
             val rect = Rect()
             node.getBoundsInScreen(rect)
+            val isSecret = node.isPassword
+            val isChecked = @Suppress("DEPRECATION") node.isChecked
+            val isShowingHint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.isShowingHintText else false
+            val hintText = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                node.hintText?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LIVE_TEXT)
+            } else {
+                null
+            }
             nodes += GuiSnapshotNode(
-                ref = "$displayId:$generation:${nodes.size}",
+                ref = nodes.size.toString(),
                 className = node.className?.toString().orEmpty(),
                 bounds = GuiBounds(rect.left, rect.top, rect.right, rect.bottom),
-                text = node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LIVE_TEXT),
+                text = if (isSecret) null else node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LIVE_TEXT),
                 desc = node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_LIVE_TEXT),
                 resourceId = node.viewIdResourceName,
                 clickable = node.isClickable,
@@ -114,6 +130,12 @@ class GuiAccessibilityActions(
                 enabled = node.isEnabled,
                 depth = depth,
                 token = node,
+                checked = isChecked,
+                selected = node.isSelected,
+                focused = node.isFocused,
+                showingHint = isShowingHint,
+                secret = isSecret,
+                placeholder = hintText,
             )
             for (index in 0 until node.childCount) {
                 if (depth >= maxDepth || nodes.size >= maxNodes) {
@@ -166,6 +188,7 @@ class GuiAccessibilityActions(
             throw IllegalStateException("Failed to write text: the field may not accept programmatic input")
         }
         if (!info.refresh()) throw IllegalStateException("Cannot read the field back after writing; call screen_observe again to confirm")
+        if (info.isPassword) return GuiTextResult("", verified = false, secret = true)
         val actual = info.text?.toString().orEmpty()
         return GuiTextResult(actual, actual == text)
     }
@@ -464,6 +487,7 @@ internal data class GuiWindowCandidate(
     val packageName: String? = null,
     val title: String? = null,
     val bounds: GuiBounds = GuiBounds(0, 0, 0, 0),
+    val id: Int = -1,
 )
 
 internal object GuiWindowSelection {

@@ -30,6 +30,7 @@ private const val CALENDAR_DELETE = "delete"
 
 private const val DEFAULT_CALENDAR_LIMIT = 50
 private const val MAX_CALENDAR_LIMIT = 200
+private const val MAX_REMINDERS = 5
 private const val MAX_REMINDER_MINUTES = 7 * 24 * 60
 private const val DEFAULT_LIST_DAYS = 30L
 private const val MAX_LIST_DAYS = 366L
@@ -56,8 +57,8 @@ private val calendarParameters: JsonObject = buildJsonObject {
             }
         }
         putJsonObject("id") {
-            put("type", "string")
-            put("description", "Calendar event id for get, update or delete.")
+            put("type", "integer")
+            put("description", "Calendar event integer id from list or create, required for get, update or delete.")
         }
         putJsonObject("calendarId") {
             put("type", "integer")
@@ -95,9 +96,10 @@ private val calendarParameters: JsonObject = buildJsonObject {
         }
         putJsonObject("reminders") {
             put("type", "array")
+            put("maxItems", MAX_REMINDERS)
             put(
                 "description",
-                "Alerts in minutes before the event. Pass an empty array on update to remove existing reminders.",
+                "Up to $MAX_REMINDERS alerts in minutes before the event. Pass an empty array on update to remove existing reminders.",
             )
             putJsonObject("items") {
                 put("type", "integer")
@@ -139,7 +141,7 @@ private fun arrangeCalendarTool(
     zone: ZoneId,
 ): CodingTool = CodingTool(
     name = "calendar",
-    description = "Read, create, update or delete calendar events in the phone calendar.",
+    description = "Read, create, update or delete events in the phone's calendar app. For automated assistant prompts on a schedule, use timer instead.",
     parameters = calendarParameters,
     label = "calendar",
     promptGuidelines = listOf(ARRANGE_CALENDAR_GUIDELINE),
@@ -276,7 +278,12 @@ private fun arrangeCalendarTool(
                         }
                         val removed = calendar.delete(id, allowSeries)
                         if (!removed) throw IllegalArgumentException("Event $id not found")
-                        textResult(buildJsonObject { put("deleted", id) }.toString())
+                        textResult(
+                            buildJsonObject {
+                                put("deleted", true)
+                                put("id", id)
+                            }.toString(),
+                        )
                     }
 
                     else -> throw IllegalArgumentException("action must be calendars, list, get, create, update or delete")
@@ -299,7 +306,6 @@ private fun eventJson(event: ArrangeCalendarEvent, zone: ZoneId): JsonObject = b
     event.description?.let { put("description", it) }
     event.timezone?.let { put("timezone", it) }
     put("recurring", event.recurring)
-    put("eventId", event.eventId)
 }
 
 private suspend fun arrangeToolResult(block: suspend () -> AgentToolResult): AgentToolResult = try {
@@ -316,7 +322,7 @@ private suspend fun arrangeToolResult(block: suspend () -> AgentToolResult): Age
 
 private fun JsonObject.reminderMinutes(): List<Int>? {
     val array = this["reminders"] as? JsonArray ?: return null
-    return array.map { element ->
+    val minutes = array.map { element ->
         val raw = (element as? JsonPrimitive)?.contentOrNull
             ?: throw IllegalArgumentException("reminders must be integer minutes")
         val value = raw.toIntOrNull() ?: throw IllegalArgumentException("reminders must be integer minutes")
@@ -325,6 +331,10 @@ private fun JsonObject.reminderMinutes(): List<Int>? {
         }
         value
     }.distinct().sorted()
+    if (minutes.size > MAX_REMINDERS) {
+        throw IllegalArgumentException("at most $MAX_REMINDERS reminders are allowed")
+    }
+    return minutes
 }
 
 private fun JsonObject.requiredLong(name: String): Long =

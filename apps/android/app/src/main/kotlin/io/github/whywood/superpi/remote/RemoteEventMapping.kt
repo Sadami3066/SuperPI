@@ -42,7 +42,12 @@ internal sealed interface RemoteBotEvent {
 
     data class ReasoningDelta(val delta: String) : RemoteBotEvent
 
-    data class ToolCall(val callId: String, val name: String, val args: JsonObject) : RemoteBotEvent
+    data class ToolCall(
+        val callId: String,
+        val name: String,
+        val args: JsonObject,
+        val hasArgs: Boolean = args.isNotEmpty(),
+    ) : RemoteBotEvent
 
     data class ToolResult(
         val callId: String,
@@ -50,6 +55,14 @@ internal sealed interface RemoteBotEvent {
         val isError: Boolean,
         val details: JsonElement?,
     ) : RemoteBotEvent
+
+    data object CompactionStart : RemoteBotEvent
+
+    data object CompactionEnd : RemoteBotEvent
+
+    data object RetryStart : RemoteBotEvent
+
+    data object RetryEnd : RemoteBotEvent
 
     data class Failed(val message: String) : RemoteBotEvent
 
@@ -80,6 +93,13 @@ internal sealed interface RemoteBotEvent {
         val questions: List<UserQuestion> = emptyList(),
         val resolved: Boolean = false,
     ) : RemoteBotEvent
+
+    data class PluginCustomMessage(
+        val customType: String,
+        val payload: String,
+        val text: String,
+        val display: Boolean = true,
+    ) : RemoteBotEvent
 }
 
 internal object RemoteEventMapping {
@@ -89,11 +109,16 @@ internal object RemoteEventMapping {
         "message_update" -> decodeMessageUpdate(event)
         "tool_call" -> decodeToolCall(event)
         "tool_result" -> decodeToolResult(event)
+        "compaction_start" -> RemoteBotEvent.CompactionStart
+        "compaction_end" -> RemoteBotEvent.CompactionEnd
+        "retry_start" -> RemoteBotEvent.RetryStart
+        "retry_end" -> RemoteBotEvent.RetryEnd
         "error" -> RemoteBotEvent.Failed(event.string("message").orEmpty().ifBlank { "The remote bot failed." })
         "agent_end" -> RemoteBotEvent.Ended(event.string("status"))
         "agent_settled" -> RemoteBotEvent.Settled
         "queue_update" -> decodeQueueUpdate(event)
         "approval_request" -> decodeApprovalRequest(event)
+        "plugin_custom_message" -> decodePluginCustomMessage(event)
 
         else -> null
     }
@@ -156,10 +181,12 @@ internal object RemoteEventMapping {
     private fun decodeToolCall(event: JsonObject): RemoteBotEvent.ToolCall? {
         val callId = event.string("callId") ?: return null
         val name = event.string("name") ?: return null
+        val argsObj = event["args"] as? JsonObject
         return RemoteBotEvent.ToolCall(
             callId = callId,
             name = name,
-            args = event["args"] as? JsonObject ?: JsonObject(emptyMap()),
+            args = argsObj ?: JsonObject(emptyMap()),
+            hasArgs = argsObj != null,
         )
     }
 
@@ -170,6 +197,21 @@ internal object RemoteEventMapping {
             result = text(event["result"]),
             isError = (event["isError"] as? JsonPrimitive)?.booleanOrNull ?: false,
             details = event["details"]?.takeUnless { it is kotlinx.serialization.json.JsonNull },
+        )
+    }
+
+    private fun decodePluginCustomMessage(event: JsonObject): RemoteBotEvent.PluginCustomMessage? {
+        val customType = event.string("customType")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val payload = (event["payload"] as? JsonPrimitive)?.contentOrNull
+            ?: event["payload"]?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.toString()
+            ?: "{}"
+        val text = (event["text"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val display = (event["display"] as? JsonPrimitive)?.booleanOrNull ?: true
+        return RemoteBotEvent.PluginCustomMessage(
+            customType = customType,
+            payload = payload,
+            text = text,
+            display = display,
         )
     }
 
@@ -338,8 +380,13 @@ internal class RemoteTurnState(
         }
 
         RemoteBotEvent.Settled -> emptyList()
+        RemoteBotEvent.CompactionStart -> emptyList()
+        RemoteBotEvent.CompactionEnd -> emptyList()
+        RemoteBotEvent.RetryStart -> emptyList()
+        RemoteBotEvent.RetryEnd -> emptyList()
         is RemoteBotEvent.QueueUpdate -> emptyList()
         is RemoteBotEvent.ApprovalRequest -> emptyList()
+        is RemoteBotEvent.PluginCustomMessage -> emptyList()
     }
 
     private fun rollStepIfNeededLocked() {
@@ -390,7 +437,7 @@ internal class RemoteTurnState(
             args = if (event.args.isNotEmpty()) event.args else existing?.args ?: JsonObject(emptyMap()),
         )
         calls[event.callId] = record
-        if (event.args.isNotEmpty()) {
+        if (event.hasArgs) {
             if (!started.add(event.callId)) return emptyList()
             return listOf(AgentEvent.ToolExecutionStart(event.callId, record.name, record.args))
         }

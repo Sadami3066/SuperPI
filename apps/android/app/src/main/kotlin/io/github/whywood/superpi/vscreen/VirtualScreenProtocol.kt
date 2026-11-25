@@ -100,7 +100,10 @@ object VirtualScreenCommands {
     const val SWIPE = "swipe"
     const val KEY = "key"
     const val TEXT = "text"
+    const val INPUT_APPLIED = "input_applied"
     const val SCREENSHOT = "screenshot"
+
+    const val INPUT_DENIED_BEFORE_DISPATCH = "input_denied_before_dispatch"
 
     const val SHELL_UID = 2000
     const val DEFAULT_WIDTH = 720

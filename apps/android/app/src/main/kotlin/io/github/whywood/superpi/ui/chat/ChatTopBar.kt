@@ -19,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -32,6 +31,7 @@ import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdMenu
 import io.github.whywood.superpi.design.DdMenuItem
 import io.github.whywood.superpi.design.DdPressable
+import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdType
@@ -39,6 +39,8 @@ import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.runtime.SessionUsage
 import io.github.whywood.superpi.ui.common.BotAvatar
+import io.github.whywood.superpi.ui.common.chat.ContextMeter
+import io.github.whywood.superpi.ui.common.chat.TopBarLayout
 
 data class ChatTopBarState(
     val reminderCount: Int,
@@ -226,6 +228,9 @@ internal fun ChatTopBar(
                                 },
                                 testTag = "chat_export",
                             )
+                            if (state.memoryToggleVisible || state.reloadVisible) {
+                                DdRowDivider()
+                            }
                             if (state.memoryToggleVisible) {
                                 DdMenuItem(
                                     text = stringResource(
@@ -260,54 +265,5 @@ internal fun ChatTopBar(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun TopBarLayout(
-    leading: @Composable () -> Unit,
-    center: @Composable () -> Unit,
-    trailing: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val gap = DdSpacing.Xs
-    Layout(
-        contents = listOf(leading, center, trailing),
-        modifier = modifier,
-    ) { (leadingMeasurables, centerMeasurables, trailingMeasurables), constraints ->
-        val loose = constraints.copy(minWidth = 0, minHeight = 0)
-        val leadingPlaceables = leadingMeasurables.map { it.measure(loose) }
-        val leadingWidth = leadingPlaceables.maxOfOrNull { it.width } ?: 0
-        val trailingConstraints = loose.copy(maxWidth = (constraints.maxWidth - leadingWidth).coerceAtLeast(0))
-        val trailingPlaceables = trailingMeasurables.map { it.measure(trailingConstraints) }
-        val trailingWidth = trailingPlaceables.maxOfOrNull { it.width } ?: 0
-        val gapPx = gap.roundToPx()
-        val leftEdge = leadingWidth + gapPx
-        val rightEdge = (constraints.maxWidth - trailingWidth - gapPx).coerceAtLeast(leftEdge)
-        val maxCenterWidth = (rightEdge - leftEdge).coerceAtLeast(0)
-        val centerConstraints = loose.copy(maxWidth = maxCenterWidth)
-        val centerPlaceables = centerMeasurables.map { it.measure(centerConstraints) }
-        val centerWidth = centerPlaceables.maxOfOrNull { it.width } ?: 0
-        val height = maxOf(
-            constraints.minHeight,
-            leadingPlaceables.maxOfOrNull { it.height } ?: 0,
-            centerPlaceables.maxOfOrNull { it.height } ?: 0,
-            trailingPlaceables.maxOfOrNull { it.height } ?: 0,
-        ).coerceIn(constraints.minHeight, constraints.maxHeight)
-        val centeredX = (constraints.maxWidth - centerWidth) / 2
-        val maxCenterX = (rightEdge - centerWidth).coerceAtLeast(leftEdge)
-        val centerX = centeredX.coerceIn(leftEdge, maxCenterX)
-        val trailingX = (constraints.maxWidth - trailingWidth).coerceAtLeast(0)
-        layout(constraints.maxWidth, height) {
-            leadingPlaceables.forEach { placeable ->
-                placeable.placeRelative(0, (height - placeable.height) / 2)
-            }
-            centerPlaceables.forEach { placeable ->
-                placeable.placeRelative(centerX, (height - placeable.height) / 2)
-            }
-            trailingPlaceables.forEach { placeable ->
-                placeable.placeRelative(trailingX, (height - placeable.height) / 2)
-            }
-        }
     }
 }

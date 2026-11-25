@@ -3,7 +3,11 @@ package io.github.whywood.superpi.ui.chat
 import io.github.whywood.superpi.ui.common.chat.activeBotFor
 import io.github.whywood.superpi.ui.common.chat.commandQuery
 
+import io.github.whywood.superpi.ui.common.chat.ChatErrorNoticeBar
 import io.github.whywood.superpi.ui.common.chat.ChatTurn
+import io.github.whywood.superpi.ui.common.chat.LoadEarlierPill
+import io.github.whywood.superpi.ui.common.chat.expandVisibleMessages
+import io.github.whywood.superpi.ui.common.chat.resolveVisibleMessages
 
 import io.github.whywood.superpi.ui.common.chat.presentedCardLookup
 
@@ -26,7 +30,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +43,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,6 +62,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -132,6 +137,7 @@ import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.DdWordmark
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.runtime.AgentRuntimeHost
 import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.GoalView
 import io.github.whywood.superpi.runtime.PendingQuestion
@@ -140,22 +146,25 @@ import io.github.whywood.superpi.runtime.QuestionAnswer
 import io.github.whywood.superpi.runtime.QueuedInput
 import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.ThinkingLevel
+import io.github.whywood.superpi.ui.common.BotAvatar
+import io.github.whywood.superpi.ui.common.PiBrandMark
 import io.github.whywood.superpi.ui.common.remoteChatControls
 import io.github.whywood.superpi.ui.common.chat.ChatComposer
 import io.github.whywood.superpi.ui.common.chat.ChatComposerActions
 import io.github.whywood.superpi.ui.common.chat.ChatComposerState
+import io.github.whywood.superpi.ui.common.chat.ChatScrollController
 import io.github.whywood.superpi.ui.common.chat.ChatScrollFollowEffect
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
 import io.github.whywood.superpi.ui.common.chat.ScrollAnchor
 import io.github.whywood.superpi.ui.common.chat.rememberChatScrollController
+import io.github.whywood.superpi.ui.common.chat.rememberNormalEmptyCopy
 import io.github.whywood.superpi.ui.common.chat.TodoPanel
 import io.github.whywood.superpi.ui.common.chat.TodoWriteCustomType
 import io.github.whywood.superpi.ui.common.chat.latestTodoPayload
 import io.github.whywood.superpi.ui.goal.GoalBar
 import io.github.whywood.superpi.ui.common.chat.AskQuestionCard
 import java.io.File
-import java.time.LocalTime
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -206,6 +215,8 @@ data class ChatScreenActions(
     val onOpenBotSettings: (String) -> Unit,
     val onEndGoal: () -> Unit = {},
     val onToggleMemoryExcluded: () -> Unit = {},
+    val onDismissError: () -> Unit = {},
+    val onRetryLoad: () -> Unit = {},
 )
 
 data class ChatScreenOverlay(
@@ -234,7 +245,6 @@ fun ChatScreen(
     overlay: ChatScreenOverlay,
     scrollAnchorFor: (String) -> ScrollAnchor?,
     modifier: Modifier = Modifier,
-    autoCollapseProcess: Boolean = true,
     processDetail: ProcessDetail = ProcessDetail.DETAILED,
     chatFontScale: Float = 1f,
     voiceLanguage: AppLanguage = AppLanguage.SYSTEM,
@@ -328,25 +338,6 @@ fun ChatScreen(
         }
     }
     val showMessageNav = userMessageIndices.size > ChatHistoryNavWindowTicks
-    val navTopItemPosition by remember(listState) {
-        derivedStateOf {
-            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
-            if (first == null || first.size <= 0) {
-                0f
-            } else {
-                first.index + (-first.offset).toFloat() / first.size
-            }
-        }
-    }
-    val navAnchorMessageIndex = if (!listState.canScrollForward) {
-        streamMessages.lastIndex.coerceAtLeast(0)
-    } else {
-        messageIndexForItemIndex(
-            itemIndex = navTopItemPosition.toInt(),
-            total = streamMessages.size,
-            visible = shownMessageCount,
-        )
-    }
     val todoPayload = remember(messages) { latestTodoPayload(messages) }
     val retryActivity = state.activity as? RuntimeActivity.Retrying
     val retryTargetId = messages.lastOrNull { it.streaming || it.retrying }?.id
@@ -465,7 +456,7 @@ fun ChatScreen(
     LaunchedEffect(state.conversationId, state.messages.size) {
         val size = state.messages.size
         val grew = state.conversationId == knownSessionId && size > knownCount
-        if (grew && (controller.following || pendingLocalSend)) controller.jumpToBottom(animate = false)
+        if (grew && (controller.following || pendingLocalSend)) controller.jumpToBottom(animate = motionEnabled)
         pendingLocalSend = false
         knownCount = size
         knownSessionId = state.conversationId
@@ -493,8 +484,9 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(pendingQuestions.map { it.requestId }) {
-        if (pendingQuestions.isNotEmpty()) {
+    val pendingQuestionIds = remember(pendingQuestions) { pendingQuestions.map { it.requestId } }
+    LaunchedEffect(pendingQuestionIds) {
+        if (pendingQuestionIds.isNotEmpty()) {
             delay(60)
             controller.jumpToBottom(animate = true)
         }
@@ -584,8 +576,13 @@ fun ChatScreen(
             } else if (messages.isEmpty()) {
                 EmptyState(
                     loaded = state.historyLoaded,
+                    sessionKey = (state.conversationId ?: "") to (activeBot?.id ?: AgentRuntimeHost.HOME_ID),
                     nickname = nickname,
-                    avatar = avatar,
+                    botName = activeBot?.name ?: AgentRuntimeHost.HOME_NAME,
+                    botAvatar = activeBot?.avatar,
+                    error = state.error,
+                    onRetryLoad = actions.onRetryLoad,
+                    onPickStarter = onInputChange,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(bottom = with(density) { overlayHeightPx.toDp() }),
@@ -606,7 +603,7 @@ fun ChatScreen(
                         contentPadding = PaddingValues(
                             start = 14.dp,
                             end = 14.dp,
-                            top = 6.dp,
+                            top = 14.dp,
                             bottom = with(chatDensity) {
                                 (overlayHeightPx + DdSpacing.Md.roundToPx()).toDp()
                             },
@@ -645,7 +642,6 @@ fun ChatScreen(
                                         onOpenFile = onOpenFile,
                                         onRetry = onRetry,
                                         attachmentRoot = attachmentRoot,
-                                        autoCollapseProcess = autoCollapseProcess,
                                         processDetail = processDetail,
                                         pendingQuestions = emptyList(),
                                         onAnswerQuestion = onAnswerQuestion,
@@ -684,25 +680,10 @@ fun ChatScreen(
                             }
                     }
                 }
-                val showTopFade by remember(listState) {
-                    derivedStateOf { listState.canScrollBackward }
-                }
-                val topFadeAlpha = animateFloatAsState(
-                    targetValue = if (showTopFade) 1f else 0f,
-                    animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
-                    label = "chat-top-fade",
-                )
-                Box(
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .height(14.dp)
-                        .graphicsLayer { alpha = topFadeAlpha.value }
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(colors.paper, colors.paper.copy(alpha = 0f)),
-                            ),
-                        ),
+                ChatTopFadeOverlay(
+                    listState = listState,
+                    motionEnabled = motionEnabled,
+                    modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
             Column(
@@ -710,27 +691,11 @@ fun ChatScreen(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth(),
             ) {
-                val jumpSpec = if (motionEnabled) tween<Float>(DdMotion.FAST, easing = DdMotion.EaseOut) else snap()
-                AnimatedVisibility(
-                    visible = controller.showJumpToBottom,
-                    enter = fadeIn(jumpSpec) + scaleIn(
-                        initialScale = if (motionEnabled) 0.92f else 1f,
-                        animationSpec = jumpSpec,
-                    ),
-                    exit = fadeOut(jumpSpec) + scaleOut(
-                        targetScale = if (motionEnabled) 0.92f else 1f,
-                        animationSpec = jumpSpec,
-                    ),
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = DdSpacing.Xs),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        JumpToBottomChip(
-                            onClick = { scope.launch { controller.jumpToBottom(animate = true) } },
-                        )
-                    }
-                }
+                ChatJumpToBottomOverlay(
+                    controller = controller,
+                    motionEnabled = motionEnabled,
+                    onJump = { scope.launch { controller.jumpToBottom(animate = true) } },
+                )
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -807,6 +772,13 @@ fun ChatScreen(
                 }
                 key(state.conversationId) {
                     TodoPanel(payload = todoPayload)
+                }
+                state.error?.takeIf { it.isNotBlank() }?.takeIf { messages.isNotEmpty() || state.historyLoaded }?.let { errText ->
+                    ChatErrorNoticeBar(
+                        error = errText,
+                        onRetry = if (!state.historyLoaded || state.conversationId == null) actions.onRetryLoad else null,
+                        onDismiss = actions.onDismissError,
+                    )
                 }
                 val paletteQuery = commandQuery(state.input)
                 var lastPaletteQuery by remember { mutableStateOf("") }
@@ -893,9 +865,11 @@ fun ChatScreen(
                 }
             }
             if (showMessageNav && !state.switchingConversation) {
-                MessageNavBar(
+                ChatMessageNavOverlay(
+                    listState = listState,
+                    streamMessagesSize = streamMessages.size,
+                    shownMessageCount = shownMessageCount,
                     userMessageIndices = userMessageIndices,
-                    activeMessageIndex = navAnchorMessageIndex,
                     onJump = ::jumpToMessage,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -912,23 +886,134 @@ fun ChatScreen(
 }
 
 @Composable
-private fun EmptyState(
-    loaded: Boolean,
-    nickname: String,
-    avatar: ImageBitmap?,
+private fun ChatTopFadeOverlay(
+    listState: LazyListState,
+    motionEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val showTopFade by remember(listState) {
+        derivedStateOf { listState.canScrollBackward }
+    }
+    val topFadeAlpha = animateFloatAsState(
+        targetValue = if (showTopFade) 1f else 0f,
+        animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
+        label = "chat-top-fade",
+    )
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(14.dp)
+            .graphicsLayer { alpha = topFadeAlpha.value }
+            .background(
+                Brush.verticalGradient(
+                    listOf(colors.paper, colors.paper.copy(alpha = 0f)),
+                ),
+            ),
+    )
+}
+
+@Composable
+private fun ChatJumpToBottomOverlay(
+    controller: ChatScrollController,
+    motionEnabled: Boolean,
+    onJump: () -> Unit,
+) {
+    val jumpSpec = if (motionEnabled) tween<Float>(DdMotion.FAST, easing = DdMotion.EaseOut) else snap()
+    AnimatedVisibility(
+        visible = controller.showJumpToBottom,
+        enter = fadeIn(jumpSpec) + scaleIn(
+            initialScale = if (motionEnabled) 0.92f else 1f,
+            animationSpec = jumpSpec,
+        ),
+        exit = fadeOut(jumpSpec) + scaleOut(
+            targetScale = if (motionEnabled) 0.92f else 1f,
+            animationSpec = jumpSpec,
+        ),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(bottom = DdSpacing.Xs),
+            contentAlignment = Alignment.Center,
+        ) {
+            JumpToBottomChip(onClick = onJump)
+        }
+    }
+}
+
+@Composable
+private fun ChatMessageNavOverlay(
+    listState: LazyListState,
+    streamMessagesSize: Int,
+    shownMessageCount: Int,
+    userMessageIndices: List<Int>,
+    onJump: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val activeMessageIndex by remember(listState, streamMessagesSize, shownMessageCount) {
+        derivedStateOf {
+            if (!listState.canScrollForward) {
+                (streamMessagesSize - 1).coerceAtLeast(0)
+            } else {
+                messageIndexForItemIndex(
+                    itemIndex = listState.firstVisibleItemIndex,
+                    total = streamMessagesSize,
+                    visible = shownMessageCount,
+                )
+            }
+        }
+    }
+    MessageNavBar(
+        userMessageIndices = userMessageIndices,
+        activeMessageIndex = activeMessageIndex,
+        onJump = onJump,
+        modifier = modifier,
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EmptyState(
+    loaded: Boolean,
+    sessionKey: Any?,
+    nickname: String,
+    botName: String,
+    botAvatar: String?,
+    onPickStarter: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    error: String? = null,
+    onRetryLoad: () -> Unit = {},
+) {
+    val colors = superPiColors()
+    val emptyCopy = rememberNormalEmptyCopy(sessionKey = sessionKey, nickname = nickname)
     Box(
         modifier.fillMaxSize().padding(horizontal = 28.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (!loaded) {
-            Text(
-                text = stringResource(R.string.assistant_loading),
-                style = DdType.body,
-                color = colors.inkTertiary,
-            )
+            if (!error.isNullOrBlank()) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(DdSpacing.Sm),
+                ) {
+                    Text(
+                        text = error,
+                        modifier = Modifier.testTag("chat_empty_error"),
+                        style = DdType.body,
+                        color = colors.danger,
+                        textAlign = TextAlign.Center,
+                    )
+                    DdTextAction(
+                        text = stringResource(R.string.super_chat_error_retry),
+                        onClick = onRetryLoad,
+                    )
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.assistant_loading),
+                    style = DdType.body,
+                    color = colors.inkTertiary,
+                )
+            }
         } else {
             val motionEnabled = LocalDdMotionEnabled.current
             var shown by remember { mutableStateOf(!motionEnabled) }
@@ -936,10 +1021,10 @@ private fun EmptyState(
             AnimatedVisibility(
                 visible = shown,
                 enter = if (motionEnabled) {
-                    fadeIn(tween(DdMotion.PAGE, easing = DdMotion.EaseOut)) +
+                    fadeIn(tween(300, easing = DdMotion.EaseOut)) +
                         slideInVertically(
-                            animationSpec = tween(DdMotion.PAGE, easing = DdMotion.EaseOut),
-                            initialOffsetY = { it / 18 },
+                            animationSpec = tween(300, easing = DdMotion.EaseOut),
+                            initialOffsetY = { it / 40 },
                         )
                 } else {
                     fadeIn(snap())
@@ -947,63 +1032,66 @@ private fun EmptyState(
                 exit = ExitTransition.None,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (avatar != null) {
-                        Image(
-                            bitmap = avatar,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(104.dp)
-                                .clip(CircleShape)
-                                .testTag("home_avatar"),
-                            contentScale = ContentScale.Crop,
+                    if (!botAvatar.isNullOrBlank()) {
+                        BotAvatar(
+                            name = botName,
+                            avatar = botAvatar,
+                            size = 76.dp,
+                            modifier = Modifier.testTag("home_avatar"),
                         )
                         Spacer(Modifier.height(DdSpacing.Lg))
                     } else {
-                        Box(
-                            Modifier
-                                .size(148.dp)
-                                .clip(CircleShape)
-                                .background(if (colors.dark) colors.ink.copy(alpha = 0.92f) else colors.surface)
-                                .border(1.dp, colors.hairline, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Image(
-                                painter = painterResource(R.drawable.v2_wave),
-                                contentDescription = null,
-                                modifier = Modifier.size(112.dp),
-                                contentScale = ContentScale.Fit,
-                            )
-                        }
-                        Spacer(Modifier.height(DdSpacing.Sm))
+                        PiBrandMark(
+                            size = 92.dp,
+                            modifier = Modifier.testTag("home_avatar"),
+                        )
+                        Spacer(Modifier.height(DdSpacing.Lg))
                     }
                     Text(
-                        text = greeting(nickname),
+                        text = emptyCopy.greeting,
                         modifier = Modifier.testTag("home_greeting"),
-                        style = DdType.display,
+                        style = DdType.heading,
                         color = colors.ink,
                         textAlign = TextAlign.Center,
                     )
-                    Spacer(Modifier.height(DdSpacing.Md))
+                    Spacer(Modifier.height(DdSpacing.Sm))
                     Text(
                         text = stringResource(R.string.assistant_home_prompt),
                         style = DdType.body,
                         color = colors.inkSecondary,
                         textAlign = TextAlign.Center,
                     )
+                    Spacer(Modifier.height(DdSpacing.Lg))
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        emptyCopy.starters.forEach { prompt ->
+                            DdPressable(
+                                onClick = { onPickStarter(prompt) },
+                                modifier = Modifier
+                                    .heightIn(min = 44.dp)
+                                    .border(0.5.dp, colors.surfaceRim, CircleShape),
+                                shape = CircleShape,
+                                background = colors.surface,
+                                contentDescription = prompt,
+                            ) {
+                                Text(
+                                    text = prompt,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                    style = DdType.chip,
+                                    color = colors.inkSecondary,
+                                    maxLines = 2,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun greeting(nickname: String): String {
-    val base = when (LocalTime.now().hour) {
-        in 5..10 -> stringResource(R.string.assistant_greeting_morning)
-        in 11..17 -> stringResource(R.string.assistant_greeting_afternoon)
-        else -> stringResource(R.string.assistant_greeting_evening)
-    }
-    return if (nickname.isBlank()) base else stringResource(R.string.assistant_greeting_named, base, nickname)
 }
 
 @Composable
@@ -1057,36 +1145,6 @@ private fun JumpToBottomChip(
                 color = colors.inkSecondary,
                 maxLines = 1,
                 softWrap = false,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LoadEarlierPill(
-    hiddenCount: Int,
-    onClick: () -> Unit,
-) {
-    val colors = superPiColors()
-    DdPressable(
-        onClick = onClick,
-        modifier = Modifier.heightIn(min = 44.dp).testTag("chat_load_earlier"),
-        shape = DdShapes.Small,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.chat_history_load_earlier),
-                style = DdType.chip,
-                color = colors.inkSecondary,
-            )
-            Text(
-                text = stringResource(R.string.chat_history_remaining, hiddenCount),
-                style = DdType.chip,
-                color = colors.inkTertiary,
             )
         }
     }

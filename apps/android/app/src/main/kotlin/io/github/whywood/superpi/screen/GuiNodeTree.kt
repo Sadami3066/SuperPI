@@ -38,6 +38,12 @@ data class GuiNode(
     val enabled: Boolean = true,
     val children: List<GuiNode> = emptyList(),
     val token: Any? = null,
+    val checked: Boolean = false,
+    val selected: Boolean = false,
+    val focused: Boolean = false,
+    val showingHint: Boolean = false,
+    val secret: Boolean = false,
+    val placeholder: String? = null,
 )
 
 data class GuiSnapshotNode(
@@ -53,6 +59,12 @@ data class GuiSnapshotNode(
     val enabled: Boolean,
     val depth: Int,
     val token: Any? = null,
+    val checked: Boolean = false,
+    val selected: Boolean = false,
+    val focused: Boolean = false,
+    val showingHint: Boolean = false,
+    val secret: Boolean = false,
+    val placeholder: String? = null,
 )
 
 enum class GuiWindowKind {
@@ -73,6 +85,8 @@ data class GuiWindowInfo(
     val active: Boolean = false,
     val readable: Boolean = false,
     val selected: Boolean = false,
+    val id: Int = -1,
+    val layer: Int = 0,
 )
 
 data class GuiSnapshot(
@@ -120,7 +134,7 @@ object GuiNodeTree {
                 ref = nodes.size.toString(),
                 className = node.className,
                 bounds = node.bounds,
-                text = node.text,
+                text = if (node.secret) null else node.text,
                 desc = node.desc,
                 resourceId = node.resourceId,
                 clickable = node.clickable,
@@ -129,6 +143,12 @@ object GuiNodeTree {
                 enabled = node.enabled,
                 depth = depth,
                 token = node.token,
+                checked = node.checked,
+                selected = node.selected,
+                focused = node.focused,
+                showingHint = node.showingHint,
+                secret = node.secret,
+                placeholder = node.placeholder,
             )
             node.children.forEach { child -> visit(child, depth + 1) }
         }
@@ -156,7 +176,7 @@ object GuiNodeTree {
     fun nodeJson(node: GuiSnapshotNode): JsonObject = buildJsonObject {
         put("ref", node.ref)
         put("class", node.className)
-        node.text?.let { put("text", it) }
+        if (!node.secret) node.text?.let { put("text", it) }
         node.desc?.let { put("desc", it) }
         node.resourceId?.let { put("resourceId", it) }
         put("bounds", node.bounds.format())
@@ -164,6 +184,12 @@ object GuiNodeTree {
         if (node.scrollable) put("scrollable", true)
         if (node.editable) put("editable", true)
         if (!node.enabled) put("enabled", false)
+        if (node.checked) put("checked", true)
+        if (node.selected) put("selected", true)
+        if (node.focused) put("focused", true)
+        if (node.showingHint) put("showingHint", true)
+        if (node.secret) put("secret", true)
+        node.placeholder?.takeIf { it.isNotEmpty() }?.let { put("placeholder", it) }
         put("depth", node.depth)
     }
 

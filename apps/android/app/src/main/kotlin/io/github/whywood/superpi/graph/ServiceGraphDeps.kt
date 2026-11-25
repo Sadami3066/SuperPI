@@ -7,6 +7,7 @@ import io.github.whywood.superpi.plugin.manager.PluginManagerFacade
 import io.github.whywood.superpi.runtime.AgentRuntimeHost
 import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
 import io.github.whywood.superpi.runtime.QuestionCenter
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.TimerStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,7 @@ internal class ServiceGraphDeps(
     val scope: CoroutineScope,
     val host: () -> AgentRuntimeHost,
     val conversationStore: () -> ConversationStore,
+    val superRuntime: () -> SuperRuntime,
     val questionCenter: QuestionCenter,
     val timerStore: TimerStore,
     val pluginManager: () -> PluginManagerFacade,

@@ -44,8 +44,8 @@ internal fun rideTools(host: PluginHost, toolState: RideToolState = RideToolStat
         name = "ride_place_search",
         label = host.t("地点搜索", "Place search"),
         description = host.t(
-            "搜索地点并返回接口给出的全部地点：名称、完整地址、城市和经纬度。参数 keywords、city（城市写完整名称，如 北京市）。",
-            "Search places and return every place the API gives: name, full address, city and coordinates. Parameters: keywords, city (use the full city name, e.g. 北京市).",
+            "搜索地点并返回服务给出的全部地点：名称、完整地址、城市和经纬度。参数 keywords、city（城市写完整名称，如 北京市）。",
+            "Search places and return every place the service gives: name, full address, city and coordinates. Parameters: keywords, city (use the full city name, e.g. 北京市).",
         ),
         parameters = buildJsonObject {
             put("type", "object")
@@ -86,8 +86,8 @@ internal fun rideTools(host: PluginHost, toolState: RideToolState = RideToolStat
         name = "ride_estimate",
         label = host.t("打车预估", "Ride estimate"),
         description = host.t(
-            "预估打车价格，返回接口给出的全部车型，以及滴滴实际吸附后的上/下车点（from/to 含名称、地址、经纬度）、distanceKm、eta、车型参考价、券后价、品类、接驾时间、账号手机尾号和 traceId。参数 from_name/from_lng/from_lat/to_name/to_lng/to_lat，坐标来自 ride_place_search，经纬度都传字符串。",
-            "Estimate ride fares and return every vehicle, the pickup and drop-off points DiDi actually snapped to (from/to with name, address and coordinates), distanceKm, eta, list and discounted prices, categories, pickup times, account phone suffix and traceId. Parameters: from_name/from_lng/from_lat/to_name/to_lng/to_lat, coordinates from ride_place_search and all passed as strings.",
+            "预估打车价格，返回服务给出的全部车型，以及滴滴实际吸附后的上/下车点（from/to 含名称、地址、经纬度）、distanceKm、eta、车型参考价、券后价、品类、接驾时间、账号手机尾号和 traceId。参数 from_name/from_lng/from_lat/to_name/to_lng/to_lat，坐标来自 ride_place_search，经纬度都传字符串。",
+            "Estimate ride fares and return every vehicle the service gives, the pickup and drop-off points DiDi actually snapped to (from/to with name, address and coordinates), distanceKm, eta, list and discounted prices, categories, pickup times, account phone suffix and traceId. Parameters: from_name/from_lng/from_lat/to_name/to_lng/to_lat, coordinates from ride_place_search and all passed as strings.",
         ),
         parameters = buildJsonObject {
             put("type", "object")
@@ -276,8 +276,8 @@ internal fun rideTools(host: PluginHost, toolState: RideToolState = RideToolStat
         name = "ride_driver_location",
         label = host.t("司机位置", "Driver location"),
         description = host.t(
-            "查询指定订单司机的实时位置：经纬度、地址，以及接口给出的司机、车牌、距离、预计到达、状态与更新时间。参数 order_id 必填。",
-            "Query the driver's live location for an order: coordinates, address, and any driver, plate, distance, ETA, status and update time the API gives. Required: order_id.",
+            "查询指定订单司机的实时位置：经纬度、地址，以及服务给出的司机、车牌、距离、预计到达、状态与更新时间。参数 order_id 必填。",
+            "Query the driver's live location for an order: coordinates, address, and any driver, plate, distance, ETA, status and update time the service gives. Required: order_id.",
         ),
         parameters = buildJsonObject {
             put("type", "object")

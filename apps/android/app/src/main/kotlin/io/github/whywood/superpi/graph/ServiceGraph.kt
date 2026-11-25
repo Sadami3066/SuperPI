@@ -12,7 +12,13 @@ import java.io.File
 
 internal class ServiceGraph(private val deps: ServiceGraphDeps) {
     val notificationCenter: NotificationCenter by lazy {
-        NotificationCenter(deps.uiContext, deps.host(), deps.conversationStore(), deps.questionCenter.pending)
+        NotificationCenter(
+            context = deps.uiContext,
+            runtime = deps.host(),
+            store = deps.conversationStore(),
+            pendingQuestions = deps.questionCenter.pending,
+            superRuntime = deps.superRuntime(),
+        )
     }
 
     val timerService: TimerService by lazy {

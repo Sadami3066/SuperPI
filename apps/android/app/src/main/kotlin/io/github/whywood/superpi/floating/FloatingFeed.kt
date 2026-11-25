@@ -7,7 +7,11 @@ import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SessionRuntimeEvent
 import io.github.whywood.superpi.conversation.ActiveRunView
+import io.github.whywood.superpi.data.ProcessDetail
+import io.github.whywood.superpi.ui.common.chat.displayToolName
 import io.github.whywood.superpi.ui.common.chat.parsePresentedItems
+import io.github.whywood.superpi.ui.common.chat.toolProgressLabel
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,6 +31,7 @@ class FloatingFeed(
     private val scope: CoroutineScope,
     private val isForeground: () -> Boolean = { false },
     private val events: kotlinx.coroutines.flow.SharedFlow<SessionRuntimeEvent> = runtime.events,
+    private val processDetail: () -> ProcessDetail = { ProcessDetail.DETAILED },
 ) {
     private val mutableState = MutableStateFlow(
         FloatingFeedState(lastEventAt = System.currentTimeMillis()),
@@ -34,6 +39,7 @@ class FloatingFeed(
     val state: StateFlow<FloatingFeedState> = mutableState.asStateFlow()
 
     private val jobs = mutableListOf<Job>()
+    private val detailedToolLabels = ConcurrentHashMap<String, Pair<String, String>>()
     private val textStream = TrackedStream { sessionId, text ->
         dispatch(FloatingFeedEvent.TrackingText(sessionId, text))
     }
@@ -80,20 +86,62 @@ class FloatingFeed(
     private suspend fun onRuntimeEvent(event: SessionRuntimeEvent) {
         val sessionId = event.sessionId.takeIf { it.isNotBlank() } ?: return
         when (val runtimeEvent = event.event) {
-            is RuntimeEvent.RunStarted -> resetTrackedText(sessionId)
+            is RuntimeEvent.RunStarted -> {
+                detailedToolLabels.remove(sessionId)
+                resetTrackedText(sessionId)
+            }
 
-            is RuntimeEvent.UserInputAdmitted -> resetTrackedText(sessionId)
+            is RuntimeEvent.UserInputAdmitted -> {
+                detailedToolLabels.remove(sessionId)
+                resetTrackedText(sessionId)
+            }
 
-            is RuntimeEvent.ActivityChanged -> trackActivity(sessionId, runtimeEvent.activity)
+            is RuntimeEvent.ActivityChanged -> {
+                val resolved = when (val activity = runtimeEvent.activity) {
+                    is RuntimeActivity.RunningTool -> {
+                        val remembered = detailedToolLabels[sessionId]
+                        if (
+                            remembered != null &&
+                            (activity.name == remembered.first || activity.name.startsWith("${remembered.first}: "))
+                        ) {
+                            RuntimeActivity.RunningTool(remembered.second)
+                        } else {
+                            val toolToken = activity.name.substringBefore(": ")
+                            val label = if (processDetail() == ProcessDetail.DETAILED && activity.name.contains(": ")) {
+                                val hint = activity.name.substringAfter(": ").trim()
+                                val formattedTool = displayToolName(toolToken)
+                                if (hint.isEmpty()) formattedTool else "$formattedTool $hint"
+                            } else {
+                                displayToolName(toolToken)
+                            }
+                            RuntimeActivity.RunningTool(label)
+                        }
+                    }
+
+                    else -> {
+                        detailedToolLabels.remove(sessionId)
+                        activity
+                    }
+                }
+                trackActivity(sessionId, resolved)
+            }
 
             is RuntimeEvent.ToolCallStarted -> {
-                trackActivity(sessionId, RuntimeActivity.RunningTool(runtimeEvent.name))
-                trackTool(sessionId, runtimeEvent.name)
+                val label = displayToolName(runtimeEvent.name)
+                detailedToolLabels[sessionId] = runtimeEvent.name to label
+                trackActivity(sessionId, RuntimeActivity.RunningTool(label))
+                trackTool(sessionId, label)
             }
 
             is RuntimeEvent.ToolStarted -> {
-                trackActivity(sessionId, RuntimeActivity.RunningTool(runtimeEvent.name))
-                trackTool(sessionId, runtimeEvent.name)
+                val label = if (processDetail() == ProcessDetail.DETAILED) {
+                    toolProgressLabel(runtimeEvent.name, runtimeEvent.rawArguments, runtimeEvent.arguments)
+                } else {
+                    displayToolName(runtimeEvent.name)
+                }
+                detailedToolLabels[sessionId] = runtimeEvent.name to label
+                trackActivity(sessionId, RuntimeActivity.RunningTool(label))
+                trackTool(sessionId, label)
             }
 
             is RuntimeEvent.ReasoningDelta -> appendTrackedReasoning(sessionId, runtimeEvent.text)
@@ -106,27 +154,33 @@ class FloatingFeed(
                 dispatch(FloatingFeedEvent.Delivered(sessionId = sessionId, items = items))
             }
 
-            is RuntimeEvent.RunFinished -> dispatch(
-                FloatingFeedEvent.Completed(
-                    sessionId = sessionId,
-                    title = resolveTitle(sessionId),
-                    status = runtimeEvent.status,
-                    text = runtimeEvent.text,
-                    error = null,
-                    whileForeground = isForeground(),
-                ),
-            )
+            is RuntimeEvent.RunFinished -> {
+                detailedToolLabels.remove(sessionId)
+                dispatch(
+                    FloatingFeedEvent.Completed(
+                        sessionId = sessionId,
+                        title = resolveTitle(sessionId),
+                        status = runtimeEvent.status,
+                        text = runtimeEvent.text,
+                        error = null,
+                        whileForeground = isForeground(),
+                    ),
+                )
+            }
 
-            is RuntimeEvent.RunFailed -> dispatch(
-                FloatingFeedEvent.Completed(
-                    sessionId = sessionId,
-                    title = resolveTitle(sessionId),
-                    status = RunStatus.FAILED,
-                    text = "",
-                    error = runtimeEvent.message,
-                    whileForeground = isForeground(),
-                ),
-            )
+            is RuntimeEvent.RunFailed -> {
+                detailedToolLabels.remove(sessionId)
+                dispatch(
+                    FloatingFeedEvent.Completed(
+                        sessionId = sessionId,
+                        title = resolveTitle(sessionId),
+                        status = RunStatus.FAILED,
+                        text = "",
+                        error = runtimeEvent.message,
+                        whileForeground = isForeground(),
+                    ),
+                )
+            }
 
             else -> Unit
         }
@@ -159,6 +213,7 @@ class FloatingFeed(
     }
 
     private fun resetTrackedText(sessionId: String) {
+        detailedToolLabels.remove(sessionId)
         if (mutableState.value.subscription?.sessionId != sessionId) return
         textStream.reset(sessionId)
         reasoningStream.reset(sessionId)

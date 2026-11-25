@@ -22,20 +22,30 @@ private val systemShellParameters: JsonObject = buildJsonObject {
             put("type", "string")
             put("description", "Shell command to run with Android shell privileges")
         }
+        putJsonObject("description") {
+            put("type", "string")
+            put("description", "Short plain-language description of what this Android shell operation does for UI display")
+        }
         putJsonObject("timeoutMs") {
             put("type", "number")
             put("description", "Maximum run time in milliseconds (default 15000, clamped to 1..120000)")
         }
     }
-    put("required", buildJsonArray { add(JsonPrimitive("command")) })
+    put("required", buildJsonArray {
+        add(JsonPrimitive("command"))
+        add(JsonPrimitive("description"))
+    })
 }
 
 fun systemShellTool(executor: () -> ShellExecutor?): CodingTool = CodingTool(
     name = "system_shell",
-    description = "Run a command in the Android system shell and return the exit code with merged stdout and stderr. Use it for Android system operations such as pm, cmd, settings, dumpsys, am and getprop; use bash for ordinary Linux work. The tool fails while the active access tier has no system shell (local access).",
+    description = "Run a command in the Android system shell and return the exit code with merged stdout and stderr. Output is bounded to the tail (up to 2000 lines or 50KB). Use it for Android system operations such as pm, cmd, settings, dumpsys, am and getprop; use bash for ordinary Linux work.",
     parameters = systemShellParameters,
     label = "system_shell",
-    promptGuidelines = listOf(SYSTEM_SHELL_GUIDELINE),
+    promptGuidelines = listOf(
+        SYSTEM_SHELL_GUIDELINE,
+        SYSTEM_SHELL_DESCRIPTION_GUIDELINE,
+    ),
     execute = { toolCallId, args, signal, onUpdate ->
         signal?.throwIfAborted()
         try {
@@ -66,9 +76,12 @@ fun systemShellTool(executor: () -> ShellExecutor?): CodingTool = CodingTool(
 private fun JsonObject.shellArguments(): JsonObject {
     val command = (this["command"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
     if (command.isEmpty()) throw IllegalArgumentException("command must not be empty")
+    val description = (this["description"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+    if (description.isEmpty()) throw IllegalArgumentException("description must not be empty")
     val timeoutMillis = shellTimeoutMillis().coerceIn(1, MAX_SHELL_TIMEOUT_MILLIS)
     return buildJsonObject {
         put("command", command)
+        put("description", description)
         put("timeout", ceil(timeoutMillis / 1000.0))
     }
 }
@@ -84,3 +97,6 @@ private const val MAX_SHELL_TIMEOUT_MILLIS = 120_000L
 
 private const val SYSTEM_SHELL_GUIDELINE =
     "System shell output may already be truncated upstream; never claim a complete log when none is available."
+
+private const val SYSTEM_SHELL_DESCRIPTION_GUIDELINE =
+    "Always provide a short plain-language description argument when running system_shell so the user sees what is happening."

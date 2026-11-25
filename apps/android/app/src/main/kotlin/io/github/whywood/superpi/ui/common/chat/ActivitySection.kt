@@ -1,5 +1,7 @@
 package io.github.whywood.superpi.ui.common.chat
 
+import android.os.SystemClock
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.RepeatMode
@@ -9,6 +11,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,11 +32,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,15 +51,20 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
@@ -70,6 +85,7 @@ import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.ToolActivityStatus
 import io.github.whywood.superpi.runtime.TurnNotice
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun ActivitySection(
@@ -77,7 +93,6 @@ internal fun ActivitySection(
     message: AssistantMessage,
     isTrailingBlock: Boolean,
     showTotalDuration: Boolean = true,
-    autoCollapseProcess: Boolean,
     processDetail: ProcessDetail,
     onToggleStep: (Long) -> Unit,
     onCopyOutput: (String) -> Unit,
@@ -91,12 +106,7 @@ internal fun ActivitySection(
         isTrailingBlock ||
             steps.any { it is AssistantStep.Tool && it.trace.status == ToolActivityStatus.RUNNING }
         )
-    val expanded = when {
-        expansionOverride >= 0 -> expansionOverride == 1
-        !autoCollapseProcess -> true
-        running -> true
-        else -> false
-    }
+    val expanded = expansionOverride == 1
     val rotation = animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
         animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
@@ -128,47 +138,28 @@ internal fun ActivitySection(
         animationSpec = settleSpec(),
         label = "activity_summary_color",
     )
-    val reasoningCount = steps.count { it is AssistantStep.Reasoning }
-    val toolCount = steps.count { it is AssistantStep.Tool }
-    val finishedAt = message.finishedAt
-    val duration = when {
-        showTotalDuration && isTrailingBlock && !message.streaming && finishedAt != null &&
-            message.startedAt > 0 && finishedAt > message.startedAt -> finishedAt - message.startedAt
-
-        !showTotalDuration && !running -> steps
-            .filterIsInstance<AssistantStep.Tool>()
-            .mapNotNull { it.trace.durationMs?.takeIf { ms -> ms > 0L } }
-            .sum()
-            .takeIf { it >= 1000L }
-
-        else -> null
-    }
-    val reasoningLabel = if (reasoningCount > 0) {
-        stringResource(R.string.assistant_process_reasoning, reasoningCount)
-    } else {
-        null
-    }
-    val toolLabel = if (toolCount > 0) {
-        stringResource(R.string.assistant_process_tools, toolCount)
-    } else {
-        null
-    }
+    val duration = processDurationMs(
+        steps = steps,
+        message = message,
+        running = running,
+        showTotalDuration = showTotalDuration,
+    )
     val durationText = duration?.let { elapsed ->
         formatElapsed(
-            elapsed / 1000L,
+            processDurationSeconds(elapsed),
             stringResource(R.string.assistant_elapsed_hours_minutes_seconds),
             stringResource(R.string.assistant_elapsed_minutes_seconds),
             stringResource(R.string.assistant_elapsed_seconds),
         )
     }
-    val activity = if (running) processActivity(steps, streaming = true) else null
+    val phase = if (running) liveProcessPhase(steps, streaming = true) else null
     val pulseAlphaState = if (running && motionEnabled) {
         val pulse = rememberInfiniteTransition(label = "activity_text_pulse")
         pulse.animateFloat(
             initialValue = 0.55f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1000, easing = DdMotion.EaseInOut),
+                animation = tween(durationMillis = 1200, easing = DdMotion.EaseInOut),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "activity_text_alpha",
@@ -176,24 +167,87 @@ internal fun ActivitySection(
     } else {
         remember { mutableFloatStateOf(1f) }
     }
-    val activityLabel = when (activity) {
-        ProcessActivity.Thinking -> stringResource(R.string.assistant_process_thinking)
-        ProcessActivity.CallingTool -> stringResource(R.string.assistant_process_calling_tool)
-        ProcessActivity.Replying -> stringResource(R.string.assistant_process_replying)
+    val thinkingTextStyle = DdType.bodySmall.copy(
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+    )
+    val textMeasurer = rememberTextMeasurer()
+    var thinkingWidthPx by remember { mutableIntStateOf(0) }
+    val latestThinkingWidthPx = rememberUpdatedState(thinkingWidthPx)
+    val activeReasoningStep = (phase as? LiveProcessPhase.Thinking)?.reasoning
+    val activeReasoningId = activeReasoningStep?.id
+    val latestReasoningText = rememberUpdatedState(activeReasoningStep?.text.orEmpty())
+    var displayedThinking by remember(message.id, firstStepId, activeReasoningId) {
+        mutableStateOf<LiveThinkingLine?>(null)
+    }
+    LaunchedEffect(message.id, firstStepId, activeReasoningId, processDetail, thinkingTextStyle) {
+        if (activeReasoningId == null || processDetail != ProcessDetail.DETAILED) {
+            displayedThinking = null
+            return@LaunchedEffect
+        }
+        var lastSwapAtMs = 0L
+        var lastRaw: String? = null
+        var lastWidthPx = -1
+        var cachedNext: LiveThinkingLine? = null
+        while (true) {
+            val raw = latestReasoningText.value
+            val widthPx = latestThinkingWidthPx.value
+            if (raw != lastRaw || widthPx != lastWidthPx) {
+                cachedNext = extractLiveThinkingLine(raw) { line ->
+                    measureThinkingSegments(
+                        textMeasurer = textMeasurer,
+                        text = line,
+                        style = thinkingTextStyle,
+                        maxWidthPx = widthPx,
+                    )
+                }
+                lastRaw = raw
+                lastWidthPx = widthPx
+            }
+            val next = cachedNext
+            val now = SystemClock.uptimeMillis()
+            val previous = displayedThinking
+            if (shouldSwapThinkingLine(previous, next, now - lastSwapAtMs)) {
+                displayedThinking = next
+                if (next != null && next.slotKey != previous?.slotKey) {
+                    lastSwapAtMs = now
+                } else if (next == null) {
+                    lastSwapAtMs = 0L
+                }
+            }
+            delay(THINKING_POLL_INTERVAL_MS)
+        }
+    }
+    val activityLabel = when (phase) {
+        is LiveProcessPhase.Thinking -> stringResource(R.string.assistant_process_thinking)
+        is LiveProcessPhase.CallingTool -> if (processDetail == ProcessDetail.DETAILED) {
+            toolProgressLabel(
+                phase.tool.trace.name,
+                phase.tool.trace.rawArguments,
+                phase.tool.trace.arguments,
+            )
+        } else {
+            stringResource(R.string.assistant_process_calling_tool)
+        }
+        LiveProcessPhase.Replying -> stringResource(R.string.assistant_process_replying)
         null -> null
     }
-    val summary = activityLabel ?: (
-        listOf(statusLabel) + listOfNotNull(reasoningLabel, toolLabel, durationText)
-        ).joinToString(" · ")
-    val activeReasoningId = if (running) {
-        steps.lastOrNull()?.takeIf { it is AssistantStep.Reasoning }?.id
-    } else {
-        null
+    val completedSummary = when (semanticStatus) {
+        ProcessStatus.Done -> if (durationText != null) {
+            stringResource(R.string.assistant_process_worked_for, durationText)
+        } else {
+            statusLabel
+        }
+        ProcessStatus.Stopped, ProcessStatus.Failed -> listOfNotNull(statusLabel, durationText).joinToString(" · ")
+        ProcessStatus.Running -> statusLabel
     }
-    val lastReasoningId = steps.lastOrNull { it is AssistantStep.Reasoning }?.id
+    val summary = activityLabel ?: completedSummary
+    val liveThinking = if (activeReasoningStep != null && processDetail == ProcessDetail.DETAILED) displayedThinking else null
+    val activeSummaryDescription = liveThinking?.text ?: summary
     val terminatedStatus = semanticStatus.takeIf {
         !running && (it == ProcessStatus.Stopped || it == ProcessStatus.Failed)
     }
+    val lastReasoningId = terminatedReasoningId(steps, terminatedStatus != null)
     val processNodes = groupProcessSteps(steps)
     Column(Modifier.fillMaxWidth()) {
         ProcessDisclosure(
@@ -204,11 +258,11 @@ internal fun ActivitySection(
             onClick = { expansionOverride = if (expanded) 0 else 1 },
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 30.dp)
+                .heightIn(min = 44.dp)
                 .semantics { stateDescription = state }
                 .testTag("process_toggle_${message.id}_${firstStepId ?: "live"}"),
             shape = DdShapes.Small,
-            contentDescription = summary,
+            contentDescription = activeSummaryDescription,
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -225,19 +279,37 @@ internal fun ActivitySection(
                         ActivityGifIcon(size = ActivityIconSize)
                     }
                 }
-                Text(
-                    text = summary,
+                Box(
                     modifier = Modifier
                         .weight(1f)
-                        .graphicsLayer { alpha = pulseAlphaState.value },
-                    style = DdType.bodySmall.copy(
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                    ),
-                    color = statusColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                        .onSizeChanged { thinkingWidthPx = it.width },
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (liveThinking != null && activeReasoningId != null) {
+                        key(activeReasoningId) {
+                            FlowingThinkingText(
+                                slotKey = liveThinking.slotKey,
+                                text = liveThinking.text,
+                                textStyle = thinkingTextStyle,
+                                baseColor = colors.inkSecondary,
+                                shimmerHighlight = colors.ink,
+                                motionEnabled = motionEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = summary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer { alpha = pulseAlphaState.value },
+                            style = thinkingTextStyle,
+                            color = statusColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 Spacer(Modifier.size(DdSpacing.Xs))
                 DdIcon(
                     icon = DdIcons.ChevronRight,
@@ -564,23 +636,29 @@ private fun ProcessToolStep(
     )
 }
 
-@Composable
-internal fun durationLabel(durationMs: Long): String = when {
-    durationMs >= 60_000L -> {
-        val seconds = (durationMs / 1000L).toInt()
-        stringResource(R.string.assistant_duration_minutes, seconds / 60, seconds % 60)
+internal fun processDurationMs(
+    steps: List<AssistantStep>,
+    message: AssistantMessage,
+    running: Boolean,
+    showTotalDuration: Boolean,
+): Long? {
+    val finishedAt = message.finishedAt
+    return when {
+        showTotalDuration && !message.streaming && finishedAt != null &&
+            message.startedAt > 0 && finishedAt >= message.startedAt -> finishedAt - message.startedAt
+
+        !showTotalDuration && !running -> steps
+            .filterIsInstance<AssistantStep.Tool>()
+            .mapNotNull { it.trace.durationMs?.takeIf { ms -> ms >= 0L } }
+            .takeIf { it.isNotEmpty() }
+            ?.sum()
+
+        else -> null
     }
-
-    durationMs >= 10_000L -> stringResource(
-        R.string.assistant_duration_seconds,
-        (durationMs / 1000L).toString(),
-    )
-
-    else -> stringResource(
-        R.string.assistant_duration_seconds,
-        String.format(Locale.US, "%.1f", durationMs / 1000.0),
-    )
 }
+
+internal fun processDurationSeconds(durationMs: Long): Long =
+    (durationMs / 1000L).coerceAtLeast(1L)
 
 internal fun formatElapsed(
     totalSeconds: Long,
@@ -597,4 +675,181 @@ internal fun formatElapsed(
         minutes > 0 -> String.format(Locale.ROOT, minutesSeconds, minutes, seconds)
         else -> String.format(Locale.ROOT, secondsOnly, seconds)
     }
+}
+
+private const val THINKING_POLL_INTERVAL_MS = 120L
+internal const val MIN_THINKING_LINE_DWELL_MS = 380L
+private const val DEFAULT_THINKING_LINE_UNITS = 36
+private val THINKING_BREAK_PUNCTUATION = setOf('，', '。', '、', '；', '：', '！', '？', '）', '》', '】')
+
+@Composable
+private fun FlowingThinkingText(
+    slotKey: Long,
+    text: String,
+    textStyle: TextStyle,
+    baseColor: Color,
+    shimmerHighlight: Color,
+    motionEnabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val slideOffsetPx = remember(density) { with(density) { 7.dp.roundToPx() } }
+    AnimatedContent(
+        targetState = slotKey,
+        modifier = modifier.clipToBounds(),
+        transitionSpec = {
+            if (motionEnabled) {
+                (
+                    fadeIn(tween(durationMillis = 200, easing = DdMotion.EaseOut)) +
+                        slideInVertically(tween(durationMillis = 200, easing = DdMotion.EaseOut)) { slideOffsetPx }
+                    ) togetherWith (
+                    fadeOut(tween(durationMillis = 150, easing = DdMotion.EaseOut)) +
+                        slideOutVertically(tween(durationMillis = 150, easing = DdMotion.EaseOut)) { -slideOffsetPx }
+                    )
+            } else {
+                fadeIn(snap()) togetherWith fadeOut(snap())
+            }
+        },
+        label = "flowing-thinking-line",
+    ) { renderedSlotKey ->
+        var pinnedText by remember { mutableStateOf(text) }
+        if (renderedSlotKey == slotKey) {
+            pinnedText = text
+        }
+        Text(
+            text = pinnedText,
+            modifier = Modifier
+                .fillMaxWidth()
+                .textShimmer(
+                    active = motionEnabled,
+                    base = baseColor,
+                    highlight = shimmerHighlight,
+                ),
+            style = textStyle,
+            color = baseColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun measureThinkingSegments(
+    textMeasurer: TextMeasurer,
+    text: String,
+    style: TextStyle,
+    maxWidthPx: Int,
+): List<String> {
+    if (text.isEmpty()) return emptyList()
+    if (maxWidthPx <= 0) return splitThinkingSegments(text)
+    val layout = textMeasurer.measure(
+        text = text,
+        style = style,
+        constraints = Constraints(maxWidth = maxWidthPx),
+    )
+    if (layout.lineCount <= 0) return listOf(text)
+    val segments = buildList {
+        for (line in 0 until layout.lineCount) {
+            val start = layout.getLineStart(line).coerceIn(0, text.length)
+            val end = layout.getLineEnd(line, visibleEnd = true).coerceIn(start, text.length)
+            val segment = text.substring(start, end).trim()
+            if (segment.isNotEmpty()) add(segment)
+        }
+    }
+    return segments.ifEmpty { listOf(text) }
+}
+
+internal fun splitThinkingSegments(
+    text: String,
+    maxUnits: Int = DEFAULT_THINKING_LINE_UNITS,
+): List<String> {
+    if (text.isBlank()) return emptyList()
+    if (maxUnits <= 0) {
+        val trimmed = text.trim()
+        return if (trimmed.isEmpty()) emptyList() else listOf(trimmed)
+    }
+    val segments = mutableListOf<String>()
+    var start = 0
+    while (start < text.length && text[start].isWhitespace()) {
+        start++
+    }
+    while (start < text.length) {
+        var units = 0
+        var end = start
+        var lastBreak = -1
+        while (end < text.length) {
+            val ch = text[end]
+            val charUnits = if (ch.code < 0x80) 1 else 2
+            if (end > start && units + charUnits > maxUnits) break
+            units += charUnits
+            end++
+            if (end < text.length && units * 2 >= maxUnits && (ch.isWhitespace() || ch in THINKING_BREAK_PUNCTUATION)) {
+                lastBreak = end
+            }
+        }
+        val splitEnd = if (end < text.length && lastBreak > start) lastBreak else end
+        val segment = text.substring(start, splitEnd).trim()
+        if (segment.isNotEmpty()) segments.add(segment)
+        start = splitEnd
+        while (start < text.length && text[start].isWhitespace()) {
+            start++
+        }
+    }
+    return segments
+}
+
+internal fun shouldSwapThinkingLine(
+    current: LiveThinkingLine?,
+    latest: LiveThinkingLine?,
+    elapsedSinceSwapMs: Long,
+    minDwellMs: Long = MIN_THINKING_LINE_DWELL_MS,
+): Boolean = when {
+    latest == null -> current != null
+    current == null -> true
+    latest.slotKey == current.slotKey -> latest.text != current.text
+    else -> elapsedSinceSwapMs >= minDwellMs
+}
+
+private val THINKING_PREFIX_REGEX =
+    Regex("""^(?:\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]]\s+)?|\d+[.)]\s+))+""")
+private val THINKING_INLINE_MARKER_REGEX = Regex("""(\*\*|__|~~|`)""")
+private val THINKING_SYMBOL_ONLY_REGEX = Regex("""^[-*_~=>#\s.·•]+$""")
+
+internal data class LiveThinkingLine(
+    val paragraphIndex: Int,
+    val segmentIndex: Int,
+    val text: String,
+) {
+    val slotKey: Long
+        get() = (paragraphIndex.toLong() shl 20) or (segmentIndex.toLong() and 0xFFFFFL)
+}
+
+internal fun cleanThinkingLine(line: String): String? {
+    val withoutPrefix = line.trim().replace(THINKING_PREFIX_REGEX, "")
+    val withoutInline = withoutPrefix
+        .replace(THINKING_INLINE_MARKER_REGEX, "")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+    if (withoutInline.isEmpty() || THINKING_SYMBOL_ONLY_REGEX.matches(withoutInline)) {
+        return null
+    }
+    return withoutInline
+}
+
+internal fun extractLiveThinkingLine(
+    raw: String,
+    splitLine: (String) -> List<String> = ::splitThinkingSegments,
+): LiveThinkingLine? {
+    if (raw.isBlank()) return null
+    val lines = raw.lines()
+    for (index in lines.lastIndex downTo 0) {
+        val cleaned = cleanThinkingLine(lines[index]) ?: continue
+        val segments = splitLine(cleaned)
+        if (segments.isEmpty()) continue
+        return LiveThinkingLine(
+            paragraphIndex = index,
+            segmentIndex = segments.lastIndex,
+            text = segments.last(),
+        )
+    }
+    return null
 }

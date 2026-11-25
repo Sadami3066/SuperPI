@@ -1,7 +1,6 @@
 <resources>
     <string name="relay_title">连接设备</string>
     <string name="relay_back">返回</string>
-    <string name="relay_intro">连接后，多台设备共用同一份记忆，也能直接使用彼此的 Bot。</string>
     <string name="relay_link_label">配对链接</string>
     <string name="relay_link_placeholder">https://服务器地址:8443/#fp=…&amp;code=…</string>
     <string name="relay_fingerprint_label">服务器指纹</string>
@@ -18,7 +17,7 @@
     <string name="relay_account_since">连接时间</string>
     <string name="relay_sign_out">退出登录</string>
     <string name="relay_sign_out_title">退出登录</string>
-    <string name="relay_sign_out_message">退出后这台设备不再同步记忆，其他设备也无法再使用这台设备上的 Bot。</string>
+    <string name="relay_sign_out_message">退出后，这台设备将断开与其他设备的连接，其他设备也无法再使用这台设备上的 Bot。</string>
     <string name="relay_sign_out_confirm">退出</string>
     <string name="relay_cancel">取消</string>
     <string name="relay_error_invalid_link">这个链接无法识别，请检查后重试。</string>
@@ -63,4 +62,23 @@
     <string name="relay_device_rename_title">修改设备名称</string>
     <string name="relay_device_rename_confirm">保存</string>
     <string name="relay_device_rename_saving">保存中…</string>
+    <string name="relay_memory_sync_title">记忆同步</string>
+    <string name="relay_memory_sync_idle">已开启同步，变更会自动保存</string>
+    <string name="relay_memory_sync_running">正在同步…</string>
+    <string name="relay_memory_sync_done">最近同步 %1$s</string>
+    <string name="relay_memory_sync_error">同步遇到问题，请重试</string>
+    <string name="relay_memory_sync_error_offline">当前网络不可用，检查连接后重试</string>
+    <string name="relay_memory_sync_error_unauthorized">连接已失效，请重新配对</string>
+    <string name="relay_memory_sync_unsupported">当前服务器暂不支持记忆同步</string>
+    <string name="relay_memory_sync_action">立即同步</string>
+    <string name="relay_memory_sync_retry">重试</string>
+    <string name="relay_memory_switch_action">处理</string>
+    <string name="relay_memory_switch_pending_title">检测到本地已有记忆</string>
+    <string name="relay_memory_switch_pending_subtitle">本地已有 %1$d 条记忆，选择合并或替换</string>
+    <string name="relay_memory_switch_dialog_title">如何处理本地记忆</string>
+    <string name="relay_memory_switch_dialog_body">这台设备上已有 %1$d 条记忆，与当前账号不一致。请选择保留并合并两份记忆，或使用账号中的记忆替换本地内容。</string>
+    <string name="relay_memory_switch_merge">合并两份记忆</string>
+    <string name="relay_memory_switch_merge_hint">保留本地和账号中的全部记忆</string>
+    <string name="relay_memory_switch_replace">替换本地记忆</string>
+    <string name="relay_memory_switch_replace_hint">清空当前设备记忆，改用账号里的内容</string>
 </resources>

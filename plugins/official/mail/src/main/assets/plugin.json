@@ -1,6 +1,6 @@
 {
   "id": "io.github.whywood.superpi.plugin.mail",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "apiLevel": 7,
   "minHostVersion": "2.0.0",
   "ui": {

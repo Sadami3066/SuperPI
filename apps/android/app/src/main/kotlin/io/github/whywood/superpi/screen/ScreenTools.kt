@@ -6,11 +6,14 @@ import io.github.whywood.superpi.sdk.ai.TextContent
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import io.github.whywood.superpi.sdk.coding.tools.textResult
 import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -62,6 +65,7 @@ internal fun screenToolNames(): List<String> = listOf(
     "screen_wait",
     "screen_list_apps",
     "screen_launch",
+    "screen_batch",
 )
 
 fun screenTools(
@@ -132,19 +136,23 @@ private fun screenGuidelines(name: String): List<String> = buildList {
     if (name == "screen_launch") add(SCREEN_LAUNCH_GUIDELINE)
 }
 
-private fun toolsForScreen(controller: ScreenController, screenshotDir: File): List<CodingTool> = listOf(
-    statusTool(controller),
-    observeTool(controller),
-    screenshotTool(controller, screenshotDir),
-    tapTool(controller),
-    swipeTool(controller),
-    scrollTool(controller),
-    typeTool(controller),
-    keyTool(controller),
-    waitTool(controller),
-    listAppsTool(controller),
-    launchTool(controller),
-)
+private fun toolsForScreen(controller: ScreenController, screenshotDir: File): List<CodingTool> {
+    val tracker = ScreenDiffTracker()
+    return listOf(
+        statusTool(controller),
+        observeTool(controller, tracker),
+        screenshotTool(controller, screenshotDir),
+        tapTool(controller, tracker),
+        swipeTool(controller, tracker),
+        scrollTool(controller, tracker),
+        typeTool(controller, tracker),
+        keyTool(controller, tracker),
+        waitTool(controller),
+        listAppsTool(controller),
+        launchTool(controller, tracker),
+        batchTool(controller, tracker),
+    )
+}
 
 internal fun parseScreenTapSelector(args: JsonObject): GuiSelector {
     val ref = args.stringOrNull("ref")?.trim()?.takeIf { it.isNotEmpty() }
@@ -329,6 +337,10 @@ private val observeParameters: JsonObject = buildJsonObject {
             put("type", "integer")
             put("description", "Maximum nodes to return, 1-50. Omit to return all matches.")
         }
+        putJsonObject("full") {
+            put("type", "boolean")
+            put("description", "Force full node list instead of an incremental diff.")
+        }
     }
 }
 
@@ -465,7 +477,7 @@ private val keyParameters: JsonObject = buildJsonObject {
     putJsonObject("properties") {
         putJsonObject("key") {
             put("type", "string")
-            put("description", "Key name: ${SCREEN_KEYS.joinToString(", ")}")
+            put("description", "Key name; home, recents, notifications, volume_up, volume_down are main-only.")
             putJsonArray("enum") { MAIN_SCREEN_KEYS.forEach { add(JsonPrimitive(it)) } }
         }
     }
@@ -497,6 +509,20 @@ private val waitParameters: JsonObject = buildJsonObject {
     }
 }
 
+private val listAppsParameters: JsonObject = buildJsonObject {
+    put("type", "object")
+    putJsonObject("properties") {
+        putJsonObject("query") {
+            put("type", "string")
+            put("description", "Optional filter on app label or package name.")
+        }
+        putJsonObject("limit") {
+            put("type", "integer")
+            put("description", "Maximum apps to return, 1-200. Defaults to 50.")
+        }
+    }
+}
+
 private val launchParameters = buildJsonObject {
     put("type", "object")
     putJsonObject("properties") {
@@ -519,9 +545,9 @@ private fun statusTool(controller: ScreenController): CodingTool = CodingTool(
     },
 )
 
-private fun observeTool(controller: ScreenController): CodingTool = CodingTool(
+private fun observeTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_observe",
-    description = "Read the selected screen as nodes; filters combine with AND. Refs survive normal operations but a restarted screen invalidates them. scanned counts visited nodes; complete=false means unsearched nodes remain.",
+    description = "Read the selected screen as nodes or incremental diffs (diffs omit unchanged nodes; reuse earlier refs or set full=true). Filters combine with AND; refs survive normal operations until restart.",
     parameters = observeParameters,
     label = "screen_observe",
     execute = { _, args, signal, _ ->
@@ -531,8 +557,28 @@ private fun observeTool(controller: ScreenController): CodingTool = CodingTool(
             val expectedPackage = args.stringOrNull("packageName")?.trim()?.takeIf { it.isNotEmpty() }
             val filters = parseObserveFilters(args)
             val limit = observeLimitOf(args)
-            val observed = controller.observe(maxDepth, maxNodes, expectedPackage)
-            textResult(observeJson(observed, filters, limit).toString())
+            val forceFull = args["full"]?.let { element ->
+                (element as? JsonPrimitive)?.booleanOrNull
+                    ?: throw IllegalArgumentException("full must be a boolean")
+            } ?: false
+            controller.withExecutionLock {
+                val observed = controller.observe(maxDepth, maxNodes, expectedPackage)
+                val displayBounds = runCatching { controller.effectDisplayInfo() }
+                    .onFailure { if (it is CancellationException) throw it }
+                    .getOrNull()
+                    ?.let { GuiBounds(0, 0, it.width, it.height) }
+                textResult(
+                    tracker.formatObserve(
+                        observed = observed,
+                        scopeKey = controller.screenScopeKey(),
+                        scanLimits = maxDepth to maxNodes,
+                        filters = filters,
+                        limit = limit,
+                        forceFull = forceFull,
+                        displayBounds = displayBounds,
+                    ).toString(),
+                )
+            }
         }
     },
 )
@@ -542,36 +588,39 @@ private fun screenshotTool(
     screenshotDir: File,
 ): CodingTool = CodingTool(
     name = "screen_screenshot",
-    description = "Save the selected screen as a PNG. Main capture needs accessibility and Android 11+; protected or locked screens may refuse. Returns an absolute path.",
+    description = "Save the selected screen as a PNG; inspect the saved path with read(path=...). Main capture needs accessibility and Android 11+; protected or locked screens may refuse.",
     parameters = screenshotParameters,
     label = "screen_screenshot",
     execute = { _, args, signal, _ ->
         signal?.throwIfAborted()
         screenTool(args) {
-            val capture = controller.screenshot()
-            if (capture.png.isEmpty()) throw IllegalStateException("Screenshot content is empty; retry later")
-            if (!screenshotDir.isDirectory && !screenshotDir.mkdirs()) {
-                throw IllegalStateException("Screenshot directory is not writable: ${screenshotDir.absolutePath}")
+            controller.withExecutionLock {
+                val capture = controller.screenshot()
+                if (capture.png.isEmpty()) throw IllegalStateException("Screenshot content is empty; retry later")
+                if (!screenshotDir.isDirectory && !screenshotDir.mkdirs()) {
+                    throw IllegalStateException("Screenshot directory is not writable: ${screenshotDir.absolutePath}")
+                }
+                val fileName = "screen-${java.util.UUID.randomUUID()}.png"
+                val file = File(screenshotDir, fileName)
+                file.writeBytes(capture.png)
+                runCatching { pruneScreenshots(screenshotDir, keep = file) }
+                textResult(
+                    buildJsonObject {
+                        put("path", file.absolutePath)
+                        put("width", capture.width)
+                        put("height", capture.height)
+                        put("sizeBytes", capture.png.size)
+                        put("hint", "Inspect this image with read(path=\"${file.absolutePath}\")")
+                    }.toString(),
+                )
             }
-            val fileName = "screen-${java.util.UUID.randomUUID()}.png"
-            val file = File(screenshotDir, fileName)
-            file.writeBytes(capture.png)
-            runCatching { pruneScreenshots(screenshotDir, keep = file) }
-            textResult(
-                buildJsonObject {
-                    put("path", file.absolutePath)
-                    put("width", capture.width)
-                    put("height", capture.height)
-                    put("sizeBytes", capture.png.size)
-                }.toString(),
-            )
         }
     },
 )
 
-private fun tapTool(controller: ScreenController): CodingTool = CodingTool(
+private fun tapTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_tap",
-    description = "Tap or long-press a node or a point on a screen. Use it to activate, open or long-press a visible control; provide exactly one of ref, text, desc, resourceId, class, or both x and y.",
+    description = "Tap or long-press a node or point, returning action effect and screen diff.",
     parameters = tapParameters,
     label = "screen_tap",
     execute = { _, args, signal, _ ->
@@ -579,14 +628,19 @@ private fun tapTool(controller: ScreenController): CodingTool = CodingTool(
         screenTool(args) {
             val selector = parseScreenTapSelector(args)
             val durationMs = tapDurationOf(args)
-            textResult(controller.tap(selector, durationMs))
+            controller.withExecutionLock {
+                val (message, payload) = runWithScreenEffect(controller, tracker, ScreenActionVerb.TAP) {
+                    controller.tap(selector, durationMs)
+                }
+                actionEffectResult(message, payload)
+            }
         }
     },
 )
 
-private fun swipeTool(controller: ScreenController): CodingTool = CodingTool(
+private fun swipeTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_swipe",
-    description = "Swipe between two points on a screen. Use it for gestures such as dismissing a card; coordinates are screen pixels and both points must lie inside the current screen.",
+    description = "Swipe between two screen pixel points, returning action effect and screen diff.",
     parameters = swipeParameters,
     label = "screen_swipe",
     execute = { _, args, signal, _ ->
@@ -598,14 +652,19 @@ private fun swipeTool(controller: ScreenController): CodingTool = CodingTool(
             val y2 = args.requiredInt("y2")
             if (listOf(x1, y1, x2, y2).any { it < 0 }) throw IllegalArgumentException("Coordinates must not be negative")
             val durationMs = swipeDurationOf(args)
-            textResult(controller.swipe(x1, y1, x2, y2, durationMs))
+            controller.withExecutionLock {
+                val (message, payload) = runWithScreenEffect(controller, tracker, ScreenActionVerb.SWIPE) {
+                    controller.swipe(x1, y1, x2, y2, durationMs)
+                }
+                actionEffectResult(message, payload)
+            }
         }
     },
 )
 
-private fun scrollTool(controller: ScreenController): CodingTool = CodingTool(
+private fun scrollTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_scroll",
-    description = "Scroll a screen or a scrollable node in one direction; down/up reveals later/earlier content, right/left horizontal content. Optional steps.",
+    description = "Scroll the screen or a scrollable node and report whether content changed or reached the end.",
     parameters = scrollParameters,
     label = "screen_scroll",
     execute = { _, args, signal, _ ->
@@ -614,14 +673,19 @@ private fun scrollTool(controller: ScreenController): CodingTool = CodingTool(
             val direction = parseScrollDirection(args)
             val amount = scrollAmountOf(args)
             val ref = args.stringOrNull("ref")?.trim()?.takeIf { it.isNotEmpty() }
-            textResult(controller.scroll(direction, amount, ref?.let { GuiSelector.Ref(it) }))
+            controller.withExecutionLock {
+                val (message, payload) = runWithScreenEffect(controller, tracker, ScreenActionVerb.SCROLL) {
+                    controller.scroll(direction, amount, ref?.let { GuiSelector.Ref(it) })
+                }
+                actionEffectResult(message, payload)
+            }
         }
     },
 )
 
-private fun typeTool(controller: ScreenController): CodingTool = CodingTool(
+private fun typeTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_type",
-    description = "Type into the selected screen. Unicode text needs accessibility and a ref or fieldText. ASCII without a field uses the virtual helper or authorized main system input. verified reports field readback.",
+    description = "Type into a field or screen and return readback, effect, and diff. Unicode requires a field locator.",
     parameters = typeParameters,
     label = "screen_type",
     execute = { _, args, signal, _ ->
@@ -629,31 +693,38 @@ private fun typeTool(controller: ScreenController): CodingTool = CodingTool(
         screenTool(args) {
             val text = parseScreenTypeText(args)
             val selector = parseScreenTextSelector(args)
-            val outcome = controller.typeText(selector, text)
-            textResult(
-                buildJsonObject {
-                    put("ok", true)
-                    put("verified", outcome.verified)
-                    put("text", outcome.text)
-                    if (!outcome.verified) {
-                        put("hint", "Write not verified: call screen_observe again to check the field content")
-                    }
-                }.toString(),
-            )
+            controller.withExecutionLock {
+                val (outcome, payload) = runWithScreenEffect(controller, tracker, ScreenActionVerb.TYPE) {
+                    controller.typeText(selector, text)
+                }
+                textResult(
+                    buildJsonObject {
+                        put("ok", true)
+                        putTypeResultFields(selector, outcome, includeHint = true)
+                        payload.effect?.let { put("effect", it.toJson()) }
+                        payload.screen?.let { put("screen", it) }
+                    }.toString(),
+                )
+            }
         }
     },
 )
 
-private fun keyTool(controller: ScreenController): CodingTool = CodingTool(
+private fun keyTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_key",
-    description = "Press a screen key: back, enter, delete, tab, escape, space or arrows. Home/recents/notifications/volume are main-only. Availability depends on accessibility and ADB/Root.",
+    description = "Press a screen key (back, enter, delete, tab, escape, space, arrows; home/recents/notifications/volume are main-only).",
     parameters = keyParameters,
     label = "screen_key",
     execute = { _, args, signal, _ ->
         signal?.throwIfAborted()
         screenTool(args) {
             val key = parseScreenKey(args)
-            textResult(controller.key(key))
+            controller.withExecutionLock {
+                val (message, payload) = runWithScreenEffect(controller, tracker, ScreenActionVerb.KEY) {
+                    controller.key(key)
+                }
+                actionEffectResult(message, payload)
+            }
         }
     },
 )
@@ -673,24 +744,26 @@ private fun waitTool(controller: ScreenController): CodingTool = CodingTool(
                 throw IllegalArgumentException("Provide at least one of forPackage, forText or forTextGone")
             }
             val timeoutMs = waitTimeoutOf(args)
-            val startedAt = System.currentTimeMillis()
-            val outcome = controller.waitFor(packageName, text, textGone, timeoutMs)
-            val elapsedMs = (System.currentTimeMillis() - startedAt).toInt()
-            textResult(
-                buildJsonObject {
-                    put("ok", outcome.matched)
-                    put("elapsedMs", elapsedMs)
-                    put("timeoutMs", timeoutMs)
-                    putJsonObject("current") {
-                        outcome.packageName?.let { put("package", it) }
-                        outcome.windowTitle?.let { put("title", it) }
-                    }
-                    if (!outcome.matched) {
-                        put("reason", "timeout")
-                        put("hint", "Wait timed out: the expected change did not appear; use screen_observe to check the current state before deciding the next step")
-                    }
-                }.toString(),
-            )
+            controller.withExecutionLock {
+                val startedAt = System.currentTimeMillis()
+                val outcome = controller.waitFor(packageName, text, textGone, timeoutMs)
+                val elapsedMs = (System.currentTimeMillis() - startedAt).toInt()
+                textResult(
+                    buildJsonObject {
+                        put("ok", outcome.matched)
+                        put("elapsedMs", elapsedMs)
+                        put("timeoutMs", timeoutMs)
+                        putJsonObject("current") {
+                            outcome.packageName?.let { put("package", it) }
+                            outcome.windowTitle?.let { put("title", it) }
+                        }
+                        if (!outcome.matched) {
+                            put("reason", "timeout")
+                            put("hint", "Wait timed out: the expected change did not appear; use screen_observe to check the current state before deciding the next step")
+                        }
+                    }.toString(),
+                )
+            }
         }
     },
 )
@@ -698,17 +771,43 @@ private fun waitTool(controller: ScreenController): CodingTool = CodingTool(
 private fun listAppsTool(controller: ScreenController): CodingTool = CodingTool(
     name = "screen_list_apps",
     description = "List installed apps that can be opened. Does not require a running virtual screen.",
-    parameters = statusParameters,
+    parameters = listAppsParameters,
     label = "screen_list_apps",
     execute = { _, args, signal, _ ->
         signal?.throwIfAborted()
         screenTool(args) {
-            require(args.isEmpty()) { "screen_list_apps does not accept arguments" }
-            val apps = controller.listApps()
+            val unexpected = args.keys - setOf("query", "limit")
+            if (unexpected.isNotEmpty()) {
+                throw IllegalArgumentException("screen_list_apps only accepts query and limit arguments")
+            }
+            val query = args["query"]?.let { element ->
+                val primitive = element as? JsonPrimitive
+                if (primitive?.isString != true) throw IllegalArgumentException("query must be a string")
+                primitive.content.trim().takeIf { it.isNotEmpty() }
+            }
+            val limit = args["limit"]?.let { element ->
+                val raw = (element as? JsonPrimitive)?.takeIf { !it.isString }?.contentOrNull?.toIntOrNull()
+                    ?: throw IllegalArgumentException("limit must be an integer between 1 and 200")
+                if (raw !in 1..200) throw IllegalArgumentException("limit must be between 1 and 200")
+                raw
+            } ?: 50
+            val all = controller.listApps()
+            val matched = if (query == null) {
+                all
+            } else {
+                val needle = query.lowercase(Locale.ROOT)
+                all.filter { app ->
+                    app.packageName.lowercase(Locale.ROOT).contains(needle) ||
+                        app.label.lowercase(Locale.ROOT).contains(needle)
+                }
+            }
+            val shown = matched.take(limit)
             textResult(buildJsonObject {
-                put("count", apps.size)
+                put("total", matched.size)
+                put("count", shown.size)
+                put("truncated", matched.size > shown.size)
                 putJsonArray("apps") {
-                    apps.forEach { app -> add(buildJsonObject {
+                    shown.forEach { app -> add(buildJsonObject {
                         put("package", app.packageName)
                         put("label", app.label)
                         if (app.component.isNotEmpty()) put("component", app.component)
@@ -719,26 +818,80 @@ private fun listAppsTool(controller: ScreenController): CodingTool = CodingTool(
     },
 )
 
-private fun launchTool(controller: ScreenController): CodingTool = CodingTool(
+private fun launchTool(controller: ScreenController, tracker: ScreenDiffTracker): CodingTool = CodingTool(
     name = "screen_launch",
-    description = "Open an app on the selected screen by package name. Virtual needs an online virtual screen; refuses cross-screen moves; reports whether launch was confirmed.",
+    description = "Open an app by package name; returns launch status, effect, and initial screen diff.",
     parameters = launchParameters,
     label = "screen_launch",
     execute = { _, args, signal, _ ->
         signal?.throwIfAborted()
         screenTool(args) {
             require(args.keys.all { it == "packageName" }) { "screen_launch only accepts packageName" }
-            val report = controller.launch(parseScreenLaunchPackage(args))
-            textResult(buildJsonObject {
-                put("ok", report.ok)
-                put("package", report.packageName)
-                put("message", report.message)
-                put("onExpectedScreen", report.landedOnExpectedDisplay)
-                if (!report.ok || !report.landedOnExpectedDisplay) put("hint", "Check screen_status with the same target and the actual screen; call virtual_screen(action=start) only when target=virtual is offline, then decide whether to relaunch the app")
-            }.toString(), isError = !report.ok || !report.landedOnExpectedDisplay)
+            val packageName = parseScreenLaunchPackage(args)
+            controller.withExecutionLock {
+                val (report, payload) = runWithScreenEffect(controller, tracker, ScreenActionVerb.LAUNCH) {
+                    controller.launch(packageName)
+                }
+                val ok = report.ok && report.landedOnExpectedDisplay
+                textResult(
+                    buildJsonObject {
+                        put("ok", report.ok)
+                        put("package", report.packageName)
+                        put("message", report.message)
+                        put("onExpectedScreen", report.landedOnExpectedDisplay)
+                        if (!ok) {
+                            put("hint", "Check screen_status with the same target and the actual screen; call virtual_screen(action=start) only when target=virtual is offline, then decide whether to relaunch the app")
+                        } else {
+                            payload.effect?.let { put("effect", it.toJson()) }
+                            payload.screen?.let { put("screen", it) }
+                        }
+                    }.toString(),
+                    isError = !ok,
+                )
+            }
         }
     },
 )
+
+private fun actionEffectResult(message: String, payload: ScreenEffectPayload): AgentToolResult = textResult(
+    buildJsonObject {
+        put("ok", true)
+        put("message", message)
+        payload.effect?.let { put("effect", it.toJson()) }
+        payload.screen?.let { put("screen", it) }
+    }.toString(),
+)
+
+internal fun JsonObjectBuilder.putTypeResultFields(
+    selector: GuiSelector?,
+    outcome: ScreenTextResult,
+    includeHint: Boolean,
+) {
+    when {
+        outcome.secret -> {
+            put("secret", true)
+            put("verified", false)
+            put("text", "(hidden)")
+            if (includeHint) {
+                put("hint", "Password field hidden; observe only if non-secret UI needs verification")
+            }
+        }
+        selector == null -> {
+            put("verified", false)
+            put("text", "(hidden)")
+            if (includeHint) {
+                put("hint", "Unverified blind input hidden; use a field ref or call screen_observe to confirm")
+            }
+        }
+        else -> {
+            put("verified", outcome.verified)
+            put("text", outcome.text)
+            if (!outcome.verified && includeHint) {
+                put("hint", "Write not verified: call screen_observe again to check the field content")
+            }
+        }
+    }
+}
 
 internal fun statusJson(status: ScreenStatusSnapshot): JsonObject = buildJsonObject {
     val connected = status.accessibilityConnected
@@ -770,7 +923,7 @@ internal fun statusJson(status: ScreenStatusSnapshot): JsonObject = buildJsonObj
 
         "disabled" -> put(
             "hint",
-            "Accessibility service is off: enable PI accessibility in settings; once enabled, nodes can be read and operated by ref",
+            "Accessibility service is off: enable SuperPI accessibility in settings; once enabled, nodes can be read and operated by ref",
         )
     }
     val virtualInfo = status.virtual
@@ -794,7 +947,7 @@ internal fun statusJson(status: ScreenStatusSnapshot): JsonObject = buildJsonObj
             put("scroll", false)
             put("swipe", false)
             put("typeText", "none")
-            put("key", "none")
+            putJsonArray("keys") {}
             put("screenshot", false)
         }
         status.virtualTransportNotice?.takeIf { it.isNotBlank() }?.let { put("notice", it) }

@@ -10,11 +10,29 @@ import android.net.Network
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
+import io.github.whywood.superpi.R
 import io.github.whywood.superpi.SuperPIApplication
+import io.github.whywood.superpi.conversation.ActiveRunView
+import io.github.whywood.superpi.data.AppMode
 import io.github.whywood.superpi.data.FloatingWindowPreferences
+import io.github.whywood.superpi.data.ProcessDetail
 import io.github.whywood.superpi.data.relay.RelayLiveState
 import io.github.whywood.superpi.floating.FloatingWindowController
+import io.github.whywood.superpi.runtime.ConversationQueries
+import io.github.whywood.superpi.runtime.JobStatus
+import io.github.whywood.superpi.runtime.RunStatus
+import io.github.whywood.superpi.runtime.RuntimeActivity
+import io.github.whywood.superpi.runtime.RuntimeEvent
+import io.github.whywood.superpi.runtime.SessionRuntimeEvent
+import io.github.whywood.superpi.runtime.SuperRuntime
+import io.github.whywood.superpi.runtime.ToolActivityStatus
+import io.github.whywood.superpi.runtime.WorkerOutcome
+import io.github.whywood.superpi.runtime.WorkerProgressEvent
+import io.github.whywood.superpi.runtime.WorkerStatus
+import io.github.whywood.superpi.runtime.isActive
+import io.github.whywood.superpi.runtime.superagent.LocalWorkerPool
 import io.github.whywood.superpi.vscreen.VirtualScreenRuntime
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,12 +40,18 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 class AgentService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -57,7 +81,16 @@ class AgentService : Service() {
     override fun onCreate() {
         super.onCreate()
         graph.notificationCenter.start()
-        runCatching { graph.relayLive.start() }
+        try {
+            graph.relayLive.start()
+        } catch (error: Exception) {
+            Diagnostics.log(this@AgentService, "service: relay start failed", error)
+        }
+        try {
+            graph.relayMemorySync.start()
+        } catch (error: Exception) {
+            Diagnostics.log(this@AgentService, "service: memory sync start failed", error)
+        }
         startForeground(NOTIFICATION_ID, graph.notificationCenter.foregroundNotification())
         graph.notificationCenter.onForegroundStarted()
         registerClockReceiver()
@@ -71,9 +104,14 @@ class AgentService : Service() {
             }
         }
         scope.launch {
-            graph.host.busySessionIds.collect { busy ->
-                updateTurnWakeLock(busy.isNotEmpty())
-            }
+            combine(
+                graph.host.busySessionIds,
+                graph.superRuntime.threadState.map { it.busy }.distinctUntilChanged(),
+                graph.superRuntime.workers,
+                graph.workerJobs.map { jobs -> jobs.any { it.status == JobStatus.RUNNING } }.distinctUntilChanged(),
+            ) { _, _, _, _ -> hasActiveTurns() }
+                .distinctUntilChanged()
+                .collect { active -> updateTurnWakeLock(active) }
         }
         scope.launch {
             ProcessExitLog.record(this@AgentService)
@@ -84,7 +122,27 @@ class AgentService : Service() {
             } catch (error: Exception) {
                 Diagnostics.log(this@AgentService, "service: process start failed", error)
             }
-            runCatching { graph.timerService.start() }
+            try {
+                graph.superRuntime.bindTimerHandler()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Diagnostics.log(this@AgentService, "service: bindTimerHandler failed", error)
+            }
+            try {
+                graph.timerService.start()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Diagnostics.log(this@AgentService, "service: timer start failed", error)
+            }
+            try {
+                graph.superRuntime.ensureStarted()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Diagnostics.log(this@AgentService, "service: superRuntime start failed", error)
+            }
         }
         scope.launch {
             delay(ACCESSIBILITY_CHECK_DELAY_MS)
@@ -106,7 +164,33 @@ class AgentService : Service() {
 
             ACTION_STOP_SESSION -> {
                 val sessionId = intent.getStringExtra(NotificationCenter.EXTRA_SESSION_ID)
-                if (!sessionId.isNullOrBlank()) graph.host.stop(sessionId)
+                if (!sessionId.isNullOrBlank()) {
+                    when {
+                        sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID -> graph.superRuntime.abortSuper()
+                        sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX) -> {
+                            val workerId = sessionId.removePrefix(NotificationCenter.WORKER_TARGET_PREFIX).trim()
+                            if (workerId.isNotEmpty()) {
+                                scope.launch {
+                                    try {
+                                        graph.superRuntime.stopWorker(workerId)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (error: Exception) {
+                                        Diagnostics.log(this@AgentService, "service: stop worker failed", error)
+                                    }
+                                }
+                            }
+                        }
+
+                        else -> try {
+                            graph.host.stop(sessionId)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            Diagnostics.log(this@AgentService, "service: stop session failed", error)
+                        }
+                    }
+                }
             }
 
             ACTION_PAIRING_CODE -> {
@@ -128,6 +212,7 @@ class AgentService : Service() {
         floatingWindow?.stop()
         floatingWindow = null
         graph.timerService.stop()
+        graph.relayMemorySync.stop()
         graph.relayLive.stop()
         graph.notificationCenter.stop()
         scope.cancel()
@@ -135,16 +220,193 @@ class AgentService : Service() {
     }
 
     private fun startFloatingWindow() {
+        val processDetailRef = AtomicReference(ProcessDetail.DETAILED)
+        scope.launch {
+            graph.appPreferences.preferences
+                .map { it.processDetail }
+                .distinctUntilChanged()
+                .collect { processDetailRef.set(it) }
+        }
+
+        val appModeFlow = graph.appPreferences.preferences
+            .map { it.appMode }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, AppMode.NORMAL)
+
+        val superThreadStatusFlow = graph.superRuntime.threadState
+            .map { Triple(it.busy, it.activeToolText, it.messages.lastOrNull()?.startedAt) }
+            .distinctUntilChanged()
+
+        val modeAwareActiveRuns = combine(
+            appModeFlow,
+            graph.conversationStore.activeRuns,
+            superThreadStatusFlow,
+            graph.superRuntime.workers,
+        ) { mode, normalRuns, _, superWorkers ->
+            if (mode == AppMode.NORMAL) {
+                normalRuns
+            } else {
+                buildSuperActiveRuns(graph.superRuntime.threadState.value, superWorkers)
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
+        val superThreadQuestionFlow = graph.superRuntime.threadState
+            .map { it.pendingQuestion }
+            .distinctUntilChanged()
+
+        val modeAwareQuestions = combine(
+            appModeFlow,
+            graph.questionCenter.pending,
+            superThreadQuestionFlow,
+            graph.superRuntime.workers,
+        ) { mode, normalQuestions, _, superWorkers ->
+            if (mode == AppMode.NORMAL) {
+                normalQuestions
+            } else {
+                buildSuperPendingQuestions(graph.superRuntime.threadState.value, superWorkers)
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+        val modeAwareEvents = MutableSharedFlow<SessionRuntimeEvent>(extraBufferCapacity = 64)
+        scope.launch {
+            graph.conversationStore.events.collect { ev ->
+                if (appModeFlow.value == AppMode.NORMAL) {
+                    modeAwareEvents.emit(ev)
+                }
+            }
+        }
+        scope.launch {
+            graph.superRuntime.superThreadEvents.collect { ev ->
+                if (appModeFlow.value == AppMode.SUPER) {
+                    modeAwareEvents.emit(SessionRuntimeEvent(SuperRuntime.SUPER_THREAD_SESSION_ID, ev))
+                }
+            }
+        }
+        scope.launch {
+            graph.superRuntime.workerProgress.collect { progress ->
+                if (appModeFlow.value != AppMode.SUPER) return@collect
+                val targetId = NotificationCenter.workerSessionTarget(progress.workerId)
+                val now = System.currentTimeMillis()
+                when (progress) {
+                    is WorkerProgressEvent.StatusChanged -> when (progress.status) {
+                        WorkerStatus.RUNNING -> {
+                            val step = progress.activeStepText?.takeIf { it.isNotBlank() }
+                            val activity = if (step != null) RuntimeActivity.RunningTool(step) else RuntimeActivity.Thinking
+                            modeAwareEvents.emit(SessionRuntimeEvent(targetId, RuntimeEvent.ActivityChanged("wrk", activity)))
+                        }
+                        WorkerStatus.IDLE -> {
+                            val worker = graph.superRuntime.workers.value.firstOrNull { it.workerId == progress.workerId }
+                            val aborted = worker?.lastOutcome == WorkerOutcome.ABORTED
+                            val silent = !aborted && (
+                                worker?.lastTurnSilent == true ||
+                                    LocalWorkerPool.isSilentNoUpdateReply(worker?.lastSummary.orEmpty())
+                                )
+                            if (!silent) {
+                                val runStatus = if (aborted) RunStatus.STOPPED else RunStatus.DONE
+                                modeAwareEvents.emit(
+                                    SessionRuntimeEvent(
+                                        targetId,
+                                        RuntimeEvent.RunFinished("wrk", worker?.lastSummary.orEmpty(), runStatus, now),
+                                    ),
+                                )
+                            }
+                        }
+                        WorkerStatus.FAILED -> {
+                            val worker = graph.superRuntime.workers.value.firstOrNull { it.workerId == progress.workerId }
+                            modeAwareEvents.emit(
+                                SessionRuntimeEvent(
+                                    targetId,
+                                    RuntimeEvent.RunFailed("wrk", worker?.lastError ?: getString(R.string.super_worker_failed_fallback)),
+                                ),
+                            )
+                        }
+                        else -> Unit
+                    }
+                    is WorkerProgressEvent.StepUpdated -> {
+                        if (progress.step.status == ToolActivityStatus.RUNNING) {
+                            val rawArgs = progress.step.argsJson
+                                .takeIf { it.isNotBlank() }
+                                ?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+                            val displayArgs = rawArgs?.toDisplayArguments() ?: emptyMap()
+                            modeAwareEvents.emit(
+                                SessionRuntimeEvent(
+                                    targetId,
+                                    RuntimeEvent.ToolStarted(
+                                        runId = "wrk",
+                                        callId = progress.step.callId,
+                                        name = progress.step.toolName,
+                                        arguments = displayArgs,
+                                        startedAt = progress.step.updatedAt,
+                                        rawArguments = rawArgs,
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+
+        val modeAwareQueries = object : ConversationQueries by graph.host {
+            override suspend fun sessionTitle(sessionId: String): String? {
+                if (sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID) {
+                    return NotificationCenter.SUPER_DISPLAY_TITLE
+                }
+                if (sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX)) {
+                    val workerId = sessionId.removePrefix(NotificationCenter.WORKER_TARGET_PREFIX)
+                    val worker = graph.superRuntime.workers.value.firstOrNull { it.workerId == workerId }
+                    if (worker != null) {
+                        return formatSuperWorkerTitle(worker.botName, worker.title)
+                    }
+                    return NotificationCenter.SUPER_DISPLAY_TITLE
+                }
+                return graph.host.sessionTitle(sessionId)
+            }
+        }
+
         val controller = FloatingWindowController(
             context = this,
-            runtime = graph.host,
-            activeRuns = graph.conversationStore.activeRuns,
-            events = graph.conversationStore.events,
+            runtime = modeAwareQueries,
+            activeRuns = modeAwareActiveRuns,
+            events = modeAwareEvents,
             questionCenter = graph.questionCenter,
+            pendingQuestions = modeAwareQuestions,
+            onAnswerQuestion = { pending, answers ->
+                when {
+                    pending.sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID -> {
+                        scope.launch {
+                            try {
+                                graph.superRuntime.answerSuperQuestion(pending.requestId, answers)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                Diagnostics.log(this@AgentService, "service: answer super question failed", error)
+                            }
+                        }
+                    }
+
+                    pending.sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX) -> {
+                        val workerId = pending.sessionId.removePrefix(NotificationCenter.WORKER_TARGET_PREFIX)
+                        scope.launch {
+                            try {
+                                graph.superRuntime.answerWorkerQuestion(workerId, pending.requestId, answers)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                Diagnostics.log(this@AgentService, "service: answer worker question failed", error)
+                            }
+                        }
+                    }
+
+                    else -> graph.questionCenter.answer(pending.requestId, answers)
+                }
+            },
             preferences = FloatingWindowPreferences(this),
             themeController = graph.themeController,
             virtualScreenProvider = { VirtualScreenRuntime.engine() },
             onOpenApp = { AppVisibility.bringToFront(this) },
+            processDetail = { processDetailRef.get() },
         )
         floatingWindow = controller
         controller.start()
@@ -160,14 +422,20 @@ class AgentService : Service() {
         ContextCompat.registerReceiver(this, clockReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
+    private fun hasActiveTurns(): Boolean =
+        graph.host.busySessionIds.value.isNotEmpty() ||
+            graph.superRuntime.threadState.value.busy ||
+            graph.superRuntime.workers.value.any { it.status.isActive } ||
+            graph.hasAnyRunningWorkerJobs
+
     private fun updateTurnWakeLock(active: Boolean) {
         if (active) {
             acquireOrRenewTurnWakeLock()
             if (wakeLockRenewJob?.isActive != true) {
                 wakeLockRenewJob = scope.launch {
-                    while (isActive && graph.host.busySessionIds.value.isNotEmpty()) {
+                    while (isActive && hasActiveTurns()) {
                         delay(TURN_WAKELOCK_RENEW_INTERVAL_MS)
-                        if (graph.host.busySessionIds.value.isNotEmpty()) {
+                        if (hasActiveTurns()) {
                             acquireOrRenewTurnWakeLock()
                         }
                     }
@@ -228,6 +496,10 @@ class AgentService : Service() {
         networkCallback = null
         val manager = getSystemService(ConnectivityManager::class.java) ?: return
         runCatching { manager.unregisterNetworkCallback(callback) }
+    }
+
+    private fun JsonObject.toDisplayArguments(): Map<String, String> = entries.associate { (key, value) ->
+        key to ((value as? JsonPrimitive)?.contentOrNull ?: value.toString())
     }
 
     companion object {

@@ -1,5 +1,8 @@
 package io.github.whywood.superpi.ui.chat
 
+import io.github.whywood.superpi.ui.common.chat.expandVisibleMessages
+import io.github.whywood.superpi.ui.common.chat.initialVisibleMessages
+import io.github.whywood.superpi.ui.common.chat.resolveVisibleMessages
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

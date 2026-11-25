@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -38,6 +39,7 @@ import io.github.whywood.superpi.core.AssistantEntry
 import io.github.whywood.superpi.data.FloatingWindowPreferences
 import io.github.whywood.superpi.data.FloatingWindowSettings
 import io.github.whywood.superpi.data.LocalizedContext
+import io.github.whywood.superpi.data.ProcessDetail
 import io.github.whywood.superpi.runtime.ConversationQueries
 import io.github.whywood.superpi.runtime.PendingQuestion
 import io.github.whywood.superpi.runtime.QuestionAnswer
@@ -72,27 +74,31 @@ class FloatingWindowController(
     private val activeRuns: StateFlow<Map<String, ActiveRunView>>,
     private val events: kotlinx.coroutines.flow.SharedFlow<io.github.whywood.superpi.runtime.SessionRuntimeEvent> = runtime.events,
     private val questionCenter: QuestionCenter,
+    private val pendingQuestions: StateFlow<List<PendingQuestion>> = questionCenter.pending,
+    private val onAnswerQuestion: ((PendingQuestion, List<QuestionAnswer>) -> Unit)? = null,
     private val preferences: FloatingWindowPreferences,
     private val themeController: ThemeController,
     private val virtualScreenProvider: () -> VirtualScreenController?,
     private val onOpenApp: () -> Unit,
+    private val processDetail: () -> ProcessDetail = { ProcessDetail.DETAILED },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val feedScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val feed = FloatingFeed(
-        runtime,
-        activeRuns,
-        questionCenter.pending,
-        feedScope,
-        { AppVisibility.foreground },
-        events,
+        runtime = runtime,
+        activeRuns = activeRuns,
+        pendingQuestions = pendingQuestions,
+        scope = feedScope,
+        isForeground = { AppVisibility.foreground },
+        events = events,
+        processDetail = processDetail,
     )
     private val windowContext = LocalizedContext(context.applicationContext)
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private val panelOpen = MutableStateFlow(false)
     private val previewOpen = MutableStateFlow(false)
     private val previewExpanded = MutableStateFlow(false)
-    private val appForeground = MutableStateFlow(false)
+    private val appForeground = MutableStateFlow(AppVisibility.foreground)
     private val settingsState = MutableStateFlow(FloatingWindowSettings())
     private val now = MutableStateFlow(System.currentTimeMillis())
     private val bubbleState = MutableStateFlow(FloatingBubbleState())
@@ -118,6 +124,7 @@ class FloatingWindowController(
     private var surfaceHost: FloatingWindowHost? = null
     private var surfaceView: FloatingTouchInterceptor? = null
     private var surfaceParams: WindowManager.LayoutParams? = null
+    private var dismissScrimView: View? = null
     private var ticker: Job? = null
     private var showJob: Job? = null
     private var virtualScreen: VirtualScreenController? = null
@@ -157,6 +164,7 @@ class FloatingWindowController(
         scope.launch {
             AppVisibility.foregroundFlow.collect { foreground ->
                 appForeground.value = foreground
+                if (foreground) panelOpen.value = false
                 requestRender()
             }
         }
@@ -194,7 +202,7 @@ class FloatingWindowController(
         if (!started) return
         refreshVirtualScreen()
         updatePreview()
-        val visible = enabled && !appForeground.value && Settings.canDrawOverlays(context)
+        val visible = floatingWindowVisible(enabled, Settings.canDrawOverlays(context))
         if (!visible) {
             showJob?.cancel()
             showJob = null
@@ -210,7 +218,7 @@ class FloatingWindowController(
             delay(SHOW_DELAY_MS)
             showJob = null
             if (!started) return@launch
-            if (!enabled || appForeground.value || !Settings.canDrawOverlays(context)) return@launch
+            if (!floatingWindowVisible(enabled, Settings.canDrawOverlays(context))) return@launch
             showWindows()
         }
     }
@@ -232,6 +240,7 @@ class FloatingWindowController(
         if (!shown) return
         shown = false
         stopPreview()
+        removeDismissScrimWindow()
         removeSurfaceWindow()
         removeBubbleWindow()
         ticker?.cancel()
@@ -254,11 +263,7 @@ class FloatingWindowController(
         val feedState = feed.state.value
         val panel = panelOpen.value
         val preview = previewOpen.value
-        val queue = if (panel || appForeground.value) {
-            emptyList()
-        } else {
-            floatingEventQueue(feedState)
-        }
+        val queue = floatingSurfaceEventQueue(feedState, panel, appForeground.value)
         val card = queue.firstOrNull()
         val body: FloatingSurfaceBody? = when {
             panel -> FloatingSurfaceBody.Panel(
@@ -278,9 +283,11 @@ class FloatingWindowController(
             else -> null
         }
         if (body == null && !preview) {
+            removeDismissScrimWindow()
             removeSurfaceWindow()
             return
         }
+        ensureDismissScrim(panel)
         showSurfaceWindow(
             body = body,
             preview = preview,
@@ -429,14 +436,6 @@ class FloatingWindowController(
                 compose,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT),
             )
-            onTouch = { event ->
-                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-                    panelOpen.value = false
-                    true
-                } else {
-                    false
-                }
-            }
         }
         host.bindOwners(view)
         val params = WindowManager.LayoutParams(
@@ -444,8 +443,7 @@ class FloatingWindowController(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
@@ -538,6 +536,45 @@ class FloatingWindowController(
         surfaceHost = null
         surfaceView = null
         surfaceParams = null
+    }
+
+    private fun ensureDismissScrim(panel: Boolean) {
+        if (!floatingNeedsDismissScrim(panel)) {
+            removeDismissScrimWindow()
+            return
+        }
+        if (floatingSurfaceMustRecreateForScrim(panel, dismissScrimView != null, surfaceView != null)) {
+            removeSurfaceWindow()
+        }
+        if (dismissScrimView == null) {
+            createDismissScrimWindow()
+        }
+    }
+
+    private fun createDismissScrimWindow() {
+        if (dismissScrimView != null) return
+        val scrim = FloatingDismissScrimView(windowContext) {
+            panelOpen.value = false
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.LEFT
+        }
+        if (runCatching { windowManager.addView(scrim, params) }.isSuccess) {
+            dismissScrimView = scrim
+        }
+    }
+
+    private fun removeDismissScrimWindow() {
+        val view = dismissScrimView ?: return
+        runCatching { windowManager.removeView(view) }
+        dismissScrimView = null
     }
 
     private fun createBubbleWindow(): Boolean {
@@ -682,7 +719,7 @@ class FloatingWindowController(
     }
 
     private fun onBubbleClick() {
-        panelOpen.value = true
+        panelOpen.value = floatingBubbleToggleNextPanelOpen(panelOpen.value)
     }
 
     private fun onBubbleLongPress() {
@@ -767,14 +804,21 @@ class FloatingWindowController(
 
     private fun answerQuestion(pending: PendingQuestion, option: QuestionOption) {
         val question = pending.questions.singleOrNull() ?: return
-        questionCenter.answer(
-            pending.requestId,
-            listOf(QuestionAnswer(questionId = question.id, selected = listOf(option.label))),
-        )
+        val answers = listOf(QuestionAnswer(questionId = question.id, selected = listOf(option.label)))
+        val handler = onAnswerQuestion
+        if (handler != null) {
+            handler(pending, answers)
+        } else {
+            questionCenter.answer(pending.requestId, answers)
+        }
     }
 
     private fun openSession(sessionId: String) {
         panelOpen.value = false
+        if (sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX)) {
+            openSessionInApp(sessionId)
+            return
+        }
         if (!AssistantEntry.openOverlay(context, sessionId)) onOpenApp()
     }
 
@@ -973,4 +1017,47 @@ private data class FloatingSurfaceUi(
 private fun FloatingSurfaceBody.withMaxHeight(maxHeightPx: Int): FloatingSurfaceBody = when (this) {
     is FloatingSurfaceBody.Card -> copy(maxHeightPx = maxHeightPx)
     is FloatingSurfaceBody.Panel -> copy(maxHeightPx = maxHeightPx)
+}
+
+internal fun floatingWindowVisible(
+    enabled: Boolean,
+    canDrawOverlays: Boolean,
+): Boolean = enabled && canDrawOverlays
+
+internal fun floatingSurfaceEventQueue(
+    state: FloatingFeedState,
+    panelOpen: Boolean,
+    appForeground: Boolean,
+): List<FloatingEventCard> = if (panelOpen || appForeground) emptyList() else floatingEventQueue(state)
+
+internal fun floatingNeedsDismissScrim(panelOpen: Boolean): Boolean = panelOpen
+
+internal fun floatingSurfaceMustRecreateForScrim(
+    panelOpen: Boolean,
+    hasScrim: Boolean,
+    hasSurface: Boolean,
+): Boolean = panelOpen && !hasScrim && hasSurface
+
+internal fun floatingBubbleToggleNextPanelOpen(panelOpen: Boolean): Boolean = !panelOpen
+
+private class FloatingDismissScrimView(
+    context: Context,
+    private val onDismiss: () -> Unit,
+) : View(context) {
+    init {
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            onDismiss()
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        onDismiss()
+        return true
+    }
 }

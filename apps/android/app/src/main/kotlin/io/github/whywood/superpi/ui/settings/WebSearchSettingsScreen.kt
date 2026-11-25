@@ -34,6 +34,7 @@ import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdTextField
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.ui.common.webSearchProviderName
 
 @Composable
 fun WebSearchSettingsScreen(
@@ -165,12 +166,4 @@ private fun WebSearchProviderEntry(
         onClick = onEdit,
         modifier = Modifier.testTag("web_search_$id"),
     )
-}
-
-private fun webSearchProviderName(id: String): Int = when (id) {
-    WebSearchSettingsStore.DEEPSEEK -> R.string.web_search_deepseek
-    WebSearchSettingsStore.EXA -> R.string.web_search_exa
-    WebSearchSettingsStore.TAVILY -> R.string.web_search_tavily
-    WebSearchSettingsStore.BRAVE -> R.string.web_search_brave
-    else -> R.string.web_search_serper
 }

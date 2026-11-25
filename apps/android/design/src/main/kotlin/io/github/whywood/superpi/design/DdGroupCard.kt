@@ -10,8 +10,30 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.dp
+
+private fun Modifier.groupCardSurface(colors: SuperPIColors): Modifier {
+    val rimModifier = if (colors.dark) {
+        border(
+            width = 0.75.dp,
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0x1FFFFFFF),
+                    Color(0x08FFFFFF),
+                ),
+            ),
+            shape = DdShapes.Card,
+        )
+    } else {
+        border(0.5.dp, colors.surfaceRim, DdShapes.Card)
+    }
+    return clip(DdShapes.Card)
+        .background(colors.surface)
+        .then(rimModifier)
+}
 
 @Composable
 fun DdGroupCard(
@@ -26,9 +48,7 @@ fun DdGroupCard(
         Column(
             modifier
                 .fillMaxWidth()
-                .clip(DdShapes.Card)
-                .background(colors.surface)
-                .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Card),
+                .groupCardSurface(colors),
             content = content,
         )
     }
@@ -49,9 +69,7 @@ fun DdGroupCard(
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                .clip(DdShapes.Card)
-                .background(colors.surface)
-                .border(1.dp, colors.hairline.copy(alpha = 0.65f), DdShapes.Card),
+                .groupCardSurface(colors),
         ) {
             Column(
                 modifier = Modifier

@@ -6,7 +6,7 @@ plugins {
 
 val designVersion: String = providers.gradleProperty("designVersion")
     .orElse(providers.gradleProperty("pluginApiVersion"))
-    .getOrElse("1.0.0")
+    .getOrElse("1.1.0")
 
 android {
     namespace = "io.github.whywood.superpi.design"

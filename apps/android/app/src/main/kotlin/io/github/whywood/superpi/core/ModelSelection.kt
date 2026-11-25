@@ -10,11 +10,18 @@ internal fun resolve(
     configured: Set<String>,
     catalog: ProviderDirectory,
 ): ModelConfig? {
-    if (configured.isEmpty() || current.providerId in configured) return null
-    val target = catalog.summaries.firstOrNull { it.id in configured } ?: return null
-    return catalog.resolveConfig(
+    if (configured.isEmpty()) return null
+    if (current.providerId in configured && catalog.models(current.providerId).isNotEmpty()) {
+        val resolved = catalog.resolveConfig(current)
+        return resolved.takeIf { it != current }
+    }
+    val target = catalog.summaries.firstOrNull { it.id in configured && catalog.models(it.id).isNotEmpty() }
+        ?: catalog.summaries.firstOrNull { it.id in configured }
+        ?: return null
+    val resolved = catalog.resolveConfig(
         ModelConfig(providerId = target.id, modelId = "", thinkingLevel = ThinkingLevel.OFF),
     )
+    return resolved.takeIf { it != current }
 }
 
 class ModelSelection(

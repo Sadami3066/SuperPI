@@ -180,7 +180,7 @@ class AmapToolsTest {
         assertTrue(raw(result).contains("INVALID_USER_KEY"))
         assertFalse(raw(result).contains("secret-key"))
         assertTrue(raw(result).contains("***"))
-        assertTrue(guidance(result).contains("Key"))
+        assertTrue(guidance(result).contains("服务凭证"))
         assertNull(result.details?.get("superpi.card"))
         assertNull(result.details?.get("kind"))
     }
@@ -366,9 +366,29 @@ class AmapToolsTest {
         assertNull(result.details?.get("superpi.card"))
     }
 
+    @Test
+    fun regeoReturnsFormattedAddress() = runTest {
+        val payload = """{"country":"中国","province":"广东省","city":"广州市","district":"海珠区"}"""
+        val result = run(
+            host = host(FakeMcpNetwork(payload = { payload })),
+            name = "amap_regeo",
+            arguments = args("""{"longitude":113.2981,"latitude":23.0965}"""),
+        )
 
+        assertFalse(result.isError)
+        assertEquals("广东省广州市海珠区", (result.details?.get("formattedAddress") as JsonPrimitive).content)
+    }
 
+    @Test
+    fun missingKeyErrorCarriesReasonAndPluginEntry() = runTest {
+        val result = run(
+            host = host(FakeMcpNetwork(failure = NetworkResponse(401, """{"info":"INVALID_USER_KEY"}"""))),
+            name = "amap_place_search",
+            arguments = args("""{"keywords":"西湖"}"""),
+        )
 
-
-
+        assertTrue(result.isError)
+        assertTrue(result.text.orEmpty().contains("服务凭证"))
+        assertEquals("invalid_key", (result.details?.get("failure") as JsonPrimitive).content)
+    }
 }

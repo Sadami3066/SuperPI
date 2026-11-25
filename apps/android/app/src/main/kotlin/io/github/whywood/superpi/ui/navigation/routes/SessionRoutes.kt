@@ -12,8 +12,10 @@ import androidx.compose.runtime.getValue
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import io.github.whywood.superpi.core.AppDependencies
+import io.github.whywood.superpi.data.AppMode
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.ui.chat.ChatViewModel
 import io.github.whywood.superpi.ui.navigation.AppDestination
 import io.github.whywood.superpi.ui.navigation.AppNavigator
@@ -63,18 +65,33 @@ internal fun TimersRoute(
     dependencies: AppDependencies,
     chatViewModel: ChatViewModel,
     conversationId: String?,
+    appMode: AppMode,
     navigator: AppNavigator,
     onBack: () -> Unit,
 ) {
+    val superMode = appMode == AppMode.SUPER
     TimerScreen(
         service = dependencies.timerService,
         runtime = dependencies.host,
         initialConversationId = conversationId,
         onBack = onBack,
         onOpenConversation = { sessionId ->
-            chatViewModel.openConversationById(sessionId)
-            navigator.reset(AppDestination.Chat)
+            when {
+                sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID -> navigator.reset(AppDestination.Chat)
+                SuperRuntime.parseWorkerSessionId(sessionId) != null -> {
+                    SuperRuntime.parseWorkerSessionId(sessionId)?.let { workerId ->
+                        navigator.reset(AppDestination.Chat)
+                        navigator.push(AppDestination.WorkerMonitor(workerId))
+                    }
+                }
+                else -> {
+                    chatViewModel.openConversationById(sessionId)
+                    navigator.reset(AppDestination.Chat)
+                }
+            }
         },
+        superRuntime = dependencies.superRuntime,
+        superMode = superMode,
     )
 }
 
@@ -84,7 +101,10 @@ internal fun WorkspaceSettingsRoute(
     navigator: AppNavigator,
     workspaces: List<RuntimeWorkspace>,
     workspaceId: String,
+    configuredProviderIds: Set<String> = emptySet(),
+    globalModelConfig: io.github.whywood.superpi.runtime.ModelConfig = io.github.whywood.superpi.runtime.ModelConfig(),
     onUpdateProfile: (String, String?, String?) -> Unit,
+    onUpdateDefaultModel: (String, io.github.whywood.superpi.runtime.ModelConfig?) -> Unit = { _, _ -> },
     onRenameWorkspace: (String, String) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -105,9 +125,13 @@ internal fun WorkspaceSettingsRoute(
         workspaceToolPolicies = dependencies.workspaceToolPolicies,
         pluginManager = dependencies.pluginManager,
         mcpConfigStore = dependencies.mcpConfigStore,
+        providerCatalog = dependencies.providerCatalog,
+        configuredProviderIds = configuredProviderIds,
+        globalModelConfig = globalModelConfig,
         existingNames = workspaces.filterNot { it.id == workspaceId }.map { it.name },
         screenToolsReady = screenToolsReady,
         onRename = { name -> onRenameWorkspace(workspaceId, name) },
+        onUpdateDefaultModel = { model -> onUpdateDefaultModel(workspaceId, model) },
         onAvatarPicked = { bitmap ->
             scope.launch {
                 val previous = workspace.avatar

@@ -225,6 +225,10 @@ class ChatViewModel(
                 retryController.onRetryEvent(scoped.sessionId, event)
             }
         }
+        launchRuntimeInit()
+    }
+
+    private fun launchRuntimeInit() {
         viewModelScope.launch {
             try {
                 withContext(ioDispatcher) {
@@ -311,7 +315,7 @@ class ChatViewModel(
         }
         if (current.switchingConversation || current.importingAttachment) return
         val text = current.input.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() && current.attachments.isEmpty()) return
         if (current.sending) {
             if (text.startsWith("/")) {
                 mutableState.update { it.copy(error = uiStrings.stopBeforeCommand) }
@@ -385,7 +389,7 @@ class ChatViewModel(
             return
         }
         val text = current.input.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() && current.attachments.isEmpty()) return
         if (text.startsWith("/")) {
             mutableState.update { it.copy(error = uiStrings.stopBeforeCommand) }
             return
@@ -396,7 +400,10 @@ class ChatViewModel(
             mutableState.update { it.copy(error = uiStrings.preparingSession) }
             return
         }
-        val prompt = sessionDrafts.buildPrompt(current.quote, current.attachments, text)
+        val draftInput = current.input
+        val draftQuote = current.quote
+        val draftAttachments = current.attachments
+        val prompt = sessionDrafts.buildPrompt(draftQuote, draftAttachments, text)
         mutableState.update {
             it.copy(input = "", quote = null, attachments = emptyList(), error = null)
         }
@@ -404,15 +411,26 @@ class ChatViewModel(
             try {
                 val images = sessionDrafts.normalizeImages(sessionId, imageRefs, root)
                 sessionOpener.awaitOpening(sessionId)
-                when (kind) {
-                    InputQueueKind.STEER -> store.steer(sessionId, prompt, images)
-                    InputQueueKind.FOLLOW_UP -> store.followUp(sessionId, prompt, images)
-                }
+                store.submitQueuedAwait(
+                    sessionId = sessionId,
+                    prompt = prompt,
+                    images = images,
+                    followUp = kind == InputQueueKind.FOLLOW_UP,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                mutableState.update {
-                    it.copy(error = chatError(uiStrings, error.message ?: uiStrings.requestFailed))
+                mutableState.update { state ->
+                    if (state.conversationId != sessionId) {
+                        state
+                    } else {
+                        state.copy(
+                            input = if (state.input.isBlank()) draftInput else state.input,
+                            quote = state.quote ?: draftQuote,
+                            attachments = if (state.attachments.isEmpty()) draftAttachments else state.attachments,
+                            error = chatError(uiStrings, error.message ?: uiStrings.requestFailed),
+                        )
+                    }
                 }
             }
         }
@@ -420,6 +438,21 @@ class ChatViewModel(
 
     fun retry(messageId: Long) {
         retryController.manualRetry(mutableState.value, messageId)
+    }
+
+    fun clearError() {
+        mutableState.update { it.copy(error = null) }
+    }
+
+    fun retryCurrentSession() {
+        val current = mutableState.value
+        mutableState.update { it.copy(error = null) }
+        val sessionId = current.conversationId
+        if (!current.ready || sessionId == null) {
+            launchRuntimeInit()
+        } else {
+            sessionOpener.openConversationById(sessionId)
+        }
     }
 
     private fun retryStarted(sessionId: String) {
@@ -689,6 +722,9 @@ class ChatViewModel(
 
     fun updateWorkspaceProfile(workspaceId: String, avatar: String?, intro: String?) =
         workspaceController.updateProfile(workspaceId, avatar, intro)
+
+    fun updateWorkspaceDefaultModel(workspaceId: String, model: ModelConfig?) =
+        workspaceController.updateDefaultModel(workspaceId, model)
 
     fun deleteWorkspace(workspaceId: String, onDeleted: () -> Unit = {}) =
         workspaceController.delete(workspaceId, onDeleted)

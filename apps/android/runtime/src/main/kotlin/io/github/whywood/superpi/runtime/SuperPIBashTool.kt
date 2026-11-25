@@ -32,6 +32,10 @@ private val bashParameters: JsonObject = buildJsonObject {
             put("type", "string")
             put("description", "Shell command to execute")
         }
+        putJsonObject("description") {
+            put("type", "string")
+            put("description", "Short plain-language description of what this command does for UI display")
+        }
         putJsonObject("timeout") {
             put("type", "number")
             put("minimum", 1)
@@ -39,7 +43,10 @@ private val bashParameters: JsonObject = buildJsonObject {
             put("description", "Timeout in seconds (1-$BASH_MAX_TIMEOUT_SECONDS, optional, default 60)")
         }
     }
-    put("required", buildJsonArray { add(JsonPrimitive("command")) })
+    put("required", buildJsonArray {
+        add(JsonPrimitive("command"))
+        add(JsonPrimitive("description"))
+    })
 }
 
 internal fun superPiBashTool(shellExecutor: ShellExecutor): CodingTool = CodingTool(
@@ -50,9 +57,11 @@ internal fun superPiBashTool(shellExecutor: ShellExecutor): CodingTool = CodingT
     promptGuidelines = listOf(
         "Check the [exit: N] marker on every bash result; investigate failures before moving on.",
         "bash runs the session Linux shell; read the system prompt environment section for its current mode and path layout.",
+        "Always provide a short plain-language description argument when running bash so the user sees what is happening.",
     ),
     execute = { _toolCallId, args, signal, _onUpdate ->
         val command = args.requiredString("command")
+        args.requiredNonBlankString("description")
         val timeoutSeconds = args.timeoutSeconds()
         signal?.throwIfAborted()
         var failure: String? = null
@@ -124,6 +133,12 @@ private fun bashDetails(truncation: Truncated, result: CommandResult): JsonValue
 
 private fun JsonObject.requiredString(name: String): String {
     val value = (this[name] as? JsonPrimitive)?.contentOrNull
+    require(!value.isNullOrEmpty()) { "Missing required argument: $name" }
+    return value
+}
+
+private fun JsonObject.requiredNonBlankString(name: String): String {
+    val value = (this[name] as? JsonPrimitive)?.contentOrNull?.trim()
     require(!value.isNullOrEmpty()) { "Missing required argument: $name" }
     return value
 }

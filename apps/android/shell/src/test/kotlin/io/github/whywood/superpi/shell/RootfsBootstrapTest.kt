@@ -33,9 +33,12 @@ class RootfsBootstrapTest {
         assertTrue(script.contains(".superpi-empty"))
         assertTrue(script.contains("cp \"\$RUN_SCRIPT\" \"\$LINUX/run.sh\""))
 
-        val probe = "/system/bin/chroot \"\$ROOT\" /bin/bash -c 'echo SUPERPI_PROBE_OK' >/dev/null 2>&1"
+        val probe = "/system/bin/chroot \"\$ROOT\" \"\$SHELL_BIN\" -c 'echo SUPERPI_PROBE_OK' >/dev/null 2>&1"
+        assertTrue(script.contains("\$ROOT/bin/bash"))
+        assertTrue(script.contains("\$ROOT/bin/sh"))
         assertTrue(script.contains(probe))
         assertTrue(script.indexOf(probe) < script.indexOf("echo SUPERPI_ALREADY"))
+        assertTrue(script.lastIndexOf(probe) < script.indexOf("touch \"\$ROOT/.superpi-ready\""))
     }
 
     @Test
@@ -60,7 +63,9 @@ class RootfsBootstrapTest {
         assertTrue(script.contains("\$ROOT/linkerconfig"))
         assertTrue(script.contains("ln -sfn /system/usr/share/zoneinfo"))
         assertTrue(script.contains("chroot"))
-        assertTrue(script.contains("/bin/bash -ls"))
+        assertTrue(script.contains("\$ROOT/bin/bash"))
+        assertTrue(script.contains("\$ROOT/bin/sh"))
+        assertTrue(script.contains("\"\$SHELL_BIN\" -ls"))
         assertTrue(script.contains("SUPERPI_CWD=\"\$1\""))
         assertTrue(script.contains("mkdir -p \"\$ROOT\$1\""))
         assertTrue(script.contains("mount --rbind \"\$1\" \"\$ROOT\$1\""))
@@ -192,6 +197,35 @@ class RootfsBootstrapTest {
             assertTrue(commands[0].startsWith("rm -rf "))
             assertTrue(commands[0].contains("rootfs"))
             assertTrue(commands[1].startsWith("sh "))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun ensureReadySupportsShOnlyRootfs() = runBlocking {
+        val dir = kotlin.io.path.createTempDirectory("rootfs-sh-only").toFile()
+        try {
+            val appRootfs = File(dir, "app-rootfs")
+            File(appRootfs, "bin").mkdirs()
+            File(appRootfs, "bin/sh").writeText("")
+            val statusFile = File(dir, "state")
+            val bootstrap = RootfsBootstrap(
+                appRootfsDir = appRootfs,
+                statusFile = statusFile,
+                scratchDir = File(dir, "scratch"),
+                linuxDir = File(dir, "linux"),
+                runner = RootCommandRunner { _, _, _ ->
+                    RootProcessResult(0, "SUPERPI_READY", "", false, true)
+                },
+                ioDispatcher = Dispatchers.Unconfined,
+            )
+
+            val status = bootstrap.ensureReady()
+
+            assertEquals(RootfsState.Ready, status.state)
+            assertTrue(bootstrap.bootstrapScriptFile.readText().contains("\$ROOT/bin/sh"))
+            assertTrue(bootstrap.runScriptFile.readText().contains("\"\$SHELL_BIN\" -ls"))
         } finally {
             dir.deleteRecursively()
         }

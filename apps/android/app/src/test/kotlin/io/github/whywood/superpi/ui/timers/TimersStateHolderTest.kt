@@ -1,18 +1,40 @@
 package io.github.whywood.superpi.ui.timers
 
 import io.github.whywood.superpi.R
+import io.github.whywood.superpi.runtime.BotBlueprint
 import io.github.whywood.superpi.runtime.ConversationSummary
+import io.github.whywood.superpi.runtime.ImagePart
 import io.github.whywood.superpi.runtime.NewTimer
+import io.github.whywood.superpi.runtime.PendingQuestion
+import io.github.whywood.superpi.runtime.QuestionAnswer
 import io.github.whywood.superpi.runtime.RemoteBotRef
+import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SuperRuntime
+import io.github.whywood.superpi.runtime.SuperThreadState
+import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.Timer
 import io.github.whywood.superpi.runtime.TimerPatch
+import io.github.whywood.superpi.runtime.TimerService
+import io.github.whywood.superpi.runtime.TimerStore
 import io.github.whywood.superpi.runtime.TimerTrigger
+import io.github.whywood.superpi.runtime.WorkerCardRef
+import io.github.whywood.superpi.runtime.WorkerInspectResult
+import io.github.whywood.superpi.runtime.WorkerOutcome
+import io.github.whywood.superpi.runtime.WorkerProgressEvent
+import io.github.whywood.superpi.runtime.WorkerRunRecord
+import io.github.whywood.superpi.runtime.WorkerSessionSnapshot
+import io.github.whywood.superpi.runtime.WorkerStatus
+import io.github.whywood.superpi.ui.chat.testing.FakeAgentRuntime
+import java.io.File
 import java.io.IOException
+import java.nio.file.Files
 import java.time.LocalTime
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -207,6 +229,108 @@ class TimersStateHolderTest {
         filePath = "$cwd/$id.jsonl",
         cwd = cwd,
     )
+
+    @Test
+    fun separatesNormalAndSuperModeTimersStrictly() = runTest {
+        val source = FakeTimersSource()
+        source.items.value = listOf(
+            timer("normal-1", "Normal timer", sessionId = "session-a"),
+            timer("super-1", "Super timer", sessionId = "super:router"),
+            timer("worker-1", "Worker timer", sessionId = "worker:wrk-abc"),
+        )
+        source.titles = mapOf(
+            "session-a" to "General Chat",
+            "super:router" to "Super PI",
+            "worker:wrk-abc" to "PI · Monitor PR",
+        )
+
+        val normalHolder = TimersStateHolder(source, backgroundScope, superMode = false)
+        normalHolder.load()
+        runCurrent()
+        assertEquals(listOf("normal-1"), normalHolder.state.value.items.map { it.id })
+
+        val superHolder = TimersStateHolder(source, backgroundScope, superMode = true)
+        superHolder.load()
+        runCurrent()
+        assertEquals(listOf("super-1", "worker-1"), superHolder.state.value.items.map { it.id })
+        assertEquals("Super PI", superHolder.state.value.titles["super:router"])
+        assertEquals("PI · Monitor PR", superHolder.state.value.titles["worker:wrk-abc"])
+    }
+
+    @Test
+    fun timerServiceDataSourceReturnsNullForMissingWorkerInsteadOfRawWorkerId() = runTest {
+        val dir = Files.createTempDirectory("timers-missing-worker").toFile()
+        try {
+            val agentRuntime = FakeAgentRuntime()
+            val store = TimerStore(dir)
+            val timerService = TimerService(agentRuntime, store, backgroundScope)
+            val workersFlow = MutableStateFlow(
+                listOf(
+                    WorkerRunRecord(
+                        workerId = "wrk-present",
+                        botRef = SuperRuntime.HOME_BOT_REF,
+                        botId = "home",
+                        botName = "PI",
+                        title = "Watch logs",
+                        status = WorkerStatus.IDLE,
+                        lastOutcome = WorkerOutcome.SUCCEEDED,
+                        turnCount = 1,
+                        createdAt = 1_000L,
+                        updatedAt = 1_000L,
+                    ),
+                ),
+            )
+            val superRuntime = object : SuperRuntime {
+                override val threadState: StateFlow<SuperThreadState> = MutableStateFlow(SuperThreadState())
+                override val workers: StateFlow<List<WorkerRunRecord>> = workersFlow
+                override val blueprints: StateFlow<List<BotBlueprint>> = MutableStateFlow(emptyList())
+                override val pendingWorkerQuestions: StateFlow<List<PendingQuestion>> = MutableStateFlow(emptyList())
+                override val workerProgress: SharedFlow<WorkerProgressEvent> = MutableSharedFlow()
+                override val superThreadEvents: SharedFlow<RuntimeEvent> = MutableSharedFlow()
+                override fun bindTimerHandler() = Unit
+                override suspend fun ensureStarted() = Unit
+                override suspend fun send(text: String, images: List<ImagePart>) = Unit
+                override suspend fun steer(text: String, images: List<ImagePart>) = Unit
+                override fun abortSuper() = Unit
+                override suspend fun compactSuper() = Unit
+                override suspend fun archiveAndResetSuper() = Unit
+                override suspend fun answerSuperQuestion(requestId: String, answers: List<QuestionAnswer>) = Unit
+                override suspend fun cancelSuperQuestion(requestId: String) = Unit
+                override suspend fun answerWorkerQuestion(workerId: String, requestId: String, answers: List<QuestionAnswer>) = Unit
+                override suspend fun dismissWorkerQuestion(workerId: String, requestId: String) = Unit
+                override suspend fun stopWorker(workerId: String) = Unit
+                override suspend fun deleteWorker(workerId: String) = Unit
+                override suspend fun compactWorker(workerId: String) = Unit
+                override suspend fun inspectWorker(workerId: String, tail: Int): WorkerInspectResult? = null
+                override fun observeWorkerSession(workerId: String): StateFlow<WorkerSessionSnapshot> =
+                    MutableStateFlow(WorkerSessionSnapshot(workerId))
+                override suspend fun loadWorkerSession(workerId: String) = Unit
+                override suspend fun sendToWorker(workerId: String, text: String, images: List<ImagePart>) = Unit
+                override suspend fun changeWorkerModel(workerId: String, providerId: String, modelId: String, thinkingLevel: ThinkingLevel) = Unit
+                override suspend fun changeWorkerThinking(workerId: String, thinkingLevel: ThinkingLevel) = Unit
+                override fun workerWorkspaceDir(workerId: String): File? = null
+                override suspend fun setBotEnabledInSuper(botRef: String, enabled: Boolean) = Unit
+                override suspend fun refreshBlueprints() = Unit
+                override suspend fun changeSuperModel(providerId: String, modelId: String, thinkingLevel: ThinkingLevel) = Unit
+                override suspend fun changeSuperThinking(thinkingLevel: ThinkingLevel) = Unit
+                override suspend fun resolveArtifactFile(refOrPath: String): File? = null
+                override fun cardById(cardId: String): WorkerCardRef? = null
+                override fun dismissError() = Unit
+                override fun dismissWorkerError(workerId: String) = Unit
+            }
+            val dataSource = TimerServiceDataSource(
+                service = timerService,
+                runtime = agentRuntime,
+                superRuntime = superRuntime,
+                superMode = true,
+            )
+
+            assertEquals("PI · Watch logs", dataSource.sessionTitle("worker:wrk-present"))
+            assertNull(dataSource.sessionTitle("worker:wrk-missing"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 
     private fun timer(id: String, name: String, prompt: String = "prompt", sessionId: String = "") = Timer(
         id = id,

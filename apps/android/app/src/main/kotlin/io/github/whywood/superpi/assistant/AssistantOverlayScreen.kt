@@ -80,11 +80,11 @@ import kotlinx.coroutines.flow.first
 internal data class AssistantOverlayConfig(
     val autoSpeak: Boolean = false,
     val entryMode: OverlayEntryMode = OverlayEntryMode.NONE,
-    val autoCollapseProcess: Boolean = true,
     val processDetail: ProcessDetail = ProcessDetail.DETAILED,
     val chatFontScale: Float = 1f,
     val language: AppLanguage = AppLanguage.CHINESE,
     val attachmentRoot: File = File("/"),
+    val switcherVisible: Boolean = true,
 )
 
 internal data class AssistantOverlayActions(
@@ -173,7 +173,7 @@ internal fun AssistantOverlayScreen(
 
     fun submit(raw: String, followUp: Boolean) {
         val text = raw.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() && state.attachments.isEmpty()) return
         speaker.stop()
         voice.clearFailure()
         keyboard?.hide()
@@ -408,7 +408,7 @@ internal fun AssistantOverlayScreen(
         AssistantOverlaySwitcher(
             state = state,
             actions = actions,
-            visible = switcherOpen,
+            visible = switcherOpen && config.switcherVisible,
             level = switcherLevel,
             width = minOf(272.dp, maxWidth * 0.76f),
             onClose = { switcherOpen = false },

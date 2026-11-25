@@ -72,7 +72,9 @@ class CliInstallRunner(private val plan: CliInstallPlan) {
             )
             val stagedVersion = plan.parseVersion(extract.stdout)
             if (extract.exitCode != 0 || stagedVersion != release.version) {
-                throw IllegalStateException(messages.versionMismatch(extract.stdout.takeLast(400).trim()))
+                throw IllegalStateException(
+                    messages.versionMismatch(failureText(extract.stdout, extract.stderr)),
+                )
             }
             onEvent(CliInstallEvent(CliInstallStage.INSTALLING))
             val install = linux.exec(
@@ -82,7 +84,9 @@ class CliInstallRunner(private val plan: CliInstallPlan) {
             )
             val installedVersion = plan.parseVersion(install.stdout)
             if (install.exitCode != 0 || installedVersion != release.version) {
-                throw IllegalStateException(messages.installFailed(install.stdout.takeLast(400).trim()))
+                throw IllegalStateException(
+                    messages.installFailed(failureText(install.stdout, install.stderr)),
+                )
             }
             installed = true
             onEvent(CliInstallEvent(CliInstallStage.FINISHING))
@@ -152,6 +156,13 @@ class CliInstallRunner(private val plan: CliInstallPlan) {
         val decoded = runCatching { Base64.getDecoder().decode(value.trim()) }.getOrNull() ?: return null
         return Base64.getEncoder().encodeToString(decoded)
     }
+
+    private fun failureText(stdout: String, stderr: String): String =
+        listOf(stdout, stderr)
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .trim()
+            .takeLast(400)
 
     private suspend fun hasExistingBinary(linux: LinuxService): Boolean = runCatching {
         linux.exec(plan.binaryExistsCommand, timeoutMs = plan.timeouts.binaryCheckMs).stdout.contains("yes")

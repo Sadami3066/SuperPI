@@ -6,8 +6,9 @@
     <string name="usage_compact_now">Compact context now</string>
     <string name="usage_input">Input</string>
     <string name="usage_output">Output</string>
-    <string name="usage_cache_read">Cache read</string>
-    <string name="usage_cache_write">Cache write</string>
+    <string name="usage_cache">Cache</string>
+    <string name="usage_cache_read">Read</string>
+    <string name="usage_cache_write">Write</string>
     <string name="usage_cost">Cost</string>
     <string name="usage_cost_value">$%1$s</string>
     <string name="usage_footnote">Estimated context usage and session totals.</string>

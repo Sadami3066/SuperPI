@@ -201,8 +201,8 @@ private fun regeoTool(host: PluginHost, client: AmapClient): PluginTool = plugin
     name = "amap_regeo",
     label = host.t("坐标转地址", "Address lookup"),
     description = host.t(
-        "把经纬度转换为行政区划。高德 MCP 只返回到区县一级，没有街道、门牌和坐标。参数：经度和纬度。",
-        "Turn coordinates into an administrative area. The Amap MCP stops at the district level, with no street, number, or coordinates. Parameters: longitude and latitude.",
+        "把经纬度转换为行政区划。高德只返回到区县一级，没有街道、门牌和坐标。参数：经度和纬度。",
+        "Turn coordinates into an administrative area. Amap stops at the district level, with no street, number, or coordinates. Parameters: longitude and latitude.",
     ),
     parameters = parameters(
         required = listOf("longitude", "latitude"),
@@ -464,17 +464,21 @@ private fun cardDetails(title: String, raw: String, guidance: String, body: Json
     put(CARD_KEY, buildJsonObject { put("title", title) })
 }
 
-private fun errorResult(host: PluginHost, failure: AmapFailure, raw: String?): PluginToolResult = textResult(
-    "",
-    details = buildJsonObject {
-        raw?.takeIf { it.isNotBlank() }?.let { put(RAW_KEY, it) }
-        put(GUIDANCE_KEY, failureGuidance(host.localizer(), failure))
-    },
-    isError = true,
-)
+private fun errorResult(host: PluginHost, failure: AmapFailure, raw: String?): PluginToolResult {
+    val guidance = failureGuidance(host.localizer(), failure)
+    return textResult(
+        guidance,
+        details = buildJsonObject {
+            raw?.takeIf { it.isNotBlank() }?.let { put(RAW_KEY, it) }
+            put(GUIDANCE_KEY, guidance)
+            put(AMAP_FAILURE_KEY, failure.name.lowercase())
+        },
+        isError = true,
+    )
+}
 
 private fun emptyResult(raw: String, guidance: String): PluginToolResult = textResult(
-    "",
+    guidance,
     details = buildJsonObject {
         raw.takeIf { it.isNotBlank() }?.let { put(RAW_KEY, it) }
         put(GUIDANCE_KEY, guidance)
@@ -483,7 +487,7 @@ private fun emptyResult(raw: String, guidance: String): PluginToolResult = textR
 )
 
 private fun inputError(host: PluginHost, message: String): PluginToolResult = textResult(
-    "",
+    message,
     details = buildJsonObject { put(GUIDANCE_KEY, message) },
     isError = true,
 )

@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.deeplink
 
+import io.github.whywood.superpi.isExternalViewIntakeScheme
 import io.github.whywood.superpi.ui.navigation.AppDestination
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -112,6 +113,15 @@ class DeepLinkTest {
         assertNull(DeepLink.parse("superpi://oauth"))
         assertNull(DeepLink.parse("superpi://oauth/callback"))
         assertNull(DeepLink.parse("superpi://oauth/callback?code=abc&state=xyz"))
+    }
+
+    @Test
+    fun excludesSuperpiSchemeFromExternalViewIntake() {
+        assertEquals(false, isExternalViewIntakeScheme("superpi"))
+        assertEquals(false, isExternalViewIntakeScheme("SUPERPI"))
+        assertEquals(true, isExternalViewIntakeScheme("content"))
+        assertEquals(true, isExternalViewIntakeScheme("file"))
+        assertEquals(true, isExternalViewIntakeScheme(null))
     }
 
     @Test

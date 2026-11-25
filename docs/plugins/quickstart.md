@@ -10,7 +10,7 @@ PI plugins are **Kotlin code plugins**: implement `SuperPIPlugin` from `plugin-a
 
 ## Quick start
 
-`plugin-api` is the only contract artifact (Android library, package `io.github.whywood.superpi.plugin.api`): the current release is `2.0.1`, whose transitive dependency is `design 1.0.0` (take the latest release in `SuperPI-Maven` as authoritative); `PLUGIN_API_LEVEL = 7`, `BASELINE_API_LEVEL = 7`, `MIN_SUPPORTED_API_LEVEL = 7`, `HOST_UI_API_LEVEL = 3`.
+`plugin-api` is the only contract artifact (Android library, package `io.github.whywood.superpi.plugin.api`): the current release is `2.0.2`, whose transitive dependency is `design 1.1.0` (take the latest release in `SuperPI-Maven` as authoritative); `PLUGIN_API_LEVEL = 7`, `BASELINE_API_LEVEL = 7`, `MIN_SUPPORTED_API_LEVEL = 7`, `HOST_UI_API_LEVEL = 3`.
 
 `plugin-api 2.0.0` / `design 1.0.0` start the SuperPI contract line at API level 7: the Kotlin package, plugin interface and Maven group are renamed, plugin ids use `io.github.whywood.superpi.plugin.*`, and host UI API level is 3. Plugins must be rebuilt and declare `apiLevel: 7`; old 1.x plugins are rejected. Later 2.x releases stay binary-compatible within level 7. The compatibility promise is in `plugin-api/COMPATIBILITY.md`: within one `apiLevel` only binary-compatible additions, and deleting, renaming, changing signatures or changing semantics requires a new `apiLevel`; the host rejects plugins with an `apiLevel` above its own, and level 5 has not been accepted since 1.0.4.
 
@@ -19,7 +19,7 @@ Start a plugin project from [`plugins/template/`](../../plugins/template): a sta
 Prerequisites:
 
 - JDK 17+ and the Android SDK; locate the SDK with the `ANDROID_HOME`/`ANDROID_SDK_ROOT` environment variables or `sdk.dir` in the project's `local.properties`.
-- Plugins depend on the public Maven repository `https://sadami3066.github.io/SuperPI-Maven` (group `io.github.sadami3066.superpi`, currently `plugin-api 2.0.1` / `design 1.0.0`, take the latest release as authoritative); no local mavenLocal publish is needed.
+- Plugins depend on the public Maven repository `https://sadami3066.github.io/SuperPI-Maven` (group `io.github.sadami3066.superpi`, currently `plugin-api 2.0.2` / `design 1.1.0`, take the latest release as authoritative); no local mavenLocal publish is needed.
 
 `plugin-api` is the contract, and `design` is the UI design system shared with the app (plugin UI uses it directly, and `plugin-api` brings it in through `api()`). Publishing a new version:
 
@@ -54,7 +54,7 @@ With the template unchanged, `rootProject.name` is `plugin-template` and the art
 
 Installing: transfer the `.ddp` to the phone, then open it with PI from a file manager, share the file to PI, or pick it with "Import plugin" on the Plugins page. The confirmation page shows name/version/size/whole-package sha256/publisher name and `keyId`, the tools/skills/pages/prompt override (when `prompt` is declared) it will provide, and the capability/permission/component declarations; the first import asks you to trust the publisher, and only after confirming does the host write the TOFU trust store, unpack, install and enable immediately (when `defaultEnabled` is true). Later upgrades must be signed with the same publisher key.
 
-Device regression is driven by scripts at the host repository root (with the device connected): `scripts/plugin-bundles-e2e.sh` regresses install and activation for the five official plugin bundles; `scripts/plugin-e2e.sh` regresses install, run, disable and upgrade with the `sample` test fixture from the plugin repository. The scripts install the debug build with `adb install`, push the `.ddp` into the app's external private directory, need no root, and run on normal devices or emulators.
+Device regression is driven by scripts at the host repository root (with the device connected): `apps/android/scripts/plugin-bundles-e2e.sh` regresses install and activation for the ten official plugin bundles; `apps/android/scripts/plugin-e2e.sh` regresses install, run, disable and upgrade with the `sample` fixture. The scripts install the debug build with `adb install`, push the `.ddp` into the app's external private directory, need no root, and run on normal devices or emulators.
 
 ## Project and dependencies
 
@@ -73,7 +73,7 @@ A plugin is an ordinary Android application project; the artifact only needs `cl
 
 Dependency rules:
 
-- Libraries the host already provides can only be `compileOnly`: `io.github.sadami3066.superpi:plugin-api` (version from the latest `SuperPI-Maven` release; `api()` carries the matching `design:1.0.0`, and plugin UI uses its Dd components directly), Compose (`ui`/`foundation`/`material3` + BOM), `kotlinx-coroutines-core`, `kotlinx-serialization-json`.
+- Libraries the host already provides can only be `compileOnly`: `io.github.sadami3066.superpi:plugin-api` (version from the latest `SuperPI-Maven` release; `api()` carries the matching `design:1.1.0`, and plugin UI uses its Dd components directly), Compose (`ui`/`foundation`/`material3` + BOM), `kotlinx-coroutines-core`, `kotlinx-serialization-json`.
 - The host release applies R8 keep to plugin runtime dependencies (`plugin-api`, `design`, Kotlin, coroutines, Compose, plus `androidx.lifecycle`/`androidx.activity`/`androidx.savedstate` commonly used by plugin UI), so these libraries never lose classes in the minified build. Keep preserves ABI names only and is not a version compatibility promise: plugins still need a rebuild for each host SDK version, and host libraries outside the allowlist are not guaranteed to work.
 - **Do not** use `implementation` for these libraries: the host is parent-first, `plugin-api` and Compose exist only in the host, and duplicates packed into the plugin trigger class conflicts.
 - A plugin may bring its own third-party libraries, but they must be packed into `classes*.dex` and must avoid packages and class names the host already occupies.
@@ -90,14 +90,14 @@ Build/package/sign (copy `plugins/template/` or test directly inside `plugins/te
 cd template && ./gradlew assemblePlugin signPlugin verifyPlugin
 
 # Official plugin repository (plugins/official root)
-./scripts/check.sh        # build, sign and verify all five official plugins
+./scripts/check.sh        # build, sign and verify all ten official plugin modules
 ```
 
 Troubleshooting paths:
 
 - **Pre-install self-check** (`Signature OK` from `verifyPlugin` only proves the signature matches the digest and **does not mean it can be installed**; check each item before importing):
   - `id` matches the reverse-domain regex (at least two segments, e.g. `com.example.myplugin`);
-  - `version` is `major.minor.patch[suffix]`; `apiLevel` is 6 (≤ the host `PLUGIN_API_LEVEL`); `minHostVersion` is not higher than the host version (write `1.0.6` for 1.1.0 capabilities, keep `1.0.4` when using only older ones);
+  - `version` is `major.minor.patch[suffix]`; `apiLevel` is 7 (≤ the host `PLUGIN_API_LEVEL`); `minHostVersion` is not higher than the host version (write `2.0.0` for the 2.0.x contract line);
   - `permissions`/`components` match actual use and pair with `capabilities` (validated at install);
   - the `entryClass` class name is valid, the class is in one of the root `classes*.dex` files and has a no-arg constructor;
   - `provides` matches the actual contributions (tools/skills/uiSlots/pages), and tool names do not conflict with host reserved names;
@@ -114,7 +114,7 @@ Troubleshooting paths:
 - **Experimental API compile error**: `components()`/`credentials()`/`accessibility()` and `PromptOverridePlugin` need `@OptIn(PluginExperimentalApi::class)`.
 - **Page arguments unavailable**: `pageContext()`/`LocalPluginPageContext` are only valid while a plugin page renders, so read them inside the page content.
 - **Compile errors with old APIs**: `Unresolved reference` on old symbols such as `PluginTool(` / `PluginToolResult.Text` / `PluginEvent.SessionStarted` / `literal(` / `IconRef.Asset` → replace factories and interfaces item by item per "Migrating from API level 5 to level 6".
-- **Level 5 plugin rejected**: since 1.0.4 the host accepts only `apiLevel = 6`; old packages must be rebuilt with `plugin-api 1.0.0`, raise `apiLevel` and `minHostVersion`, and be signed again.
+- **Older plugin rejected**: host 2.0.0+ accepts only `apiLevel = 7`; rebuild with `plugin-api 2.0.x` / `design 1.1.0`, set `apiLevel: 7` and `minHostVersion: "2.0.0"`, then sign again.
 - **Load failure**: `ClassNotFoundException` → wrong `entryClass` or minified away; `NoSuchMethodException` → missing no-arg constructor; `NoClassDefFoundError` → host version mismatch or host dependencies packed into the bundle.
 - **Behavior differs**: `host.logs()` goes to the host log (logcat tag `SuperPIPlugin/<pluginId>`); exceptions thrown by plugins are isolated by the host and shown in the plugin row error.
 - **Tools/skills unchanged after refresh**: after changing state in a page, call `host.requestContributionsRefresh()`; a busy session is rebuilt only after the current round ends, and the current round does not change midway.
@@ -138,7 +138,7 @@ Troubleshooting paths:
 
 ## Reference
 
-- Contract source: `plugin-api/src/main/kotlin/io/github/whywood/superpi/plugin/api/` in the host repository; compatibility contract and changelog: `plugin-api/COMPATIBILITY.md`, `plugin-api/CHANGELOG.md`; ABI gate: `./scripts/api-compat.sh`
-- Design system: `design/` in the host repository (design 0.7.0 components and usage, carried to plugins through `plugin-api`)
+- Contract source: `apps/android/plugin-api/src/main/kotlin/io/github/whywood/superpi/plugin/api/`; compatibility contract and changelog: `apps/android/plugin-api/COMPATIBILITY.md`, `apps/android/plugin-api/CHANGELOG.md`; ABI gate: `apps/android/scripts/api-compat.sh`
+- Design system: `apps/android/design/` (design 1.1.0 components and usage, carried to plugins through `plugin-api`)
 - Plugin projects: [`plugins/official/`](../../plugins/official) (official implementations) and [`plugins/template/`](../../plugins/template) (template and starter project)
 - Product capabilities: [Getting Started](../user/getting-started.md); builds and modules: [Developer Guide](../contributing/development.md)

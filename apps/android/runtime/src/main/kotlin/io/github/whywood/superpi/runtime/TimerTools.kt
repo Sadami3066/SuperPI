@@ -19,6 +19,11 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
+enum class TimerToolScope {
+    SESSION_ONLY,
+    SUPER_AND_WORKERS,
+}
+
 private val TOOL_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
 
 private val FREQUENCY_VALUES = buildJsonArray {
@@ -33,7 +38,7 @@ private val TIMER_ACTION_VALUES = buildJsonArray {
     add(JsonPrimitive("delete"))
 }
 
-private val timerParameters: JsonObject = buildJsonObject {
+private fun buildTimerParameters(scope: TimerToolScope): JsonObject = buildJsonObject {
     put("type", "object")
     putJsonObject("properties") {
         putJsonObject("action") {
@@ -43,11 +48,11 @@ private val timerParameters: JsonObject = buildJsonObject {
         }
         putJsonObject("id") {
             put("type", "string")
-            put("description", "Timer id, required for update and delete")
+            put("description", "Timer id from timer(action=list), required for update and delete")
         }
         putJsonObject("prompt") {
             put("type", "string")
-            put("description", "Message sent to the current conversation when the timer fires")
+            put("description", "Message sent to the conversation when the timer fires")
         }
         putJsonObject("frequency") {
             put("type", "string")
@@ -74,46 +79,91 @@ private val timerParameters: JsonObject = buildJsonObject {
             put("type", "boolean")
             put("description", "Whether the timer is enabled")
         }
+        if (scope == TimerToolScope.SUPER_AND_WORKERS) {
+            putJsonObject("workerId") {
+                put("type", "string")
+                put("description", "Optional worker id (e.g. wrk-...) to bind a created timer to that worker instead of Super router")
+            }
+        }
     }
     put("required", buildJsonArray { add(JsonPrimitive("action")) })
 }
 
-fun timerTools(service: TimerService, binding: SessionBinding): List<CodingTool> =
-    timerTool(service, binding).let { delegate ->
-        val editable = setOf("prompt", "name", "frequency", "date", "time", "cron", "enabled")
-        listOf(
-            toolVariant(delegate, "timer_create", "Create a timer in this conversation. once needs date/time, cron needs a five-field expression. enabled defaults to true; false creates a disabled timer.", editable, setOf("prompt", "frequency"), "create"),
-            toolVariant(delegate, "timer_list", "List timers in this conversation with their ids, trigger details, enabled state and delivery results.", emptySet(), fixedAction = "list"),
-            toolVariant(delegate, "timer_update", "Update only supplied timer fields using an id from timer_list. The conversation cannot change.", editable + "id", setOf("id"), "update"),
-            toolVariant(delegate, "timer_delete", "Delete a timer by its id from timer_list.", setOf("id"), setOf("id"), "delete"),
-        )
-    }
+fun timerTools(
+    service: TimerService,
+    binding: SessionBinding,
+    scope: TimerToolScope = TimerToolScope.SESSION_ONLY,
+    targetResolver: (suspend (String) -> BoundSession?)? = null,
+): List<CodingTool> = listOf(timerTool(service, binding, scope, targetResolver))
 
-private fun timerTool(service: TimerService, binding: SessionBinding): CodingTool = CodingTool(
-    name = "timer",
-    description = "Create, list, update or delete timers bound to this conversation. A timer posts a message here when it fires. frequency=once needs date/time; frequency=cron needs a five-field expression.",
-    parameters = timerParameters,
-    label = "timer",
-    execute = { _, args, signal, _ ->
-        signal?.throwIfAborted()
-        timerToolResult {
-            when (val action = args.requiredString("action").lowercase()) {
-                "create" -> createTimer(service, binding, args)
-                "list" -> listTimers(service, binding)
-                "update" -> updateTimer(service, binding, args)
-                "delete" -> deleteTimer(service, binding, args)
-                else -> textResult("action must be create, list, update or delete.", isError = true)
-            }
+private fun timerTool(
+    service: TimerService,
+    binding: SessionBinding,
+    scope: TimerToolScope,
+    targetResolver: (suspend (String) -> BoundSession?)?,
+): CodingTool {
+    val parameters = buildTimerParameters(scope)
+    val boundSession = binding.current()
+    val isWorker = boundSession != null && SuperRuntime.parseWorkerSessionId(boundSession.sessionId) != null
+    val baseDescription = "Create, list, update or delete timers bound to this conversation. A timer triggers an automated conversation prompt on a schedule (unlike calendar, which manages events in the phone's Calendar app). frequency=once needs date/time; frequency=cron needs a five-field expression."
+    val fullDescription = buildString {
+        append(baseDescription)
+        if (scope == TimerToolScope.SUPER_AND_WORKERS) {
+            append(" Lists and manages both Super router timers and worker timers; pass workerId on create to schedule a check directly on a specific worker.")
+        } else if (isWorker) {
+            append(" For recurring monitoring checks on a worker, if a scheduled check finds nothing new to report back to Super, reply ONLY with [NO_UPDATE].")
         }
-    },
-)
+    }
+    return CodingTool(
+        name = "timer",
+        description = fullDescription,
+        parameters = parameters,
+        label = "timer",
+        execute = { _, args, signal, _ ->
+            signal?.throwIfAborted()
+            timerToolResult {
+                when (args.requiredString("action").lowercase()) {
+                    "create" -> createTimer(service, binding, parameters, scope, targetResolver, args)
+                    "list" -> listTimers(service, binding, parameters, scope, args)
+                    "update" -> updateTimer(service, binding, parameters, scope, args)
+                    "delete" -> deleteTimer(service, binding, parameters, scope, args)
+                    else -> textResult("action must be create, list, update or delete.", isError = true)
+                }
+            }
+        },
+    )
+}
 
 private suspend fun createTimer(
     service: TimerService,
     binding: SessionBinding,
+    parameters: JsonObject,
+    scope: TimerToolScope,
+    targetResolver: (suspend (String) -> BoundSession?)?,
     args: JsonObject,
 ): AgentToolResult {
-    val session = requireSession(binding)
+    val allowed = buildSet {
+        addAll(listOf("action", "prompt", "name", "frequency", "date", "time", "cron", "enabled"))
+        if (scope == TimerToolScope.SUPER_AND_WORKERS) add("workerId")
+    }
+    validateActionArgs(
+        label = "timer(action=create)",
+        args = args,
+        parameters = parameters,
+        allowedFields = allowed,
+        requiredFields = setOf("prompt", "frequency"),
+    )
+    val requestedWorkerId = if (scope == TimerToolScope.SUPER_AND_WORKERS) {
+        args.stringOrNull("workerId")?.trim()?.takeIf { it.isNotEmpty() }
+    } else {
+        null
+    }
+    val session = if (requestedWorkerId != null) {
+        targetResolver?.invoke(requestedWorkerId)
+            ?: throw IllegalArgumentException("Worker not found: $requestedWorkerId")
+    } else {
+        requireSession(binding)
+    }
     val sessionFile = session.sessionFile
         ?: throw IllegalArgumentException("Current conversation is not saved yet; cannot create a timer")
     val prompt = args.requiredString("prompt")
@@ -131,17 +181,24 @@ private suspend fun createTimer(
             cwd = session.cwd,
         ),
     )
-    return textResult(timerJson(created).toString())
+    return textResult(timerJson(created, includeTarget = scope == TimerToolScope.SUPER_AND_WORKERS).toString())
 }
 
-private suspend fun listTimers(service: TimerService, binding: SessionBinding): AgentToolResult {
+private suspend fun listTimers(
+    service: TimerService,
+    binding: SessionBinding,
+    parameters: JsonObject,
+    scope: TimerToolScope,
+    args: JsonObject,
+): AgentToolResult {
+    validateActionArgs("timer(action=list)", args = args, parameters = parameters, allowedFields = setOf("action"))
     val session = requireSession(binding)
     val timers = service.list()
-        .filter { it.sessionId == session.sessionId }
+        .filter { belongsToScope(it.sessionId, session.sessionId, scope) }
         .sortedWith(compareBy({ it.nextRunAt ?: Long.MAX_VALUE }, { it.createdAt }))
     val result = buildJsonObject {
         putJsonArray("timers") {
-            timers.forEach { add(timerJson(it)) }
+            timers.forEach { add(timerJson(it, includeTarget = scope == TimerToolScope.SUPER_AND_WORKERS)) }
         }
     }
     return textResult(result.toString())
@@ -150,12 +207,21 @@ private suspend fun listTimers(service: TimerService, binding: SessionBinding): 
 private suspend fun updateTimer(
     service: TimerService,
     binding: SessionBinding,
+    parameters: JsonObject,
+    scope: TimerToolScope,
     args: JsonObject,
 ): AgentToolResult {
+    validateActionArgs(
+        label = "timer(action=update)",
+        args = args,
+        parameters = parameters,
+        allowedFields = setOf("action", "id", "prompt", "name", "frequency", "date", "time", "cron", "enabled"),
+        requiredFields = setOf("id"),
+    )
     val session = requireSession(binding)
     val id = args.requiredString("id")
     val existing = service.list()
-        .firstOrNull { it.id == id && it.sessionId == session.sessionId }
+        .firstOrNull { it.id == id && belongsToScope(it.sessionId, session.sessionId, scope) }
         ?: throw IllegalArgumentException("Timer not found: $id")
     val hasTriggerArgs = listOf("frequency", "date", "time", "cron").any { args.containsKey(it) }
     val trigger = if (hasTriggerArgs) {
@@ -163,7 +229,7 @@ private suspend fun updateTimer(
     } else {
         null
     }
-    require(args.keys.any { it !in setOf("id", "action") }) { "timer_update requires at least one changed field" }
+    require(args.keys.any { it !in setOf("id", "action") }) { "timer update requires at least one changed field" }
     val patch = TimerPatch(
         name = args.stringOrNull("name")?.trim()?.takeIf { it.isNotEmpty() },
         prompt = args.stringOrNull("prompt")?.takeIf { it.isNotBlank() },
@@ -172,18 +238,27 @@ private suspend fun updateTimer(
     )
     val updated = service.update(id, patch)
         ?: throw IllegalArgumentException("Timer not found: $id")
-    return textResult(timerJson(updated).toString())
+    return textResult(timerJson(updated, includeTarget = scope == TimerToolScope.SUPER_AND_WORKERS).toString())
 }
 
 private suspend fun deleteTimer(
     service: TimerService,
     binding: SessionBinding,
+    parameters: JsonObject,
+    scope: TimerToolScope,
     args: JsonObject,
 ): AgentToolResult {
+    validateActionArgs(
+        label = "timer(action=delete)",
+        args = args,
+        parameters = parameters,
+        allowedFields = setOf("action", "id"),
+        requiredFields = setOf("id"),
+    )
     val session = requireSession(binding)
     val id = args.requiredString("id")
     val existing = service.list()
-        .firstOrNull { it.id == id && it.sessionId == session.sessionId }
+        .firstOrNull { it.id == id && belongsToScope(it.sessionId, session.sessionId, scope) }
         ?: throw IllegalArgumentException("Timer not found: $id")
     if (!service.delete(existing.id)) {
         throw IllegalArgumentException("Timer not found: $id")
@@ -193,6 +268,15 @@ private suspend fun deleteTimer(
         put("id", id)
     }
     return textResult(result.toString())
+}
+
+private fun belongsToScope(
+    timerSessionId: String,
+    currentSessionId: String,
+    scope: TimerToolScope,
+): Boolean = when (scope) {
+    TimerToolScope.SESSION_ONLY -> timerSessionId == currentSessionId
+    TimerToolScope.SUPER_AND_WORKERS -> SuperRuntime.isSuperManagedSessionId(timerSessionId)
 }
 
 private fun requireSession(binding: SessionBinding): BoundSession =
@@ -209,9 +293,16 @@ private suspend fun timerToolResult(block: suspend () -> AgentToolResult): Agent
         textResult(error.message ?: "Timer operation failed", isError = true)
     }
 
-private fun timerJson(timer: Timer): JsonObject = buildJsonObject {
+private fun timerJson(timer: Timer, includeTarget: Boolean = false): JsonObject = buildJsonObject {
     put("id", timer.id)
     put("name", timer.name)
+    if (includeTarget) {
+        val workerId = SuperRuntime.parseWorkerSessionId(timer.sessionId)
+        put("target", if (workerId != null) "worker" else "super")
+        if (workerId != null) {
+            put("workerId", workerId)
+        }
+    }
     put("trigger", timer.trigger.toJsonObject())
     if (timer.nextRunAt == null) {
         put("nextRunAt", JsonNull)

@@ -32,8 +32,13 @@ class SuperPIBashToolTest {
             handler(command, timeoutSeconds, signal)
     }
 
-    private fun args(command: String = "true", timeout: Double? = null): JsonObject = buildJsonObject {
+    private fun args(
+        command: String = "true",
+        description: String = "Run command",
+        timeout: Double? = null,
+    ): JsonObject = buildJsonObject {
         put("command", command)
+        put("description", description)
         if (timeout != null) put("timeout", timeout)
     }
 
@@ -46,7 +51,7 @@ class SuperPIBashToolTest {
 
         assertEquals("bash", schema.name)
         assertEquals(
-            listOf("command"),
+            listOf("command", "description"),
             schema.parameters.getValue("required").jsonArray.map { it.jsonPrimitive.content },
         )
         assertTrue(schema.parameters.getValue("properties").jsonObject.containsKey("timeout"))
@@ -212,5 +217,45 @@ class SuperPIBashToolTest {
                     .execute("call", args(), null, null)
             }
         }
+    }
+
+    @Test
+    fun requiresDescriptionInSchemaAndExecution() = runBlocking {
+        val bashTool = tool(executor { _, _, _ -> ShellResult("done\n", 0) })
+        val properties = bashTool.parameters.getValue("properties").jsonObject
+        val required = bashTool.parameters.getValue("required").jsonArray.map { it.jsonPrimitive.content }
+        assertTrue(properties.containsKey("description"))
+        assertTrue(required.contains("description"))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                bashTool.execute("missing-desc", buildJsonObject { put("command", "echo hi") }, null, null)
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                bashTool.execute(
+                    "blank-desc",
+                    buildJsonObject {
+                        put("command", "echo hi")
+                        put("description", "   ")
+                    },
+                    null,
+                    null,
+                )
+            }
+        }
+
+        val result = bashTool.execute(
+            "desc-call",
+            buildJsonObject {
+                put("command", "echo hi")
+                put("description", "Print greeting")
+            },
+            null,
+            null,
+        )
+        assertNull(result.isError)
+        assertTrue(resultText(result).contains("[exit: 0]"))
     }
 }

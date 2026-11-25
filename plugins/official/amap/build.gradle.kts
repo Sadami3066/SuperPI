@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.whywood.superpi.plugin.amap"
         minSdk = 29
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.5.3"
+        versionCode = 12
+        versionName = "1.5.4"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

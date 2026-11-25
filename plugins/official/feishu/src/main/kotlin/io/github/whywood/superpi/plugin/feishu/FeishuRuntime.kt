@@ -96,13 +96,14 @@ internal class FeishuRuntime {
                 pageState.update { it.copy(checking = false) }
                 throw error
             } catch (error: Exception) {
+                runCatching { host.logs().warn("feishu status refresh failed", error) }
                 pageState.update { current ->
                     if (current.errorOperation != null) {
                         current.copy(checking = false)
                     } else {
                         current.copy(
                             checking = false,
-                            error = error.message ?: host.text(ERROR_UNKNOWN),
+                            error = host.text(ERROR_STATUS),
                             errorOperation = null,
                         )
                     }
@@ -256,7 +257,7 @@ internal class FeishuRuntime {
             previous.copy(
                 installedVersion = version,
                 checkedAt = checkedAt,
-                message = host.text(ERROR_STATUS, statusResult.stdout.takeLast(200).trim()),
+                message = statusFailureMessage(host, statusResult.stdout),
             )
         } else {
             FeishuSnapshot(
@@ -366,7 +367,7 @@ internal class FeishuRuntime {
         pageState.update { it.copy(stage = STAGE_AUTH, authUrl = null) }
         val start = linux.exec(FeishuCli.loginStartCommand(), timeoutMs = LOGIN_START_TIMEOUT_MS)
         val challenge = FeishuCli.parseLoginChallenge(start.stdout)
-            ?: throw IllegalStateException(host.text(ERROR_AUTH_OUTPUT, start.stdout.takeLast(300).trim()))
+            ?: throw authFailure(host, start.stdout)
         pageState.update { it.copy(stage = STAGE_AUTH, authUrl = challenge.verificationUrl) }
         val poll = linux.exec(
             FeishuCli.loginPollCommand(challenge.deviceCode),
@@ -377,7 +378,7 @@ internal class FeishuRuntime {
         if (poll.exitCode != 0 && result?.account == null) {
             val current = readAuthStatus(linux)
             if (current?.userReady != true) {
-                throw IllegalStateException(host.text(ERROR_AUTH_OUTPUT, poll.stdout.takeLast(300).trim()))
+                throw authFailure(host, poll.stdout)
             }
             memory = memory?.copy(missingScopes = emptyList())
         } else {
@@ -413,7 +414,7 @@ internal class FeishuRuntime {
         }
         pageState.update { it.copy(authUrl = null) }
         if (exitCode != 0) {
-            throw IllegalStateException(host.text(ERROR_AUTH_OUTPUT, tail.toString().takeLast(300).trim()))
+            throw authFailure(host, tail.toString())
         }
         if (found == null) {
             throw IllegalStateException(host.text(ERROR_AUTH))
@@ -425,12 +426,23 @@ internal class FeishuRuntime {
         pageState.update { it.copy(stage = STAGE_SIGNING_OUT) }
         val result = linux.exec(FeishuCli.logoutCommand(), timeoutMs = LOGOUT_TIMEOUT_MS)
         if (result.exitCode != 0) {
-            throw IllegalStateException(host.text(ERROR_LOGOUT, result.stdout.takeLast(300).trim()))
+            runCatching { host.logs().warn("feishu logout failed: ${result.stdout.takeLast(300).trim()}") }
+            throw IllegalStateException(host.text(ERROR_LOGOUT))
         }
         memory = memory?.copy(connected = false, account = null, scopeCount = 0, missingScopes = emptyList())
         refresh(host)
         host.requestContributionsRefresh()
         host.ui().snackbar(host.text(SNACKBAR_LOGGED_OUT))
+    }
+
+    private fun statusFailureMessage(host: PluginHost, output: String): String {
+        runCatching { host.logs().warn("feishu status read failed: ${output.takeLast(300).trim()}") }
+        return host.text(ERROR_STATUS)
+    }
+
+    private fun authFailure(host: PluginHost, output: String): IllegalStateException {
+        runCatching { host.logs().warn("feishu authorization failed: ${redactFeishuAuthLog(output)}") }
+        return IllegalStateException(host.text(ERROR_AUTH_OUTPUT))
     }
 
     private fun notifyInstalled(host: PluginHost) {
@@ -458,4 +470,17 @@ internal class FeishuRuntime {
 
     private fun requireLinux(host: PluginHost): LinuxService =
         linuxOrNull(host) ?: throw IllegalStateException(host.text(ERROR_LINUX))
+
+    private fun redactFeishuAuthLog(output: String): String {
+        val tail = output.takeLast(300).trim()
+        val withoutUrls = AUTH_URL_REGEX.replace(tail, "[redacted-url]")
+        return AUTH_SECRET_REGEX.replace(withoutUrls, "$1$2[redacted]")
+    }
+
+    private companion object {
+        val AUTH_URL_REGEX = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
+        val AUTH_SECRET_REGEX = Regex(
+            "(?i)\\b(device_code|user_code|access_token|refresh_token|token|secret|code|state)\\b(\\s*[:=]\\s*)\"?[^\\s,\"'}]+\"?",
+        )
+    }
 }

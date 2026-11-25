@@ -1,29 +1,19 @@
 package io.github.whywood.superpi.ui.settings
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -41,12 +31,12 @@ import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdSegmentedControl
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdType
-import io.github.whywood.superpi.design.SuperPIColors
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.theme.ThemeAppearanceMode
 import io.github.whywood.superpi.theme.ThemeChoice
 import io.github.whywood.superpi.theme.ThemeOption
 import io.github.whywood.superpi.theme.ThemeSource
+import io.github.whywood.superpi.ui.common.ThemeMiniPreview
 
 @Composable
 fun ThemeScreen(
@@ -200,61 +190,6 @@ private fun ThemeRow(
             if (selected) {
                 Spacer(Modifier.width(DdSpacing.Md))
                 DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 18.dp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ThemeMiniPreview(
-    preview: SuperPIColors,
-    selected: Boolean,
-    selectedBorder: Color,
-) {
-    val shape = RoundedCornerShape(8.dp)
-    val borderWidth = if (selected) 1.5.dp else 1.dp
-    val borderColor = if (selected) selectedBorder else preview.hairline
-    Box(
-        modifier = Modifier
-            .size(width = 48.dp, height = 34.dp)
-            .clip(shape)
-            .background(preview.paper)
-            .border(borderWidth, borderColor, shape)
-            .padding(5.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(RoundedCornerShape(4.dp))
-                .background(preview.surface)
-                .padding(horizontal = 5.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(0.68f)
-                    .height(3.dp)
-                    .clip(CircleShape)
-                    .background(preview.ink.copy(alpha = 0.85f)),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(0.48f)
-                        .height(2.5.dp)
-                        .clip(CircleShape)
-                        .background(preview.inkTertiary.copy(alpha = 0.65f)),
-                )
-                Box(
-                    Modifier
-                        .size(width = 10.dp, height = 5.dp)
-                        .clip(CircleShape)
-                        .background(preview.accent),
-                )
             }
         }
     }

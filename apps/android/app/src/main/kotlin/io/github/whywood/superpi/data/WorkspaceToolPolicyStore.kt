@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.data
 
+import io.github.whywood.superpi.runtime.MemoryAccessScope
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,16 +18,24 @@ data class WorkspaceToolPolicy(
     val mcpServers: Set<String> = emptySet(),
     val screenTools: Boolean = false,
     val miniappTools: Boolean = false,
+    val memoryScope: MemoryAccessScope? = null,
+    val memoryDispatch: Boolean? = null,
 ) {
     val isEmpty: Boolean
         get() = !allCapabilities && skills.isEmpty() && plugins.isEmpty() &&
-            mcpServers.isEmpty() && !screenTools && !miniappTools
+            mcpServers.isEmpty() && !screenTools && !miniappTools &&
+            memoryScope == null && memoryDispatch == null
 
     fun enabledSkills(installed: Set<String>): Set<String> = resolve(installed, skills)
 
     fun enabledPlugins(installed: Set<String>): Set<String> = resolve(installed, plugins)
 
     fun enabledMcpServers(installed: Set<String>): Set<String> = resolve(installed, mcpServers)
+
+    fun effectiveMemoryScope(): MemoryAccessScope = memoryScope ?: MemoryAccessScope.PERSONAL
+
+    fun effectiveMemoryDispatch(isHome: Boolean = allCapabilities): Boolean =
+        if (effectiveMemoryScope() == MemoryAccessScope.OFF) false else (memoryDispatch ?: isHome)
 
     private fun resolve(installed: Set<String>, selection: Set<String>): Set<String> =
         if (allCapabilities) installed - selection else installed.intersect(selection)
@@ -76,6 +85,14 @@ class WorkspaceToolPolicyStore(private val file: File) {
                             mcpServers = item.stringSet("mcpServers"),
                             screenTools = item.optBoolean("screenTools", false),
                             miniappTools = item.optBoolean("miniappTools", false),
+                            memoryScope = item.optString("memoryScope")
+                                .takeIf { it.isNotBlank() }
+                                ?.let { MemoryAccessScope.fromWire(it) },
+                            memoryDispatch = if (item.has("memoryDispatch") && !item.isNull("memoryDispatch")) {
+                                item.optBoolean("memoryDispatch")
+                            } else {
+                                null
+                            },
                         ),
                     )
                 }
@@ -86,16 +103,16 @@ class WorkspaceToolPolicyStore(private val file: File) {
     private fun writeToDisk(policies: Map<String, WorkspaceToolPolicy>) {
         val root = JSONObject()
         policies.forEach { (cwd, policy) ->
-            root.put(
-                cwd,
-                JSONObject()
-                    .put("allCapabilities", policy.allCapabilities)
-                    .put("skills", org.json.JSONArray(policy.skills.toList()))
-                    .put("plugins", org.json.JSONArray(policy.plugins.toList()))
-                    .put("mcpServers", org.json.JSONArray(policy.mcpServers.toList()))
-                    .put("screenTools", policy.screenTools)
-                    .put("miniappTools", policy.miniappTools),
-            )
+            val obj = JSONObject()
+                .put("allCapabilities", policy.allCapabilities)
+                .put("skills", org.json.JSONArray(policy.skills.toList()))
+                .put("plugins", org.json.JSONArray(policy.plugins.toList()))
+                .put("mcpServers", org.json.JSONArray(policy.mcpServers.toList()))
+                .put("screenTools", policy.screenTools)
+                .put("miniappTools", policy.miniappTools)
+            policy.memoryScope?.let { obj.put("memoryScope", it.wire) }
+            policy.memoryDispatch?.let { obj.put("memoryDispatch", it) }
+            root.put(cwd, obj)
         }
         val temp = File(file.parentFile, file.name + ".tmp")
         temp.writeText(root.toString())

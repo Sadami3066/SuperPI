@@ -3,7 +3,9 @@ package io.github.whywood.superpi.runtime
 import io.github.whywood.superpi.sdk.agent.AgentToolResult
 import io.github.whywood.superpi.sdk.ai.RequestAbortedException
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
+import io.github.whywood.superpi.sdk.coding.tools.formatSize
 import io.github.whywood.superpi.sdk.coding.tools.textResult
+import io.github.whywood.superpi.sdk.coding.tools.truncateTail
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -57,18 +59,11 @@ private val jobParameters: JsonObject = buildJsonObject {
 }
 
 fun jobTools(binding: SessionBinding, registry: JobRegistry): List<CodingTool> =
-    jobTool(binding, registry).let { delegate ->
-        listOf(
-            toolVariant(delegate, "job_start", "Start a long-running shell command in this conversation and return its job id immediately.", setOf("command", "label"), setOf("command"), "start"),
-            toolVariant(delegate, "job_output", "Read output since the previous read and the current status. wait=true waits for new output or completion; timeout leaves the job running.", setOf("jobId", "wait", "timeoutMs"), setOf("jobId"), "output"),
-            toolVariant(delegate, "job_list", "List this conversation's running and finished background jobs.", emptySet(), fixedAction = "list"),
-            toolVariant(delegate, "job_kill", "Request cancellation of a background job. Read job_output to confirm its final status.", setOf("jobId", "reason"), setOf("jobId"), "kill"),
-        )
-    }
+    listOf(jobTool(binding, registry))
 
 private fun jobTool(binding: SessionBinding, registry: JobRegistry): CodingTool = CodingTool(
     name = "job",
-    description = "Start, read, list or cancel background shell jobs in the current conversation. start returns a job id; output returns output since the previous read plus a status line; list shows this conversation's jobs; kill requests cancellation.",
+    description = "Start, read, list or cancel background shell jobs in the current conversation. action=start returns a job id; action=output returns output since the previous read plus a status line; action=list shows this conversation's jobs; action=kill requests cancellation.",
     parameters = jobParameters,
     label = "job",
     execute = { _, args, signal, _ ->
@@ -77,7 +72,7 @@ private fun jobTool(binding: SessionBinding, registry: JobRegistry): CodingTool 
             when (val action = args.requiredJobString("action").lowercase()) {
                 "start" -> jobStart(binding, registry, args)
                 "output" -> jobOutput(binding, registry, args)
-                "list" -> jobList(binding, registry)
+                "list" -> jobList(binding, registry, args)
                 "kill" -> jobKill(binding, registry, args)
                 else -> textResult("action must be start, output, list or kill.", isError = true)
             }
@@ -86,6 +81,13 @@ private fun jobTool(binding: SessionBinding, registry: JobRegistry): CodingTool 
 )
 
 private suspend fun jobStart(binding: SessionBinding, registry: JobRegistry, args: JsonObject): AgentToolResult {
+    validateActionArgs(
+        label = "job(action=start)",
+        args = args,
+        parameters = jobParameters,
+        allowedFields = setOf("action", "command", "label"),
+        requiredFields = setOf("command"),
+    )
     val session = activeJobSession(binding)
     val command = args.requiredJobString("command")
     val label = args.jobStringOrNull("label").orEmpty()
@@ -96,12 +98,19 @@ private suspend fun jobStart(binding: SessionBinding, registry: JobRegistry, arg
     } else {
         textResult(
             "Started background job $jobId.\n\n" +
-                "Use job_output with jobId=$jobId to read output, or job_kill to stop it.",
+                "Use job with action=output and jobId=$jobId to read output, or action=kill to stop it.",
         )
     }
 }
 
 private suspend fun jobOutput(binding: SessionBinding, registry: JobRegistry, args: JsonObject): AgentToolResult {
+    validateActionArgs(
+        label = "job(action=output)",
+        args = args,
+        parameters = jobParameters,
+        allowedFields = setOf("action", "jobId", "wait", "timeoutMs"),
+        requiredFields = setOf("jobId"),
+    )
     val session = activeJobSession(binding)
     val jobId = args.requiredJobString("jobId", "job_id")
     requireJobOwner(registry, session.sessionId, jobId)
@@ -114,12 +123,23 @@ private suspend fun jobOutput(binding: SessionBinding, registry: JobRegistry, ar
         else -> registry.awaitRead(jobId, true, timeout)
     }
     val status = "[status: ${jobStatusText(read.status, read.exitCode)}]"
-    val prefix = if (read.dropped) "[older output was dropped from the in-memory buffer]\n" else ""
-    val text = prefix + if (read.output.isEmpty()) status else read.output.trimEnd('\n') + "\n" + status
+    val trimmed = read.output.trimEnd('\n')
+    val tail = truncateTail(trimmed)
+    val prefixes = buildList {
+        if (read.dropped) add("[older output was dropped from the in-memory buffer]")
+        if (tail.truncated) {
+            val lines = if (tail.text.isEmpty()) 0 else tail.text.lineSequence().count()
+            val bytes = tail.text.encodeToByteArray().size
+            add("[output truncated to the last $lines lines (${formatSize(bytes)})]")
+        }
+    }
+    val prefix = if (prefixes.isEmpty()) "" else prefixes.joinToString("\n") + "\n"
+    val text = prefix + if (tail.text.isEmpty()) status else tail.text + "\n" + status
     return textResult(text, isError = read.status == JobStatus.FAILED)
 }
 
-private fun jobList(binding: SessionBinding, registry: JobRegistry): AgentToolResult {
+private fun jobList(binding: SessionBinding, registry: JobRegistry, args: JsonObject): AgentToolResult {
+    validateActionArgs("job(action=list)", args = args, parameters = jobParameters, allowedFields = setOf("action"))
     val session = activeJobSession(binding)
     val lines = registry.jobs.value
         .filter { it.sessionId == session.sessionId }
@@ -128,6 +148,13 @@ private fun jobList(binding: SessionBinding, registry: JobRegistry): AgentToolRe
 }
 
 private suspend fun jobKill(binding: SessionBinding, registry: JobRegistry, args: JsonObject): AgentToolResult {
+    validateActionArgs(
+        label = "job(action=kill)",
+        args = args,
+        parameters = jobParameters,
+        allowedFields = setOf("action", "jobId", "reason"),
+        requiredFields = setOf("jobId"),
+    )
     val session = activeJobSession(binding)
     val jobId = args.requiredJobString("jobId", "job_id")
     requireJobOwner(registry, session.sessionId, jobId)

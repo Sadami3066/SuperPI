@@ -117,7 +117,6 @@ internal fun ChatTurn(
     onOpenFile: (String) -> Unit,
     onRetry: (Long) -> Unit,
     attachmentRoot: File,
-    autoCollapseProcess: Boolean = true,
     processDetail: ProcessDetail = ProcessDetail.DETAILED,
     pendingQuestions: List<PendingQuestion> = emptyList(),
     onAnswerQuestion: (PendingQuestion, List<QuestionAnswer>) -> Unit = { _, _ -> },
@@ -177,7 +176,6 @@ internal fun ChatTurn(
             onOpenFile = onOpenFile,
             onRetry = onRetry,
             attachmentRoot = attachmentRoot,
-            autoCollapseProcess = autoCollapseProcess,
             processDetail = processDetail,
             pendingQuestions = pendingQuestions,
             onAnswerQuestion = onAnswerQuestion,
@@ -533,7 +531,6 @@ private fun AssistantTurn(
     onOpenFile: (String) -> Unit,
     onRetry: (Long) -> Unit,
     attachmentRoot: File,
-    autoCollapseProcess: Boolean,
     processDetail: ProcessDetail,
     pendingQuestions: List<PendingQuestion>,
     onAnswerQuestion: (PendingQuestion, List<QuestionAnswer>) -> Unit,
@@ -570,21 +567,18 @@ private fun AssistantTurn(
                             message = message,
                             isTrailingBlock = block.key == lastBlockKey,
                             showTotalDuration = activityCount == 1,
-                            autoCollapseProcess = autoCollapseProcess,
                             processDetail = processDetail,
                             onToggleStep = onToggleStep,
                             onCopyOutput = onCopyOutput,
                             onFileClick = onOpenFile,
                         )
 
-                        is TurnBlock.Text -> ContentEntrance(block.key, animate = message.streaming) {
-                            AnswerText(
-                                message = message,
-                                text = block.step.text.trim(),
-                                onQuote = onQuote,
-                                onOpenFile = onOpenFile,
-                            )
-                        }
+                        is TurnBlock.Text -> AnswerText(
+                            message = message,
+                            text = block.step.text.trim(),
+                            onQuote = onQuote,
+                            onOpenFile = onOpenFile,
+                        )
 
                         is TurnBlock.Card -> ContentEntrance(block.key, animate = message.streaming) {
                             AnswerCardBlock(

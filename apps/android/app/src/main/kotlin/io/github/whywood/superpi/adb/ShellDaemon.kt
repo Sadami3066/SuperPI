@@ -8,14 +8,19 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlin.system.exitProcess
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 object ShellDaemon {
     private const val HELPER_CLASS = "io.github.whywood.superpi.vscreen.VirtualScreenHelperMain"
     private const val LOG_FILE = "/data/local/tmp/superpi-vscreen.log"
     private var token = ""
+    @Volatile
+    private var serverSocket: ServerSocket? = null
+    private val challenges = ConcurrentHashMap<String, Long>()
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -25,9 +30,10 @@ object ShellDaemon {
         token = args.getOrNull(1) ?: ""
         require(token.length >= 8) { "token too short" }
         val server = ServerSocket(port, 50, InetAddress.getByName("127.0.0.1"))
+        serverSocket = server
         println("SHD_READY port=$port pid=${android.os.Process.myPid()} uid=${android.os.Process.myUid()}")
         System.out.flush()
-        while (true) {
+        while (!server.isClosed) {
             val client = runCatching { server.accept() }.getOrNull() ?: continue
             thread(isDaemon = true) {
                 try {
@@ -45,43 +51,99 @@ object ShellDaemon {
         socket.soTimeout = 30_000
         val input = socket.getInputStream()
         val requestLine = readAsciiLine(input) ?: return
-        val path = requestLine.split(" ").getOrNull(1) ?: "/"
+        val requestParts = requestLine.split(" ")
+        val method = requestParts.firstOrNull().orEmpty().uppercase()
+        val path = requestParts.getOrNull(1) ?: "/"
+        val route = path.substringBefore('?')
         var contentLength = 0
-        var requestToken = ""
+        var requestNonce = ""
+        var requestAuth = ""
         var timeoutSeconds = DEFAULT_TIMEOUT_SECONDS
         while (true) {
             val line = readAsciiLine(input) ?: break
             if (line.isEmpty()) break
             when {
                 line.startsWith("content-length:", ignoreCase = true) ->
-                    contentLength = line.substring(15).trim().toIntOrNull() ?: 0
+                    contentLength = line.substring(15).trim().toIntOrNull() ?: -1
 
-                line.startsWith("x-token:", ignoreCase = true) ->
-                    requestToken = line.substring(8).trim()
+                line.startsWith("x-nonce:", ignoreCase = true) ->
+                    requestNonce = line.substring(8).trim()
+
+                line.startsWith("x-auth:", ignoreCase = true) ->
+                    requestAuth = line.substring(7).trim()
 
                 line.startsWith("x-timeout:", ignoreCase = true) ->
                     timeoutSeconds = (line.substring(10).trim().toLongOrNull() ?: timeoutSeconds)
                         .coerceIn(1, MAX_TIMEOUT_SECONDS)
             }
         }
-        if (requestToken != token) {
+        if (route == "/challenge" && method == "GET") {
+            val cnonce = queryParam(path, "cnonce").orEmpty()
+            if (!NONCE_PATTERN.matches(cnonce)) {
+                sendHttp(socket, 400, "INVALID_NONCE\n")
+                return
+            }
+            val snonce = issueChallenge()
+            val uid = android.os.Process.myUid()
+            val proof = ShellAuth.daemonProof(token, cnonce, snonce, uid)
+            sendHttp(
+                socket,
+                200,
+                "uid=$uid protocol=${ShellAuth.SHELL_PROTOCOL_VERSION} snonce=$snonce proof=$proof\n",
+            )
+            return
+        }
+        if (contentLength < 0 || contentLength > MAX_REQUEST_BODY_BYTES) {
+            sendHttp(socket, 413, "PAYLOAD_TOO_LARGE\n")
+            return
+        }
+        val expiresAt = challenges.remove(requestNonce)
+        if (expiresAt == null || System.currentTimeMillis() > expiresAt) {
             sendHttp(socket, 403, "DENIED\n")
             return
         }
         val body = readBody(input, contentLength)
-        val route = path.substringBefore('?')
+        val expectedAuth = ShellAuth.clientProof(token, requestNonce, method, path, ShellAuth.sha256Hex(body))
+        if (!ShellAuth.constantTimeEquals(requestAuth, expectedAuth)) {
+            sendHttp(socket, 403, "DENIED\n")
+            return
+        }
         val (code, response) = try {
             when (route) {
-                "/health" -> 200 to "uid=${android.os.Process.myUid()} ok protocol=2\n"
+                "/health" -> 200 to "uid=${android.os.Process.myUid()} ok protocol=${ShellAuth.SHELL_PROTOCOL_VERSION}\n"
                 "/exec" -> 200 to execShell(body, timeoutSeconds, socket)
                 "/start-helper" -> 200 to handleStartHelper(path)
                 "/kill-helper" -> 200 to handleKillHelper(path)
+                "/shutdown" -> {
+                    scheduleShutdown()
+                    200 to "ok protocol=${ShellAuth.SHELL_PROTOCOL_VERSION}\n"
+                }
                 else -> 404 to "not found\n"
             }
         } catch (failure: Throwable) {
             500 to "ERR: ${failure.message}\n"
         }
         sendHttp(socket, code, response)
+    }
+
+    private fun issueChallenge(): String {
+        val now = System.currentTimeMillis()
+        challenges.entries.removeIf { it.value <= now }
+        while (challenges.size >= MAX_PENDING_CHALLENGES) {
+            val firstKey = challenges.keys.firstOrNull() ?: break
+            challenges.remove(firstKey)
+        }
+        val nonce = ShellAuth.randomHex(16)
+        challenges[nonce] = now + CHALLENGE_TTL_MS
+        return nonce
+    }
+
+    private fun scheduleShutdown() {
+        thread(isDaemon = true, name = "shd-shutdown") {
+            runCatching { Thread.sleep(100) }
+            runCatching { serverSocket?.close() }
+            exitProcess(0)
+        }
     }
 
     private fun execShell(command: String, timeoutSeconds: Long, socket: Socket): String {
@@ -155,7 +217,7 @@ object ShellDaemon {
         val pid = queryParam(path, "pid")?.toIntOrNull() ?: return "need pid\n"
         val process = ProcessBuilder("/system/bin/kill", "-9", pid.toString()).start()
         process.waitFor(2, TimeUnit.SECONDS)
-        return "ok protocol=2\n"
+        return "ok protocol=${ShellAuth.SHELL_PROTOCOL_VERSION}\n"
     }
 
     private fun readBody(input: InputStream, length: Int): String {
@@ -212,4 +274,8 @@ object ShellDaemon {
     private const val DEFAULT_TIMEOUT_SECONDS = 20L
     private const val MAX_TIMEOUT_SECONDS = 120L
     private const val MAX_OUTPUT_CHARS = 2 * 1024 * 1024
+    private const val MAX_REQUEST_BODY_BYTES = 1024 * 1024
+    private const val CHALLENGE_TTL_MS = 30_000L
+    private const val MAX_PENDING_CHALLENGES = 128
+    private val NONCE_PATTERN = Regex("^[A-Za-z0-9]{16,128}$")
 }

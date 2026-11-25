@@ -108,9 +108,15 @@ internal class WecomReleaseSource : CliUpdateSource {
 
     override suspend fun discover(network: NetworkService?, installedVersion: String?): CliUpdateCheck {
         failure = null
-        val service = network ?: return CliUpdateCheck(latestVersion = null, release = null, failed = true)
+        val service = network ?: run {
+            failure = "network unavailable"
+            return CliUpdateCheck(latestVersion = null, release = null, failed = true)
+        }
         val body = CliHttp.getText(service, WecomReleases.REGISTRY_URL, timeoutMs = UPDATE_CHECK_TIMEOUT_MS)
-            ?: return CliUpdateCheck(latestVersion = null, release = null, failed = true)
+            ?: run {
+                failure = "registry fetch failed"
+                return CliUpdateCheck(latestVersion = null, release = null, failed = true)
+            }
         return when (val parsed = WecomReleases.parseRegistryRelease(body, System.currentTimeMillis())) {
             is WecomReleaseResult.Success -> CliUpdateCheck(
                 latestVersion = parsed.release.version,

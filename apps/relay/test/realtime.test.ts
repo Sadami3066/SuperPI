@@ -332,19 +332,25 @@ describe('realtime hub', () => {
       ops: [
         {
           opId: 'op-1',
-          kind: 'memory',
-          memory: {
-            id: 'mem-1',
-            kind: 'IDENTITY',
+          kind: 'event',
+          event: {
+            id: 'evt-1',
+            eventKind: 'FACT',
             content: 'One',
+            qualifiersJson: '{}',
+            semanticKeywords: [],
             tags: [],
-            entities: [],
-            confidence: 'CONFIRMED',
+            domain: 'PERSONAL',
+            sensitivity: 'NORMAL',
+            epistemicTier: 'USER_EXPLICIT',
             importance: 4,
             pinned: false,
+            eventTime: 1_000,
+            eventTimePrecision: 'DAY',
             validFrom: 1_000,
             status: 'ACTIVE',
             sourceKind: 'USER_MANUAL',
+            entityLinks: [],
             createdAt: 1_000,
             updatedAt: 1_000,
             revision: 1,
@@ -352,19 +358,25 @@ describe('realtime hub', () => {
         },
         {
           opId: 'op-2',
-          kind: 'memory',
-          memory: {
-            id: 'mem-2',
-            kind: 'HABIT',
+          kind: 'event',
+          event: {
+            id: 'evt-2',
+            eventKind: 'PREFERENCE',
             content: 'Two',
+            qualifiersJson: '{}',
+            semanticKeywords: [],
             tags: [],
-            entities: [],
-            confidence: 'OBSERVED',
+            domain: 'PERSONAL',
+            sensitivity: 'NORMAL',
+            epistemicTier: 'OBSERVED',
             importance: 3,
             pinned: false,
+            eventTime: 2_000,
+            eventTimePrecision: 'DAY',
             validFrom: 2_000,
             status: 'ACTIVE',
-            sourceKind: 'CHAT_AUTO',
+            sourceKind: 'AGENT_AUTO',
+            entityLinks: [],
             createdAt: 2_000,
             updatedAt: 2_000,
             revision: 1,
@@ -383,7 +395,8 @@ describe('realtime hub', () => {
     client.send(hello(desktop.deviceId))
     const helloOk = await nextOf(client, 'hello_ok')
     expect(helloOk.memoryVersion).toBe(2)
-    expect(helloOk.capabilities).toContain('memory-v2')
+    expect(helloOk.capabilities).toContain('memory-v3')
+    expect(helloOk.capabilities).not.toContain('memory-v2')
     expect(helloOk.devices.map((device) => device.deviceId)).toEqual([desktop.deviceId])
   })
 
@@ -400,26 +413,32 @@ describe('realtime hub', () => {
     clientB.send(hello(phoneB.deviceId))
     await nextOf(clientB, 'hello_ok')
 
-    const pushResponse = await fetch(`${harness.httpBase}/v2/memory/push`, {
+    const pushResponse = await fetch(`${harness.httpBase}/v3/memory/push`, {
       method: 'POST',
       headers: { authorization: `Bearer ${phoneA.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         ops: [
           {
             opId: 'push-a-1',
-            kind: 'memory',
-            memory: {
-              id: 'm-peer',
-              kind: 'IDENTITY',
+            kind: 'event',
+            event: {
+              id: 'evt-peer',
+              eventKind: 'PREFERENCE',
               content: 'Prefers decaf coffee',
+              qualifiersJson: '{}',
+              semanticKeywords: ['coffee'],
               tags: [],
-              entities: [],
-              confidence: 'CONFIRMED',
+              domain: 'PERSONAL',
+              sensitivity: 'NORMAL',
+              epistemicTier: 'USER_EXPLICIT',
               importance: 4,
               pinned: false,
+              eventTime: 5_000,
+              eventTimePrecision: 'DAY',
               validFrom: 5_000,
               status: 'ACTIVE',
               sourceKind: 'USER_MANUAL',
+              entityLinks: [],
               createdAt: 5_000,
               updatedAt: 5_000,
               revision: 1,
@@ -1021,5 +1040,172 @@ describe('realtime hub', () => {
     expect(stateInbound).toMatchObject({ id: 'rpc-state-after-lru', method: 'bot.state' })
     hostClient.send({ type: 'route_ok', id: 'rpc-state-after-lru', result: { busy: false } })
     expect(await nextOf(callerClient, 'route_ok')).toMatchObject({ id: 'rpc-state-after-lru' })
+  })
+
+  it('streams worker.start, preserves worker.resume across settled and sweeper with separate LRU, and broadcasts rich BotInfo', async () => {
+    let clock = 300_000
+    const harness = await startRelay({
+      now: () => clock,
+      hubOptions: { sweeperIntervalMs: 25 },
+    })
+    const caller = await enrollDevice(harness, 'Caller', 'android')
+    const host = await enrollDevice(harness, 'Host', 'android')
+
+    const callerClient = await Client.open(harness.wsBase, caller.token)
+    callerClient.send({
+      ...hello(caller.deviceId),
+      capabilities: ['remote-bot', 'super-worker'],
+    })
+    const helloOk = await nextOf(callerClient, 'hello_ok')
+    expect(helloOk.capabilities).toContain('super-worker')
+
+    const richBots: BotInfo[] = [
+      {
+        id: 'home',
+        name: 'PI',
+        intro: 'Phone assistant',
+        capabilities: {
+          skills: ['screen-ops'],
+          plugins: ['mail'],
+          mcpServers: ['calendar'],
+          screenTools: true,
+          miniappTools: false,
+          memoryScope: 'PERSONAL',
+          memoryDispatch: true,
+        },
+      },
+    ]
+    const hostClient = await Client.open(harness.wsBase, host.token)
+    hostClient.send({
+      ...hello(host.deviceId, richBots),
+      capabilities: ['remote-bot', 'super-worker'],
+    })
+    await nextOf(hostClient, 'hello_ok')
+    const presence = await nextOf(callerClient, 'presence')
+    expect(presence.bots).toEqual(richBots)
+
+    callerClient.send({
+      type: 'route',
+      id: 'wrk-start-1',
+      to: host.deviceId,
+      method: 'worker.start',
+      params: { botId: 'home', task: 'Run diagnostics' },
+    })
+    expect(await nextOf(hostClient, 'route')).toMatchObject({ id: 'wrk-start-1', method: 'worker.start' })
+    hostClient.send({ type: 'route_ok', id: 'wrk-start-1', result: { workerId: 'w1', status: 'RUNNING' } })
+    expect(await nextOf(callerClient, 'route_ok')).toMatchObject({ id: 'wrk-start-1' })
+
+    hostClient.send({ type: 'route_event', id: 'wrk-start-1', seq: 0, event: { type: 'agent_start' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'wrk-start-1', seq: 0 })
+    hostClient.send({ type: 'route_event', id: 'wrk-start-1', seq: 1, event: { type: 'agent_settled' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'wrk-start-1', seq: 1 })
+
+    hostClient.send({ type: 'route_event', id: 'wrk-start-1', seq: 2, event: { type: 'agent_start' } })
+    expect(await nextOf(hostClient, 'route_error')).toMatchObject({ id: 'wrk-start-1', code: 'internal' })
+
+    callerClient.send({
+      type: 'route',
+      id: 'bot-resume-keep',
+      to: host.deviceId,
+      method: 'bot.resume',
+      params: { botId: 'home', sessionId: 's-keep' },
+    })
+    await nextOf(hostClient, 'route')
+    hostClient.send({ type: 'route_ok', id: 'bot-resume-keep', result: { sessionId: 's-keep', busy: false } })
+    await nextOf(callerClient, 'route_ok')
+
+    for (let i = 1; i <= 13; i += 1) {
+      clock += 10
+      const id = `wr-${i}`
+      callerClient.send({
+        type: 'route',
+        id,
+        to: host.deviceId,
+        method: 'worker.resume',
+        params: { botId: 'home', workerId: `w-${i}` },
+      })
+      await nextOf(hostClient, 'route')
+      hostClient.send({ type: 'route_ok', id, result: { workerId: `w-${i}`, busy: true } })
+      await nextOf(callerClient, 'route_ok')
+    }
+
+    hostClient.send({ type: 'route_event', id: 'wr-1', seq: 1, event: { type: 'agent_start' } })
+    expect(await nextOf(hostClient, 'route_error')).toMatchObject({ id: 'wr-1', code: 'internal' })
+
+    hostClient.send({ type: 'route_event', id: 'bot-resume-keep', seq: 1, event: { type: 'agent_start' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'bot-resume-keep', seq: 1 })
+
+    hostClient.send({ type: 'route_event', id: 'wr-13', seq: 1, event: { type: 'agent_settled' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'wr-13', seq: 1 })
+    clock += 3 * 60 * 60 * 1000
+    await new Promise((resolve) => setTimeout(resolve, 40))
+
+    hostClient.send({ type: 'route_event', id: 'wr-13', seq: 2, event: { type: 'agent_start' } })
+    expect(await nextOf(callerClient, 'route_event')).toMatchObject({ id: 'wr-13', seq: 2 })
+  })
+
+  it('rejects oversized route_ok with payload_too_large without dropping sockets and normalizes unknown route_error codes', async () => {
+    const harness = await startRelay()
+    const caller = await enrollDevice(harness, 'Caller', 'android')
+    const host = await enrollDevice(harness, 'Host', 'android')
+
+    const callerClient = await Client.open(harness.wsBase, caller.token)
+    callerClient.send(hello(caller.deviceId))
+    await nextOf(callerClient, 'hello_ok')
+
+    const hostClient = await Client.open(harness.wsBase, host.token)
+    hostClient.send(hello(host.deviceId, [{ id: 'home', name: 'PI' }]))
+    await nextOf(hostClient, 'hello_ok')
+    await nextOf(callerClient, 'presence')
+
+    callerClient.send({
+      type: 'route',
+      id: 'big-history-1',
+      to: host.deviceId,
+      method: 'bot.history',
+      params: { botId: 'home', sessionId: 's-1' },
+    })
+    expect(await nextOf(hostClient, 'route')).toMatchObject({ id: 'big-history-1', method: 'bot.history' })
+
+    const huge = 'x'.repeat(4_300_000)
+    hostClient.send({ type: 'route_ok', id: 'big-history-1', result: { messages: [huge] } })
+    expect(await nextOf(callerClient, 'route_error')).toMatchObject({
+      id: 'big-history-1',
+      code: 'payload_too_large',
+    })
+
+    callerClient.send({
+      type: 'route',
+      id: 'bad-code-1',
+      to: host.deviceId,
+      method: 'bot.state',
+      params: { botId: 'home' },
+    })
+    expect(await nextOf(hostClient, 'route')).toMatchObject({ id: 'bad-code-1', method: 'bot.state' })
+    hostClient.send({
+      type: 'route_error',
+      id: 'bad-code-1',
+      code: 'unexpected_custom_code' as never,
+      message: 'something broke',
+    })
+    expect(await nextOf(callerClient, 'route_error')).toMatchObject({
+      id: 'bad-code-1',
+      code: 'internal',
+      message: 'something broke',
+    })
+
+    callerClient.send({
+      type: 'route',
+      id: 'healthy-after-oversize',
+      to: host.deviceId,
+      method: 'bot.state',
+      params: { botId: 'home' },
+    })
+    expect(await nextOf(hostClient, 'route')).toMatchObject({ id: 'healthy-after-oversize', method: 'bot.state' })
+    hostClient.send({ type: 'route_ok', id: 'healthy-after-oversize', result: { busy: false } })
+    expect(await nextOf(callerClient, 'route_ok')).toMatchObject({
+      id: 'healthy-after-oversize',
+      result: { busy: false },
+    })
   })
 })

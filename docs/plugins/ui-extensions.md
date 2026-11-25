@@ -74,7 +74,7 @@ Match rules:
 - MCP tools are called through `tool_search` + `tool_execute` by default, and renderers do not need to care about that wrapper.
 - Structured content is for UI only and does not enter the model context; do not stuff images or large JSON into `details` expecting the host to render them — prefer `structuredContent`.
 - Renderer content is subject to the same plugin UI compatibility constraints (`ui.apiLevel` / `kotlin` / `compose`) and retries automatically after a version upgrade; Compose exceptions have no crash isolation, just like slots, so test them yourself.
-- Tool result renderers need `plugin-api 2.0.0+` and host `1.1.0+`; plugins using only older capabilities are unaffected.
+- Tool result renderers need `plugin-api 2.0.x` and host `2.0.0+`; plugins on the level 6 line keep using their 1.x SDK.
 
 Pages and composer actions are contributions, not slots: `PluginUiContributions.pages` (built with `pluginPage(id, title, icon?, content)`) declares plugin pages with inline page content, and `PluginUiContributions.composerActions` (built with `composerAction(id, label, icon?)`) declares composer actions. `PluginUiContributions` is a read-only interface, `pages` / `composerActions` have default empty implementations, and plugins implement only `bindings` (plus the members they need). In the plugin page list, tapping a row that has `pages` enters the first page; composer action chips appear in the chat composer and open that plugin's page when tapped (the action id opens the matching page when it equals a page id, otherwise the first page).
 
@@ -183,7 +183,7 @@ override fun ui(host: PluginHost) = object : PluginUiContributions {
 
 ### Plugin UI uses only `:design`
 
-Plugin UI uses the app's design system `io.github.whywood.superpi.design` directly (`plugin-api` already carries `design 0.7.0` through `api()`, so plugin projects do not declare the coordinate again). Components are identical to the app's and inventing styles is forbidden; new components are in the second and third blocks of the table below:
+Plugin UI uses the app's design system `io.github.whywood.superpi.design` directly. `plugin-api 2.0.2` already carries `design 1.1.0` through `api()`, so plugin projects normally declare only `plugin-api`; if you need an explicit pin, use `compileOnly("io.github.sadami3066.superpi:design:1.1.0")`. Components are identical to the app's and inventing styles is forbidden:
 
 | Component | Purpose |
 |---|---|
@@ -203,49 +203,30 @@ Plugin UI uses the app's design system `io.github.whywood.superpi.design` direct
 | `DdType` | Type scale: `pageTitle`/`heading`/`body`/`bodySmall`/`label`/`button` |
 | `superPiColors()` | Color tokens: `paper`/`surface`/`raised`/`ink`/`inkSecondary`/`inkTertiary`/`accent`/`accentSoft`/`danger`/`success`/`warning`/`hairline`/`wash` |
 
-`design 0.7.0` adds:
+The current `design 1.1.0` SDK also includes:
 
-| Component | Purpose |
+| Component / API | Purpose |
 |---|---|
 | `DdMarkdown(text, live, onFileClick, onLinkClick, onImage)` | Markdown rendering (headings/lists/tables/code/images/footnotes); `live` for streaming text, `onImage` handles image taps |
 | `DdHtmlText(html, onLinkClick?, imageLabel?, style, color, linkColor)` | Restricted HTML text |
+| `DdHtmlBlocks(html, loader, onLinkClick, onImageClick, imageLabel, ...)` + `DdHtmlImageLoader` | HTML body with images: split by `<img>`, text blocks keep `DdHtmlText` formatting support; the loader returns `ImageBitmap` and shows a placeholder on failure |
 | `DdWebView(url, state = DdWebViewState())` / `DdWebView(DdWebContent.Url/Html, ...)` | Embedded web page; `state` provides `canGoBack`/`goBack`/`reload`/`evaluateJavascript`/`dispose` |
-| `DdImage(path / bytes / bitmap, contentDescription, contentScale, shape, maxLongEdge, failure)` | Local image loading with placeholder and failure states |
+| `DdImage(path / bytes / bitmap, ...)` / `DdRemoteImage(...)` | Local and remote images with placeholder, failure and rounded clipping; `DdRemoteImage` takes a loader and is backed by the host image cache |
 | `DdImageViewer(path / bytes / bitmap, onDismiss)` | Full-screen image viewer (Dialog) |
 | `DdPullToRefresh(isRefreshing, onRefresh) { ... }` | Pull-to-refresh container |
 | `DdSnackbarHostState` + `DdSnackbarHost(state)` | In-page light messages; `showSnackbar(...)` returns a result |
 | `DdFileRow(name, subtitle?, icon, onClick?, enabled, trailing)` | File/attachment row |
-| `DdDatePicker(selected: LocalDate, onSelect, onDismiss, title, previousMonthLabel, nextMonthLabel)` | Date picker sheet |
-| `DdTimePicker(selected: LocalTime, onSelect, onDismiss, title, doneLabel)` | Time picker sheet |
-
-`design 0.8.0` adds (needs an explicit dependency and `minHostVersion: "1.0.7"`, see below):
-
-| Component | Purpose |
-|---|---|
-| `DdSheet(onDismiss, fullBleed?, containerColor?, content)` | Rewritten bottom sheet: drags down only; scrim taps and back play the exit animation first; max height is the window height minus the status bar; long content scrolls itself (`verticalScroll`/`LazyColumn`), so stop writing `fillMaxHeight(0.94f)` |
-| `DdSwipeRow(key, actions, openKey, onOpenChange, enabled, content)` + `DdSwipeAction(icon, label, tint, background, onClick)` | List row swipe actions: two anchors with snapping, only one row open at a time, haptics past the threshold; the row content provides its own opaque background |
-| `DdHtmlBlocks(html, loader, onLinkClick, onImageClick, imageLabel, ...)` + `DdHtmlImageLoader` | HTML body with images: split by `<img>`, text blocks keep `DdHtmlText` formatting support; the loader returns `ImageBitmap` and shows a placeholder on failure |
-| `DdInfoTooltip(text, contentDescription?, icon?)` | Info icon at the end of a row with a tap/long-press hint, replacing permanent helper text |
-| `LocalDdMotionEnabled` | System "reduce motion" switch; custom animations skip when it is false |
-
-```kotlin
-compileOnly("io.github.sadami3066.superpi:design:0.8.0")
-```
-
-```kotlin
-DdHtmlBlocks(
-    html = detail.htmlBody.orEmpty(),
-    loader = myImageLoader,
-    imageLabel = host.t("含图片", "Image"),
-    onImageClick = { source -> /* open the viewer */ },
-)
-```
-
-`design 1.0.0` adds (needs an explicit dependency and `minHostVersion: "1.3.0"`):
-
-| Component / API | Purpose |
-|---|---|
+| `DdDatePicker(...)` / `DdTimePicker(...)` | Date and time picker sheets; copy comes from the caller |
+| `DdSwipeRow(...)` + `DdSwipeAction(...)` | List row swipe actions: two anchors with snapping, only one row open at a time, haptics past the threshold |
+| `DdInfoTooltip(text, contentDescription?, icon?)` | Info icon at the end of a row with a tap/long-press hint |
 | `DdExpandToggle(expanded, collapsedLabel, expandedLabel, onToggle)` | Expand/collapse for long card lists: one line of text plus a rotating chevron, 44dp target; copy comes from the caller |
+| `DdStatusRow(label, value, tone, busy)` | Status summary row with `DdStatusTone` |
+| `DdNoticeBar(text, tone, actionLabel?, onAction?)` | Inline notice with `DdNoticeTone.INFO/SUCCESS/WARNING/DANGER` |
+| `DdProgressBar(progress: Float?)` | Determinate or indeterminate progress; respects reduce motion |
+| `DdSlider(...)` / `DdWordmark(...)` | Continuous-value slider and PI brand wordmark |
+| `SuperPITheme(colors, fontStyle)` | Wraps a page in a custom `SuperPIColors` (the host already sets it, so plugins usually do not call it) |
+| `DdTheme.lightPi()` / `DdTheme.darkPi()` | The default PI light and dark palettes; `lightClassicBlue()`, `lightSantorini()` and `darkOceanic()` remain available |
+| `LocalDdMotionEnabled` | System "reduce motion" switch; custom animations skip when it is false |
 
 ```kotlin
 if (items.size > PreviewRows) {
@@ -257,17 +238,6 @@ if (items.size > PreviewRows) {
     )
 }
 ```
-
-`design 1.0.0` adds (needs an explicit dependency and `minHostVersion: "1.0.8"`, see below):
-
-| Component / API | Purpose |
-|---|---|
-| `DdStatusRow(label, value, tone, busy)` | Status summary row: label on the left, value on the right, `DdStatusTone` controls the dot/spinner color; on refresh keep the old value and mark only that row busy |
-| `DdNoticeBar(text, tone, actionLabel?, onAction?)` | Inline page notice: `DdNoticeTone.INFO/SUCCESS/WARNING/DANGER`, good for errors with retry, sign-in prompts and action results |
-| `DdProgressBar(progress: Float?)` | Download/install/sync progress; `null` is indeterminate, pass 0..1 for determinate progress; respects reduce motion |
-| `SuperPITheme(colors, fontStyle)` | Wraps a page in a custom `SuperPIColors` (the host already sets it, so plugins usually do not call it) |
-| `DdTheme.lightPi()` / `DdTheme.darkPi()` | The default PI light and dark palettes, usable as a theme pack `base` or a starting point for custom colors; `DdTheme.lightClassicBlue()` remains for the Classic Blue palette |
-| `DdStatusTone` / `DdNoticeTone` | The status/notice tones above |
 
 ```kotlin
 DdGroupCard {
@@ -293,7 +263,7 @@ DdPullToRefresh(isRefreshing = refreshing, onRefresh = { refreshing = true }) {
 if (viewer != null) DdImageViewer(path = viewer, onDismiss = { viewer = null })
 ```
 
-Date/time components use `java.time` (`LocalDate`/`LocalTime`); plugins using design 0.7.0 components write `minHostVersion: "1.0.6"`, using design 0.8.0 components writes `"1.0.7"` and declares `design:0.8.0` explicitly in the build script; using design 1.0.0 components writes `"1.0.8"` and declares `design:0.9.0`; using design 1.0.0 components (`DdExpandToggle`) writes `"1.3.0"` and declares `design:0.10.0`; using design 1.0.0 components (`DdRemoteImage`) writes `"1.4.0"` and declares `design:0.11.0`; using tool result renderers writes `"1.1.0"` and depends on `plugin-api 2.0.0`.
+Date/time components use `java.time` (`LocalDate`/`LocalTime`). The current contract line writes `minHostVersion: "2.0.0"`; components added in 1.1.0 (including `DdExpandToggle` and `DdRemoteImage`) are available in the same SDK.
 
 Conventions:
 

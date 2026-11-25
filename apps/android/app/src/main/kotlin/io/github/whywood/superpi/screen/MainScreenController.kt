@@ -10,6 +10,20 @@ class MainScreenController(
     private val shell: MainScreenShell? = null,
     private val screenshotSupported: () -> Boolean = { true },
 ) : ScreenController {
+    private val executionLock = ScreenExecutionLock()
+
+    override suspend fun <T> withExecutionLock(block: suspend () -> T): T = executionLock.withLock(block)
+
+    override suspend fun awaitQuiet(quietMs: Long, maxWaitMs: Long): Boolean? =
+        if (actions.connected) actions.awaitQuiet(0, quietMs, maxWaitMs) else null
+
+    override suspend fun effectDisplayInfo(): ScreenDisplayInfo? = runCatching { displaySize() }
+        .getOrNull()
+        ?.takeIf { (w, h) -> w > 0 && h > 0 }
+        ?.let { (w, h) -> ScreenDisplayInfo(0, w, h, if (actions.connected) BACKEND_ACCESSIBILITY else BACKEND_NONE) }
+
+    override fun screenScopeKey(): String = "main"
+
     override suspend fun status(): ScreenStatusSnapshot {
         val base = try { virtualStatus() } catch (error: CancellationException) { throw error }
             catch (_: Exception) { ScreenStatusSnapshot(actions.connected, actions.connected, "unavailable") }
@@ -77,11 +91,11 @@ class MainScreenController(
         if (selector != null) {
             requireNodes()
             val result = actions.setText(0, selector, text)
-            return ScreenTextResult(BACKEND_ACCESSIBILITY, result.text, result.verified)
+            return ScreenTextResult(BACKEND_ACCESSIBILITY, result.text, result.verified, result.secret)
         }
         require(isAsciiText(text)) { "Main screen Unicode input needs screen_observe(target=main) first, then a field ref or fieldText" }
         requireShell().execute("input -d 0 text ${mainShellQuote(text.replace(" ", "%s"))}")
-        return ScreenTextResult("system", text, false)
+        return ScreenTextResult("system", "", false)
     }
 
     override suspend fun key(name: String): String {

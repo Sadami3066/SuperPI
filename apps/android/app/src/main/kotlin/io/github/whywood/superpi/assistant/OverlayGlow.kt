@@ -183,13 +183,13 @@ private const val GLOW_ENTRY_OUT_MS = 560
 private const val GLOW_PULSE_IN_MS = 180
 private const val GLOW_PULSE_OUT_MS = 500
 private const val GLOW_RISE_DELAY_MS = 80
-private const val GLOW_RISE_MS = 900
+private const val GLOW_RISE_MS = 640
 private const val GLOW_REPLY_IN_MS = 120
 private const val GLOW_REPLY_HOLD_MS = 350
 private const val GLOW_REPLY_OUT_MS = 400
-private const val GLOW_SWEEP_MS = 900
-private const val GLOW_ACTIVITY_MS = 320
-private const val GLOW_DONE_MS = 900
+private const val GLOW_SWEEP_MS = 700
+private const val GLOW_ACTIVITY_MS = 260
+private const val GLOW_DONE_MS = 600
 private const val GLOW_STOP_MS = 480
 private const val MAX_FRAME_STEP_NANOS = 100_000_000L
 private const val NANOS_PER_SECOND = 1_000_000_000f
@@ -233,27 +233,27 @@ internal fun rememberOverlayGlow(
         if (startTracker.update(signal)) pulseToken += 1
         if (replyTracker.update(signal)) replyToken += 1
     }
-    LaunchedEffect(playsEntry, entryStart) {
+    LaunchedEffect(playsEntry, entryStart, motionEnabled) {
         if (entryStarted || !playsEntry || !entryStart) return@LaunchedEffect
         entryStarted = true
-        if (motionScale() == 0f) return@LaunchedEffect
+        if (!motionEnabled || motionScale() == 0f) return@LaunchedEffect
         delay(GLOW_ENTRY_DELAY_MS.toLong())
         entry.animateTo(1f, tween(GLOW_ENTRY_IN_MS, easing = DdMotion.EaseOut))
         entry.animateTo(0f, tween(GLOW_ENTRY_OUT_MS, easing = DdMotion.EaseInOut))
     }
-    LaunchedEffect(entryStart) {
+    LaunchedEffect(entryStart, motionEnabled) {
         if (riseStarted || !entryStart) return@LaunchedEffect
         riseStarted = true
-        if (motionScale() == 0f) {
+        if (!motionEnabled || motionScale() == 0f) {
             rise.snapTo(1f)
             return@LaunchedEffect
         }
         delay(GLOW_RISE_DELAY_MS.toLong())
         rise.animateTo(1f, tween(GLOW_RISE_MS, easing = DdMotion.EaseOut))
     }
-    LaunchedEffect(signal.phase) {
+    LaunchedEffect(signal.phase, motionEnabled) {
         val target = signal.phase.glowActivityTarget()
-        if (motionScale() == 0f) {
+        if (!motionEnabled || motionScale() == 0f) {
             activity.snapTo(target)
             return@LaunchedEffect
         }
@@ -265,14 +265,14 @@ internal fun rememberOverlayGlow(
             ),
         )
     }
-    LaunchedEffect(pulseToken) {
-        if (pulseToken == 0 || motionScale() == 0f) return@LaunchedEffect
+    LaunchedEffect(pulseToken, motionEnabled) {
+        if (pulseToken == 0 || !motionEnabled || motionScale() == 0f) return@LaunchedEffect
         startPulse.snapTo(0f)
         startPulse.animateTo(1f, tween(GLOW_PULSE_IN_MS, easing = DdMotion.EaseOut))
         startPulse.animateTo(0f, tween(GLOW_PULSE_OUT_MS, easing = DdMotion.EaseInOut))
     }
-    LaunchedEffect(replyToken) {
-        if (replyToken == 0 || motionScale() == 0f) return@LaunchedEffect
+    LaunchedEffect(replyToken, motionEnabled) {
+        if (replyToken == 0 || !motionEnabled || motionScale() == 0f) return@LaunchedEffect
         replySweep.snapTo(0f)
         replyPulse.snapTo(0f)
         launch {

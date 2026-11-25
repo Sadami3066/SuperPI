@@ -37,8 +37,7 @@ import io.github.whywood.superpi.runtime.SdkCredentialStore
 import io.github.whywood.superpi.runtime.SkillCatalog
 import io.github.whywood.superpi.runtime.MiniappAgentService
 import io.github.whywood.superpi.runtime.MiniappStore
-import io.github.whywood.superpi.runtime.memory.MemoryDreamer
-import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.memory.MemoryAgentService
 import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
 import io.github.whywood.superpi.service.ProcessRuntime
@@ -58,14 +57,12 @@ internal class FakeAppDependencies(
 
     override val memory: MemoryStore get() = unavailable("memory")
 
-    override val memoryIngestor: MemoryIngestor get() = unavailable("memoryIngestor")
-
-    override val memoryDreamer: MemoryDreamer get() = unavailable("memoryDreamer")
+    override val memoryAgent: MemoryAgentService get() = unavailable("memoryAgent")
 
     override val memoryPreferences: MemoryPreferencesStore get() = unavailable("memoryPreferences")
 
-    override val memorySync: io.github.whywood.superpi.data.relay.RelayMemorySync
-        get() = unavailable("memorySync")
+    override val memoryModelRouter: io.github.whywood.superpi.runtime.memory.MemoryModelRouter
+        get() = unavailable("memoryModelRouter")
 
     override val storageMounts: StorageMountStore get() = unavailable("storageMounts")
 
@@ -74,6 +71,9 @@ internal class FakeAppDependencies(
     override val relayController: io.github.whywood.superpi.data.relay.RelayController get() = unavailable("relayController")
 
     override val relayLive: io.github.whywood.superpi.data.relay.RelayLive get() = unavailable("relayLive")
+
+    override val relayMemorySync: io.github.whywood.superpi.data.relay.RelayMemorySync
+        get() = unavailable("relayMemorySync")
 
     override val remoteTransport: io.github.whywood.superpi.remote.RemoteAgentTransport get() = unavailable("remoteTransport")
 
@@ -84,6 +84,8 @@ internal class FakeAppDependencies(
     override val remoteFileClient: io.github.whywood.superpi.remote.RemoteFileClient get() = unavailable("remoteFileClient")
 
     override val remoteArtifactClient: io.github.whywood.superpi.remote.RemoteArtifactClient get() = unavailable("remoteArtifactClient")
+
+    override val superRuntime: io.github.whywood.superpi.runtime.SuperRuntime get() = unavailable("superRuntime")
 
     override val updateManager: UpdateManager get() = unavailable("updateManager")
 
@@ -147,7 +149,7 @@ internal class FakeAppDependencies(
 
     override fun configuredProviderIds(): Set<String> = unavailable("configuredProviderIds")
 
-    override fun reloadCustomProviders(): Nothing = unavailable("reloadCustomProviders")
+    override suspend fun reloadCustomProviders(): Nothing = unavailable("reloadCustomProviders")
 
     override val credentials: SdkCredentialStore get() = unavailable("credentials")
 

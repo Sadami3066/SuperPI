@@ -5,8 +5,11 @@ import io.github.whywood.superpi.runtime.RunStatus
 import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.conversation.ActiveRunView
+import io.github.whywood.superpi.data.ProcessDetail
 import io.github.whywood.superpi.ui.chat.testing.FakeAgentRuntime
 import io.github.whywood.superpi.ui.chat.testing.HOME_CWD
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -390,6 +393,89 @@ class FloatingFeedTest {
         advanceTimeBy(FLOATING_TRACKING_TEXT_THROTTLE_MS + 1)
         runCurrent()
         assertEquals("新", feed.state.value.subscription?.text)
+        feed.stop()
+    }
+
+    @Test
+    fun processDetailControlsFloatingToolLabelAndPreservesRichLabelOverActivityChanged() = runTest(dispatcher) {
+        val runtime = FakeAgentRuntime()
+        val runs = MutableStateFlow(
+            mapOf("session-1" to ActiveRunView("session-1", "会话", RuntimeActivity.Thinking, 100L)),
+        )
+        var mode = ProcessDetail.DETAILED
+        val feed = FloatingFeed(
+            runtime = runtime,
+            activeRuns = runs,
+            pendingQuestions = MutableStateFlow(emptyList()),
+            scope = kotlinx.coroutines.CoroutineScope(dispatcher),
+            processDetail = { mode },
+        )
+        feed.start()
+        runCurrent()
+
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.ToolStarted(
+                runId = "run-1",
+                callId = "call-1",
+                name = "bash",
+                arguments = mapOf("command" to "ls -la", "description" to "List directory files"),
+                startedAt = 120L,
+                rawArguments = buildJsonObject {
+                    put("command", "ls -la")
+                    put("description", "List directory files")
+                },
+            ),
+        )
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.ActivityChanged("run-1", RuntimeActivity.RunningTool("bash: ls -la")),
+        )
+        runCurrent()
+
+        assertEquals("List directory files", feed.state.value.subscription?.tool)
+        assertEquals(RuntimeActivity.RunningTool("List directory files"), feed.state.value.subscription?.activity)
+
+        mode = ProcessDetail.COMPACT
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.ToolStarted(
+                runId = "run-1",
+                callId = "call-2",
+                name = "mcp__github__list_prs",
+                arguments = mapOf("description" to "Fetch open PRs"),
+                startedAt = 200L,
+            ),
+        )
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.ActivityChanged("run-1", RuntimeActivity.RunningTool("mcp__github__list_prs: repo=foo")),
+        )
+        runCurrent()
+
+        assertEquals("github · list_prs", feed.state.value.subscription?.tool)
+        assertEquals(RuntimeActivity.RunningTool("github · list_prs"), feed.state.value.subscription?.activity)
+
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.RunStarted("run-2", startedAt = 300L),
+        )
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.ActivityChanged("run-2", RuntimeActivity.RunningTool("bash: ls -la")),
+        )
+        runCurrent()
+
+        assertEquals(RuntimeActivity.RunningTool("bash"), feed.state.value.subscription?.activity)
+
+        mode = ProcessDetail.DETAILED
+        runtime.emitFor(
+            "session-1",
+            RuntimeEvent.ActivityChanged("run-2", RuntimeActivity.RunningTool("bash: ls -la")),
+        )
+        runCurrent()
+
+        assertEquals(RuntimeActivity.RunningTool("bash ls -la"), feed.state.value.subscription?.activity)
         feed.stop()
     }
 

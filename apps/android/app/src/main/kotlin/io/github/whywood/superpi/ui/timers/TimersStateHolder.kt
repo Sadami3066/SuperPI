@@ -5,6 +5,7 @@ import io.github.whywood.superpi.runtime.ConversationQueries
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.NewTimer
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.Timer
 import io.github.whywood.superpi.runtime.TimerDeliveryException
 import io.github.whywood.superpi.runtime.TimerPatch
@@ -66,6 +67,8 @@ internal interface TimersDataSource {
 internal class TimerServiceDataSource(
     private val service: TimerService,
     private val runtime: ConversationQueries,
+    private val superRuntime: SuperRuntime? = null,
+    private val superMode: Boolean = false,
 ) : TimersDataSource {
     override val timers: StateFlow<List<Timer>> get() = service.timers
 
@@ -79,17 +82,57 @@ internal class TimerServiceDataSource(
 
     override suspend fun runNow(id: String): Result<Unit> = service.runNow(id)
 
-    override suspend fun sessionTitle(sessionId: String): String? = runtime.sessionTitle(sessionId)
+    override suspend fun sessionTitle(sessionId: String): String? {
+        if (sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID) return "Super PI"
+        val workerId = SuperRuntime.parseWorkerSessionId(sessionId)
+        if (workerId != null) {
+            val worker = superRuntime?.workers?.value?.firstOrNull { it.workerId == workerId }
+            return worker?.let { "${it.botName} · ${it.title}" }
+        }
+        return runtime.sessionTitle(sessionId)
+    }
 
-    override suspend fun conversations(): List<ConversationSummary> = runtime.allSessions()
+    override suspend fun conversations(): List<ConversationSummary> {
+        if (!superMode) return runtime.allSessions()
+        val router = ConversationSummary(
+            id = SuperRuntime.SUPER_THREAD_SESSION_ID,
+            title = "Super PI",
+            updatedAt = Long.MAX_VALUE,
+            filePath = SuperRuntime.SUPER_THREAD_SESSION_ID,
+            cwd = SuperRuntime.SUPER_THREAD_SESSION_ID,
+        )
+        val workerItems = superRuntime?.workers?.value.orEmpty()
+            .sortedByDescending { it.updatedAt }
+            .map { worker ->
+                val sid = SuperRuntime.workerSessionId(worker.workerId)
+                ConversationSummary(
+                    id = sid,
+                    title = worker.title,
+                    updatedAt = worker.updatedAt,
+                    filePath = sid,
+                    cwd = sid,
+                )
+            }
+        return listOf(router) + workerItems
+    }
 
-    override suspend fun workspaces(): List<RuntimeWorkspace> = runtime.workspaces()
+    override suspend fun workspaces(): List<RuntimeWorkspace> {
+        if (!superMode) return runtime.workspaces()
+        return superRuntime?.workers?.value.orEmpty().map { worker ->
+            RuntimeWorkspace(
+                id = worker.workerId,
+                name = if (worker.isRemote) "${worker.botName} · ${worker.deviceName}" else worker.botName,
+                cwd = SuperRuntime.workerSessionId(worker.workerId),
+            )
+        }
+    }
 }
 
 internal class TimersStateHolder(
     private val source: TimersDataSource,
     private val scope: CoroutineScope,
     private val initialConversationId: String? = null,
+    private val superMode: Boolean = false,
 ) {
     private val _state = MutableStateFlow(TimersUiState())
     val state: StateFlow<TimersUiState> = _state.asStateFlow()
@@ -97,11 +140,18 @@ internal class TimersStateHolder(
     private val refreshLock = Mutex()
     private var observeJob: Job? = null
 
+    private fun matchesMode(timer: Timer): Boolean =
+        if (superMode) {
+            SuperRuntime.isSuperManagedSessionId(timer.sessionId)
+        } else {
+            !SuperRuntime.isSuperManagedSessionId(timer.sessionId)
+        }
+
     fun start() {
         if (observeJob != null) return
         observeJob = scope.launch {
             source.timers.collect { items ->
-                _state.update { it.copy(items = items) }
+                _state.update { it.copy(items = items.filter(::matchesMode)) }
                 resolveTitles()
             }
         }
@@ -113,9 +163,13 @@ internal class TimersStateHolder(
         try {
             val conversations = source.conversations()
             val workspaces = source.workspaces()
-            val remoteCwds = workspaces.filter { workspace -> workspace.remote != null }
-                .mapTo(mutableSetOf()) { workspace -> workspace.cwd }
-            val items = source.list()
+            val remoteCwds = if (superMode) {
+                emptySet()
+            } else {
+                workspaces.filter { workspace -> workspace.remote != null }
+                    .mapTo(mutableSetOf()) { workspace -> workspace.cwd }
+            }
+            val items = source.list().filter(::matchesMode)
             _state.update {
                 it.copy(
                     loading = false,
@@ -124,7 +178,7 @@ internal class TimersStateHolder(
                         .filterNot { conversation -> conversation.archived || conversation.cwd in remoteCwds }
                         .sortedByDescending { conversation -> conversation.updatedAt },
                     workspaceNames = workspaces
-                        .filter { workspace -> workspace.remote == null }
+                        .filter { workspace -> superMode || workspace.remote == null }
                         .associate { workspace -> workspace.cwd to workspace.name },
                 )
             }
@@ -142,7 +196,7 @@ internal class TimersStateHolder(
             return
         }
         try {
-            val items = source.list()
+            val items = source.list().filter(::matchesMode)
             _state.update { it.copy(items = items, errorRes = null) }
             resolveTitles()
         } catch (cancel: CancellationException) {
@@ -163,9 +217,11 @@ internal class TimersStateHolder(
     }
 
     fun openNew() {
-        val conversation = initialConversationId?.let { id ->
+        val preferredId = initialConversationId
+            ?: if (superMode) SuperRuntime.SUPER_THREAD_SESSION_ID else null
+        val conversation = preferredId?.let { id ->
             _state.value.conversations.firstOrNull { it.id == id }
-        }
+        } ?: if (superMode) _state.value.conversations.firstOrNull() else null
         _state.update {
             it.copy(
                 editorOpen = true,

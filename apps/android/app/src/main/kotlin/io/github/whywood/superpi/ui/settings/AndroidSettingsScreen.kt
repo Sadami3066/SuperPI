@@ -50,6 +50,7 @@ import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSwitch
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.ui.common.overlayEntryModeLabel
 import kotlinx.coroutines.launch
 
 @Composable
@@ -243,15 +244,6 @@ private fun OverlayEntryModeRow(
         }
     }
 }
-
-@Composable
-internal fun overlayEntryModeLabel(mode: OverlayEntryMode): String = stringResource(
-    when (mode) {
-        OverlayEntryMode.VOICE -> R.string.usage_habits_mode_voice
-        OverlayEntryMode.CAMERA -> R.string.usage_habits_mode_camera
-        OverlayEntryMode.NONE -> R.string.usage_habits_mode_none
-    },
-)
 
 private fun openOverlayPermission(context: Context) {
     val intent = Intent(

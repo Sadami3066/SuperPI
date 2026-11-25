@@ -9,7 +9,7 @@ description: 在 PI「小程序」里创建或修改 HTML/CSS/JS 轻量小应用
 
 小程序同时提供三层能力：
 
-1. **页面数据**：页面通过 `app.data` 读写自己的 JSON KV；Agent 也可用 `miniapp_edit` 直接更新数据，不用改页面。
+1. **页面数据**：页面通过 `app.data` 读写自己的 JSON KV；Agent 也可用 `miniapp_data` 直接更新数据，不用改页面。
 2. **页面驱动 Agent**：页面 JS 用 `app.agent.models/capabilities/run` 编排一次性 Agent（可并行、可串行），拿最终文本，也可用 `onEvent` 接收增量事件。
 3. **页面 UI**：HTML/CSS/JS 全部由你写，移动端优先、深浅色适配、无构建步骤。
 
@@ -28,7 +28,7 @@ description: 在 PI「小程序」里创建或修改 HTML/CSS/JS 轻量小应用
 4. 调 `miniapp_load`（`path=<draft>`）。按报错修到成功；主对话中再用 `present` 交付入口；页面 Agent 返回应用 id、绝对路径与最终文本，不调用聊天交付工具。
 5. 打开检查布局与交互，再告诉用户去「小程序」使用。
 
-修改已有小程序：`miniapp_list` 找到 id 和路径；改界面/交互就编辑 `apps/<id>/` 文件；只改内容/数据用 `miniapp_edit`。
+修改已有小程序：`miniapp_list` 找到 id 和路径；改界面/交互就编辑 `apps/<id>/` 文件；只改内容/数据用 `miniapp_data`。
 
 ## 文件夹格式
 
@@ -148,7 +148,7 @@ const text = await app.agent.run({
 - 生命周期绑定页面：页面关闭/返回会取消正在运行的 Agent；没有后台运行。需要结果就在页面里 await 完。
 - 进度交给 `onEvent`（文本增量、工具调用）；其他界面状态由页面自己维护。
 - 页面 Agent 按当前配置启用 MCP；capabilities() 列出可选工具。
-- 文件、命令、插件和 MCP 不按运行目录隔离；tools/skills 可主动缩减。默认工作区文件在结束后保留，临时会话状态会清理；本次 job_start 的任务在完成或取消时会终止并等待收尾。一次性运行不提供 get_goal/create_goal/update_goal、定时提醒或 present 聊天交付卡。
+- 文件、命令、插件和 MCP 不按运行目录隔离；tools/skills 可主动缩减。默认工作区文件在结束后保留，临时会话状态会清理；本次 job 的任务在完成或取消时会终止并等待收尾。一次性运行不提供 goal、定时提醒或 present 聊天交付卡。
 - 失败会 reject，并在 reject 前收到 `run_error`；用 `try/catch` 展示错误，不要吞掉。
 
 完整 API、限制与错误码：`references/api-reference.md`。
@@ -168,13 +168,13 @@ const text = await app.agent.run({
 
 - 数据是任意 JSON；表单 schema、字段、默认值都可以由你定义，页面按约定读取渲染。
 - 页面正在打开时数据不会自动刷新；用户重新打开或点详情页「重新加载」。
-- 日报/播客类：页面写一次，之后用 `miniapp_edit` 的 `action=set` 更新按日期分的 key。
+- 日报/播客类：页面写一次，之后用 `miniapp_data` 的 `action=set` 更新按日期分的 key。
 
 ## 修改流程
 
 - `miniapp_list` 找 id/path。
 - 改界面/交互/逻辑：编辑 `apps/<id>/` 文件，不需要重新 `miniapp_load`。
-- 改内容/数据：用 `miniapp_edit`，不改页面。
+- 改内容/数据：用 `miniapp_data`，不改页面。
 - 删除小程序：`miniapp_delete`（`app=<id>`），会连同页面数据一起删除，无法恢复。
 - 重写页面不丢数据；不要直接改 `userdata` 下的数据库文件。
 

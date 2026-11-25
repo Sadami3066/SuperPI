@@ -36,11 +36,13 @@ public object Cards {
         if (card == null && raw == null && guidance == null) return result
         val title = card?.text("title")
         val existing = result.text.orEmpty()
+        val hasPresentMarker = existing.contains(PRESENT_MARKER) ||
+            result.blocks.any { it is TextBlock && it.text.contains(PRESENT_MARKER) }
         val body = buildList {
             existing.trim().takeIf { it.isNotEmpty() }?.let(::add)
             raw?.let { add("$RAW_HEADING\n$it") }
             guidance?.let { add("$GUIDANCE_HEADING\n$it") }
-            if (card != null && !result.isError && !existing.contains(PRESENT_MARKER)) {
+            if (card != null && !result.isError && !hasPresentMarker) {
                 add(instruction(callId, title))
             }
         }.joinToString("\n\n")

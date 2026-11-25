@@ -3,10 +3,13 @@ package io.github.whywood.superpi.data.relay
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import io.github.whywood.superpi.data.AgentDocStore
+import io.github.whywood.superpi.data.BundledSkills
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
+import io.github.whywood.superpi.remote.RemoteStreamClosed
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.QuestionCenter
+import io.github.whywood.superpi.runtime.superagent.LocalWorkerPool
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Base64
@@ -66,7 +69,6 @@ class RelayLive(
     private val scope: CoroutineScope,
     private val accounts: RelayStore,
     private val host: AgentRuntime,
-    private val onRemoteMemoryChanged: ((Long) -> Unit)? = null,
     private val appVersion: String,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     questionCenter: QuestionCenter? = null,
@@ -75,9 +77,11 @@ class RelayLive(
     configuredProviderIds: () -> Set<String> = { emptySet() },
     agentDocStore: () -> AgentDocStore? = { null },
     slashCommands: suspend (String) -> List<RemoteCommandSpec> = { emptyList() },
-    workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
-    installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
+    private val workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
+    private val installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
     expandSkillPrompt: suspend (String, String) -> String = { _, text -> text },
+    private val localWorkerPool: LocalWorkerPool? = null,
+    private val onRemoteMemoryChanged: (Long) -> Unit = {},
 ) {
     private val socket = RelaySocket(scope, io)
     private val mutex = Mutex()
@@ -104,6 +108,7 @@ class RelayLive(
         workspaceToolPolicies = workspaceToolPolicies,
         installedCapabilities = installedCapabilities,
         expandSkillPrompt = expandSkillPrompt,
+        localWorkerPool = localWorkerPool,
     )
 
     private val _state = MutableStateFlow(RelayLiveState.Disabled)
@@ -127,6 +132,8 @@ class RelayLive(
                     online = linked && device.online,
                     avatar = bot.avatar,
                     capabilities = device.capabilities,
+                    intro = bot.intro,
+                    botCapabilities = bot.capabilities,
                 )
             }
         }
@@ -137,6 +144,9 @@ class RelayLive(
 
     private val _remoteEvents = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = REMOTE_EVENT_BUFFER)
     val remoteEvents: SharedFlow<RemoteEvent> = _remoteEvents.asSharedFlow()
+
+    private val _streamClosures = MutableSharedFlow<RemoteStreamClosed>(extraBufferCapacity = REMOTE_EVENT_BUFFER)
+    val streamClosures: SharedFlow<RemoteStreamClosed> = _streamClosures.asSharedFlow()
 
     private val _syncEvents = MutableSharedFlow<RelaySyncEvent>(extraBufferCapacity = SYNC_EVENT_BUFFER)
     val syncEvents: SharedFlow<RelaySyncEvent> = _syncEvents.asSharedFlow()
@@ -214,6 +224,7 @@ class RelayLive(
         socket.stop()
         server.reset()
         calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay stopped"))
+        _streamClosures.tryEmit(RemoteStreamClosed.TransportDisconnected)
         _relayCapabilities.value = emptyList()
         _devices.value = emptyList()
         _state.value = RelayLiveState.Disabled
@@ -492,10 +503,55 @@ class RelayLive(
     }
 
     private suspend fun bots(): List<RelayBot> = runCatching {
+        val policyStore = workspaceToolPolicies()
         host.workspaces()
             .filter { workspace -> workspace.remote == null }
-            .map { workspace -> RelayBot(workspace.id, workspace.name, avatar = encodeBotAvatar(workspace.avatar)) }
+            .map { workspace ->
+                val summary = if (policyStore != null) {
+                    buildBotCapabilities(workspace, policyStore)
+                } else {
+                    null
+                }
+                RelayBot(
+                    id = workspace.id,
+                    name = workspace.name,
+                    avatar = encodeBotAvatar(workspace.avatar),
+                    intro = workspace.intro?.trim()?.take(RelayFrames.MAX_BOT_INTRO_LENGTH).orEmpty(),
+                    capabilities = summary,
+                )
+            }
     }.getOrDefault(emptyList())
+
+    private suspend fun buildBotCapabilities(
+        workspace: io.github.whywood.superpi.runtime.RuntimeWorkspace,
+        policyStore: WorkspaceToolPolicyStore,
+    ): RelayBotCapabilities {
+        val inventory = runCatching { installedCapabilities(workspace.cwd) }.getOrDefault(RemoteCapabilitiesInventory())
+        val stored = policyStore.policyForCwd(workspace.cwd)
+        val policy = if (workspace.isHome) stored.copy(allCapabilities = true) else stored
+        val enabledSkills = policy.enabledSkills(inventory.skills.toSet())
+            .filterNot { skill ->
+                (skill == BundledSkills.SCREEN_OPS_SKILL && (!policy.screenTools || !inventory.screenToolsReady)) ||
+                    (skill == BundledSkills.MINIAPP_SKILL && !policy.miniappTools)
+            }
+            .sorted()
+        val installedPluginIds = inventory.plugins.mapTo(mutableSetOf()) { it.id }
+        val enabledPluginIds = policy.enabledPlugins(installedPluginIds)
+        val enabledPlugins = inventory.plugins
+            .filter { it.id in enabledPluginIds }
+            .map { it.name.ifBlank { it.id } }
+            .sorted()
+        val enabledMcp = policy.enabledMcpServers(inventory.mcpServers.toSet()).sorted()
+        return RelayBotCapabilities(
+            skills = enabledSkills,
+            plugins = enabledPlugins,
+            mcpServers = enabledMcp,
+            screenTools = policy.screenTools && inventory.screenToolsReady,
+            miniappTools = policy.miniappTools,
+            memoryScope = policy.effectiveMemoryScope().wire,
+            memoryDispatch = policy.effectiveMemoryDispatch(isHome = workspace.isHome),
+        )
+    }
 
     private fun encodeBotAvatar(path: String?): String? {
         val raw = path?.takeIf { it.isNotBlank() } ?: return null
@@ -602,7 +658,15 @@ class RelayLive(
         platform = "android",
         appVersion = appVersion,
         bots = if (_allowRemote.value) bots() else emptyList(),
-        capabilities = if (_allowRemote.value) RELAY_CAPABILITIES else RELAY_CAPABILITIES_READONLY,
+        capabilities = if (_allowRemote.value) {
+            if (localWorkerPool != null) {
+                RELAY_CAPABILITIES
+            } else {
+                RELAY_CAPABILITIES.filterNot { it == CAPABILITY_SUPER_WORKER }
+            }
+        } else {
+            RELAY_CAPABILITIES_READONLY
+        },
     )
 
     private suspend fun resendHelloLocked(current: RelayAccount) {
@@ -621,6 +685,7 @@ class RelayLive(
         helloApplied = false
         _relayCapabilities.value = emptyList()
         calls.failAll(RemoteCallError(RemoteCallCodes.DISCONNECTED, "relay disconnected"))
+        _streamClosures.tryEmit(RemoteStreamClosed.TransportDisconnected)
         if (value == RelaySocketState.Unauthorized || value == RelaySocketState.Stopped) {
             server.reset()
         }
@@ -667,7 +732,7 @@ class RelayLive(
                         _state.value = RelayLiveState.Online
                     }
                 }
-                onRemoteMemoryChanged?.invoke(frame.memoryVersion)
+                onRemoteMemoryChanged(frame.memoryVersion)
             }
 
             is RelayServerFrame.Presence -> {
@@ -687,6 +752,7 @@ class RelayLive(
                 }
                 if (!frame.online) {
                     server.onPeerOffline(frame.deviceId)
+                    _streamClosures.tryEmit(RemoteStreamClosed.PeerOffline(frame.deviceId))
                 }
                 devicesMutex.withLock {
                     val existing = _devices.value
@@ -698,8 +764,7 @@ class RelayLive(
                 }
             }
 
-            is RelayServerFrame.MemoryChanged ->
-                onRemoteMemoryChanged?.invoke(frame.version)
+            is RelayServerFrame.MemoryChanged -> onRemoteMemoryChanged(frame.version)
             is RelayServerFrame.SyncEvent -> {
                 val syncEvent = frame.toEvent()
                 if (!_syncEvents.tryEmit(syncEvent)) {
@@ -711,7 +776,7 @@ class RelayLive(
             } else {
                 val code = if (frame.method.startsWith("session.") ||
                     frame.method.startsWith("file.") ||
-                    frame.method.startsWith("workspace.") ||
+                    frame.method.startsWith("worker.") ||
                     frame.method == "bot.create" ||
                     frame.method == "bot.update" ||
                     frame.method == "bot.delete" ||
@@ -735,6 +800,7 @@ class RelayLive(
             is RelayServerFrame.RouteOk -> calls.settle(frame.id, RemoteCallOutcome.Ok(frame.result))
             is RelayServerFrame.RouteError -> {
                 server.onRouteRejected(frame.id)
+                _streamClosures.tryEmit(RemoteStreamClosed.RouteRejected(frame.id, frame.code, frame.message))
                 calls.settle(
                     frame.id,
                     RemoteCallOutcome.Failed(RemoteCallError(frame.code, frame.message)),
@@ -761,6 +827,7 @@ class RelayLive(
         private const val MAX_AVATAR_CACHE = 32
         private const val CAPABILITY_BOT_SESSIONS = "bot-sessions"
         private const val CAPABILITY_SYNC_EVENTS = "sync-events"
+        private const val CAPABILITY_SUPER_WORKER = "super-worker"
         private val LEGACY_CAPABILITIES = setOf("remote-bot", "bot-sessions", "bot-images", "bot-approval")
         private const val BOT_SESSIONS = "bot.sessions"
         private const val BOT_HISTORY = "bot.history"

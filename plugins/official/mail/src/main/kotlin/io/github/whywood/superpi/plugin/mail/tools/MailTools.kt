@@ -27,6 +27,7 @@ import io.github.whywood.superpi.plugin.mail.mime.MailComposeLimits
 import io.github.whywood.superpi.plugin.mail.ui.displayPreview
 import io.github.whywood.superpi.plugin.mail.ui.formatFileSize
 import io.github.whywood.superpi.plugin.mail.ui.readableError
+import io.github.whywood.superpi.plugin.mail.ui.t
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -107,93 +108,114 @@ private const val MAX_CHAT_ATTACHMENT_BYTES = 10L * 1024 * 1024
 
 private fun searchTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_search",
-    label = "搜索邮件",
-    description = "在已连接的邮箱中按关键词、账号、文件夹和未读状态搜索邮件，返回带文件夹、收发件人、预览、大小与会话的摘要列表；需要正文时再用 mail_read 打开。",
+    label = host.t("搜索邮件", "Search mail"),
+    description = host.t(
+        "在已连接的邮箱中按关键词、账号、文件夹和未读状态搜索邮件，返回带文件夹、收发件人、预览、大小与会话的摘要列表；需要正文时再用 mail_read 打开。",
+        "Search emails across connected accounts by keyword, account, folder and unread state. Returns summaries with folder, sender/recipients, preview, size and thread info; call mail_read for the full message.",
+    ),
     parameters = parameters(
         required = emptyList(),
-        "query" to stringProperty("关键词，匹配主题、发件人、收件人和预览；可留空表示最近邮件"),
-        "account" to stringProperty("邮箱地址或账号 id，可留空表示全部账号"),
+        "query" to stringProperty(host.t("关键词，匹配主题、发件人、收件人和预览；可留空表示最近邮件", "Keywords matching subject, sender, recipients or preview; omit for recent mail")),
+        "account" to stringProperty(host.t("邮箱地址或账号 id，可留空表示全部账号", "Email address or account id; omit for all accounts")),
         "folder" to enumProperty(
-            "文件夹：all（全部）、inbox（收件箱）、sent（已发送）、drafts（草稿）、archive（归档），默认 all",
+            host.t(
+                "文件夹：all（全部）、inbox（收件箱）、sent（已发送）、drafts（草稿）、archive（归档），默认 all",
+                "Folder: all, inbox, sent, drafts, or archive (default all)",
+            ),
             listOf("all", "inbox", "sent", "drafts", "archive"),
         ),
-        "unread_only" to booleanProperty("只看未读"),
-        "offset" to intProperty("从第几封开始返回，默认 0；用于继续翻页", minimum = 0),
-        "limit" to intProperty("返回数量，1-50，默认 20", minimum = 1, maximum = SEARCH_MAX_LIMIT),
+        "unread_only" to booleanProperty(host.t("只看未读", "Only return unread messages")),
+        "offset" to intProperty(host.t("从第几封开始返回，默认 0；用于继续翻页", "Zero-based pagination offset (default 0)"), minimum = 0),
+        "limit" to intProperty(host.t("返回数量，1-50，默认 20", "Maximum messages to return (1-50, default 20)"), minimum = 1, maximum = SEARCH_MAX_LIMIT),
     ),
     execute = guardedExecute(host) { call -> search(host, repository, call) },
 )
 
 private fun readTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_read",
-    label = "读取邮件",
-    description = "读取一封邮件的完整纯文本正文、HTML 原文、全部头字段、收发件人与全部附件（含内嵌附件及其 Content-ID）。",
+    label = host.t("读取邮件", "Read mail"),
+    description = host.t(
+        "读取一封邮件的完整纯文本正文、HTML 原文、全部头字段、收发件人与全部附件（含内嵌附件及其 Content-ID）。",
+        "Read one email's full plain-text body, raw HTML, headers, sender/recipients and all attachments (including inline attachments with Content-ID).",
+    ),
     parameters = parameters(
         required = listOf("message_id"),
-        "message_id" to stringProperty("mail_search 返回的邮件 id"),
+        "message_id" to stringProperty(host.t("mail_search 返回的邮件 id", "Message id returned by mail_search")),
     ),
     execute = guardedExecute(host) { call -> read(host, repository, call) },
 )
 
 private fun saveAttachmentTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_save_attachment",
-    label = "保存附件",
-    description = "把一封邮件的附件保存到手机的下载目录，返回保存结果。附件 id 见 mail_read 输出。",
+    label = host.t("保存附件", "Save attachment"),
+    description = host.t(
+        "把一封邮件的附件保存到手机的下载目录，返回保存结果。附件 id 见 mail_read 输出。",
+        "Save an email attachment to the phone's Downloads directory. Get the attachment id from mail_read.",
+    ),
     parameters = parameters(
         required = listOf("message_id", "attachment_id"),
-        "message_id" to stringProperty("邮件 id"),
-        "attachment_id" to stringProperty("mail_read 返回的附件 id，例如 att-0"),
-        "account" to stringProperty("邮箱地址或账号 id，可留空"),
+        "message_id" to stringProperty(host.t("邮件 id", "Message id")),
+        "attachment_id" to stringProperty(host.t("mail_read 返回的附件 id，例如 att-0", "Attachment id from mail_read, e.g. att-0")),
+        "account" to stringProperty(host.t("邮箱地址或账号 id，可留空", "Optional email address or account id")),
     ),
     execute = guardedExecute(host) { call -> saveAttachment(host, repository, call) },
 )
 
 private fun draftTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_draft",
-    label = "起草邮件",
-    description = "生成一封邮件草稿并返回草稿 id。不会直接发送；用户明确要求发送时，生成后再调用 mail_send。可以通过 attachments 附带本地文件。",
+    label = host.t("起草邮件", "Draft mail"),
+    description = host.t(
+        "生成一封邮件草稿并返回草稿 id。不会直接发送；用户明确要求发送时，生成后再调用 mail_send。可以通过 attachments 附带本地文件。",
+        "Create an email draft and return its draft id without sending. Call mail_send afterwards only when the user explicitly confirms sending. Local files can be attached via attachments.",
+    ),
     parameters = parameters(
         required = listOf("to", "subject", "body"),
-        "to" to stringProperty("收件人，多个用逗号分隔"),
-        "cc" to stringProperty("抄送，多个用逗号分隔，可留空"),
-        "subject" to stringProperty("主题"),
-        "body" to stringProperty("正文纯文本"),
-        "reply_to" to stringProperty("要回复的邮件 id，可留空"),
-        "attachments" to stringProperty("附件文件的本地绝对路径，多个用英文逗号分隔，可留空"),
+        "to" to stringProperty(host.t("收件人，多个用逗号分隔", "Recipients, comma-separated")),
+        "cc" to stringProperty(host.t("抄送，多个用逗号分隔，可留空", "Optional CC recipients, comma-separated")),
+        "subject" to stringProperty(host.t("主题", "Email subject")),
+        "body" to stringProperty(host.t("正文纯文本", "Plain-text body")),
+        "reply_to" to stringProperty(host.t("要回复的邮件 id，可留空", "Optional message id being replied to")),
+        "attachments" to stringProperty(host.t("附件文件的本地绝对路径，多个用英文逗号分隔，可留空", "Optional comma-separated absolute local file paths to attach")),
     ),
     execute = guardedExecute(host) { call -> draft(host, repository, call) },
 )
 
 private fun sendTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_send",
-    label = "发送邮件",
-    description = "发送一封 mail_draft 生成的草稿。只在用户明确要求发送时使用；发送后如实报告结果。",
+    label = host.t("发送邮件", "Send mail"),
+    description = host.t(
+        "发送一封 mail_draft 生成的草稿。只在用户明确要求发送时使用；发送后如实报告结果。",
+        "Send a draft created by mail_draft. Call only when the user explicitly requests sending, and report the exact outcome.",
+    ),
     parameters = parameters(
         required = listOf("draft_id"),
-        "draft_id" to stringProperty("mail_draft 返回的草稿 id"),
+        "draft_id" to stringProperty(host.t("mail_draft 返回的草稿 id", "Draft id returned by mail_draft")),
     ),
     execute = guardedExecute(host) { call -> send(host, repository, call) },
 )
 
 private fun markTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_mark",
-    label = "标记邮件",
-    description = "把一封邮件标记为已读或未读。",
+    label = host.t("标记邮件", "Mark mail"),
+    description = host.t("把一封邮件标记为已读或未读。", "Mark an email as read or unread."),
     parameters = parameters(
         required = listOf("message_id"),
-        "message_id" to stringProperty("邮件 id"),
-        "unread" to booleanProperty("true 表示未读"),
+        "message_id" to stringProperty(host.t("邮件 id", "Message id")),
+        "unread" to booleanProperty(host.t("true 表示未读", "true to mark unread, false to mark read")),
     ),
     execute = guardedExecute(host) { call -> mark(repository, call) },
 )
 
 private fun archiveTool(host: PluginHost, repository: MailRepository): PluginTool = pluginTool(
     name = "mail_archive",
-    label = "归档邮件",
-    description = "把一封邮件移动到归档文件夹（服务商没有归档文件夹时不可用）。",
+    label = host.t("归档邮件", "Archive mail"),
+    description = host.t(
+        "把一封邮件移动到归档文件夹（服务商没有归档文件夹时不可用）。",
+        "Move an email to the archive folder (unavailable if the mail provider has no archive folder).",
+    ),
     parameters = parameters(
         required = listOf("message_id"),
-        "message_id" to stringProperty("邮件 id"),
+        "message_id" to stringProperty(host.t("邮件 id", "Message id")),
     ),
     execute = guardedExecute(host) { call -> archive(repository, call) },
 )

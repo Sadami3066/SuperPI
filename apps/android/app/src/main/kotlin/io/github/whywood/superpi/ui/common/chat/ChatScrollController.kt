@@ -1,6 +1,5 @@
 package io.github.whywood.superpi.ui.common.chat
 
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.lazy.LazyListState
@@ -16,6 +15,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlin.math.floor
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -27,7 +27,6 @@ data class ScrollAnchor(val index: Int, val offset: Int, val atBottom: Boolean =
 internal class ChatScrollController(
     private val listState: LazyListState,
     private val thresholdPx: Float,
-    private val maxSmoothOverflowPx: Float,
 ) {
     var following by mutableStateOf(true)
         private set
@@ -40,17 +39,22 @@ internal class ChatScrollController(
 
     private var dragging = false
     private var dragSeen = false
+    private var springVelocityPxPerSec = 0f
+    private var subPixelCarryPx = 0f
 
     fun onDraggingChanged(value: Boolean) {
         dragging = value
-        if (value) dragSeen = true
+        if (value) {
+            dragSeen = true
+            resetPhysics()
+        }
     }
 
     suspend fun anchorToBottom() {
         if (!following) return
         withFrameNanos { }
         val overflow = overflowToBottom()
-        if (overflow > 0f) {
+        if (overflow > 0f && listState.canScrollForward) {
             listState.scrollBy(overflow)
         }
     }
@@ -58,24 +62,37 @@ internal class ChatScrollController(
     suspend fun jumpToBottom(animate: Boolean) {
         dragSeen = false
         following = true
-        awaitSettled()
+        if (!animate) {
+            resetPhysics()
+            awaitSettled()
+            val lastIndex = listState.layoutInfo.totalItemsCount - 1
+            if (lastIndex < 0) return
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            if (last == null || last.index != lastIndex) {
+                listState.scrollToItem(lastIndex)
+                awaitSettled()
+            }
+            val overflow = overflowToBottom()
+            if (overflow > 0f && listState.canScrollForward) {
+                listState.scrollBy(overflow)
+            }
+            resetPhysics()
+            return
+        }
+        withFrameNanos { }
         val lastIndex = listState.layoutInfo.totalItemsCount - 1
         if (lastIndex < 0) return
         val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-        if (last == null || last.index != lastIndex) {
-            if (animate) {
-                listState.animateScrollToItem(lastIndex)
-            } else {
-                listState.scrollToItem(lastIndex)
-            }
+        if (last == null || last.index < lastIndex - 2) {
+            resetPhysics()
+            listState.animateScrollToItem((lastIndex - 1).coerceAtLeast(0))
             awaitSettled()
         }
-        val overflow = overflowToBottom()
-        if (overflow <= 0f) return
-        if (animate) listState.animateScrollBy(overflow) else listState.scrollBy(overflow)
+        followUntilSettled(smooth = true)
     }
 
     suspend fun restoreAnchor(index: Int, offset: Int) {
+        resetPhysics()
         following = false
         awaitSettled()
         val count = listState.layoutInfo.totalItemsCount
@@ -89,6 +106,7 @@ internal class ChatScrollController(
     }
 
     suspend fun jumpToItem(index: Int, offset: Int = 0) {
+        resetPhysics()
         following = false
         awaitSettled()
         val count = listState.layoutInfo.totalItemsCount
@@ -113,17 +131,45 @@ internal class ChatScrollController(
                 lastNanos = now
                 elapsed
             }
-            if (!following || dragging || dragSeen || listState.isScrollInProgress) return
+            if (!following || dragging || dragSeen || listState.isScrollInProgress) {
+                resetPhysics()
+                return
+            }
             val overflow = overflowToBottom()
-            val step = ScrollFollowPolicy.followStepPx(
-                overflowPx = overflow,
+            if (overflow <= 0f || !listState.canScrollForward) {
+                resetPhysics()
+                return
+            }
+            if (!smooth) {
+                listState.scrollBy(overflow)
+                resetPhysics()
+                return
+            }
+            val effectiveOverflow = (overflow - subPixelCarryPx).coerceAtLeast(0f)
+            val step = ScrollFollowPolicy.softSpringStep(
+                overflowPx = effectiveOverflow,
+                velocityPxPerSec = springVelocityPxPerSec,
                 deltaSeconds = dt,
-                maxSmoothOverflowPx = maxSmoothOverflowPx,
-                smooth = smooth,
+                smooth = true,
             )
-            if (step <= 0f) return
-            val consumed = listState.scrollBy(step)
-            if (consumed <= 0.1f || overflow - consumed <= 0.5f) return
+            springVelocityPxPerSec = step.nextVelocityPxPerSec
+            if (step.settled) {
+                if (overflow > 0f && listState.canScrollForward) {
+                    listState.scrollBy(overflow)
+                }
+                resetPhysics()
+                return
+            }
+            subPixelCarryPx += step.stepPx
+            val wholePx = floor(subPixelCarryPx).coerceAtMost(overflow)
+            if (wholePx >= 1f) {
+                val consumed = listState.scrollBy(wholePx)
+                subPixelCarryPx = (subPixelCarryPx - consumed).coerceAtLeast(0f)
+                if (consumed <= 0.05f) {
+                    resetPhysics()
+                    return
+                }
+            }
         }
     }
 
@@ -134,8 +180,16 @@ internal class ChatScrollController(
         if (distance != null && ScrollFollowPolicy.nearBottom(distance, thresholdPx)) {
             following = true
             atBottom = distance <= 0f
-            if (distance > 0f && listState.canScrollForward) listState.scrollBy(distance)
+            if (distance > 0f && listState.canScrollForward) {
+                if (distance <= 2f) {
+                    listState.scrollBy(distance)
+                    resetPhysics()
+                } else {
+                    followUntilSettled(smooth = true)
+                }
+            }
         } else {
+            resetPhysics()
             following = false
         }
     }
@@ -143,6 +197,11 @@ internal class ChatScrollController(
     fun onBottomChanged(value: Boolean) {
         atBottom = value
         if (value) following = true
+    }
+
+    private fun resetPhysics() {
+        springVelocityPxPerSec = 0f
+        subPixelCarryPx = 0f
     }
 
     private suspend fun awaitSettled() {
@@ -163,9 +222,17 @@ internal class ChatScrollController(
         val info = listState.layoutInfo
         if (info.totalItemsCount == 0) return 0f
         val last = info.visibleItemsInfo.lastOrNull() ?: return 0f
-        if (last.index != info.totalItemsCount - 1) return 0f
         val viewportBottom = info.viewportEndOffset - info.afterContentPadding
-        return (last.offset + last.size - viewportBottom).toFloat().coerceAtLeast(0f)
+        val tailOverflow = (last.offset + last.size - viewportBottom).toFloat().coerceAtLeast(0f)
+        if (last.index >= info.totalItemsCount - 1) return tailOverflow
+        val remainingItems = info.totalItemsCount - 1 - last.index
+        val avgSize = if (info.visibleItemsInfo.isNotEmpty()) {
+            info.visibleItemsInfo.sumOf { it.size }.toFloat() / info.visibleItemsInfo.size.toFloat()
+        } else {
+            thresholdPx
+        }
+        val gap = info.mainAxisItemSpacing.toFloat().coerceAtLeast(0f)
+        return tailOverflow + remainingItems * (maxOf(avgSize, thresholdPx) + gap)
     }
 }
 
@@ -173,9 +240,8 @@ internal class ChatScrollController(
 internal fun rememberChatScrollController(listState: LazyListState): ChatScrollController {
     val density = LocalDensity.current
     val thresholdPx = with(density) { ScrollFollowPolicy.NearBottomThresholdDp.dp.toPx() }
-    val maxSmoothOverflowPx = with(density) { ScrollFollowPolicy.MaxSmoothOverflowDp.dp.toPx() }
-    val controller = remember(listState, thresholdPx, maxSmoothOverflowPx) {
-        ChatScrollController(listState, thresholdPx, maxSmoothOverflowPx)
+    val controller = remember(listState, thresholdPx) {
+        ChatScrollController(listState, thresholdPx)
     }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(controller, dragged) {
@@ -221,6 +287,10 @@ internal fun ChatScrollFollowEffect(
                 if (controller.following) {
                     withFrameNanos { }
                     controller.followUntilSettled(smooth = smooth)
+                    withFrameNanos { }
+                    if (controller.needsFollow()) {
+                        controller.followUntilSettled(smooth = smooth)
+                    }
                 }
             }
         }

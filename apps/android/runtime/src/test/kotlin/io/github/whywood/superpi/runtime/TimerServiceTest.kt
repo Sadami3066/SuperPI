@@ -235,6 +235,82 @@ class TimerServiceTest {
     }
 
     @Test
+    fun onceTimerTransientFailureDefersAndRecoversOnRetry() = runTest {
+        val fixture = Fixture(backgroundScope)
+        try {
+            fixture.timer(
+                name = "Once transient",
+                prompt = "retry me",
+                trigger = TimerTrigger.Once(LocalDate.of(2026, 10, 24), LocalTime.of(9, 0)),
+                sessionId = "session-1",
+            )
+            fixture.runtime.deliveryFailure = IllegalStateException("temporary failure")
+            fixture.clock.advance(Duration.ofDays(1))
+            fixture.service.deliverDue()
+
+            val deferred = fixture.store.list().single()
+            assertTrue(deferred.enabled)
+            assertEquals(TimerError.DELIVERY_FAILED, deferred.lastError)
+            assertEquals(fixture.clock.millis() + 30_000L, deferred.nextRunAt)
+            assertNull(deferred.lastDeliveredAt)
+
+            fixture.runtime.deliveryFailure = null
+            fixture.clock.advance(Duration.ofSeconds(30))
+            fixture.service.deliverDue()
+
+            val recovered = fixture.store.list().single()
+            assertFalse(recovered.enabled)
+            assertNull(recovered.nextRunAt)
+            assertNull(recovered.lastError)
+            assertEquals(fixture.clock.millis(), recovered.lastDeliveredAt)
+            assertEquals(1, fixture.runtime.deliveries.size)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun onceTimerTransientFailureDisablesAfterThreeRetries() = runTest {
+        val fixture = Fixture(backgroundScope)
+        try {
+            fixture.timer(
+                name = "Once exhaust",
+                prompt = "give up eventually",
+                trigger = TimerTrigger.Once(LocalDate.of(2026, 10, 24), LocalTime.of(9, 0)),
+                sessionId = "session-1",
+            )
+            fixture.runtime.openFailure = IllegalStateException("still broken")
+            fixture.clock.advance(Duration.ofDays(1))
+
+            fixture.service.deliverDue()
+            val after1 = fixture.store.list().single()
+            assertTrue(after1.enabled)
+            assertEquals(fixture.clock.millis() + 30_000L, after1.nextRunAt)
+
+            fixture.clock.advance(Duration.ofSeconds(30))
+            fixture.service.deliverDue()
+            val after2 = fixture.store.list().single()
+            assertTrue(after2.enabled)
+            assertEquals(fixture.clock.millis() + 120_000L, after2.nextRunAt)
+
+            fixture.clock.advance(Duration.ofSeconds(120))
+            fixture.service.deliverDue()
+            val after3 = fixture.store.list().single()
+            assertTrue(after3.enabled)
+            assertEquals(fixture.clock.millis() + 300_000L, after3.nextRunAt)
+
+            fixture.clock.advance(Duration.ofSeconds(300))
+            fixture.service.deliverDue()
+            val exhausted = fixture.store.list().single()
+            assertFalse(exhausted.enabled)
+            assertNull(exhausted.nextRunAt)
+            assertEquals(TimerError.OPEN_FAILED, exhausted.lastError)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
     fun runNowDoesNotChangeNextRunAt() = runTest {
         val fixture = Fixture(backgroundScope)
         try {
@@ -669,6 +745,45 @@ class TimerServiceTest {
             val root = Json.parseToJsonElement(fixture.intentsFile.readText()) as JsonObject
             assertEquals("2", root["schemaVersion"].toString())
             assertEquals(JsonArray(emptyList()), root["intents"])
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun recomputesTargetsOnStartupAfterTimezoneChangeWhileStopped() = runTest {
+        val fixture = Fixture(backgroundScope)
+        try {
+            fixture.timer(
+                name = "Morning",
+                prompt = "standup",
+                trigger = TimerTrigger.Daily(LocalTime.of(9, 0)),
+                sessionId = "session-1",
+            )
+            fixture.clock.advance(Duration.ofHours(22))
+            val traveledZone = ZoneId.of("America/New_York")
+            val expectedTarget = ZonedDateTime.of(2026, 10, 24, 9, 0, 0, 0, traveledZone)
+                .toInstant()
+                .toEpochMilli()
+            val restartedStore = TimerStore(fixture.directory, fixture.clock) { traveledZone }
+            val restartedService = TimerService(
+                runtime = fixture.runtime,
+                store = restartedStore,
+                scope = backgroundScope,
+                clock = fixture.clock,
+                intentsFile = fixture.intentsFile,
+                ioDispatcher = Dispatchers.IO,
+            )
+            try {
+                restartedService.start()
+                awaitStoreIo {
+                    restartedService.timers.value.singleOrNull()?.nextRunAt == expectedTarget
+                }
+            } finally {
+                restartedService.stop()
+            }
+            assertTrue(fixture.runtime.deliveries.isEmpty())
+            assertEquals(expectedTarget, restartedStore.list().single().nextRunAt)
         } finally {
             fixture.close()
         }

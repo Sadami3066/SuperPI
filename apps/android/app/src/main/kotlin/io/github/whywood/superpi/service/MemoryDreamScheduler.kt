@@ -9,18 +9,26 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 internal class MemoryDreamScheduler(private val context: Context) {
-    fun ensureScheduled() {
+    fun syncSchedule(intervalHours: Int, replace: Boolean = false) {
         runCatching {
+            val manager = WorkManager.getInstance(context.applicationContext)
+            if (intervalHours <= 0) {
+                manager.cancelUniqueWork(UNIQUE_WORK_NAME)
+                return
+            }
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .setRequiresBatteryNotLow(true)
                 .build()
-            val request = PeriodicWorkRequestBuilder<MemoryDreamWorker>(REPEAT_HOURS, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<MemoryDreamWorker>(
+                intervalHours.toLong().coerceAtLeast(1L),
+                TimeUnit.HOURS,
+            )
                 .setConstraints(constraints)
                 .build()
-            WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
+            manager.enqueueUniquePeriodicWork(
                 UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                if (replace) ExistingPeriodicWorkPolicy.UPDATE else ExistingPeriodicWorkPolicy.KEEP,
                 request,
             )
         }.onFailure { error ->
@@ -30,6 +38,5 @@ internal class MemoryDreamScheduler(private val context: Context) {
 
     private companion object {
         private const val UNIQUE_WORK_NAME = "superpi_memory_dream"
-        private const val REPEAT_HOURS = 24L
     }
 }

@@ -169,7 +169,7 @@ fun DdIconButton(
 fun DdWordmark(
     modifier: Modifier = Modifier,
     color: Color = superPiColors().ink,
-    dotColor: Color = superPiColors().accent,
+    dotColor: Color = superPiColors().signal,
     style: TextStyle = DdType.wordmark,
 ) {
     Row(modifier) {

@@ -2,12 +2,11 @@ package io.github.whywood.superpi.ui.workspaces
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,6 +24,7 @@ import io.github.whywood.superpi.data.SkillRepository
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
 import io.github.whywood.superpi.data.WorkspaceToolPolicyStore
 import io.github.whywood.superpi.design.DdEmptyState
+import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdRowDivider
 import io.github.whywood.superpi.design.DdSheet
@@ -32,8 +32,6 @@ import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdSpinner
 import io.github.whywood.superpi.design.DdSwitch
-import io.github.whywood.superpi.design.DdType
-import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.manager.PluginManagerFacade
 import io.github.whywood.superpi.runtime.McpConfigStore
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
@@ -53,7 +51,6 @@ internal fun WorkspaceCapabilitySheet(
     mcpConfigStore: McpConfigStore,
     onDismiss: () -> Unit,
 ) {
-    val colors = superPiColors()
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(true) }
     var items by remember { mutableStateOf<List<CapabilityItem>>(emptyList()) }
@@ -135,15 +132,18 @@ internal fun WorkspaceCapabilitySheet(
                                 WorkspaceCapabilityKind.Mcp -> R.string.bot_capabilities_empty_mcp
                             },
                         ),
+                        icon = when (kind) {
+                            WorkspaceCapabilityKind.Skills -> DdIcons.Sparkles
+                            WorkspaceCapabilityKind.Plugins -> DdIcons.Puzzle
+                            WorkspaceCapabilityKind.Mcp -> DdIcons.Plug
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
 
                 else -> LazyColumn(
-                    Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = DdSpacing.Xs),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentPadding = PaddingValues(start = DdSpacing.Xxl, end = DdSpacing.Xxl, bottom = DdSpacing.Xxl),
                 ) {
                     itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
                         val checked = item.id in selected
@@ -158,7 +158,7 @@ internal fun WorkspaceCapabilitySheet(
                                 )
                             },
                         )
-                        if (index != items.lastIndex) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                        if (index != items.lastIndex) DdRowDivider()
                     }
                 }
             }

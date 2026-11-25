@@ -437,11 +437,12 @@ describe('relay http', () => {
     expect(response.status).toBe(400)
   })
 
-  it('coordinates Memory v2 dream leases and cooldown across multiple devices', async () => {
+  it('coordinates Memory v3 consolidation leases and cooldown across multiple devices', async () => {
     let clock = 100_000
     const harness = await startRelay({ now: () => clock, withMemory: true })
-    const unauth = await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, { method: 'POST' })
+    const unauth = await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, { method: 'POST' })
     expect(unauth.status).toBe(401)
+    expect((await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, { method: 'POST' })).status).toBe(404)
     const phoneA = (await (
       await enroll(harness, { loginSecret: LOGIN_SECRET, deviceName: 'Phone A', platform: 'android' })
     ).json()) as EnrollResponse
@@ -449,7 +450,7 @@ describe('relay http', () => {
       await enroll(harness, { loginSecret: LOGIN_SECRET, deviceName: 'Phone B', platform: 'android' })
     ).json()) as EnrollResponse
 
-    const badTtl = await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+    const badTtl = await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
       method: 'POST',
       headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
       body: JSON.stringify({ ttlMs: -5 }),
@@ -457,34 +458,41 @@ describe('relay http', () => {
     expect(badTtl.status).toBe(400)
 
     const leaseA1 = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
         body: JSON.stringify({ ttlMs: 60_000, minIntervalMs: 1_000_000 }),
       })
-    ).json()) as { acquired: boolean; leaseId?: string; holderDeviceId?: string; expiresAt: number; lastDreamAt: number | null; serverSeq: number }
+    ).json()) as {
+      acquired: boolean
+      leaseId?: string
+      holderDeviceId?: string
+      expiresAt: number
+      lastConsolidationAt: number | null
+      serverSeq: number
+    }
     expect(leaseA1.acquired).toBe(true)
     expect(leaseA1.leaseId).toBeTruthy()
     expect(leaseA1.expiresAt).toBe(160_000)
-    expect(leaseA1.lastDreamAt).toBeNull()
+    expect(leaseA1.lastConsolidationAt).toBeNull()
     expect(leaseA1.serverSeq).toBe(0)
 
     const leaseBBlocked = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: auth(phoneB.token),
       })
-    ).json()) as { acquired: boolean; holderDeviceId?: string; expiresAt: number; lastDreamAt: number | null }
+    ).json()) as { acquired: boolean; holderDeviceId?: string; expiresAt: number; lastConsolidationAt: number | null }
     expect(leaseBBlocked).toEqual({
       acquired: false,
       holderDeviceId: phoneA.deviceId,
       expiresAt: 160_000,
-      lastDreamAt: null,
+      lastConsolidationAt: null,
       serverSeq: 0,
     })
 
     const leaseARenew = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
         body: JSON.stringify({ ttlMs: 90_000 }),
@@ -494,41 +502,47 @@ describe('relay http', () => {
     expect(leaseARenew.expiresAt).toBe(190_000)
 
     const wrongRelease = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease?leaseId=${encodeURIComponent(leaseARenew.leaseId!)}`, {
-        method: 'DELETE',
-        headers: auth(phoneB.token),
-      })
+      await fetch(
+        `${harness.baseUrl}/v3/memory/consolidation-lease?leaseId=${encodeURIComponent(leaseARenew.leaseId!)}`,
+        {
+          method: 'DELETE',
+          headers: auth(phoneB.token),
+        },
+      )
     ).json()) as { released: boolean }
     expect(wrongRelease.released).toBe(false)
 
-    await fetch(`${harness.baseUrl}/v2/memory/push`, {
+    await fetch(`${harness.baseUrl}/v3/memory/push`, {
       method: 'POST',
       headers: { ...auth(phoneA.token), 'content-type': 'application/json' },
-      body: JSON.stringify({ ops: [], dreamCompletedAt: 100_000 }),
+      body: JSON.stringify({ ops: [], consolidationCompletedAt: 100_000 }),
     })
 
     const okRelease = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease?leaseId=${encodeURIComponent(leaseARenew.leaseId!)}`, {
-        method: 'DELETE',
-        headers: auth(phoneA.token),
-      })
+      await fetch(
+        `${harness.baseUrl}/v3/memory/consolidation-lease?leaseId=${encodeURIComponent(leaseARenew.leaseId!)}`,
+        {
+          method: 'DELETE',
+          headers: auth(phoneA.token),
+        },
+      )
     ).json()) as { released: boolean }
     expect(okRelease.released).toBe(true)
 
     const leaseBCooldownBlocked = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: { ...auth(phoneB.token), 'content-type': 'application/json' },
         body: JSON.stringify({ ttlMs: 30_000, minIntervalMs: 600_000 }),
       })
-    ).json()) as { acquired: boolean; holderDeviceId?: string; expiresAt: number; lastDreamAt: number | null }
+    ).json()) as { acquired: boolean; holderDeviceId?: string; expiresAt: number; lastConsolidationAt: number | null }
     expect(leaseBCooldownBlocked.acquired).toBe(false)
     expect(leaseBCooldownBlocked.holderDeviceId).toBeUndefined()
-    expect(leaseBCooldownBlocked.lastDreamAt).toBe(100_000)
+    expect(leaseBCooldownBlocked.lastConsolidationAt).toBe(100_000)
     expect(leaseBCooldownBlocked.expiresAt).toBe(700_000)
 
     const leaseBManualNow = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: { ...auth(phoneB.token), 'content-type': 'application/json' },
         body: JSON.stringify({ ttlMs: 30_000, minIntervalMs: 0 }),
@@ -539,7 +553,7 @@ describe('relay http', () => {
 
     clock = 130_001
     const leaseATakeover = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: auth(phoneA.token),
       })
@@ -553,7 +567,7 @@ describe('relay http', () => {
     expect(revokeA.status).toBe(200)
 
     const leaseBAfterRevoke = (await (
-      await fetch(`${harness.baseUrl}/v2/memory/dream-lease`, {
+      await fetch(`${harness.baseUrl}/v3/memory/consolidation-lease`, {
         method: 'POST',
         headers: auth(phoneB.token),
       })

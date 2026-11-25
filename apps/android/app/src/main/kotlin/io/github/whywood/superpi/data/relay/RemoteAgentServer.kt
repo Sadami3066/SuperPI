@@ -12,7 +12,9 @@ import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.CompactionOutcome
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.ImagePart
+import io.github.whywood.superpi.runtime.MemoryAccessScope
 import io.github.whywood.superpi.runtime.MessageStatus
+import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.PendingQuestion
 import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.QuestionAnswer
@@ -25,6 +27,7 @@ import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.ToolActivityStatus
 import io.github.whywood.superpi.runtime.invocationKey
 import io.github.whywood.superpi.runtime.resolveThinkingLevel
+import io.github.whywood.superpi.runtime.superagent.LocalWorkerPool
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Base64
@@ -88,6 +91,7 @@ class RemoteAgentServer(
     private val workspaceToolPolicies: () -> WorkspaceToolPolicyStore? = { null },
     private val installedCapabilities: suspend (String) -> RemoteCapabilitiesInventory = { RemoteCapabilitiesInventory() },
     private val expandSkillPrompt: suspend (String, String) -> String = { _, text -> text },
+    localWorkerPool: LocalWorkerPool? = null,
 ) {
     private val feeds = ConcurrentHashMap<String, Feed>()
     private val botWatchers = ConcurrentHashMap<String, BotWatcher>()
@@ -98,6 +102,16 @@ class RemoteAgentServer(
     private val suppressedSessionSync = ConcurrentHashMap<String, Long>()
     private val presentedArtifacts = PresentedArtifactRegistry()
     private val questionMutex = Mutex()
+    private val workerServer: RemoteWorkerServer? = localWorkerPool?.let { pool ->
+        RemoteWorkerServer(
+            pool = pool,
+            bots = bots,
+            send = send,
+            scope = scope,
+            presentedArtifacts = presentedArtifacts,
+            resolveBotCwd = { id -> localWorkspaceById(id)?.cwd },
+        )
+    }
 
     init {
         scope.launch {
@@ -113,6 +127,7 @@ class RemoteAgentServer(
     fun reset() {
         fileHandler.dispose()
         presentedArtifacts.clear()
+        workerServer?.reset()
         for ((_, feed) in feeds) {
             synchronized(feed) {
                 feed.active = false
@@ -130,6 +145,7 @@ class RemoteAgentServer(
 
     fun onPeerOffline(deviceId: String) {
         if (deviceId.isBlank()) return
+        workerServer?.onPeerOffline(deviceId)
         botWatchers.entries.removeIf { it.value.deviceId == deviceId }
         for (feed in feeds.values) {
             synchronized(feed) {
@@ -141,6 +157,7 @@ class RemoteAgentServer(
 
     fun onRouteRejected(routeId: String) {
         if (routeId.isBlank()) return
+        workerServer?.onRouteRejected(routeId)
         botWatchers.remove(routeId)
         for (feed in feeds.values) {
             synchronized(feed) {
@@ -151,6 +168,15 @@ class RemoteAgentServer(
     }
 
     suspend fun handle(frame: RelayServerFrame.Route) {
+        if (frame.method.startsWith("worker.")) {
+            val workerHandler = workerServer
+            if (workerHandler == null) {
+                reject(frame, "bad_request", "worker routes are not enabled")
+            } else {
+                workerHandler.handle(frame)
+            }
+            return
+        }
         try {
             when (frame.method) {
                 "bot.prompt" -> prompt(frame)
@@ -226,6 +252,37 @@ class RemoteAgentServer(
             rawText
         }
         val existing = frame.params.string("sessionId").ifBlank { null }
+        val requestedProvider = frame.params.optionalTrimmedString("provider")
+        val requestedModelId = frame.params.optionalTrimmedString("modelId")
+        val requestedThinkingRaw = frame.params.optionalTrimmedString("thinkingLevel")
+        var validatedModel: Pair<String, String>? = null
+        var validatedThinking: ThinkingLevel? = null
+        if (existing == null && (requestedProvider != null || requestedModelId != null || requestedThinkingRaw != null)) {
+            if ((requestedProvider != null) != (requestedModelId != null)) {
+                reject(frame, "bad_request", "provider and modelId must both be provided")
+                return
+            }
+            if (requestedThinkingRaw != null) {
+                validatedThinking = parseThinkingLevel(requestedThinkingRaw) ?: run {
+                    reject(frame, "bad_request", "Invalid thinkingLevel: $requestedThinkingRaw")
+                    return
+                }
+            }
+            if (requestedProvider != null && requestedModelId != null) {
+                val configured = configuredProviderIds()
+                if (configured.isNotEmpty() && requestedProvider !in configured) {
+                    reject(frame, "bad_request", "Provider is not configured: $requestedProvider")
+                    return
+                }
+                val catalog = providerCatalog()
+                val option = catalog?.models(requestedProvider)?.firstOrNull { it.id == requestedModelId }
+                if (catalog != null && catalog.summaries.isNotEmpty() && option == null) {
+                    reject(frame, "bad_request", "Unknown model: $requestedProvider/$requestedModelId")
+                    return
+                }
+                validatedModel = requestedProvider to requestedModelId
+            }
+        }
         val sessionId = if (existing != null) {
             resolveExistingSession(botId, existing) ?: run {
                 reject(frame, "session_not_found", "session $existing was not found")
@@ -233,6 +290,27 @@ class RemoteAgentServer(
             }
         } else {
             host.newSession(botId).sessionId.also { created -> sessionBots[created] = botId }
+        }
+        if (existing == null && (validatedModel != null || validatedThinking != null)) {
+            val defaultCfg = effectiveDefaultConfig(botId)
+            val targetProvider = validatedModel?.first ?: defaultCfg.providerId
+            val targetModelId = validatedModel?.second ?: defaultCfg.modelId
+            val option = if (targetProvider.isNotBlank() && targetModelId.isNotBlank()) {
+                providerCatalog()?.models(targetProvider)?.firstOrNull { it.id == targetModelId }
+            } else {
+                null
+            }
+            val baseThinking = validatedThinking ?: defaultCfg.thinkingLevel
+            val resolvedThinking = if (option != null && option.thinkingLevels.isNotEmpty()) {
+                option.thinkingLevels.resolveThinkingLevel(baseThinking)
+            } else {
+                baseThinking
+            }
+            if (validatedModel != null) {
+                host.setSessionModel(sessionId, targetProvider, targetModelId, resolvedThinking)
+            } else {
+                host.setSessionThinkingLevel(sessionId, resolvedThinking)
+            }
         }
         val alreadyBusy = host.busySessionIds.value.contains(sessionId) || feeds[sessionId]?.active == true
         val feed = ensureActiveFeed(sessionId, frame.id, frame.from).also {
@@ -573,7 +651,7 @@ class RemoteAgentServer(
         val busy = resolvedSessionId.isNotEmpty() &&
             (host.busySessionIds.value.contains(resolvedSessionId) || feeds[resolvedSessionId]?.active == true)
         val modelSnap = if (resolvedSessionId.isNotEmpty()) host.sessionModel(resolvedSessionId) else null
-        val fallbackConfig = host.currentConfig()
+        val fallbackConfig = if (botId.isNotEmpty()) effectiveDefaultConfig(botId) else host.currentConfig()
         val providerId = modelSnap?.providerId ?: fallbackConfig.providerId
         val modelId = modelSnap?.modelId ?: fallbackConfig.modelId
         val thinkingLevel = (modelSnap?.thinkingLevel ?: fallbackConfig.thinkingLevel).name.lowercase()
@@ -609,7 +687,7 @@ class RemoteAgentServer(
             findActiveSessionId(botId) ?: host.sessions(botId).firstOrNull { !it.archived }?.id
         }
         val snap = resolvedSessionId?.let { host.sessionModel(it) }
-        val fallback = host.currentConfig()
+        val fallback = effectiveDefaultConfig(botId)
         val currentProviderId = snap?.providerId ?: fallback.providerId
         val currentModelId = snap?.modelId ?: fallback.modelId
         val currentThinking = snap?.thinkingLevel ?: fallback.thinkingLevel
@@ -686,8 +764,9 @@ class RemoteAgentServer(
             reject(frame, "bad_request", "provider and modelId are required")
             return
         }
-        if (isBotBusy(botId)) {
-            reject(frame, "conflict", "Cannot change model while a turn is running")
+        val configured = configuredProviderIds()
+        if (configured.isNotEmpty() && provider !in configured) {
+            reject(frame, "bad_request", "Provider is not configured: $provider")
             return
         }
         val catalog = providerCatalog()
@@ -702,8 +781,23 @@ class RemoteAgentServer(
                 return
             }
         }
+        val requestedSessionId = frame.params.optionalTrimmedString("sessionId")
+        val explicitSession = requestedSessionId != null && requestedSessionId != ACTIVE_SESSION_SENTINEL
+        if (explicitSession) {
+            val resolved = resolveExistingSession(botId, requestedSessionId) ?: run {
+                reject(frame, "session_not_found", "session $requestedSessionId was not found")
+                return
+            }
+            if (host.busySessionIds.value.contains(resolved) || feeds[resolved]?.active == true) {
+                reject(frame, "conflict", "Cannot change model while a turn is running")
+                return
+            }
+        } else if (isBotBusy(botId)) {
+            reject(frame, "conflict", "Cannot change model while a turn is running")
+            return
+        }
         val sessionId = resolveControlSessionId(frame, botId, allowCreate = true, failIfMissing = true) ?: return
-        val baseThinking = requestedThinking ?: host.sessionModel(sessionId)?.thinkingLevel ?: host.currentConfig().thinkingLevel
+        val baseThinking = requestedThinking ?: host.sessionModel(sessionId)?.thinkingLevel ?: effectiveDefaultConfig(botId).thinkingLevel
         val resolvedThinking = if (option != null && option.thinkingLevels.isNotEmpty()) {
             option.thinkingLevels.resolveThinkingLevel(baseThinking)
         } else {
@@ -738,13 +832,24 @@ class RemoteAgentServer(
             reject(frame, "bad_request", "Invalid thinkingLevel: $rawLevel")
             return
         }
-        if (isBotBusy(botId)) {
+        val requestedSessionId = frame.params.optionalTrimmedString("sessionId")
+        val explicitSession = requestedSessionId != null && requestedSessionId != ACTIVE_SESSION_SENTINEL
+        if (explicitSession) {
+            val resolved = resolveExistingSession(botId, requestedSessionId) ?: run {
+                reject(frame, "session_not_found", "session $requestedSessionId was not found")
+                return
+            }
+            if (host.busySessionIds.value.contains(resolved) || feeds[resolved]?.active == true) {
+                reject(frame, "conflict", "Cannot change thinking level while a turn is running")
+                return
+            }
+        } else if (isBotBusy(botId)) {
             reject(frame, "conflict", "Cannot change thinking level while a turn is running")
             return
         }
         val sessionId = resolveControlSessionId(frame, botId, allowCreate = true, failIfMissing = true) ?: return
         val snap = host.sessionModel(sessionId)
-        val fallback = host.currentConfig()
+        val fallback = effectiveDefaultConfig(botId)
         val providerId = snap?.providerId ?: fallback.providerId
         val modelId = snap?.modelId ?: fallback.modelId
         val option = if (providerId.isNotBlank() && modelId.isNotBlank()) {
@@ -926,6 +1031,22 @@ class RemoteAgentServer(
         val mcpServers = parseStringSet("mcpServers", fallback.mcpServers) ?: return null
         val screenTools = parseBool("screenTools", fallback.screenTools) ?: return null
         val miniappTools = parseBool("miniappTools", fallback.miniappTools) ?: return null
+        val memoryScope = when (val elem = json["memoryScope"]) {
+            null -> fallback.memoryScope
+            JsonNull -> null
+            is JsonPrimitive -> {
+                if (!elem.isString) return null
+                parseMemoryAccessScopeStrict(elem.content) ?: return null
+            }
+            else -> return null
+        }
+        val rawMemoryDispatch = when (val elem = json["memoryDispatch"]) {
+            null -> fallback.memoryDispatch
+            JsonNull -> null
+            is JsonPrimitive -> elem.booleanOrNull ?: return null
+            else -> return null
+        }
+        val memoryDispatch = if (memoryScope == MemoryAccessScope.OFF) false else rawMemoryDispatch
         return WorkspaceToolPolicy(
             allCapabilities = if (isHome) true else requestedAll,
             skills = skills,
@@ -933,6 +1054,8 @@ class RemoteAgentServer(
             mcpServers = mcpServers,
             screenTools = screenTools,
             miniappTools = miniappTools,
+            memoryScope = memoryScope,
+            memoryDispatch = memoryDispatch,
         )
     }
 
@@ -952,6 +1075,8 @@ class RemoteAgentServer(
                 put("mcpServers", buildJsonArray { policy.mcpServers.sorted().forEach { add(JsonPrimitive(it)) } })
                 put("screenTools", policy.screenTools)
                 put("miniappTools", policy.miniappTools)
+                policy.memoryScope?.let { put("memoryScope", it.wire) }
+                policy.memoryDispatch?.let { put("memoryDispatch", it) }
             },
         )
         put(
@@ -1393,7 +1518,7 @@ class RemoteAgentServer(
         respondOk(
             frame.id,
             buildJsonObject {
-                put("bot", serializeBot(created.id, created.name, frameAvatarOrStored(created.avatar)))
+                put("bot", serializeBot(created.id, created.name, frameAvatarOrStored(created.avatar), created.intro))
             },
         )
     }
@@ -1441,7 +1566,7 @@ class RemoteAgentServer(
         respondOk(
             frame.id,
             buildJsonObject {
-                put("bot", serializeBot(botId, finalName, frameAvatarOrStored(finalAvatar)))
+                put("bot", serializeBot(botId, finalName, frameAvatarOrStored(finalAvatar), refreshed?.intro ?: nextIntro))
             },
         )
     }
@@ -1837,9 +1962,22 @@ class RemoteAgentServer(
                 if (liveFeed != null) {
                     put("seq", snapSeq)
                 }
-                put("messages", serialized)
+                put("messages", serialized.messages)
+                if (serialized.truncated) {
+                    put("truncated", true)
+                }
             },
         )
+    }
+
+    private data class BoundedHistory(
+        val messages: JsonArray,
+        val truncated: Boolean,
+    )
+
+    private fun capHistoryText(text: String, limit: Int): Pair<String, Boolean> {
+        if (text.length <= limit) return text to false
+        return "${text.take(limit)}\n...[truncated]" to true
     }
 
     private fun serializeHistory(
@@ -1847,21 +1985,26 @@ class RemoteAgentServer(
         cwd: String?,
         messages: List<AssistantMessage>,
         bufferedEvents: List<BufferedEvent> = emptyList(),
-    ): JsonArray = buildJsonArray {
+    ): BoundedHistory {
+        val entries = mutableListOf<JsonObject>()
+        var truncated = false
         val committedToolCallIds = HashSet<String>()
         val committedToolResultIds = HashSet<String>()
+        val committedToolNames = HashMap<String, String>()
         for (message in messages) {
             when (message.role) {
                 AssistantRole.USER -> {
                     if (message.text.isNotBlank()) {
-                        addJsonObject {
+                        val (cappedText, wasCapped) = capHistoryText(message.text, MAX_HISTORY_BLOCK_CHARS)
+                        if (wasCapped) truncated = true
+                        entries += buildJsonObject {
                             put("role", "user")
                             put(
                                 "content",
                                 buildJsonArray {
                                     addJsonObject {
                                         put("type", "text")
-                                        put("text", message.text)
+                                        put("text", cappedText)
                                     }
                                 },
                             )
@@ -1877,18 +2020,22 @@ class RemoteAgentServer(
                             when (step) {
                                 is AssistantStep.Reasoning -> {
                                     if (step.text.isNotBlank()) {
+                                        val (capped, wasCapped) = capHistoryText(step.text, MAX_HISTORY_BLOCK_CHARS)
+                                        if (wasCapped) truncated = true
                                         contentBlocks += buildJsonObject {
                                             put("type", "thinking")
-                                            put("thinking", step.text)
+                                            put("thinking", capped)
                                         }
                                     }
                                 }
 
                                 is AssistantStep.Text -> {
                                     if (step.text.isNotBlank()) {
+                                        val (capped, wasCapped) = capHistoryText(step.text, MAX_HISTORY_BLOCK_CHARS)
+                                        if (wasCapped) truncated = true
                                         contentBlocks += buildJsonObject {
                                             put("type", "text")
-                                            put("text", step.text)
+                                            put("text", capped)
                                         }
                                     }
                                 }
@@ -1897,8 +2044,17 @@ class RemoteAgentServer(
                                     val trace = step.trace
                                     val callId = trace.invocationKey
                                     committedToolCallIds += callId
-                                    val args = trace.rawArguments ?: JsonObject(
-                                        trace.arguments.mapValues { (_, v) -> JsonPrimitive(v) },
+                                    committedToolNames[callId] = trace.name
+                                    val rawArgs = trace.rawArguments?.takeIf {
+                                        it.toString().length <= MAX_HISTORY_TOOL_RESULT_CHARS
+                                    }
+                                    if (trace.rawArguments != null && rawArgs == null) truncated = true
+                                    val args = rawArgs ?: JsonObject(
+                                        trace.arguments.mapValues { (_, v) ->
+                                            val (cappedVal, valCapped) = capHistoryText(v, MAX_HISTORY_TOOL_RESULT_CHARS)
+                                            if (valCapped) truncated = true
+                                            JsonPrimitive(cappedVal)
+                                        },
                                     )
                                     contentBlocks += buildJsonObject {
                                         put("type", "toolCall")
@@ -1908,7 +2064,7 @@ class RemoteAgentServer(
                                     }
                                     if (trace.status != ToolActivityStatus.RUNNING || trace.output != null || trace.error != null) {
                                         committedToolResultIds += callId
-                                        val resultText = if (
+                                        val rawResultText = if (
                                             trace.error == null &&
                                             trace.name == "present" &&
                                             trace.status != ToolActivityStatus.FAILED &&
@@ -1918,6 +2074,11 @@ class RemoteAgentServer(
                                         } else {
                                             trace.error ?: trace.output.orEmpty()
                                         }
+                                        val (resultText, resultCapped) = capHistoryText(
+                                            rawResultText,
+                                            MAX_HISTORY_TOOL_RESULT_CHARS,
+                                        )
+                                        if (resultCapped) truncated = true
                                         toolResults += buildJsonObject {
                                             put("role", "toolResult")
                                             put("toolCallId", callId)
@@ -1940,58 +2101,91 @@ class RemoteAgentServer(
                             }
                         }
                     } else if (message.text.isNotBlank()) {
+                        val (capped, wasCapped) = capHistoryText(message.text, MAX_HISTORY_BLOCK_CHARS)
+                        if (wasCapped) truncated = true
                         contentBlocks += buildJsonObject {
                             put("type", "text")
-                            put("text", message.text)
+                            put("text", capped)
                         }
                     }
                     if (contentBlocks.isNotEmpty() || message.error != null || message.status == MessageStatus.FAILED) {
-                        addJsonObject {
+                        entries += buildJsonObject {
                             put("role", "assistant")
                             put("content", JsonArray(contentBlocks))
-                            message.error?.takeIf { it.isNotBlank() }?.let { put("errorMessage", it) }
+                            message.error?.takeIf { it.isNotBlank() }?.let { err ->
+                                val (cappedErr, errCapped) = capHistoryText(err, MAX_HISTORY_TOOL_RESULT_CHARS)
+                                if (errCapped) truncated = true
+                                put("errorMessage", cappedErr)
+                            }
                         }
                     }
                     for (result in toolResults) {
-                        add(result)
+                        entries += result
                     }
                 }
             }
         }
-        val lastIsStreamingAssistant = messages.lastOrNull()?.role == AssistantRole.ASSISTANT
+        val lastAssistant = messages.lastOrNull()?.takeIf { it.role == AssistantRole.ASSISTANT }
+        val lastCommittedThinking = lastAssistant?.steps
+            ?.filterIsInstance<AssistantStep.Reasoning>()
+            ?.joinToString("") { it.text }
+            .orEmpty()
+        val lastCommittedText = if (lastAssistant != null) {
+            if (lastAssistant.steps.isNotEmpty()) {
+                lastAssistant.steps.filterIsInstance<AssistantStep.Text>().joinToString("") { it.text }
+            } else {
+                lastAssistant.text
+            }
+        } else {
+            ""
+        }
+        var dedupeAgainstLastCommitted = lastAssistant != null
         if (bufferedEvents.isNotEmpty()) {
             val liveThinking = StringBuilder()
             val liveText = StringBuilder()
             val liveBlocks = mutableListOf<JsonObject>()
+            fun stripCommittedPrefix(live: String, committed: String): String {
+                if (!dedupeAgainstLastCommitted || committed.isEmpty() || live.isEmpty()) return live
+                if (committed.startsWith(live)) return ""
+                if (live.startsWith(committed)) return live.substring(committed.length)
+                return live
+            }
             fun flushLiveAssistant() {
-                if (liveThinking.isNotEmpty() && !lastIsStreamingAssistant) {
+                val rawThinking = liveThinking.toString()
+                val rawText = liveText.toString()
+                liveThinking.setLength(0)
+                liveText.setLength(0)
+                val effectiveThinking = stripCommittedPrefix(rawThinking, lastCommittedThinking)
+                val effectiveText = stripCommittedPrefix(rawText, lastCommittedText)
+                if (effectiveThinking.isNotEmpty()) {
+                    val (cappedThinking, wasCapped) = capHistoryText(effectiveThinking, MAX_HISTORY_BLOCK_CHARS)
+                    if (wasCapped) truncated = true
                     liveBlocks.add(
                         0,
                         buildJsonObject {
                             put("type", "thinking")
-                            put("thinking", liveThinking.toString())
+                            put("thinking", cappedThinking)
                         },
                     )
-                    liveThinking.setLength(0)
                 }
-                if (liveText.isNotEmpty() && !lastIsStreamingAssistant) {
+                if (effectiveText.isNotEmpty()) {
+                    val (cappedLiveText, wasCapped) = capHistoryText(effectiveText, MAX_HISTORY_BLOCK_CHARS)
+                    if (wasCapped) truncated = true
                     liveBlocks += buildJsonObject {
                         put("type", "text")
-                        put("text", liveText.toString())
+                        put("text", cappedLiveText)
                     }
-                    liveText.setLength(0)
                 }
                 if (liveBlocks.isNotEmpty()) {
-                    addJsonObject {
+                    entries += buildJsonObject {
                         put("role", "assistant")
                         put("content", JsonArray(liveBlocks.toList()))
                     }
                     liveBlocks.clear()
-                } else {
-                    liveThinking.setLength(0)
-                    liveText.setLength(0)
+                    dedupeAgainstLastCommitted = false
                 }
             }
+            val bufferedToolNames = HashMap<String, String>()
             for (entry in bufferedEvents) {
                 val ev = entry.event
                 when ((ev["type"] as? JsonPrimitive)?.contentOrNull) {
@@ -2003,40 +2197,105 @@ class RemoteAgentServer(
                             "text_delta" -> liveText.append(delta)
                         }
                     }
-                    "tool_execution_start" -> {
-                        val callId = (ev["toolCallId"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                        val toolName = (ev["toolName"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                        if (callId.isNotBlank() && toolName.isNotBlank() && callId !in committedToolCallIds) {
-                            committedToolCallIds += callId
-                            liveBlocks += buildJsonObject {
-                                put("type", "toolCall")
-                                put("id", callId)
-                                put("name", toolName)
-                                put("arguments", (ev["args"] as? JsonObject) ?: buildJsonObject {})
+
+                    "tool_call" -> {
+                        val callId = (ev["callId"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        val toolName = (ev["name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        if (callId.isNotBlank() && toolName.isNotBlank()) {
+                            bufferedToolNames[callId] = toolName
+                            val rawArgsObj = (ev["args"] as? JsonObject) ?: buildJsonObject {}
+                            val argsObj = if (rawArgsObj.toString().length <= MAX_HISTORY_TOOL_RESULT_CHARS) {
+                                rawArgsObj
+                            } else {
+                                truncated = true
+                                buildJsonObject {}
+                            }
+                            if (callId !in committedToolCallIds) {
+                                committedToolCallIds += callId
+                                liveBlocks += buildJsonObject {
+                                    put("type", "toolCall")
+                                    put("id", callId)
+                                    put("name", toolName)
+                                    put("arguments", argsObj)
+                                }
+                            } else if ((ev["args"] as? JsonObject) != null) {
+                                val existingIndex = liveBlocks.indexOfFirst { block ->
+                                    (block["type"] as? JsonPrimitive)?.contentOrNull == "toolCall" &&
+                                        (block["id"] as? JsonPrimitive)?.contentOrNull == callId
+                                }
+                                if (existingIndex >= 0) {
+                                    liveBlocks[existingIndex] = buildJsonObject {
+                                        put("type", "toolCall")
+                                        put("id", callId)
+                                        put("name", toolName)
+                                        put("arguments", argsObj)
+                                    }
+                                }
                             }
                         }
                     }
-                    "tool_execution_end" -> {
-                        val callId = (ev["toolCallId"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                        val toolName = (ev["toolName"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+                    "tool_result" -> {
+                        val callId = (ev["callId"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        val toolName = (ev["name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                            ?: bufferedToolNames[callId]
+                            ?: committedToolNames[callId].orEmpty()
                         if (callId.isNotBlank() && callId !in committedToolResultIds) {
                             committedToolResultIds += callId
                             flushLiveAssistant()
-                            val content = ((ev["result"] as? JsonObject)?.get("content") as? JsonArray) ?: buildJsonArray {}
+                            dedupeAgainstLastCommitted = false
+                            val rawText = (ev["result"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                            val (cappedRawText, rawCapped) = capHistoryText(rawText, MAX_HISTORY_TOOL_RESULT_CHARS)
+                            if (rawCapped) truncated = true
+                            val content = buildJsonArray {
+                                addJsonObject {
+                                    put("type", "text")
+                                    put("text", cappedRawText)
+                                }
+                            }
                             val isError = (ev["isError"] as? JsonPrimitive)?.booleanOrNull == true
-                            addJsonObject {
+                            val rawDetails = ev["details"]?.takeUnless { it is JsonNull }
+                            val details = rawDetails?.takeIf { it.toString().length <= MAX_HISTORY_TOOL_RESULT_CHARS }
+                            if (rawDetails != null && details == null) truncated = true
+                            entries += buildJsonObject {
                                 put("role", "toolResult")
                                 put("toolCallId", callId)
                                 put("toolName", toolName)
                                 if (isError) put("isError", true)
                                 put("content", content)
+                                details?.let { put("details", it) }
                             }
+                        } else if (callId.isNotBlank()) {
+                            flushLiveAssistant()
+                            dedupeAgainstLastCommitted = false
                         }
                     }
                 }
             }
             flushLiveAssistant()
         }
+        var remainingBudget = MAX_HISTORY_WIRE_CHARS
+        var firstKeptIndex = entries.size
+        for (index in entries.indices.reversed()) {
+            val itemSize = entries[index].toString().length + 1
+            if (index == entries.lastIndex || itemSize <= remainingBudget) {
+                remainingBudget = (remainingBudget - itemSize).coerceAtLeast(0)
+                firstKeptIndex = index
+            } else {
+                break
+            }
+        }
+        while (firstKeptIndex < entries.lastIndex &&
+            (entries[firstKeptIndex]["role"] as? JsonPrimitive)?.contentOrNull == "toolResult"
+        ) {
+            firstKeptIndex += 1
+        }
+        val droppedPrefix = firstKeptIndex > 0
+        val kept = if (droppedPrefix) entries.subList(firstKeptIndex, entries.size) else entries
+        return BoundedHistory(
+            messages = JsonArray(kept.toList()),
+            truncated = truncated || droppedPrefix,
+        )
     }
 
     private suspend fun onPendingQuestionsChanged(current: List<PendingQuestion>) {
@@ -2249,8 +2508,12 @@ class RemoteAgentServer(
     }
 
     private fun resolvePresentedLocalFile(rawPath: String, cwd: String?): File? {
-        val clean = if (rawPath.startsWith("file://")) {
-            runCatching { java.net.URI(rawPath).path }.getOrNull() ?: return null
+        val clean = if (rawPath.startsWith("file:", ignoreCase = true)) {
+            val uri = runCatching { java.net.URI(rawPath) }.getOrNull() ?: return null
+            if (!uri.scheme.equals("file", ignoreCase = true)) return null
+            val authority = uri.authority
+            if (!authority.isNullOrEmpty() && !authority.equals("localhost", ignoreCase = true)) return null
+            uri.path?.takeIf { it.isNotBlank() } ?: return null
         } else {
             rawPath
         }
@@ -2474,11 +2737,23 @@ class RemoteAgentServer(
         }
     }
 
-    private fun serializeBot(id: String, name: String, avatar: String?): JsonObject = buildJsonObject {
+    private fun serializeBot(id: String, name: String, avatar: String?, intro: String? = null): JsonObject = buildJsonObject {
         put("id", id)
         put("name", name)
         avatar?.takeIf { it.isNotBlank() }?.let { put("avatar", it) }
+        intro?.trim()?.take(RelayFrames.MAX_BOT_INTRO_LENGTH)?.takeIf { it.isNotEmpty() }?.let { put("intro", it) }
     }
+
+    private suspend fun effectiveDefaultConfig(botId: String): ModelConfig =
+        localWorkspaceById(botId)?.defaultModel ?: host.currentConfig()
+
+    private fun parseMemoryAccessScopeStrict(raw: String): MemoryAccessScope? =
+        when (raw.trim().uppercase()) {
+            "OFF" -> MemoryAccessScope.OFF
+            "WORK_ONLY" -> MemoryAccessScope.WORK_ONLY
+            "PERSONAL" -> MemoryAccessScope.PERSONAL
+            else -> null
+        }
 
     private fun serializeFileEntry(entry: RemoteFileEntryDto): JsonObject = buildJsonObject {
         put("name", entry.name)
@@ -2551,6 +2826,9 @@ class RemoteAgentServer(
         private const val DEFAULT_FILE_LIST_LIMIT = 500
         private const val MAX_SESSION_TITLE_LENGTH = 128
         private const val MAX_DECODED_AVATAR_BYTES = 50_000
+        private const val MAX_HISTORY_WIRE_CHARS = 2_621_440
+        private const val MAX_HISTORY_BLOCK_CHARS = 262_144
+        private const val MAX_HISTORY_TOOL_RESULT_CHARS = 131_072
         private const val SUPPRESS_SYNC_WINDOW_MS = 2_000L
         private val PRESENT_ARTIFACT_TYPES = setOf("file", "image", "video", "html")
         private val DATA_IMAGE_URL_REGEX = Regex("^data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$", RegexOption.IGNORE_CASE)

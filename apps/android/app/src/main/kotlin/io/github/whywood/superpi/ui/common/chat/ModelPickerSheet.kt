@@ -1,5 +1,7 @@
 package io.github.whywood.superpi.ui.common.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,8 +12,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,17 +22,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.design.DdDropdown
+import io.github.whywood.superpi.design.DdHairline
 import io.github.whywood.superpi.design.DdIcon
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdMenuItem
+import io.github.whywood.superpi.design.DdPressable
 import io.github.whywood.superpi.design.DdRowDivider
+import io.github.whywood.superpi.design.DdShapes
 import io.github.whywood.superpi.design.DdSheet
 import io.github.whywood.superpi.design.DdSheetHeader
 import io.github.whywood.superpi.design.DdSpacing
@@ -40,8 +48,6 @@ import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.runtime.ThinkingLevel
-
-
 
 @Composable
 internal fun ModelPickerSheet(
@@ -63,6 +69,7 @@ internal fun ModelPickerSheet(
     val colors = superPiColors()
     var showProviders by remember { mutableStateOf(false) }
     var showThinking by remember { mutableStateOf(false) }
+    val showThinkingRow = !loading && configured && thinkingLevels.any { it != ThinkingLevel.OFF }
     DdSheet(onDismiss = onDismiss) {
         DdSheetHeader(
             title = stringResource(R.string.assistant_model_sheet),
@@ -72,10 +79,9 @@ internal fun ModelPickerSheet(
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = 520.dp)
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = DdSpacing.Xxl),
         ) {
-            Spacer(Modifier.height(DdSpacing.Sm))
+            Spacer(Modifier.height(DdSpacing.Xs))
             if (loading) {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(vertical = DdSpacing.Xxl),
@@ -84,152 +90,238 @@ internal fun ModelPickerSheet(
                     DdSpinner(size = 20.dp, strokeWidth = 2.dp)
                 }
             } else {
-                if (providers.isNotEmpty()) {
-                    val providerName = providers.firstOrNull { it.id == providerId }?.name ?: providerId
-                    DdDropdown(
-                        expanded = showProviders,
-                        onDismissRequest = { showProviders = false },
-                        anchor = {
-                            DdListRow(
-                                title = stringResource(R.string.assistant_model_provider),
-                                trailing = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = providerName,
-                                            modifier = Modifier.widthIn(max = 160.dp),
-                                            style = DdType.bodySmall,
-                                            color = colors.inkTertiary,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
-                                    }
-                                },
-                                onClick = { showProviders = true },
-                                modifier = Modifier.testTag("assistant_provider_row"),
-                            )
-                        },
+                if (providers.isNotEmpty() || showThinkingRow) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(DdShapes.Large)
+                            .background(colors.wash.copy(alpha = if (colors.dark) 0.55f else 0.72f))
+                            .border(0.5.dp, colors.surfaceRim, DdShapes.Large),
                     ) {
-                        providers.forEach { provider ->
-                            DdMenuItem(
-                                text = provider.name,
-                                onClick = {
-                                    showProviders = false
-                                    onProviderChange(provider.id)
+                        if (providers.isNotEmpty()) {
+                            val providerName = providers.firstOrNull { it.id == providerId }?.name ?: providerId
+                            DdDropdown(
+                                expanded = showProviders,
+                                onDismissRequest = { showProviders = false },
+                                anchor = {
+                                    PickerHeaderRow(
+                                        title = stringResource(R.string.assistant_model_provider),
+                                        value = providerName,
+                                        valueMaxWidth = 160.dp,
+                                        onClick = { showProviders = true },
+                                        modifier = Modifier.testTag("assistant_provider_row"),
+                                    )
                                 },
-                                selected = provider.id == providerId,
-                                trailing = if (provider.id == providerId) {
-                                    {
-                                        DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
-                                    }
-                                } else {
-                                    null
+                            ) {
+                                providers.forEach { provider ->
+                                    DdMenuItem(
+                                        text = provider.name,
+                                        onClick = {
+                                            showProviders = false
+                                            onProviderChange(provider.id)
+                                        },
+                                        selected = provider.id == providerId,
+                                        trailing = if (provider.id == providerId) {
+                                            {
+                                                DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        testTag = "assistant_provider_${provider.id}",
+                                    )
+                                }
+                            }
+                        }
+                        if (providers.isNotEmpty() && showThinkingRow) {
+                            DdRowDivider(leadingInset = DdSpacing.Lg)
+                        }
+                        if (showThinkingRow) {
+                            DdDropdown(
+                                expanded = showThinking,
+                                onDismissRequest = { showThinking = false },
+                                anchor = {
+                                    PickerHeaderRow(
+                                        title = stringResource(R.string.assistant_thinking_sheet),
+                                        value = thinkingLabel(thinkingLevel),
+                                        valueMaxWidth = 140.dp,
+                                        onClick = { showThinking = true },
+                                        modifier = Modifier.testTag("assistant_thinking_row"),
+                                    )
                                 },
-                                testTag = "assistant_provider_${provider.id}",
-                            )
+                            ) {
+                                thinkingLevels.forEach { level ->
+                                    DdMenuItem(
+                                        text = thinkingLabel(level),
+                                        onClick = {
+                                            showThinking = false
+                                            onDismiss()
+                                            onThinkingLevelChange(level)
+                                        },
+                                        selected = level == thinkingLevel,
+                                        trailing = if (level == thinkingLevel) {
+                                            {
+                                                DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        testTag = "assistant_thinking_${level.name.lowercase()}",
+                                    )
+                                }
+                            }
                         }
                     }
-                    DdRowDivider()
+                    Spacer(Modifier.height(DdSpacing.Md))
+                    DdHairline()
                 }
-
                 if (!configured) {
                     DdListRow(
                         title = stringResource(R.string.assistant_model_unconfigured),
                         onClick = null,
                         enabled = false,
                     )
-                    DdRowDivider()
+                } else if (models.isEmpty()) {
+                    DdListRow(
+                        title = stringResource(R.string.assistant_remote_models_empty),
+                        onClick = null,
+                        enabled = false,
+                    )
                 } else {
-                    if (thinkingLevels.any { it != ThinkingLevel.OFF }) {
-                        DdDropdown(
-                            expanded = showThinking,
-                            onDismissRequest = { showThinking = false },
-                            anchor = {
-                                DdListRow(
-                                    title = stringResource(R.string.assistant_thinking_sheet),
-                                    trailing = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = thinkingLabel(thinkingLevel),
-                                                modifier = Modifier.widthIn(max = 140.dp),
-                                                style = DdType.bodySmall,
-                                                color = colors.inkTertiary,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
-                                        }
-                                    },
-                                    onClick = { showThinking = true },
-                                    modifier = Modifier.testTag("assistant_thinking_row"),
-                                )
-                            },
-                        ) {
-                            thinkingLevels.forEach { level ->
-                                DdMenuItem(
-                                    text = thinkingLabel(level),
-                                    onClick = {
-                                        showThinking = false
-                                        onDismiss()
-                                        onThinkingLevelChange(level)
-                                    },
-                                    selected = level == thinkingLevel,
-                                    trailing = if (level == thinkingLevel) {
-                                        {
-                                            DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
-                                        }
-                                    } else {
-                                        null
-                                    },
-                                    testTag = "assistant_thinking_${level.name.lowercase()}",
-                                )
-                            }
-                        }
-                        DdRowDivider()
-                    }
-                    if (models.isEmpty()) {
-                        DdListRow(
-                            title = stringResource(R.string.assistant_remote_models_empty),
-                            onClick = null,
-                            enabled = false,
-                        )
-                    } else {
-                        models.forEachIndexed { index, option ->
-                            DdListRow(
-                                title = option.displayName,
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false),
+                    ) {
+                        itemsIndexed(models, key = { _, option -> option.id }) { index, option ->
+                            val selected = option.id == modelId
+                            DdPressable(
                                 onClick = {
                                     onDismiss()
                                     onModelChange(option.id)
                                 },
-                                trailing = {
-                                    if (option.id == modelId) {
-                                        DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 20.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                shape = DdShapes.Medium,
+                                background = if (selected) colors.wash else Color.Transparent,
+                                contentDescription = option.displayName,
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 52.dp)
+                                        .padding(horizontal = DdSpacing.Md, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = option.displayName,
+                                        modifier = Modifier.weight(1f),
+                                        style = DdType.body,
+                                        color = colors.ink,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (selected) {
+                                        Spacer(Modifier.width(DdSpacing.Sm))
+                                        DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 18.dp)
                                     }
-                                },
-                            )
-                            if (index != models.lastIndex) DdRowDivider()
+                                }
+                            }
+                            if (index != models.lastIndex && !selected && models.getOrNull(index + 1)?.id != modelId) {
+                                DdRowDivider(leadingInset = DdSpacing.Md)
+                            }
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(DdSpacing.Md))
         }
         if (manageProvidersVisible) {
             DdRowDivider(Modifier.padding(horizontal = DdSpacing.Xxl))
-            DdListRow(
-                title = stringResource(R.string.assistant_model_manage_providers),
+            Spacer(Modifier.height(DdSpacing.Xs))
+            val manageLabel = stringResource(R.string.assistant_model_manage_providers)
+            DdPressable(
                 onClick = {
                     onDismiss()
                     onManageProviders()
                 },
-                showChevron = true,
-                modifier = Modifier.padding(horizontal = DdSpacing.Xxl),
-            )
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = DdSpacing.Md),
+                shape = DdShapes.Medium,
+                contentDescription = manageLabel,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                        .padding(horizontal = DdSpacing.Md, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = manageLabel,
+                        modifier = Modifier.weight(1f),
+                        style = DdType.body,
+                        color = colors.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    DdIcon(
+                        icon = DdIcons.ChevronRight,
+                        tint = colors.inkTertiary.copy(alpha = 0.55f),
+                        size = 15.dp,
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(DdSpacing.Xl))
+    }
+}
+
+@Composable
+private fun PickerHeaderRow(
+    title: String,
+    value: String,
+    valueMaxWidth: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = superPiColors()
+    DdPressable(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RectangleShape,
+        contentDescription = "$title, $value",
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .padding(horizontal = DdSpacing.Lg, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = DdType.body,
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(DdSpacing.Md))
+            Text(
+                text = value,
+                modifier = Modifier.widthIn(max = valueMaxWidth),
+                style = DdType.bodySmall,
+                color = colors.inkSecondary,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(6.dp))
+            DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
+        }
     }
 }

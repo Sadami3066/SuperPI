@@ -11,11 +11,11 @@
     <string name="miniapp_invalid_delete_message">“%1$s” will be deleted permanently.</string>
     <string name="miniapp_invalid_close">Close</string>
     <string name="miniapp_chat_card_created">Created</string>
-    <string name="miniapp_reason_manifest_missing">Manifest missing</string>
-    <string name="miniapp_reason_manifest_unreadable">Manifest unreadable</string>
-    <string name="miniapp_reason_manifest_invalid">Manifest invalid</string>
-    <string name="miniapp_reason_entry_missing">Entry point missing</string>
-    <string name="miniapp_reason_id_mismatch">ID does not match folder</string>
+    <string name="miniapp_reason_manifest_missing">Configuration file is missing</string>
+    <string name="miniapp_reason_manifest_unreadable">Could not read configuration file</string>
+    <string name="miniapp_reason_manifest_invalid">Configuration format is invalid</string>
+    <string name="miniapp_reason_entry_missing">Start page is missing</string>
+    <string name="miniapp_reason_id_mismatch">Folder name does not match configuration</string>
     <string name="miniapp_search_placeholder">Search miniapps</string>
     <string name="miniapp_retry">Retry</string>
     <string name="miniapp_error_scan_failed">Scan failed. Try again.</string>

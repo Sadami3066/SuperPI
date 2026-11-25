@@ -11,6 +11,7 @@ object DdMotion {
     const val PRESS = 140
     const val PRESS_IN = 70
     const val PRESS_OUT = 180
+    const val MOOD = 160
     const val FAST = 200
     const val BASE = 260
     const val ENTER = 460
@@ -20,7 +21,7 @@ object DdMotion {
     const val STAGGER = 40
 
     const val NAV = 300
-    const val SCREEN = 320
+    const val SCREEN = 280
 
     val EaseOut = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
     val EaseInOut = CubicBezierEasing(0.65f, 0f, 0.35f, 1f)

@@ -11,14 +11,23 @@ internal fun buildPathsSection(
     appDataDir: String,
     sharedStorage: Boolean,
     mounts: List<StorageMountInfo>,
+    readOnly: Boolean = false,
 ): String = buildString {
-    appendLine("Skills: $skillsDir.")
-    appendLine("App data: $appDataDir. Bash and file tools use these real paths.")
+    if (!readOnly) {
+        appendLine("Skills: $skillsDir.")
+        appendLine("App data: $appDataDir. Bash and file tools use these real paths.")
+    } else {
+        appendLine("App data: $appDataDir. Read-only query tools (read, ls, grep, find) use explicit absolute paths.")
+    }
     if (sharedStorage) {
-        appendLine(
-            "Shared storage: $PUBLIC_STORAGE_ROOT — all user files are readable and writable. " +
-                "Do not delete or overwrite user files unless the user asks.",
-        )
+        if (readOnly) {
+            appendLine("Shared storage: $PUBLIC_STORAGE_ROOT — user files are readable.")
+        } else {
+            appendLine(
+                "Shared storage: $PUBLIC_STORAGE_ROOT — all user files are readable and writable. " +
+                    "Do not delete or overwrite user files unless the user asks.",
+            )
+        }
     }
     if (mounts.isNotEmpty()) {
         appendLine("Mounted directories:")

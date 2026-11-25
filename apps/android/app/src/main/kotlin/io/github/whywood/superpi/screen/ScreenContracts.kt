@@ -63,6 +63,7 @@ data class ScreenTextResult(
     val backend: String,
     val text: String,
     val verified: Boolean,
+    val secret: Boolean = false,
 )
 
 data class ScreenWaitOutcome(
@@ -97,6 +98,10 @@ data class ScreenApp(
 interface ScreenAccessibilityBackend {
     val connected: Boolean
 
+    suspend fun awaitQuiet(displayId: Int, quietMs: Long = 350L, maxWaitMs: Long = 700L): Boolean? = null
+
+    suspend fun awaitDisplayChange(displayId: Int, timeoutMs: Long = 300L): Boolean? = null
+
     suspend fun observe(displayId: Int, maxDepth: Int, maxNodes: Int, expectedPackage: String? = null): GuiSnapshot
 
     suspend fun tap(displayId: Int, selector: GuiSelector, durationMs: Int)
@@ -130,6 +135,8 @@ interface ScreenVirtualBackend {
 
     suspend fun screenshot(): ByteArray?
 
+    fun latestFrameBytes(): ByteArray? = null
+
     suspend fun launch(packageName: String): VirtualScreenLaunchReport
 
     fun helperUid(): Int?
@@ -152,6 +159,16 @@ interface ScreenAppCatalog {
 }
 
 interface ScreenController {
+    suspend fun <T> withExecutionLock(block: suspend () -> T): T = block()
+
+    suspend fun awaitQuiet(quietMs: Long = 350L, maxWaitMs: Long = 700L): Boolean? = null
+
+    suspend fun effectDisplayInfo(): ScreenDisplayInfo? = null
+
+    suspend fun frameGrid(): ScreenFrameGrid? = null
+
+    fun screenScopeKey(): String = ""
+
     suspend fun status(): ScreenStatusSnapshot
 
     suspend fun observe(

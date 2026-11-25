@@ -66,7 +66,6 @@ class TodoToolsTest {
     @Test
     fun invalidListsReturnErrorWithoutPosting() = runTest {
         val cases = listOf(
-            buildJsonObject { put("todos", buildJsonArray { }) },
             buildJsonObject {
                 put("todos", buildJsonArray {
                     add(todo("same", "pending"))
@@ -89,6 +88,21 @@ class TodoToolsTest {
             assertTrue(resultText(result).isNotBlank())
         }
         assertTrue(posts.isEmpty())
+    }
+
+    @Test
+    fun emptyTodosClearsTaskList() = runTest {
+        val result = tool().execute(
+            "call-clear",
+            buildJsonObject { put("todos", buildJsonArray {}) },
+            null,
+            null,
+        )
+        assertNull(result.isError)
+        assertEquals("Cleared todo list.", resultText(result))
+        assertEquals(1, posts.size)
+        val postedTodos = Json.parseToJsonElement(posts.single().payload).jsonObject["todos"]!!.jsonArray
+        assertTrue(postedTodos.isEmpty())
     }
 
     @Test

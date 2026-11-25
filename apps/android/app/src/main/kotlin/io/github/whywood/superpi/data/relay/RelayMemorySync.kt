@@ -1,550 +1,597 @@
 package io.github.whywood.superpi.data.relay
 
-import android.util.Log
-import io.github.whywood.superpi.runtime.memory.DreamLeaseResult
-import io.github.whywood.superpi.runtime.memory.MemoryAccountSwitchCheck
+import io.github.whywood.superpi.runtime.memory.ConsolidationLeaseResult
 import io.github.whywood.superpi.runtime.memory.MemoryAccountSwitchMode
-import io.github.whywood.superpi.runtime.memory.MemoryDreamCoordinator
+import io.github.whywood.superpi.runtime.memory.MemoryConsolidationCoordinator
+import io.github.whywood.superpi.runtime.memory.MemoryRemotePullEntry
 import io.github.whywood.superpi.runtime.memory.MemoryStore
-import io.github.whywood.superpi.runtime.memory.MemorySyncOpItem
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.coroutineContext
-import kotlinx.coroutines.CancellationException
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
-enum class RelayMemorySyncErrorKind {
-    Unauthorized,
-    Offline,
-    Rejected,
-}
-
-data class MemoryAccountSwitchPrompt(
-    val accountKey: String,
-    val accountId: String,
-    val origin: String,
-    val localMemoryCount: Int,
-)
-
-data class RelayMemorySyncState(
-    val syncing: Boolean = false,
-    val serverSeq: Long = 0L,
-    val lastSyncedAt: Long? = null,
-    val lastError: String? = null,
-    val errorKind: RelayMemorySyncErrorKind? = null,
-    val supported: Boolean = true,
-    val pendingAccountSwitch: MemoryAccountSwitchPrompt? = null,
-)
-
-enum class SyncRunStatus {
+enum class RelayMemorySyncStatus {
+    Idle,
+    Syncing,
     Synced,
-    NoAccount,
+    Error,
+    AwaitingAccountSwitch,
     Unsupported,
-    Offline,
-    Unauthorized,
-    Rejected,
-    PendingAccountSwitch,
 }
+
+data class RelayMemoryAccountSwitchPrompt(
+    val accountKey: String,
+    val accountIdentity: String,
+    val localRecordCount: Int,
+)
+
+data class RelayMemorySyncUiState(
+    val status: RelayMemorySyncStatus = RelayMemorySyncStatus.Idle,
+    val lastSyncedAt: Long? = null,
+    val lastErrorCode: String? = null,
+    val accountSwitchPrompt: RelayMemoryAccountSwitchPrompt? = null,
+)
 
 class RelayMemorySync(
-    private val store: MemoryStore,
-    private val accounts: RelayAccountStore,
-    private val client: RelayMemoryApi,
     private val scope: CoroutineScope,
-    private val io: CoroutineDispatcher = Dispatchers.IO,
-    private val relayCapabilities: () -> List<String> = { emptyList() },
-    private val onPostMergeConsolidation: () -> Unit = {},
+    private val accounts: RelayAccountStore,
+    private val memory: MemoryStore,
+    private val client: RelayMemoryClient,
+    private val relayCapabilities: () -> Set<String> = { emptySet() },
+    private val onConsolidationTrigger: () -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
-) : MemoryDreamCoordinator {
-    private val started = AtomicBoolean(false)
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val localChangeDebounceMs: Long = 1_500L,
+) : MemoryConsolidationCoordinator {
+    private val _state = MutableStateFlow(RelayMemorySyncUiState())
+    val state: StateFlow<RelayMemorySyncUiState> = _state.asStateFlow()
+
     private val syncMutex = Mutex()
-    private val scheduleMutex = Mutex()
-    private val unsupportedOrigins = ConcurrentHashMap.newKeySet<String>()
+    private val started = AtomicBoolean(false)
+    private val completedLeases = ConcurrentHashMap.newKeySet<String>()
+    private val leaseAccounts = ConcurrentHashMap<String, Pair<String, RelayAccount>>()
+    private val lastSettledChangeVersion = AtomicLong(-1L)
 
     @Volatile
-    private var applyingRemote = false
+    private var accountWatchJob: Job? = null
 
-    private var debounceJob: Job? = null
-    private var activeSyncJob: Job? = null
-    private var pendingResyncDelayMs: Long? = null
-    private var lastObservedAccountKey: String? = null
+    @Volatile
+    private var memoryWatchJob: Job? = null
 
-    private val _state = MutableStateFlow(RelayMemorySyncState())
-    val state: StateFlow<RelayMemorySyncState> = _state.asStateFlow()
+    @Volatile
+    private var activeAccountKey: String? = null
 
+    @OptIn(FlowPreview::class)
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        scope.launch(io) {
+        accountWatchJob = scope.launch(ioDispatcher) {
             accounts.account.collect { account ->
                 if (account == null) {
-                    lastObservedAccountKey = null
-                    cancelScheduledSync()
-                    _state.value = RelayMemorySyncState()
+                    activeAccountKey = null
+                    lastSettledChangeVersion.set(-1L)
+                    _state.value = RelayMemorySyncUiState()
                 } else {
                     val key = accountKey(account)
-                    if (key != lastObservedAccountKey) {
-                        lastObservedAccountKey = key
-                        unsupportedOrigins.remove(account.origin)
-                        _state.update {
-                            it.copy(
-                                supported = true,
-                                lastError = null,
-                                errorKind = null,
-                                pendingAccountSwitch = null,
-                            )
-                        }
-                        scheduleSync(0L)
+                    if (activeAccountKey != key) {
+                        activeAccountKey = key
+                        lastSettledChangeVersion.set(-1L)
+                    }
+                    syncNow(manual = false)
+                }
+            }
+        }
+        memoryWatchJob = scope.launch(ioDispatcher) {
+            memory.changes
+                .drop(1)
+                .debounce(localChangeDebounceMs)
+                .collect { version ->
+                    if (version == lastSettledChangeVersion.get()) return@collect
+                    if (accounts.read() != null) {
+                        syncNow(manual = false)
                     }
                 }
-            }
-        }
-        scope.launch(io) {
-            store.changes.drop(1).collect {
-                if (applyingRemote) return@collect
-                if (accounts.read() != null &&
-                    _state.value.supported &&
-                    _state.value.pendingAccountSwitch == null
-                ) {
-                    scheduleSync(LOCAL_PUSH_DEBOUNCE_MS)
-                }
-            }
         }
     }
 
-    fun onRemoteVersionHint(serverSeq: Long) {
-        scope.launch(io) {
-            val current = accounts.read() ?: return@launch
-            unsupportedOrigins.remove(current.origin)
-            _state.update { it.copy(supported = true) }
-            if (_state.value.pendingAccountSwitch != null) return@launch
-            val knownSeq = _state.value.serverSeq
-            if (serverSeq <= 0L || serverSeq > knownSeq) {
-                scheduleSync(REMOTE_PULL_DEBOUNCE_MS)
-            }
+    fun stop() {
+        if (!started.compareAndSet(true, false)) return
+        accountWatchJob?.cancel()
+        accountWatchJob = null
+        memoryWatchJob?.cancel()
+        memoryWatchJob = null
+    }
+
+    fun onRemoteVersionHint(version: Long) {
+        if (version < 0L) return
+        scope.launch(ioDispatcher) {
+            syncNow(manual = false)
         }
     }
 
-    fun requestSyncIfConnected() {
-        scope.launch(io) {
-            val account = accounts.read() ?: return@launch
-            if (isSyncUnsupported(account)) return@launch
-            if (_state.value.pendingAccountSwitch != null) return@launch
-            scheduleSync(0L)
+    fun triggerSyncNow() {
+        scope.launch(ioDispatcher) {
+            syncNow(manual = true)
         }
     }
 
-    suspend fun syncNow(): SyncRunStatus = syncInternal(dreamCompletedAt = null).status
+    fun triggerResolveAccountSwitch(mode: MemoryAccountSwitchMode) {
+        scope.launch(ioDispatcher) {
+            resolveAccountSwitch(mode)
+        }
+    }
 
-    suspend fun resolveAccountSwitch(mode: MemoryAccountSwitchMode): SyncRunStatus {
-        val resolved = syncMutex.withLock {
-            val account = accounts.read()
-            if (account == null) {
-                _state.update { it.copy(pendingAccountSwitch = null) }
+    suspend fun syncNow(manual: Boolean = false): Boolean {
+        var triggerOverlapConsolidation = false
+        val synced = syncMutex.withLock {
+            val account = accounts.read() ?: run {
+                _state.value = RelayMemorySyncUiState()
                 return@withLock false
             }
-            store.resolveAccountSwitch(
-                accountKey = accountKey(account),
-                accountIdentity = accountIdentity(account),
-                mode = mode,
-            )
-            _state.update { it.copy(pendingAccountSwitch = null, errorKind = null, lastError = null) }
-            true
-        }
-        if (!resolved) return SyncRunStatus.NoAccount
-        val outcome = syncInternal(dreamCompletedAt = null)
-        if (outcome.triggerPostMergeDream) {
-            onPostMergeConsolidation()
-        }
-        return outcome.status
-    }
-
-    override suspend fun prepareForDream(forceManual: Boolean, minIntervalMs: Long): DreamLeaseResult {
-        val account = accounts.read() ?: return DreamLeaseResult.Acquired(null)
-        val token = accounts.token()?.takeIf { it.isNotBlank() } ?: return DreamLeaseResult.Acquired(null)
-        if (isSyncUnsupported(account)) return DreamLeaseResult.Acquired(null)
-
-        when (syncInternal(dreamCompletedAt = null).status) {
-            SyncRunStatus.NoAccount,
-            SyncRunStatus.Unsupported,
-            -> return DreamLeaseResult.Acquired(null)
-
-            SyncRunStatus.Offline -> return DreamLeaseResult.Offline
-            SyncRunStatus.Unauthorized -> return DreamLeaseResult.Unauthorized
-            SyncRunStatus.Rejected -> return DreamLeaseResult.Rejected
-            SyncRunStatus.PendingAccountSwitch -> return DreamLeaseResult.Blocked("account_switch_pending")
-            SyncRunStatus.Synced -> Unit
-        }
-
-        val intervalToCheck = if (forceManual) 0L else minIntervalMs.coerceAtLeast(0L)
-        val lease = try {
-            client.acquireDreamLease(
-                account = account,
-                token = token,
-                ttlMs = DREAM_LEASE_TTL_MS,
-                minIntervalMs = intervalToCheck,
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: RelayMemoryException) {
-            return when (error.failure) {
-                RelayMemoryFailure.Unauthorized -> DreamLeaseResult.Unauthorized
-                RelayMemoryFailure.Rejected -> DreamLeaseResult.Rejected
-                RelayMemoryFailure.NotFound -> {
-                    unsupportedOrigins.add(account.origin)
-                    _state.update { it.copy(supported = false) }
-                    return DreamLeaseResult.Acquired(null)
-                }
-                RelayMemoryFailure.Unreachable,
-                RelayMemoryFailure.BadResponse,
-                -> DreamLeaseResult.Offline
-            }
-        }
-
-        if (lease == null) {
-            unsupportedOrigins.add(account.origin)
-            _state.update { it.copy(supported = false) }
-            return DreamLeaseResult.Acquired(null)
-        }
-        lease.lastDreamAt?.let { store.updateRemoteLastDreamAt(accountKey(account), it) }
-
-        if (lease.acquired) {
-            return DreamLeaseResult.Acquired(lease.leaseId)
-        }
-        val reason = if (!lease.holderDeviceId.isNullOrBlank()) "busy" else "not_due"
-        return DreamLeaseResult.Blocked(reason)
-    }
-
-    override suspend fun onDreamCompleted(leaseId: String?, finishedAt: Long) {
-        try {
-            syncInternal(dreamCompletedAt = finishedAt)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            runCatching { Log.w(TAG, "post-dream memory sync push failed", error) }
-        }
-    }
-
-    override suspend fun onDreamFinished(leaseId: String?) {
-        if (leaseId.isNullOrBlank()) return
-        withContext(NonCancellable) {
-            val account = accounts.read() ?: return@withContext
-            val token = accounts.token()?.takeIf { it.isNotBlank() } ?: return@withContext
-            runCatching { client.releaseDreamLease(account, token, leaseId) }
-        }
-    }
-
-    private fun scheduleSync(delayMs: Long) {
-        scope.launch(io) {
-            scheduleMutex.withLock {
-                if (activeSyncJob?.isActive == true) {
-                    val existing = pendingResyncDelayMs
-                    pendingResyncDelayMs = if (existing == null) delayMs else minOf(existing, delayMs)
-                    return@withLock
-                }
-                debounceJob?.cancel()
-                debounceJob = scope.launch(io) {
-                    if (delayMs > 0L) delay(delayMs)
-                    runScheduledLoop()
-                }
-            }
-        }
-    }
-
-    private suspend fun runScheduledLoop() {
-        scheduleMutex.withLock {
-            activeSyncJob = coroutineContext[Job]
-            debounceJob = null
-        }
-        try {
-            var nextDelay: Long? = 0L
-            while (nextDelay != null) {
-                if (nextDelay > 0L) delay(nextDelay)
-                val outcome = syncInternal(dreamCompletedAt = null)
-                if (outcome.triggerPostMergeDream) {
-                    onPostMergeConsolidation()
-                }
-                nextDelay = scheduleMutex.withLock {
-                    val queued = pendingResyncDelayMs
-                    pendingResyncDelayMs = null
-                    queued
-                }
-            }
-        } finally {
-            withContext(NonCancellable) {
-                scheduleMutex.withLock {
-                    if (activeSyncJob == coroutineContext[Job]) {
-                        activeSyncJob = null
-                    }
-                }
-            }
-        }
-    }
-
-    private suspend fun cancelScheduledSync() {
-        scheduleMutex.withLock {
-            pendingResyncDelayMs = null
-            debounceJob?.cancel()
-            debounceJob = null
-            activeSyncJob?.cancel()
-            activeSyncJob = null
-        }
-    }
-
-    private suspend fun syncInternal(dreamCompletedAt: Long?): SyncResult {
-        var overlapDetected = false
-        val status = syncMutex.withLock {
-            val account = accounts.read() ?: return@withLock SyncRunStatus.NoAccount
-            val token = accounts.token()?.takeIf { it.isNotBlank() } ?: return@withLock SyncRunStatus.NoAccount
-            if (isSyncUnsupported(account)) {
-                _state.update { it.copy(supported = false, syncing = false) }
-                return@withLock SyncRunStatus.Unsupported
+            val caps = relayCapabilities()
+            if (caps.isNotEmpty() && CAPABILITY_MEMORY_V3 !in caps) {
+                _state.value = _state.value.copy(
+                    status = RelayMemorySyncStatus.Unsupported,
+                    lastErrorCode = null,
+                    accountSwitchPrompt = null,
+                )
+                return@withLock false
             }
             val key = accountKey(account)
-            val identity = accountIdentity(account)
-            store.ensure()
-            when (val switchCheck = store.inspectAccountSwitch(identity)) {
-                is MemoryAccountSwitchCheck.NeedsDecision -> {
-                    _state.update {
-                        it.copy(
-                            syncing = false,
-                            lastError = null,
-                            errorKind = null,
-                            pendingAccountSwitch = MemoryAccountSwitchPrompt(
-                                accountKey = key,
-                                accountId = account.accountId,
-                                origin = account.origin,
-                                localMemoryCount = switchCheck.localMemoryCount,
-                            ),
-                        )
-                    }
-                    return@withLock SyncRunStatus.PendingAccountSwitch
-                }
-                MemoryAccountSwitchCheck.Ready -> Unit
+            val check = memory.inspectAccountSwitch(key)
+            if (check.requiresPrompt) {
+                _state.value = _state.value.copy(
+                    status = RelayMemorySyncStatus.AwaitingAccountSwitch,
+                    lastErrorCode = null,
+                    accountSwitchPrompt = RelayMemoryAccountSwitchPrompt(
+                        accountKey = key,
+                        accountIdentity = key,
+                        localRecordCount = check.localRecordCount,
+                    ),
+                )
+                return@withLock false
             }
 
-            _state.update { it.copy(syncing = true, lastError = null, errorKind = null, pendingAccountSwitch = null) }
-            try {
-                val cursor = store.readSyncCursor(key)
-                var currentPulledSeq = cursor.lastPulledServerSeq
-                var latestServerSeq = cursor.lastPulledServerSeq
+            _state.value = _state.value.copy(
+                status = RelayMemorySyncStatus.Syncing,
+                lastErrorCode = null,
+                accountSwitchPrompt = null,
+            )
 
-                val firstPull = pullAllLocked(account, key, token, currentPulledSeq)
-                currentPulledSeq = firstPull.pulledSeq
-                latestServerSeq = maxOf(latestServerSeq, firstPull.serverSeq)
-                if (firstPull.hadOverlap) overlapDetected = true
+            val pullOutcome = pullCycleLocked(account, key)
+            if (!pullOutcome.ok) {
+                return@withLock false
+            }
+            triggerOverlapConsolidation = pullOutcome.hadOverlap
 
-                var dreamStampRemaining = dreamCompletedAt
-                while (true) {
-                    val batch = store.collectPendingPushBatch(key, account.deviceId, limit = PUSH_BATCH_SIZE)
-                    if (batch.ops.isEmpty()) {
-                        if (dreamStampRemaining != null) {
-                            val response = client.push(account, token, emptyList(), dreamCompletedAt = dreamStampRemaining)
-                            dreamStampRemaining = null
-                            latestServerSeq = maxOf(latestServerSeq, response.serverSeq)
-                            store.markPushAcked(key, batch, response.serverSeq, response.lastDreamAt)
-                        } else if (batch.isBaseline && batch.nextInitialPushDone) {
-                            store.markPushAcked(key, batch, latestServerSeq, null)
+            val pushOutcome = pushCycleLocked(account, key, consolidationCompletedAt = null)
+            if (!pushOutcome.ok) {
+                return@withLock false
+            }
+
+            pushOutcome.settledChangeVersion?.let { lastSettledChangeVersion.set(it) }
+            _state.value = RelayMemorySyncUiState(
+                status = RelayMemorySyncStatus.Synced,
+                lastSyncedAt = clock(),
+                lastErrorCode = null,
+                accountSwitchPrompt = null,
+            )
+            true
+        }
+        if (synced && triggerOverlapConsolidation) {
+            onConsolidationTrigger()
+        }
+        return synced
+    }
+
+    suspend fun resolveAccountSwitch(mode: MemoryAccountSwitchMode) {
+        syncMutex.withLock {
+            val account = accounts.read() ?: return
+            val key = accountKey(account)
+            memory.resolveAccountSwitch(key, key, mode)
+            _state.value = _state.value.copy(
+                status = RelayMemorySyncStatus.Idle,
+                lastErrorCode = null,
+                accountSwitchPrompt = null,
+            )
+        }
+        syncNow(manual = true)
+    }
+
+    override suspend fun prepareForConsolidation(
+        forceManual: Boolean,
+        minIntervalMs: Long,
+    ): ConsolidationLeaseResult {
+        val account = accounts.read() ?: return ConsolidationLeaseResult.Acquired(null)
+        val caps = relayCapabilities()
+        if (caps.isNotEmpty() && CAPABILITY_MEMORY_V3 !in caps) {
+            return if (forceManual) {
+                ConsolidationLeaseResult.Acquired(null)
+            } else {
+                ConsolidationLeaseResult.Blocked("unsupported")
+            }
+        }
+        return syncMutex.withLock {
+            val key = accountKey(account)
+            val check = memory.inspectAccountSwitch(key)
+            if (check.requiresPrompt) {
+                _state.value = _state.value.copy(
+                    status = RelayMemorySyncStatus.AwaitingAccountSwitch,
+                    accountSwitchPrompt = RelayMemoryAccountSwitchPrompt(
+                        accountKey = key,
+                        accountIdentity = key,
+                        localRecordCount = check.localRecordCount,
+                    ),
+                )
+                return@withLock ConsolidationLeaseResult.Blocked("account_switch_pending")
+            }
+
+            when (val pull = pullCycleForLeaseLocked(account, key)) {
+                is LeasePullStep.Failed -> return@withLock pull.result
+                LeasePullStep.Ok -> Unit
+            }
+
+            when (val res = client.acquireConsolidationLease(account, minIntervalMs, forceManual)) {
+                is RelayMemoryOutcome.Ok -> {
+                    val value = res.value
+                    if (value.acquired) {
+                        value.leaseId?.let { id -> leaseAccounts[id] = key to account }
+                        ConsolidationLeaseResult.Acquired(value.leaseId)
+                    } else if (value.holderDeviceId != null) {
+                        ConsolidationLeaseResult.Blocked("busy")
+                    } else {
+                        value.lastConsolidationAt?.let { ts ->
+                            memory.recordRemoteConsolidationAt(key, ts)
                         }
+                        ConsolidationLeaseResult.Blocked("cooldown")
+                    }
+                }
+
+                RelayMemoryOutcome.Offline -> ConsolidationLeaseResult.Offline
+                RelayMemoryOutcome.Unauthorized -> {
+                    _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "unauthorized")
+                    ConsolidationLeaseResult.Unauthorized
+                }
+
+                is RelayMemoryOutcome.Rejected -> {
+                    if (res.code == "not_found") {
+                        _state.value = _state.value.copy(status = RelayMemorySyncStatus.Unsupported, lastErrorCode = null)
+                        if (forceManual) {
+                            ConsolidationLeaseResult.Acquired(null)
+                        } else {
+                            ConsolidationLeaseResult.Blocked("unsupported")
+                        }
+                    } else {
+                        ConsolidationLeaseResult.Rejected
+                    }
+                }
+            }
+        }
+    }
+
+    override suspend fun onConsolidationCompleted(leaseId: String?, finishedAt: Long) {
+        val leased = leaseId?.let { leaseAccounts[it] }
+        val currentAccount = accounts.read()
+        val targetAccount = leased?.second ?: currentAccount ?: return
+        val targetKey = leased?.first ?: accountKey(targetAccount)
+        syncMutex.withLock {
+            val accountMatches = currentAccount != null && accountKey(currentAccount) == targetKey
+            val check = if (accountMatches) memory.inspectAccountSwitch(targetKey) else null
+            val pushOutcome = if (accountMatches && check != null && !check.requiresPrompt) {
+                pushCycleLocked(targetAccount, targetKey, consolidationCompletedAt = finishedAt)
+            } else {
+                PushCycleOutcome(ok = false)
+            }
+            if (pushOutcome.ok) {
+                pushOutcome.settledChangeVersion?.let { lastSettledChangeVersion.set(it) }
+                memory.recordRemoteConsolidationAt(targetKey, finishedAt)
+                _state.value = _state.value.copy(
+                    status = RelayMemorySyncStatus.Synced,
+                    lastSyncedAt = clock(),
+                    lastErrorCode = null,
+                )
+            }
+            if (leaseId != null) {
+                val released = client.releaseConsolidationLease(targetAccount, leaseId)
+                if (released is RelayMemoryOutcome.Ok) {
+                    completedLeases += leaseId
+                    leaseAccounts.remove(leaseId)
+                }
+            }
+        }
+    }
+
+    override suspend fun onConsolidationFinished(leaseId: String?) {
+        if (leaseId == null) return
+        val leased = leaseAccounts.remove(leaseId)
+        if (completedLeases.remove(leaseId)) return
+        val account = leased?.second ?: accounts.read() ?: return
+        client.releaseConsolidationLease(account, leaseId)
+    }
+
+    private suspend fun pullCycleLocked(account: RelayAccount, accountKey: String): PullCycleOutcome =
+        when (val result = pullPagesLocked(account, accountKey)) {
+            is InternalPullResult.Ok -> PullCycleOutcome(ok = true, hadOverlap = result.hadOverlap)
+            InternalPullResult.Offline -> {
+                _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "offline")
+                PullCycleOutcome(ok = false, hadOverlap = false)
+            }
+
+            InternalPullResult.Unauthorized -> {
+                _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "unauthorized")
+                PullCycleOutcome(ok = false, hadOverlap = false)
+            }
+
+            is InternalPullResult.Rejected -> {
+                _state.value = if (result.code == "not_found") {
+                    _state.value.copy(status = RelayMemorySyncStatus.Unsupported, lastErrorCode = null)
+                } else {
+                    _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = result.code)
+                }
+                PullCycleOutcome(ok = false, hadOverlap = false)
+            }
+        }
+
+    private suspend fun pullCycleForLeaseLocked(account: RelayAccount, accountKey: String): LeasePullStep =
+        when (val result = pullPagesLocked(account, accountKey)) {
+            is InternalPullResult.Ok -> LeasePullStep.Ok
+            InternalPullResult.Offline -> LeasePullStep.Failed(ConsolidationLeaseResult.Offline)
+            InternalPullResult.Unauthorized -> {
+                _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "unauthorized")
+                LeasePullStep.Failed(ConsolidationLeaseResult.Unauthorized)
+            }
+
+            is InternalPullResult.Rejected -> {
+                if (result.code == "not_found") {
+                    _state.value = _state.value.copy(status = RelayMemorySyncStatus.Unsupported, lastErrorCode = null)
+                }
+                LeasePullStep.Failed(ConsolidationLeaseResult.Rejected)
+            }
+        }
+
+    private suspend fun pullPagesLocked(account: RelayAccount, accountKey: String): InternalPullResult {
+        val startCursor = memory.readPullCursor(accountKey)
+        var cursor = startCursor
+        var safeCursor = startCursor
+        var latestRemoteConsolidationAt: Long? = null
+        var hadOverlap = false
+        var paginationCompleted = false
+        val deferred = ArrayList<MemoryRemotePullEntry>()
+        for (pageIndex in 0 until MAX_PULL_PAGES) {
+            when (val res = client.pull(account, since = cursor, limit = PULL_PAGE_LIMIT)) {
+                is RelayMemoryOutcome.Ok -> {
+                    val page = res.value
+                    page.lastConsolidationAt?.takeIf { it > 0L }?.let { latestRemoteConsolidationAt = it }
+                    val applied = memory.applyRemotePullBatch(
+                        accountKey = accountKey,
+                        selfDeviceId = account.deviceId,
+                        entries = page.entries,
+                        nextSince = page.nextSince,
+                        remoteLastConsolidationAt = null,
+                        advanceCursor = false,
+                    )
+                    if (applied.hadLocalAndRemoteOverlap) hadOverlap = true
+                    if (applied.deferredEntries.isNotEmpty()) deferred += applied.deferredEntries
+                    val progressed = page.nextSince > cursor
+                    if (progressed) {
+                        cursor = page.nextSince
+                    }
+                    if (deferred.isEmpty() && cursor > safeCursor) {
+                        safeCursor = cursor
+                    }
+                    if (!page.hasMore) {
+                        paginationCompleted = true
                         break
                     }
-                    val isFinalBatch = (!batch.isBaseline && batch.ops.size < PUSH_BATCH_SIZE) ||
-                        (batch.isBaseline && batch.nextInitialPushDone)
-                    val chunks = splitOpsByByteBudget(batch.ops)
-                    var lastRemoteDreamAt: Long? = null
-                    for ((index, chunk) in chunks.withIndex()) {
-                        val attachedDreamAt = if (isFinalBatch && index == chunks.lastIndex) dreamStampRemaining else null
-                        val response = client.push(account, token, chunk, dreamCompletedAt = attachedDreamAt)
-                        if (attachedDreamAt != null) dreamStampRemaining = null
-                        latestServerSeq = maxOf(latestServerSeq, response.serverSeq)
-                        lastRemoteDreamAt = response.lastDreamAt ?: lastRemoteDreamAt
-                        if (response.rejectedCount > 0) {
-                            val summary = response.rejected.joinToString("; ") { "${it.opId}:${it.reason}" }
-                            runCatching { Log.w(TAG, "server rejected ${response.rejectedCount} sync ops: $summary") }
-                        }
-                    }
-                    store.markPushAcked(key, batch, latestServerSeq, lastRemoteDreamAt)
+                    if (!progressed) break
                 }
 
-                if (latestServerSeq > currentPulledSeq) {
-                    val trailingPull = pullAllLocked(account, key, token, currentPulledSeq)
-                    currentPulledSeq = trailingPull.pulledSeq
-                    latestServerSeq = maxOf(latestServerSeq, trailingPull.serverSeq)
-                    if (trailingPull.hadOverlap) overlapDetected = true
+                RelayMemoryOutcome.Offline -> {
+                    if (safeCursor > startCursor || latestRemoteConsolidationAt != null) {
+                        memory.commitPullCursor(accountKey, safeCursor, latestRemoteConsolidationAt)
+                    }
+                    return InternalPullResult.Offline
                 }
 
-                _state.update {
-                    it.copy(
-                        syncing = false,
-                        serverSeq = currentPulledSeq,
-                        lastSyncedAt = clock(),
-                        lastError = null,
-                        errorKind = null,
-                        supported = true,
-                        pendingAccountSwitch = null,
-                    )
+                RelayMemoryOutcome.Unauthorized -> {
+                    if (safeCursor > startCursor || latestRemoteConsolidationAt != null) {
+                        memory.commitPullCursor(accountKey, safeCursor, latestRemoteConsolidationAt)
+                    }
+                    return InternalPullResult.Unauthorized
                 }
-                SyncRunStatus.Synced
-            } catch (cancelled: CancellationException) {
-                _state.update { it.copy(syncing = false) }
-                throw cancelled
-            } catch (error: RelayMemoryException) {
-                when (error.failure) {
-                    RelayMemoryFailure.NotFound -> {
-                        unsupportedOrigins.add(account.origin)
-                        _state.update { it.copy(syncing = false, supported = false, lastError = null, errorKind = null) }
-                        SyncRunStatus.Unsupported
+
+                is RelayMemoryOutcome.Rejected -> {
+                    if (safeCursor > startCursor || latestRemoteConsolidationAt != null) {
+                        memory.commitPullCursor(accountKey, safeCursor, latestRemoteConsolidationAt)
                     }
-                    RelayMemoryFailure.Unauthorized -> {
-                        _state.update {
-                            it.copy(
-                                syncing = false,
-                                lastError = error.detail ?: error.failure.name,
-                                errorKind = RelayMemorySyncErrorKind.Unauthorized,
-                            )
-                        }
-                        SyncRunStatus.Unauthorized
-                    }
-                    RelayMemoryFailure.Rejected -> {
-                        _state.update {
-                            it.copy(
-                                syncing = false,
-                                lastError = error.detail ?: error.failure.name,
-                                errorKind = RelayMemorySyncErrorKind.Rejected,
-                            )
-                        }
-                        SyncRunStatus.Rejected
-                    }
-                    RelayMemoryFailure.Unreachable,
-                    RelayMemoryFailure.BadResponse,
-                    -> {
-                        _state.update {
-                            it.copy(
-                                syncing = false,
-                                lastError = error.detail ?: error.failure.name,
-                                errorKind = RelayMemorySyncErrorKind.Offline,
-                            )
-                        }
-                        SyncRunStatus.Offline
-                    }
+                    return InternalPullResult.Rejected(res.code)
                 }
-            } catch (error: Exception) {
-                runCatching { Log.w(TAG, "memory sync round failed", error) }
-                _state.update {
-                    it.copy(
-                        syncing = false,
-                        lastError = error.message ?: "sync failed",
-                        errorKind = RelayMemorySyncErrorKind.Offline,
-                    )
-                }
-                SyncRunStatus.Offline
-            } finally {
-                _state.update { it.copy(syncing = false) }
             }
         }
-        return SyncResult(
-            status = status,
-            triggerPostMergeDream = status == SyncRunStatus.Synced && overlapDetected && dreamCompletedAt == null,
-        )
-    }
-
-    private fun splitOpsByByteBudget(ops: List<MemorySyncOpItem>): List<List<MemorySyncOpItem>> {
-        if (ops.isEmpty()) return emptyList()
-        val chunks = ArrayList<List<MemorySyncOpItem>>()
-        var current = ArrayList<MemorySyncOpItem>()
-        var currentBytes = PUSH_ENVELOPE_OVERHEAD_BYTES
-        for (op in ops) {
-            val opBytes = RelayProtocol.encodeSyncOpJson(op).toByteArray(Charsets.UTF_8).size + 1
-            if (current.isNotEmpty() && currentBytes + opBytes > PUSH_MAX_PAYLOAD_BYTES) {
-                chunks.add(current)
-                current = ArrayList()
-                currentBytes = PUSH_ENVELOPE_OVERHEAD_BYTES
-            }
-            current.add(op)
-            currentBytes += opBytes
+        var unresolvedDeferred = false
+        if (deferred.isNotEmpty()) {
+            val replay = memory.applyRemotePullBatch(
+                accountKey = accountKey,
+                selfDeviceId = account.deviceId,
+                entries = deferred,
+                nextSince = 0L,
+                remoteLastConsolidationAt = null,
+                advanceCursor = false,
+            )
+            if (replay.hadLocalAndRemoteOverlap) hadOverlap = true
+            unresolvedDeferred = replay.deferredEntries.isNotEmpty()
         }
-        if (current.isNotEmpty()) chunks.add(current)
-        return chunks
+        val finalCursor = if (!paginationCompleted && unresolvedDeferred) safeCursor else cursor
+        if (finalCursor > startCursor || latestRemoteConsolidationAt != null) {
+            memory.commitPullCursor(accountKey, finalCursor, latestRemoteConsolidationAt)
+        }
+        return InternalPullResult.Ok(hadOverlap = hadOverlap)
     }
 
-    private suspend fun pullAllLocked(
+    private suspend fun pushCycleLocked(
         account: RelayAccount,
         accountKey: String,
-        token: String,
-        initialSince: Long,
-    ): PullResult {
-        var since = initialSince
-        var serverSeq = initialSince
-        var anyOverlap = false
-        while (true) {
-            val page = client.pull(account, token, since = since, limit = PULL_PAGE_SIZE)
-            serverSeq = maxOf(serverSeq, page.serverSeq)
-            val mergeResult = try {
-                applyingRemote = true
-                store.applyRemotePullBatch(
-                    accountKey = accountKey,
-                    selfDeviceId = account.deviceId,
-                    entries = page.entries,
-                    nextSince = page.nextSince,
-                    serverSeq = page.serverSeq,
-                    remoteLastDreamAt = page.lastDreamAt,
-                )
-            } finally {
-                applyingRemote = false
-            }
-            if (mergeResult.hadLocalAndRemoteOverlap) anyOverlap = true
-            val progressed = page.nextSince > since
-            if (progressed) since = page.nextSince
-            if (!page.hasMore || !progressed) break
-        }
-        return PullResult(pulledSeq = since, serverSeq = serverSeq, hadOverlap = anyOverlap)
-    }
+        consolidationCompletedAt: Long?,
+    ): PushCycleOutcome {
+        var pendingCompletionAt = consolidationCompletedAt
+        var hadRejected = false
+        var firstRejectedReason: String? = null
+        var latestSettledVersion: Long? = null
+        for (batchIndex in 0 until MAX_PUSH_BATCHES) {
+            val versionBeforeCollect = memory.changes.value
+            val batch = memory.collectPendingPushBatch(accountKey, account.deviceId, limit = PUSH_BATCH_LIMIT)
+            if (batch.isEmpty()) {
+                val stamp = if (hadRejected) null else pendingCompletionAt
+                if (stamp == null) {
+                    if (!hadRejected) {
+                        latestSettledVersion = versionBeforeCollect
+                    }
+                    break
+                }
+                pendingCompletionAt = null
+                when (val res = client.push(account, emptyList(), consolidationCompletedAt = stamp)) {
+                    is RelayMemoryOutcome.Ok -> {
+                        memory.markPushAcked(accountKey, emptyList(), res.value.lastConsolidationAt)
+                        latestSettledVersion = versionBeforeCollect
+                        break
+                    }
 
-    private fun isSyncUnsupported(account: RelayAccount): Boolean {
-        if (account.origin in unsupportedOrigins) return true
-        val caps = relayCapabilities()
-        return caps.isNotEmpty() && CAPABILITY_MEMORY_V2 !in caps
+                    RelayMemoryOutcome.Offline -> {
+                        _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "offline")
+                        return PushCycleOutcome(ok = false)
+                    }
+
+                    RelayMemoryOutcome.Unauthorized -> {
+                        _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "unauthorized")
+                        return PushCycleOutcome(ok = false)
+                    }
+
+                    is RelayMemoryOutcome.Rejected -> {
+                        _state.value = if (res.code == "not_found") {
+                            _state.value.copy(status = RelayMemorySyncStatus.Unsupported, lastErrorCode = null)
+                        } else {
+                            _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = res.code)
+                        }
+                        return PushCycleOutcome(ok = false)
+                    }
+                }
+            }
+            val stamp = if (batch.size < PUSH_BATCH_LIMIT && !hadRejected) pendingCompletionAt else null
+            when (val res = client.push(account, batch, consolidationCompletedAt = stamp)) {
+                is RelayMemoryOutcome.Ok -> {
+                    if (stamp != null) pendingCompletionAt = null
+                    val result = res.value
+                    memory.markPushAcked(accountKey, batch, result.lastConsolidationAt)
+                    if (result.rejected.isNotEmpty()) {
+                        hadRejected = true
+                        if (firstRejectedReason == null) {
+                            firstRejectedReason = result.rejected.firstOrNull()?.reason
+                        }
+                    } else {
+                        latestSettledVersion = versionBeforeCollect
+                    }
+                }
+
+                RelayMemoryOutcome.Offline -> {
+                    _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "offline")
+                    return PushCycleOutcome(ok = false)
+                }
+
+                RelayMemoryOutcome.Unauthorized -> {
+                    _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "unauthorized")
+                    return PushCycleOutcome(ok = false)
+                }
+
+                is RelayMemoryOutcome.Rejected -> {
+                    _state.value = if (res.code == "not_found") {
+                        _state.value.copy(status = RelayMemorySyncStatus.Unsupported, lastErrorCode = null)
+                    } else {
+                        _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = res.code)
+                    }
+                    return PushCycleOutcome(ok = false)
+                }
+            }
+        }
+        if (hadRejected) {
+            _state.value = _state.value.copy(
+                status = RelayMemorySyncStatus.Error,
+                lastErrorCode = firstRejectedReason ?: "push_rejected",
+            )
+            return PushCycleOutcome(ok = false)
+        }
+        if (pendingCompletionAt != null) {
+            val versionBeforeFinal = memory.changes.value
+            when (val res = client.push(account, emptyList(), consolidationCompletedAt = pendingCompletionAt)) {
+                is RelayMemoryOutcome.Ok -> {
+                    memory.markPushAcked(accountKey, emptyList(), res.value.lastConsolidationAt)
+                    latestSettledVersion = versionBeforeFinal
+                }
+
+                RelayMemoryOutcome.Offline -> {
+                    _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "offline")
+                    return PushCycleOutcome(ok = false)
+                }
+
+                RelayMemoryOutcome.Unauthorized -> {
+                    _state.value = _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = "unauthorized")
+                    return PushCycleOutcome(ok = false)
+                }
+
+                is RelayMemoryOutcome.Rejected -> {
+                    _state.value = if (res.code == "not_found") {
+                        _state.value.copy(status = RelayMemorySyncStatus.Unsupported, lastErrorCode = null)
+                    } else {
+                        _state.value.copy(status = RelayMemorySyncStatus.Error, lastErrorCode = res.code)
+                    }
+                    return PushCycleOutcome(ok = false)
+                }
+            }
+        }
+        return PushCycleOutcome(ok = true, settledChangeVersion = latestSettledVersion)
     }
 
     private fun accountKey(account: RelayAccount): String =
-        "${account.accountId}|${account.origin}|${account.deviceId}"
+        "${account.origin.trimEnd('/')}|${account.accountId}"
 
-    private fun accountIdentity(account: RelayAccount): String =
-        "${account.accountId}|${account.origin}"
-
-    private data class PullResult(
-        val pulledSeq: Long,
-        val serverSeq: Long,
+    private data class PullCycleOutcome(
+        val ok: Boolean,
         val hadOverlap: Boolean,
     )
 
-    private data class SyncResult(
-        val status: SyncRunStatus,
-        val triggerPostMergeDream: Boolean,
+    private data class PushCycleOutcome(
+        val ok: Boolean,
+        val settledChangeVersion: Long? = null,
     )
 
+    private sealed interface InternalPullResult {
+        data class Ok(val hadOverlap: Boolean) : InternalPullResult
+        data object Offline : InternalPullResult
+        data object Unauthorized : InternalPullResult
+        data class Rejected(val code: String) : InternalPullResult
+    }
+
+    private sealed interface LeasePullStep {
+        data object Ok : LeasePullStep
+        data class Failed(val result: ConsolidationLeaseResult) : LeasePullStep
+    }
+
     companion object {
-        private const val TAG = "RelayMemorySync"
-        private const val CAPABILITY_MEMORY_V2 = "memory-v2"
-        private const val PULL_PAGE_SIZE = 200
-        private const val PUSH_BATCH_SIZE = 100
-        private const val PUSH_MAX_PAYLOAD_BYTES = 1_024 * 1_024
-        private const val PUSH_ENVELOPE_OVERHEAD_BYTES = 128
-        private const val LOCAL_PUSH_DEBOUNCE_MS = 1_500L
-        private const val REMOTE_PULL_DEBOUNCE_MS = 300L
-        private const val DREAM_LEASE_TTL_MS = 10 * 60_000L
+        private const val CAPABILITY_MEMORY_V3 = "memory-v3"
+        private const val PULL_PAGE_LIMIT = 200
+        private const val MAX_PULL_PAGES = 100
+        private const val PUSH_BATCH_LIMIT = 100
+        private const val MAX_PUSH_BATCHES = 100
     }
 }

@@ -1,31 +1,6 @@
 package io.github.whywood.superpi.ui.chat
 
-internal const val ChatHistoryFoldThreshold = 20
-internal const val ChatHistoryInitialVisible = 3
-internal const val ChatHistoryLoadStep = 20
 internal const val ChatHistoryNavWindowTicks = 5
-
-internal fun initialVisibleMessages(total: Int): Int =
-    if (total > ChatHistoryFoldThreshold) ChatHistoryInitialVisible else total.coerceAtLeast(0)
-
-internal fun expandVisibleMessages(visible: Int, total: Int): Int {
-    val safeTotal = total.coerceAtLeast(0)
-    val safeVisible = visible.coerceIn(0, safeTotal)
-    if (safeVisible >= safeTotal) return safeVisible
-    return (safeVisible + ChatHistoryLoadStep).coerceAtMost(safeTotal)
-}
-
-internal fun resolveVisibleMessages(visible: Int, previousTotal: Int, total: Int): Int {
-    if (total <= 0) return 0
-    if (visible <= 0 || previousTotal <= 0) return initialVisibleMessages(total)
-    if (total <= previousTotal) return visible.coerceAtMost(total)
-    val collapsed = visible <= ChatHistoryInitialVisible && previousTotal > ChatHistoryFoldThreshold
-    return if (collapsed) {
-        ChatHistoryInitialVisible.coerceAtMost(total)
-    } else {
-        (visible + (total - previousTotal)).coerceAtMost(total)
-    }
-}
 
 internal fun navAnchorSlot(userMessageIndices: List<Int>, anchorMessageIndex: Int): Int {
     if (userMessageIndices.isEmpty()) return 0

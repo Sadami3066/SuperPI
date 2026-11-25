@@ -17,9 +17,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -56,6 +58,9 @@ data class SuperPIColors(
 ) {
     val userBubble: Color get() = accentSoft
     val onUserBubble: Color get() = ink
+    val signal: Color get() = if (dark) Color(0xFFFF5A4F) else Color(0xFFE5483F)
+    val surfaceRim: Color get() = if (dark) Color(0x14FFFFFF) else hairline.copy(alpha = 0.55f)
+    val composerShadow: Color get() = if (dark) Color(0xFF000000) else Color(0xFF0B1220)
 }
 
 val LocalSuperPIColors = staticCompositionLocalOf { DdTheme.lightClassicBlue() }
@@ -311,14 +316,16 @@ public fun SuperPITheme(
 ) {
     val systemDark = isSystemInDarkTheme()
     val colors = when (preset) {
-        ThemePreset.PI -> if (systemDark) DdTheme.darkPi() else DdTheme.lightPi()
-        ThemePreset.SYSTEM -> if (systemDark) DdTheme.darkOceanic() else DdTheme.lightSantorini()
+        ThemePreset.PI, ThemePreset.SYSTEM -> if (systemDark) DdTheme.darkPi() else DdTheme.lightPi()
         ThemePreset.SANTORINI -> DdTheme.lightSantorini()
         ThemePreset.OCEANIC -> DdTheme.darkOceanic()
         ThemePreset.CLASSIC_BLUE -> DdTheme.lightClassicBlue()
     }
     SuperPITheme(colors = colors, fontStyle = fontStyle, content = content)
 }
+
+private const val BASE_FONT_SCALE = 0.9f
+private val LocalDdBaseFontScaled = staticCompositionLocalOf { false }
 
 @Composable
 public fun SuperPITheme(
@@ -332,9 +339,20 @@ public fun SuperPITheme(
     val typography = remember(fontStyle) { superPiTypography(fontStyle) }
     val colorScheme = remember(colors) { colors.materialScheme() }
     val motionEnabled = ValueAnimator.areAnimatorsEnabled()
+    val density = LocalDensity.current
+    val alreadyScaled = LocalDdBaseFontScaled.current
+    val scaledDensity = remember(density, alreadyScaled) {
+        if (alreadyScaled) {
+            density
+        } else {
+            Density(density = density.density, fontScale = density.fontScale * BASE_FONT_SCALE)
+        }
+    }
     CompositionLocalProvider(
         LocalSuperPIColors provides colors,
         LocalDdMotionEnabled provides motionEnabled,
+        LocalDensity provides scaledDensity,
+        LocalDdBaseFontScaled provides true,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

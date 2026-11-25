@@ -23,6 +23,7 @@ import io.github.whywood.superpi.runtime.SessionHandle
 import io.github.whywood.superpi.runtime.SessionMcpServerStatus
 import io.github.whywood.superpi.runtime.SessionRuntimeEvent
 import io.github.whywood.superpi.runtime.SessionUsage
+import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.ToolResultDetails
 import io.github.whywood.superpi.runtime.ToolResultPayload
 import io.github.whywood.superpi.runtime.UserQuestion
@@ -86,6 +87,12 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
+data class RemotePendingModelSelection(
+    val providerId: String? = null,
+    val modelId: String? = null,
+    val thinkingLevel: ThinkingLevel? = null,
+)
+
 class RemoteSessionHandle internal constructor(
     private val target: RemoteSessionTarget,
     private val transport: RemoteAgentTransport,
@@ -148,6 +155,9 @@ class RemoteSessionHandle internal constructor(
 
     @Volatile
     private var remoteUsage: SessionUsage? = null
+
+    @Volatile
+    private var pendingModelSelection: RemotePendingModelSelection? = null
 
     override val sessionId: String get() = mirror.sessionId
 
@@ -349,6 +359,22 @@ class RemoteSessionHandle internal constructor(
     internal fun updateRemoteUsage(usage: SessionUsage?) {
         if (usage != null) remoteUsage = usage
     }
+
+    internal fun setPendingModel(providerId: String, modelId: String, thinkingLevel: ThinkingLevel?) {
+        pendingModelSelection = RemotePendingModelSelection(
+            providerId = providerId.takeIf { it.isNotBlank() },
+            modelId = modelId.takeIf { it.isNotBlank() },
+            thinkingLevel = thinkingLevel ?: pendingModelSelection?.thinkingLevel,
+        )
+    }
+
+    internal fun setPendingThinking(thinkingLevel: ThinkingLevel) {
+        val current = pendingModelSelection
+        pendingModelSelection = current?.copy(thinkingLevel = thinkingLevel)
+            ?: RemotePendingModelSelection(thinkingLevel = thinkingLevel)
+    }
+
+    internal fun pendingModelSelection(): RemotePendingModelSelection? = pendingModelSelection
 
     override fun sessionName(): String? = mirror.name()
 
@@ -677,6 +703,18 @@ class RemoteSessionHandle internal constructor(
             }
 
             is RemoteBotEvent.ApprovalRequest -> handleApprovalRequest(turnScope, turn, decoded)
+            is RemoteBotEvent.PluginCustomMessage -> {
+                mirror.appendCustomMessage(decoded.customType, decoded.text, decoded.payload, decoded.display)
+                emitPassiveRuntime(
+                    RuntimeEvent.PluginCustomMessage(
+                        runId = "",
+                        customType = decoded.customType,
+                        payload = decoded.payload,
+                        text = decoded.text,
+                        display = decoded.display,
+                    ),
+                )
+            }
             is RemoteBotEvent.Failed -> {
                 turn.failure = decoded.message
                 turn.settled.complete(Unit)
@@ -856,6 +894,7 @@ class RemoteSessionHandle internal constructor(
 
     private suspend fun rememberPeerSession(result: JsonObject?) {
         val returned = (result?.get("sessionId") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return
+        pendingModelSelection = null
         if (returned == peerSessionId) return
         peerSessionId = returned
         mirror.appendRemoteMapping(target.deviceId, target.botId, returned)
@@ -1102,6 +1141,21 @@ class RemoteSessionHandle internal constructor(
                 }
             }
 
+            is RemoteBotEvent.PluginCustomMessage -> {
+                mirror.appendCustomMessage(decoded.customType, decoded.text, decoded.payload, decoded.display)
+                val turn = ensurePassiveTurn(route, event.seq)
+                val runId = ensurePassiveRunStarted(turn, prompt = null)
+                emitPassiveRuntime(
+                    RuntimeEvent.PluginCustomMessage(
+                        runId = runId,
+                        customType = decoded.customType,
+                        payload = decoded.payload,
+                        text = decoded.text,
+                        display = decoded.display,
+                    ),
+                )
+            }
+
             is RemoteBotEvent.TextDelta,
             is RemoteBotEvent.ReasoningDelta,
             is RemoteBotEvent.ToolCall,
@@ -1132,6 +1186,12 @@ class RemoteSessionHandle internal constructor(
             is RemoteBotEvent.Settled -> {
                 passiveTurn?.let { finishPassiveTurn(it) }
             }
+
+            RemoteBotEvent.CompactionStart,
+            RemoteBotEvent.CompactionEnd,
+            RemoteBotEvent.RetryStart,
+            RemoteBotEvent.RetryEnd,
+            -> Unit
         }
     }
 
@@ -1348,7 +1408,20 @@ class RemoteSessionHandle internal constructor(
 
     private fun promptParams(text: String, images: List<RouteImagePart>, sessionId: String?): JsonObject = buildJsonObject {
         put("botId", target.botId)
-        if (sessionId != null) put("sessionId", sessionId)
+        if (sessionId != null) {
+            put("sessionId", sessionId)
+        } else {
+            val pending = pendingModelSelection
+            if (pending != null) {
+                val providerId = pending.providerId
+                val modelId = pending.modelId
+                if (!providerId.isNullOrBlank() && !modelId.isNullOrBlank()) {
+                    put("provider", providerId)
+                    put("modelId", modelId)
+                }
+                pending.thinkingLevel?.let { put("thinkingLevel", it.name.lowercase()) }
+            }
+        }
         put("text", text)
         if (images.isNotEmpty()) {
             put(

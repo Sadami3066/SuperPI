@@ -178,7 +178,7 @@ internal fun RidePage(host: PluginHost) {
                             modifier = Modifier.testTag("ride_verify"),
                         )
                         DdTextAction(
-                            text = host.t("更换密钥", "Change key"),
+                            text = host.t("更换账号凭证", "Change account credential"),
                             onClick = {
                                 keyInput = ""
                                 error = null
@@ -213,9 +213,9 @@ internal fun RidePage(host: PluginHost) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = DdSpacing.Card, vertical = DdSpacing.Lg),
                     verticalArrangement = Arrangement.spacedBy(DdSpacing.Sm),
                 ) {
-                    DdText(host.t("填写滴滴 Key", "Enter Didi key"), style = DdType.body, color = colors.ink)
+                    DdText(host.t("填写账号凭证", "Enter your account credential"), style = DdType.body, color = colors.ink)
                     DdTextAction(
-                        text = host.t("去滴滴开放平台获取 Key", "Get a key on the Didi open platform"),
+                        text = host.t("去滴滴开放平台获取账号凭证", "Get an account credential on the Didi open platform"),
                         onClick = { runCatching { host.ui().openUrl(DIDI_KEY_DOC_URL) } },
                         modifier = Modifier.testTag("ride_key_doc"),
                     )
@@ -225,7 +225,7 @@ internal fun RidePage(host: PluginHost) {
                             keyInput = it.trim()
                             error = null
                         },
-                        placeholder = host.t("粘贴滴滴 Key", "Paste Didi key"),
+                        placeholder = host.t("粘贴账号凭证", "Paste your account credential"),
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         onDone = { if (keyInput.isNotBlank() && !busy) connect(keyInput, persist = true) },
@@ -254,7 +254,7 @@ internal fun RidePage(host: PluginHost) {
                         )
                     }
                     DdText(
-                        host.t("Key 只保存在本机，不会发送给其他服务。", "The key stays on this device."),
+                        host.t("账号凭证只保存在本机，不会发送给其他服务。", "The account credential stays on this device."),
                         style = DdType.micro,
                         color = colors.inkTertiary,
                     )

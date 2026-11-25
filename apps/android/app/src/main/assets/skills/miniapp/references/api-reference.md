@@ -362,12 +362,12 @@ try {
 
 | 工具 | 参数 | 行为 |
 |---|---|---|
-| `miniapp_edit` | `action=get`, `app`, `key` | 读取 key，不存在返回 null |
-| `miniapp_edit` | `action=set`, `app`, `key`, `value` | 写入/覆盖任意 JSON，≤256KB |
-| `miniapp_edit` | `action=delete`, `app`, `key` | 删除 key |
-| `miniapp_edit` | `action=keys`, `app` | 列出 key（排序） |
+| `miniapp_data` | `action=get`, `app`, `key` | 读取 key，不存在返回 null |
+| `miniapp_data` | `action=set`, `app`, `key`, `value` | 写入/覆盖任意 JSON，≤256KB |
+| `miniapp_data` | `action=delete`, `app`, `key` | 删除 key |
+| `miniapp_data` | `action=keys`, `app` | 列出 key（排序） |
 
-示例：日报页面把内容存在 `report_2026-10-24`；Agent 每天用 `miniapp_edit`（`action=set`）更新对应 key，页面重开读取。
+示例：日报页面把内容存在 `report_2026-10-24`；Agent 每天用 `miniapp_data`（`action=set`）更新对应 key，页面重开读取。
 
 ## 页面与 App 的边界
 

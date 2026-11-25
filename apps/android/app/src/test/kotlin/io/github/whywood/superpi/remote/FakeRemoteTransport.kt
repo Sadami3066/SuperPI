@@ -25,6 +25,7 @@ internal class FakeRemoteTransport(
     capabilities: List<String> = DEFAULT_CAPABILITIES,
 ) : RemoteAgentTransport {
     private val events = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = 128)
+    private val streamClosuresFlow = MutableSharedFlow<RemoteStreamClosed>(extraBufferCapacity = 64)
     private val syncEventsFlow = MutableSharedFlow<RemoteSyncEvent>(extraBufferCapacity = 64)
     private val onlineState = MutableStateFlow(if (online) setOf(DEVICE_ID) else emptySet())
     private val devicesFlow = MutableStateFlow(
@@ -48,6 +49,8 @@ internal class FakeRemoteTransport(
 
     override val remoteEvents: SharedFlow<RemoteEvent> = events.asSharedFlow()
 
+    override val streamClosures: SharedFlow<RemoteStreamClosed> = streamClosuresFlow.asSharedFlow()
+
     override val onlineDevices: StateFlow<Set<String>> = onlineState.asStateFlow()
 
     override val syncEvents: SharedFlow<RemoteSyncEvent> = syncEventsFlow.asSharedFlow()
@@ -59,6 +62,8 @@ internal class FakeRemoteTransport(
     val calls: MutableList<FakeCall> = mutableListOf()
 
     var failNext: RemoteCallError? = null
+
+    var beforeCallReturn: (suspend (FakeCall) -> Unit)? = null
 
     var result: (FakeCall) -> JsonObject? = { call ->
         if (call.method == "bot.prompt") {
@@ -83,6 +88,10 @@ internal class FakeRemoteTransport(
         syncEventsFlow.tryEmit(event)
     }
 
+    fun emitStreamClosure(closed: RemoteStreamClosed) {
+        streamClosuresFlow.tryEmit(closed)
+    }
+
     override suspend fun call(
         to: String,
         method: String,
@@ -94,6 +103,7 @@ internal class FakeRemoteTransport(
         val call = FakeCall(to, method, params, timeoutMillis, "route-$callCount")
         calls += call
         onRouteId(call.routeId)
+        beforeCallReturn?.invoke(call)
         val failure = failNext
         if (failure != null) {
             failNext = null

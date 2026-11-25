@@ -4,8 +4,12 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -37,18 +41,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -160,7 +171,7 @@ internal fun ChatComposer(
         else -> stringResource(R.string.assistant_hint)
     }
     val canSend = state.inputEnabled && state.ready && state.configured &&
-        value.isNotBlank() && !state.importingAttachment
+        (value.isNotBlank() || state.attachments.isNotEmpty()) && !state.importingAttachment
     val stops = state.sending && !canSend
     val sendDescription = when {
         stops -> stringResource(R.string.assistant_stop)
@@ -305,7 +316,7 @@ internal fun ChatComposer(
                     ComposerSurface.Recording -> VoiceRecordingBar(
                         volume = voice.volume,
                         stopping = voice.stopping,
-                        canSend = voice.buffer.isNotBlank() || value.isNotBlank(),
+                        canSend = voice.buffer.isNotBlank() || value.isNotBlank() || state.attachments.isNotEmpty(),
                         onCancel = voice.cancel,
                         onStop = voice.stop,
                         onSend = voice.send,
@@ -314,6 +325,7 @@ internal fun ChatComposer(
                     ComposerSurface.Expanded -> ComposerCard(
                         shape = shape,
                         focused = focused,
+                        sending = state.sending,
                     ) {
                         ChatComposerExpandedContent(
                             state = state,
@@ -330,7 +342,7 @@ internal fun ChatComposer(
                         )
                     }
 
-                    ComposerSurface.Collapsed -> ComposerCard(shape) {
+                    ComposerSurface.Collapsed -> ComposerCard(shape, sending = state.sending) {
                         ChatComposerCollapsedContent(
                             placeholder = placeholder,
                             canSend = canSend,
@@ -401,6 +413,7 @@ internal fun ChatComposer(
 private fun ComposerCard(
     shape: RoundedCornerShape,
     focused: Boolean = false,
+    sending: Boolean = false,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -416,11 +429,26 @@ private fun ComposerCard(
         animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "composer-spot",
     )
+    val pulseAlphaState: State<Float> = if (sending && motionEnabled) {
+        val pulse = rememberInfiniteTransition(label = "composer-running-pulse")
+        pulse.animateFloat(
+            initialValue = 0.28f,
+            targetValue = 0.62f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = DdMotion.EaseInOut),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "composer-running-alpha",
+        )
+    } else {
+        remember { mutableFloatStateOf(0.45f) }
+    }
     val borderColor by animateColorAsState(
         targetValue = if (focused) colors.inkTertiary.copy(alpha = 0.45f) else colors.hairline,
         animationSpec = if (motionEnabled) tween(durationMillis = DdMotion.BASE, easing = DdMotion.EaseOut) else snap(),
         label = "composer-border",
     )
+    val signalColor = colors.signal
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -428,12 +456,27 @@ private fun ComposerCard(
                 elevation = elevation,
                 shape = shape,
                 clip = false,
-                ambientColor = Color(0xFF0B1220),
-                spotColor = Color(0xFF0B1220).copy(alpha = spotAlpha),
+                ambientColor = colors.composerShadow,
+                spotColor = colors.composerShadow.copy(alpha = spotAlpha),
             )
             .clip(shape)
             .background(colors.composer)
-            .border(1.dp, borderColor, shape),
+            .border(1.dp, borderColor, shape)
+            .drawWithContent {
+                drawContent()
+                if (sending) {
+                    val strokePx = 1.dp.toPx()
+                    val half = strokePx / 2f
+                    val radiusPx = shape.topStart.toPx(size, this)
+                    drawRoundRect(
+                        color = signalColor.copy(alpha = pulseAlphaState.value),
+                        topLeft = Offset(half, half),
+                        size = Size(size.width - strokePx, size.height - strokePx),
+                        cornerRadius = CornerRadius(radiusPx, radiusPx),
+                        style = Stroke(width = strokePx),
+                    )
+                }
+            },
         content = content,
     )
 }

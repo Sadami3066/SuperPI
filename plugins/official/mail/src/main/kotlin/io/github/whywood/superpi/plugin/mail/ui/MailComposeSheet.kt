@@ -2,6 +2,7 @@ package io.github.whywood.superpi.plugin.mail.ui
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -467,14 +468,17 @@ internal fun MailComposeSheet(
                                         if (image) {
                                             DdPressable(
                                                 onClick = { viewerPath = attachment.path },
+                                                modifier = Modifier.size(44.dp),
                                                 shape = DdShapes.Medium,
                                                 contentDescription = host.t("预览图片", "Preview image"),
                                             ) {
-                                                DdImage(
-                                                    path = attachment.path,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(34.dp),
-                                                )
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    DdImage(
+                                                        path = attachment.path,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(34.dp),
+                                                    )
+                                                }
                                             }
                                             Spacer(Modifier.width(4.dp))
                                         }
@@ -482,7 +486,6 @@ internal fun MailComposeSheet(
                                             icon = DdIcons.Close,
                                             onClick = { removeAttachment(attachment) },
                                             contentDescription = host.t("移除附件", "Remove attachment"),
-                                            size = 36.dp,
                                             iconSize = 15.dp,
                                             tint = if (canEditAttachments) {
                                                 colors.inkTertiary

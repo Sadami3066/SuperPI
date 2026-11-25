@@ -14,9 +14,13 @@ export const RELAY_CAPABILITIES = [
   'session-controls',
   'bot-capabilities',
   'present-artifacts',
-  'memory-v2',
+  'memory-v3',
+  'super-worker',
 ] as const
 export type RelayCapability = (typeof RELAY_CAPABILITIES)[number]
+
+export const MEMORY_ACCESS_SCOPES = ['PERSONAL', 'WORK_ONLY', 'OFF'] as const
+export type MemoryAccessScopeWire = (typeof MEMORY_ACCESS_SCOPES)[number]
 
 export const ERROR_CODES = [
   'unauthorized',
@@ -73,16 +77,39 @@ export const ROUTE_METHODS = [
   'file.rename',
   'file.delete',
   'artifact.read_chunk',
+  'worker.list',
+  'worker.start',
+  'worker.continue',
+  'worker.resume',
+  'worker.steer',
+  'worker.abort',
+  'worker.approval',
+  'worker.inspect',
+  'worker.delete',
+  'worker.compact',
+  'worker.set_model',
 ] as const
 
 export type RouteMethod = (typeof ROUTE_METHODS)[number]
 
 export type DevicePlatform = 'android' | 'desktop' | 'cli' | 'unknown'
 
+export interface BotCapabilitiesSummary {
+  skills: string[]
+  plugins: string[]
+  mcpServers: string[]
+  screenTools?: boolean
+  miniappTools?: boolean
+  memoryScope?: MemoryAccessScopeWire
+  memoryDispatch?: boolean
+}
+
 export interface BotInfo {
   id: string
   name: string
   avatar?: string
+  intro?: string
+  capabilities?: BotCapabilitiesSummary
 }
 
 export interface RemoteSessionSummary {
@@ -204,6 +231,11 @@ export type BotEvent =
   | { type: 'agent_end'; status?: string }
   | { type: 'agent_settled' }
   | { type: 'error'; message: string }
+  | { type: 'plugin_custom_message'; customType: string; payload: string; text: string; display?: boolean }
+  | { type: 'compaction_start' }
+  | { type: 'compaction_end' }
+  | { type: 'retry_start' }
+  | { type: 'retry_end' }
 
 export interface HelloFrame {
   type: 'hello'
@@ -385,6 +417,18 @@ export function isBotEvent(value: unknown): value is BotEvent {
       return true
     case 'error':
       return typeof value.message === 'string'
+    case 'plugin_custom_message':
+      return (
+        isNonEmptyString(value.customType) &&
+        typeof value.payload === 'string' &&
+        typeof value.text === 'string' &&
+        (value.display === undefined || typeof value.display === 'boolean')
+      )
+    case 'compaction_start':
+    case 'compaction_end':
+    case 'retry_start':
+    case 'retry_end':
+      return true
     default:
       return false
   }
@@ -610,6 +654,9 @@ export const MAX_RELATIVE_PATH_LENGTH = 512
 const MAX_BOTS_PER_DEVICE = 64
 const MAX_BOT_ID_LENGTH = 128
 const MAX_BOT_NAME_LENGTH = 128
+const MAX_BOT_INTRO_LENGTH = 256
+const MAX_BOT_CAPABILITY_ITEMS = 64
+const MAX_BOT_CAPABILITY_NAME_LENGTH = 128
 const MAX_BOT_AVATAR_LENGTH = 65_536
 const MAX_TOTAL_AVATAR_CHARS_PER_DEVICE = 512 * 1024
 const MAX_CAPABILITIES = 32
@@ -723,8 +770,73 @@ function requireBots(value: unknown, tolerantAvatars: boolean): BotInfo[] {
     } else if (entry.avatar !== undefined && entry.avatar !== null && entry.avatar !== '' && !tolerantAvatars) {
       throw new ProtocolError('bot.avatar is invalid')
     }
+    if (typeof entry.intro === 'string') {
+      const trimmed = entry.intro.trim().slice(0, MAX_BOT_INTRO_LENGTH)
+      if (trimmed !== '') {
+        bot.intro = trimmed
+      }
+    } else if (entry.intro !== undefined && entry.intro !== null && !tolerantAvatars) {
+      throw new ProtocolError('bot.intro must be a string')
+    }
+    if (entry.capabilities !== undefined && entry.capabilities !== null) {
+      const summary = normalizeBotCapabilities(entry.capabilities, tolerantAvatars)
+      if (summary) {
+        bot.capabilities = summary
+      }
+    }
     return bot
   })
+}
+
+function normalizeBotCapabilities(raw: unknown, tolerant: boolean): BotCapabilitiesSummary | null {
+  if (!isRecord(raw)) {
+    if (tolerant) return null
+    throw new ProtocolError('bot.capabilities must be an object')
+  }
+  const summary: BotCapabilitiesSummary = {
+    skills: normalizeCapabilityList(raw.skills, 'skills', tolerant),
+    plugins: normalizeCapabilityList(raw.plugins, 'plugins', tolerant),
+    mcpServers: normalizeCapabilityList(raw.mcpServers, 'mcpServers', tolerant),
+  }
+  if (typeof raw.screenTools === 'boolean') {
+    summary.screenTools = raw.screenTools
+  } else if (raw.screenTools !== undefined && raw.screenTools !== null && !tolerant) {
+    throw new ProtocolError('bot.capabilities.screenTools must be a boolean')
+  }
+  if (typeof raw.miniappTools === 'boolean') {
+    summary.miniappTools = raw.miniappTools
+  } else if (raw.miniappTools !== undefined && raw.miniappTools !== null && !tolerant) {
+    throw new ProtocolError('bot.capabilities.miniappTools must be a boolean')
+  }
+  if (typeof raw.memoryScope === 'string') {
+    const scope = raw.memoryScope.trim().toUpperCase()
+    if ((MEMORY_ACCESS_SCOPES as readonly string[]).includes(scope)) {
+      summary.memoryScope = scope as MemoryAccessScopeWire
+    } else if (!tolerant) {
+      throw new ProtocolError('bot.capabilities.memoryScope is invalid')
+    }
+  } else if (raw.memoryScope !== undefined && raw.memoryScope !== null && !tolerant) {
+    throw new ProtocolError('bot.capabilities.memoryScope is invalid')
+  }
+  if (typeof raw.memoryDispatch === 'boolean') {
+    summary.memoryDispatch = raw.memoryDispatch
+  } else if (raw.memoryDispatch !== undefined && raw.memoryDispatch !== null && !tolerant) {
+    throw new ProtocolError('bot.capabilities.memoryDispatch must be a boolean')
+  }
+  return summary
+}
+
+function normalizeCapabilityList(raw: unknown, field: string, tolerant: boolean): string[] {
+  if (raw === undefined || raw === null) return []
+  if (!isStringArray(raw)) {
+    if (tolerant) return []
+    throw new ProtocolError(`bot.capabilities.${field} must be an array of strings`)
+  }
+  return raw
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+    .slice(0, MAX_BOT_CAPABILITY_ITEMS)
+    .map((entry) => entry.slice(0, MAX_BOT_CAPABILITY_NAME_LENGTH))
 }
 
 function requireIdentifier(record: Record<string, unknown>, key: string): string {
@@ -904,6 +1016,23 @@ function validateRouteParams(
   routeId: string,
 ): Record<string, unknown> {
   switch (method) {
+    case 'bot.prompt': {
+      const hasProvider = params.provider !== undefined && params.provider !== null
+      const hasModelId = params.modelId !== undefined && params.modelId !== null
+      if (hasProvider) {
+        requireRouteBoundedNonEmpty(params, 'provider', 128, routeId)
+      }
+      if (hasModelId) {
+        requireRouteBoundedNonEmpty(params, 'modelId', 256, routeId)
+      }
+      if (hasProvider !== hasModelId) {
+        throw new RouteValidationError(routeId, 'provider and modelId must both be specified')
+      }
+      if (params.thinkingLevel !== undefined && params.thinkingLevel !== null) {
+        requireRouteBoundedNonEmpty(params, 'thinkingLevel', 32, routeId)
+      }
+      return params
+    }
     case 'bot.approval':
       validateBotApprovalParams(params, routeId)
       return params
@@ -1021,9 +1150,122 @@ function validateRouteParams(
       return { ...params, path: requireRoutePath(params.path, false, routeId) }
     case 'artifact.read_chunk':
       return validateArtifactReadChunkParams(params, routeId)
+    case 'worker.list':
+      if (params.botId !== undefined) {
+        requireRouteBotId(params, routeId)
+      }
+      return params
+    case 'worker.start': {
+      requireRouteBotId(params, routeId)
+      const next = requireRouteBoundedTextOrImages(params, 'task', 32_768, routeId)
+      if (next.workerId !== undefined) {
+        requireRouteIdentifier(next, 'workerId', routeId)
+      }
+      if (next.callerDeviceId !== undefined) {
+        requireRouteBoundedNonEmpty(next, 'callerDeviceId', 128, routeId)
+      }
+      if (next.providerId !== undefined) {
+        requireRouteBoundedNonEmpty(next, 'providerId', 128, routeId)
+      }
+      if (next.modelId !== undefined) {
+        requireRouteBoundedNonEmpty(next, 'modelId', 256, routeId)
+      }
+      if (next.thinkingLevel !== undefined) {
+        requireRouteBoundedNonEmpty(next, 'thinkingLevel', 32, routeId)
+      }
+      if (next.title !== undefined && next.title !== null && (typeof next.title !== 'string' || next.title.length > 256)) {
+        throw new RouteValidationError(routeId, 'title must be a string within 256 characters')
+      }
+      if (next.name !== undefined && next.name !== null && (typeof next.name !== 'string' || next.name.length > 256)) {
+        throw new RouteValidationError(routeId, 'name must be a string within 256 characters')
+      }
+      return next
+    }
+    case 'worker.continue':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'workerId', routeId)
+      return requireRouteBoundedTextOrImages(params, 'message', 32_768, routeId)
+    case 'worker.resume':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'workerId', routeId)
+      if (
+        params.afterSeq !== undefined &&
+        (typeof params.afterSeq !== 'number' || !Number.isInteger(params.afterSeq) || params.afterSeq < 0)
+      ) {
+        throw new RouteValidationError(routeId, 'afterSeq must be a non-negative integer')
+      }
+      return params
+    case 'worker.steer':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'workerId', routeId)
+      return requireRouteBoundedTextOrImages(params, 'message', 16_384, routeId)
+    case 'worker.abort':
+    case 'worker.delete':
+    case 'worker.compact':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'workerId', routeId)
+      return params
+    case 'worker.set_model':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'workerId', routeId)
+      if (params.providerId !== undefined) {
+        requireRouteBoundedNonEmpty(params, 'providerId', 128, routeId)
+      }
+      if (params.modelId !== undefined) {
+        requireRouteBoundedNonEmpty(params, 'modelId', 256, routeId)
+      }
+      if (params.thinkingLevel !== undefined) {
+        requireRouteBoundedNonEmpty(params, 'thinkingLevel', 32, routeId)
+      }
+      if (
+        (params.providerId !== undefined && params.modelId === undefined) ||
+        (params.providerId === undefined && params.modelId !== undefined)
+      ) {
+        throw new RouteValidationError(routeId, 'providerId and modelId must both be specified')
+      }
+      if (params.providerId === undefined && params.thinkingLevel === undefined) {
+        throw new RouteValidationError(routeId, 'providerId/modelId or thinkingLevel is required')
+      }
+      return params
+    case 'worker.approval':
+      return validateWorkerApprovalParams(params, routeId)
+    case 'worker.inspect':
+      requireRouteBotId(params, routeId)
+      requireRouteIdentifier(params, 'workerId', routeId)
+      if (
+        params.tail !== undefined &&
+        (typeof params.tail !== 'number' || !Number.isInteger(params.tail) || params.tail < 1 || params.tail > 200)
+      ) {
+        throw new RouteValidationError(routeId, 'tail must be an integer between 1 and 200')
+      }
+      return params
     default:
       return params
   }
+}
+
+function validateWorkerApprovalParams(params: Record<string, unknown>, routeId: string): Record<string, unknown> {
+  requireRouteBotId(params, routeId)
+  requireRouteIdentifier(params, 'workerId', routeId)
+  requireRouteIdentifier(params, 'requestId', routeId)
+  if (params.answers !== undefined) {
+    if (!Array.isArray(params.answers) || params.answers.length > 16 || !params.answers.every(isBotQuestionAnswer)) {
+      throw new RouteValidationError(routeId, 'invalid approval answers')
+    }
+  }
+  if (params.dismissed !== undefined && typeof params.dismissed !== 'boolean') {
+    throw new RouteValidationError(routeId, 'dismissed must be a boolean')
+  }
+  const hasResolution =
+    params.dismissed === true ||
+    params.cancelled === true ||
+    typeof params.confirmed === 'boolean' ||
+    typeof params.value === 'string' ||
+    params.answers !== undefined
+  if (!hasResolution) {
+    throw new RouteValidationError(routeId, 'approval response payload is required')
+  }
+  return params
 }
 
 function validateBotCapabilitiesSetParams(
@@ -1051,6 +1293,21 @@ function validateBotCapabilitiesSetParams(
   }
   if (policy.miniappTools !== undefined && typeof policy.miniappTools !== 'boolean') {
     throw new RouteValidationError(routeId, 'policy.miniappTools must be a boolean')
+  }
+  if (policy.memoryScope !== undefined && policy.memoryScope !== null) {
+    if (
+      typeof policy.memoryScope !== 'string' ||
+      !(MEMORY_ACCESS_SCOPES as readonly string[]).includes(policy.memoryScope.trim().toUpperCase())
+    ) {
+      throw new RouteValidationError(routeId, 'policy.memoryScope is invalid')
+    }
+  }
+  if (
+    policy.memoryDispatch !== undefined &&
+    policy.memoryDispatch !== null &&
+    typeof policy.memoryDispatch !== 'boolean'
+  ) {
+    throw new RouteValidationError(routeId, 'policy.memoryDispatch must be a boolean')
   }
   return params
 }
@@ -1236,6 +1493,37 @@ function requireRouteBoundedNonEmpty(
     throw new RouteValidationError(routeId, `${key} must be a non-empty string within ${maxLength} characters`)
   }
   return value
+}
+
+function requireRouteBoundedTextOrImages(
+  params: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+  routeId: string,
+): Record<string, unknown> {
+  const value = params[key]
+  if (typeof value !== 'string' || value.length > maxLength) {
+    throw new RouteValidationError(routeId, `${key} must be a string within ${maxLength} characters`)
+  }
+  if (params.images !== undefined) {
+    let images: RouteImagePart[]
+    try {
+      images = validateRouteImages(params.images)
+    } catch (error) {
+      throw new RouteValidationError(
+        routeId,
+        error instanceof Error ? error.message : 'invalid images',
+      )
+    }
+    if (value.trim() === '' && images.length === 0) {
+      throw new RouteValidationError(routeId, `${key} or images is required`)
+    }
+    return { ...params, images }
+  }
+  if (value.trim() === '') {
+    throw new RouteValidationError(routeId, `${key} must be a non-empty string within ${maxLength} characters`)
+  }
+  return params
 }
 
 function requireRoutePath(value: unknown, allowEmpty: boolean, routeId: string): string {

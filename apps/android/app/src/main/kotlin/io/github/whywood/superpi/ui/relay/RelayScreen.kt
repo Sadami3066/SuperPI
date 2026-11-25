@@ -81,8 +81,11 @@ import io.github.whywood.superpi.data.relay.RelayAccount
 import io.github.whywood.superpi.data.relay.RelayDevice
 import io.github.whywood.superpi.data.relay.RelayError
 import io.github.whywood.superpi.data.relay.RelayLiveState
+import io.github.whywood.superpi.data.relay.RelayMemorySyncStatus
+import io.github.whywood.superpi.data.relay.RelayMemorySyncUiState
 import io.github.whywood.superpi.data.relay.RelayPairingLink
 import io.github.whywood.superpi.data.relay.RelayUiState
+import io.github.whywood.superpi.runtime.memory.MemoryAccountSwitchMode
 import io.github.whywood.superpi.design.DdAlpha
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdGroupCard
@@ -126,6 +129,7 @@ internal fun RelayScreen(
     allowRemote: Boolean,
     devices: List<RelayDevice>,
     defaultDeviceName: String,
+    syncState: RelayMemorySyncUiState = RelayMemorySyncUiState(),
     onBack: () -> Unit,
     onConnect: (link: String, loginSecret: String?, deviceName: String) -> Unit,
     onSignOut: () -> Unit,
@@ -135,6 +139,8 @@ internal fun RelayScreen(
     onDismissPairCode: () -> Unit = {},
     onRevokeDevice: (String) -> Unit = {},
     onRenameDevice: (deviceId: String, name: String) -> Unit = { _, _ -> },
+    onSyncMemoryNow: () -> Unit = {},
+    onResolveMemoryAccountSwitch: (MemoryAccountSwitchMode) -> Unit = {},
 ) {
     val colors = superPiColors()
     val context = LocalContext.current
@@ -146,9 +152,13 @@ internal fun RelayScreen(
     var confirmRevokeDevice by remember { mutableStateOf<RelayDevice?>(null) }
     var renameTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var renameInput by rememberSaveable { mutableStateOf("") }
+    var showSwitchDialog by rememberSaveable { mutableStateOf(false) }
     var pairCopied by remember(state.pairLink) { mutableStateOf(false) }
     val fingerprint = remember(link) { RelayPairingLink.parse(link)?.fingerprint }
     val connect = { onConnect(link.trim(), secret.trim().ifEmpty { null }, deviceName.trim()) }
+    LaunchedEffect(syncState.accountSwitchPrompt?.accountIdentity) {
+        showSwitchDialog = syncState.accountSwitchPrompt != null
+    }
 
     DdPageScaffold(
         topBar = {
@@ -191,6 +201,7 @@ internal fun RelayScreen(
                 liveState = liveState,
                 allowRemote = allowRemote,
                 devices = devices,
+                syncState = syncState,
                 generatingPairCode = state.generatingPairCode,
                 revokingDeviceId = state.revokingDeviceId,
                 error = state.error,
@@ -201,6 +212,8 @@ internal fun RelayScreen(
                     renameTarget = id to currentName
                     renameInput = currentName
                 },
+                onSyncMemoryNow = onSyncMemoryNow,
+                onOpenSwitchPrompt = { showSwitchDialog = true },
                 onDismissError = onDismissError,
                 onSignOut = { confirmSignOut = true },
             )
@@ -424,6 +437,54 @@ internal fun RelayScreen(
         )
     }
 
+    val activeSwitchPrompt = syncState.accountSwitchPrompt
+    if (showSwitchDialog && activeSwitchPrompt != null) {
+        DdDialog(
+            onDismissRequest = { showSwitchDialog = false },
+            title = stringResource(R.string.relay_memory_switch_dialog_title),
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(DdSpacing.Md)) {
+                    Text(
+                        text = stringResource(
+                            R.string.relay_memory_switch_dialog_body,
+                            activeSwitchPrompt.localRecordCount,
+                        ),
+                        style = DdType.bodySmall,
+                        color = colors.inkSecondary,
+                    )
+                    Column {
+                        DdListRow(
+                            title = stringResource(R.string.relay_memory_switch_merge),
+                            subtitle = stringResource(R.string.relay_memory_switch_merge_hint),
+                            onClick = {
+                                showSwitchDialog = false
+                                onResolveMemoryAccountSwitch(MemoryAccountSwitchMode.MERGE)
+                            },
+                            showChevron = true,
+                        )
+                        DdRowDivider()
+                        DdListRow(
+                            title = stringResource(R.string.relay_memory_switch_replace),
+                            subtitle = stringResource(R.string.relay_memory_switch_replace_hint),
+                            onClick = {
+                                showSwitchDialog = false
+                                onResolveMemoryAccountSwitch(MemoryAccountSwitchMode.REPLACE_LOCAL)
+                            },
+                            showChevron = true,
+                        )
+                    }
+                }
+            },
+            actions = {
+                DdTextAction(
+                    text = stringResource(R.string.relay_cancel),
+                    onClick = { showSwitchDialog = false },
+                    color = colors.inkSecondary,
+                )
+            },
+        )
+    }
+
     if (scanningQr) {
         RelayQrScanSheet(
             onDismiss = { scanningQr = false },
@@ -469,12 +530,6 @@ private fun ColumnScope.ConnectForm(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = DdSpacing.ScreenHorizontal),
     ) {
-        Text(
-            text = stringResource(R.string.relay_intro),
-            style = DdType.bodySmall,
-            color = colors.inkSecondary,
-        )
-        Spacer(Modifier.height(DdSpacing.Xxl))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -580,6 +635,7 @@ private fun ColumnScope.ConnectedAccount(
     liveState: RelayLiveState,
     allowRemote: Boolean,
     devices: List<RelayDevice>,
+    syncState: RelayMemorySyncUiState,
     generatingPairCode: Boolean,
     revokingDeviceId: String?,
     error: RelayError?,
@@ -587,6 +643,8 @@ private fun ColumnScope.ConnectedAccount(
     onGeneratePairCode: () -> Unit,
     onRequestRevokeDevice: (RelayDevice) -> Unit,
     onRequestRenameDevice: (deviceId: String, currentName: String) -> Unit,
+    onSyncMemoryNow: () -> Unit,
+    onOpenSwitchPrompt: () -> Unit,
     onDismissError: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -624,6 +682,12 @@ private fun ColumnScope.ConnectedAccount(
                 value = formatDate(account.enrolledAt),
             )
         }
+        Spacer(Modifier.height(DdSpacing.Xl))
+        MemorySyncCard(
+            syncState = syncState,
+            onSyncNow = onSyncMemoryNow,
+            onOpenSwitchPrompt = onOpenSwitchPrompt,
+        )
         Spacer(Modifier.height(DdSpacing.Xl))
         ShareCard(
             liveState = liveState,
@@ -827,6 +891,80 @@ private fun formatFingerprint(value: String): String =
 private fun formatDate(epochMillis: Long): String {
     val formatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
     return Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(formatter)
+}
+
+private fun formatDateTime(epochMillis: Long): String {
+    val formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)
+    return Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).toLocalDateTime().format(formatter)
+}
+
+@Composable
+private fun MemorySyncCard(
+    syncState: RelayMemorySyncUiState,
+    onSyncNow: () -> Unit,
+    onOpenSwitchPrompt: () -> Unit,
+) {
+    val colors = superPiColors()
+    val subtitleText = when (syncState.status) {
+        RelayMemorySyncStatus.Idle -> stringResource(R.string.relay_memory_sync_idle)
+        RelayMemorySyncStatus.Syncing -> stringResource(R.string.relay_memory_sync_running)
+        RelayMemorySyncStatus.Synced -> {
+            val syncedAt = syncState.lastSyncedAt
+            if (syncedAt != null) {
+                stringResource(R.string.relay_memory_sync_done, formatDateTime(syncedAt))
+            } else {
+                stringResource(R.string.relay_memory_sync_idle)
+            }
+        }
+
+        RelayMemorySyncStatus.Error -> when (syncState.lastErrorCode) {
+            "offline" -> stringResource(R.string.relay_memory_sync_error_offline)
+            "unauthorized" -> stringResource(R.string.relay_memory_sync_error_unauthorized)
+            else -> stringResource(R.string.relay_memory_sync_error)
+        }
+
+        RelayMemorySyncStatus.AwaitingAccountSwitch -> {
+            val count = syncState.accountSwitchPrompt?.localRecordCount ?: 0
+            stringResource(R.string.relay_memory_switch_pending_subtitle, count)
+        }
+
+        RelayMemorySyncStatus.Unsupported -> stringResource(R.string.relay_memory_sync_unsupported)
+    }
+    DdGroupCard {
+        DdListRow(
+            title = stringResource(R.string.relay_memory_sync_title),
+            subtitle = subtitleText,
+            trailing = {
+                when (syncState.status) {
+                    RelayMemorySyncStatus.Syncing -> DdSpinner(
+                        modifier = Modifier.size(18.dp),
+                        color = colors.accent,
+                    )
+
+                    RelayMemorySyncStatus.AwaitingAccountSwitch -> DdTextAction(
+                        text = stringResource(R.string.relay_memory_switch_action),
+                        onClick = onOpenSwitchPrompt,
+                        color = colors.accent,
+                    )
+
+                    RelayMemorySyncStatus.Unsupported -> Unit
+                    RelayMemorySyncStatus.Error -> DdTextAction(
+                        text = stringResource(R.string.relay_memory_sync_retry),
+                        onClick = onSyncNow,
+                        color = colors.accent,
+                    )
+
+                    RelayMemorySyncStatus.Idle,
+                    RelayMemorySyncStatus.Synced,
+                    -> DdTextAction(
+                        text = stringResource(R.string.relay_memory_sync_action),
+                        onClick = onSyncNow,
+                        color = colors.accent,
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable

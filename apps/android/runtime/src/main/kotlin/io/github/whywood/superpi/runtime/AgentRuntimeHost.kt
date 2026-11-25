@@ -140,6 +140,7 @@ class AgentRuntimeHost internal constructor(
             sessionClosureBuffer.tryEmit(SessionClosure(sessionId, reason))
         },
         clock = clock,
+        resolveDefaultModel = { cwd -> workspaceAdmin.defaultModelForCwd(cwd, modelSettings.read()) },
     )
     init {
         backgroundScope.launch {
@@ -227,6 +228,10 @@ class AgentRuntimeHost internal constructor(
         workspaceAdmin.updateProfile(id, avatar, intro)
     }
 
+    override suspend fun updateWorkspaceDefaultModel(id: String, model: ModelConfig?) {
+        workspaceAdmin.updateDefaultModel(id, model)
+    }
+
     override suspend fun deleteWorkspace(id: String) = workspaceAdmin.delete(id)
 
     override suspend fun allSessions(): List<ConversationSummary> = sessionsAdmin.all()
@@ -312,6 +317,11 @@ class AgentRuntimeHost internal constructor(
     }
 
     suspend fun isSessionMemoryExcluded(id: String): Boolean = sessionsAdmin.isMemoryExcluded(id)
+
+    suspend fun sessionCwd(sessionId: String): String? {
+        val openCwd = mutex.withLock { handles[sessionId]?.cwd }
+        return openCwd ?: sessionsAdmin.cwd(sessionId)
+    }
 
     suspend fun sessionBranch(sessionId: String): Pair<String?, List<SessionEntry>>? {
         val openBranch = mutex.withLock {

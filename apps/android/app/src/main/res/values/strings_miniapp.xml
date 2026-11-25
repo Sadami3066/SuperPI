@@ -11,11 +11,11 @@
     <string name="miniapp_invalid_delete_message">「%1$s」删除后无法恢复。</string>
     <string name="miniapp_invalid_close">关闭</string>
     <string name="miniapp_chat_card_created">已创建</string>
-    <string name="miniapp_reason_manifest_missing">缺少 manifest 文件</string>
-    <string name="miniapp_reason_manifest_unreadable">manifest 无法读取</string>
-    <string name="miniapp_reason_manifest_invalid">manifest 格式错误</string>
-    <string name="miniapp_reason_entry_missing">缺少入口文件</string>
-    <string name="miniapp_reason_id_mismatch">ID 与目录不一致</string>
+    <string name="miniapp_reason_manifest_missing">缺少配置文件，无法打开</string>
+    <string name="miniapp_reason_manifest_unreadable">文件损坏，暂时无法读取</string>
+    <string name="miniapp_reason_manifest_invalid">配置有误，无法加载</string>
+    <string name="miniapp_reason_entry_missing">缺少首页文件，无法打开</string>
+    <string name="miniapp_reason_id_mismatch">文件夹名称与配置不一致</string>
     <string name="miniapp_search_placeholder">搜索小程序</string>
     <string name="miniapp_retry">重试</string>
     <string name="miniapp_error_scan_failed">扫描失败，请重试。</string>

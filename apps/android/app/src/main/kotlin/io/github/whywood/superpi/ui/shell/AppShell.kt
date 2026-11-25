@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -21,14 +22,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.core.AppDependencies
 import io.github.whywood.superpi.core.resolveAttachmentRoot
+import io.github.whywood.superpi.data.AppMode
 import io.github.whywood.superpi.data.AttachmentExport
 import io.github.whywood.superpi.data.AttachmentKind
 import io.github.whywood.superpi.data.LanguagePreferences
@@ -42,6 +46,7 @@ import io.github.whywood.superpi.data.relay.RemoteSessionsOutcome
 import io.github.whywood.superpi.data.session.SessionExporter
 import io.github.whywood.superpi.data.UiPreferences
 import io.github.whywood.superpi.data.exportShareIntent
+import io.github.whywood.superpi.data.normalizeCompactionTriggerPercent
 import io.github.whywood.superpi.data.update.hasUpdate
 import io.github.whywood.superpi.design.DdDialog
 import io.github.whywood.superpi.design.DdFontStyle
@@ -49,11 +54,10 @@ import io.github.whywood.superpi.design.DdFonts
 import io.github.whywood.superpi.design.DdText
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
+import io.github.whywood.superpi.design.LocalDdMotionEnabled
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.plugin.host.services.PluginUiBridge
 import io.github.whywood.superpi.remote.RemoteAdminResult
-import io.github.whywood.superpi.remote.RemoteArtifactClient
-import io.github.whywood.superpi.remote.RemoteArtifactResult
 import io.github.whywood.superpi.remote.RemoteBotAdminClient
 import io.github.whywood.superpi.remote.RemoteBotControlClient
 import io.github.whywood.superpi.remote.RemoteControlResult
@@ -68,8 +72,10 @@ import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.JobStatus
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.resolveThinkingLevel
+import io.github.whywood.superpi.service.NotificationCenter
 import io.github.whywood.superpi.ui.RemoteDrawerState
 import io.github.whywood.superpi.ui.RemoteDrawerStatus
 import io.github.whywood.superpi.ui.workspaces.RemoteHostTarget
@@ -82,7 +88,6 @@ import io.github.whywood.superpi.ui.chat.RemoteSessionOpenResult
 import io.github.whywood.superpi.ui.common.LocalHapticsEnabled
 import io.github.whywood.superpi.ui.common.ProfileAvatarCache
 import io.github.whywood.superpi.ui.common.chat.ChatUiState
-import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
 import io.github.whywood.superpi.ui.common.rememberAvatarBitmap
 import io.github.whywood.superpi.ui.common.shareChooser
 import io.github.whywood.superpi.ui.sessionIdsWithEnabledTimers
@@ -94,6 +99,7 @@ import io.github.whywood.superpi.ui.navigation.AppRouteHost
 import io.github.whywood.superpi.ui.navigation.ChatRouteData
 import io.github.whywood.superpi.ui.navigation.ShellRouteUi
 import io.github.whywood.superpi.ui.navigation.deepLinkStack
+import io.github.whywood.superpi.ui.navigation.rememberRemotePresentContext
 import java.io.File
 import io.github.whywood.superpi.ui.navigation.rememberAppNavigator
 import io.github.whywood.superpi.ui.shell.ShellCommandAction
@@ -111,6 +117,8 @@ import io.github.whywood.superpi.ui.shell.buildCommandItems
 import io.github.whywood.superpi.ui.shell.commandInsertion
 import io.github.whywood.superpi.ui.shell.planSubmission
 import io.github.whywood.superpi.ui.shell.rememberFrozenChatState
+import io.github.whywood.superpi.ui.superagent.SuperChatScreen
+import io.github.whywood.superpi.ui.superagent.SuperChatViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -157,23 +165,28 @@ internal fun AppShell(
     val avatarRevision by ProfileAvatarStore.revision.collectAsStateWithLifecycle(initialValue = 0L)
     val avatarKey = remember(avatarRevision) { "profile:${avatarStore.current()?.lastModified() ?: 0L}" }
     val avatarBitmap by rememberAvatarBitmap(avatarKey) { avatarStore.load() }
+    val catalogRevision by graph.providerCatalog.revision.collectAsStateWithLifecycle()
     val customProviders by graph.customProviderStore.entries.collectAsStateWithLifecycle(initialValue = emptyList())
-    val configuredProviders = remember(authKinds, customProviders) {
+    val configuredProviders = remember(authKinds, customProviders, catalogRevision) {
         graph.configuredProviderIds()
     }
-    val configuredProviderList = remember(graph.providerCatalog.summaries, configuredProviders) {
+    val configuredProviderList = remember(catalogRevision, configuredProviders) {
         graph.providerCatalog.summaries.filter { it.id in configuredProviders }
     }
-    LaunchedEffect(customProviders) {
+    LaunchedEffect(catalogRevision) {
         chatViewModel.refreshModelCatalog()
     }
     val storedModelConfig by graph.modelConfigStore.config.collectAsStateWithLifecycle(initialValue = null)
     val defaultModelConfig = storedModelConfig ?: ModelConfig()
-    val defaultProvider = graph.providerCatalog.summary(defaultModelConfig.providerId)
-    val defaultModelLabel = graph.providerCatalog.models(defaultModelConfig.providerId)
-        .firstOrNull { it.id == defaultModelConfig.modelId }
-        ?.displayName
-        ?: defaultModelConfig.modelId
+    val defaultProvider = remember(catalogRevision, defaultModelConfig.providerId) {
+        graph.providerCatalog.summary(defaultModelConfig.providerId)
+    }
+    val defaultModelLabel = remember(catalogRevision, defaultModelConfig) {
+        graph.providerCatalog.models(defaultModelConfig.providerId)
+            .firstOrNull { it.id == defaultModelConfig.modelId }
+            ?.displayName
+            ?: defaultModelConfig.modelId
+    }
     LaunchedEffect(configuredProviders, storedModelConfig, state.providerId, state.conversationId, state.ready) {
         val config = storedModelConfig ?: return@LaunchedEffect
         val workspace = state.workspaces.firstOrNull { it.id == state.currentWorkspaceId }
@@ -247,6 +260,36 @@ internal fun AppShell(
         PluginUiBridge.consumeClosePage()
     }
     val uiPreferences by graph.appPreferences.preferences.collectAsStateWithLifecycle(initialValue = UiPreferences())
+    val appMode = uiPreferences.appMode
+    val superDir = remember(graph.agentDir) { File(graph.agentDir, "super") }
+    val superRouterWorkspace = remember(superDir) { File(superDir, "router/workspace") }
+    val shellConversationStrings = rememberShellConversationStrings()
+    val superChatViewModel = remember(graph, scope, superDir, superRouterWorkspace) {
+        SuperChatViewModel(
+            superRuntime = graph.superRuntime,
+            providers = graph.providerCatalog,
+            configuredProviderIds = graph::configuredProviderIds,
+            attachmentStore = graph.attachmentStore,
+            superDir = superDir,
+            routerWorkspaceDir = superRouterWorkspace,
+            scope = scope,
+            strings = shellConversationStrings,
+        )
+    }
+    LaunchedEffect(shellConversationStrings) {
+        superChatViewModel.updateStrings(shellConversationStrings)
+    }
+    LaunchedEffect(catalogRevision) {
+        superChatViewModel.refreshModelCatalog()
+    }
+    LaunchedEffect(appMode) {
+        if (appMode == AppMode.SUPER) {
+            runCatching { graph.superRuntime.ensureStarted() }
+        }
+    }
+    val superUiState by superChatViewModel.state.collectAsStateWithLifecycle()
+    val superWorkers by graph.superRuntime.workers.collectAsStateWithLifecycle()
+    val superBlueprints by graph.superRuntime.blueprints.collectAsStateWithLifecycle()
     val pendingQuestions by graph.questionCenter.pending.collectAsStateWithLifecycle()
     val activeQuestions = pendingQuestions.filter { it.sessionId == state.conversationId }
     val foreignQuestion = pendingQuestions.firstOrNull { it.sessionId != state.conversationId }
@@ -426,6 +469,7 @@ internal fun AppShell(
     var remoteReloading by remember { mutableStateOf(false) }
     var remoteControlRefreshEpoch by remember { mutableStateOf(0) }
     var remoteLoadedWorkspaceId by remember { mutableStateOf<String?>(null) }
+    var remoteLoadedConversationId by remember { mutableStateOf<String?>(null) }
     val latestWorkspaces by rememberUpdatedState(state.workspaces)
     val latestActiveWorkspace by rememberUpdatedState(activeWorkspace)
     val latestDrawerOpen by rememberUpdatedState(drawerOpen)
@@ -498,6 +542,7 @@ internal fun AppShell(
         val remote = workspace?.remote
         if (workspace == null || remote == null) {
             remoteLoadedWorkspaceId = null
+            remoteLoadedConversationId = null
             remoteModelsSnapshot = null
             remoteCurrentModel = null
             remoteCurrentThinking = null
@@ -507,10 +552,15 @@ internal fun AppShell(
         }
         if (remoteLoadedWorkspaceId != workspace.id) {
             remoteLoadedWorkspaceId = workspace.id
+            remoteLoadedConversationId = state.conversationId
             remoteModelsSnapshot = null
             remoteCurrentModel = null
             remoteCurrentThinking = null
             remoteCommands = emptyList()
+        } else if (remoteLoadedConversationId != state.conversationId) {
+            remoteLoadedConversationId = state.conversationId
+            remoteCurrentModel = null
+            remoteCurrentThinking = null
         }
         if (!remote.online || relayState != RelayLiveState.Online) {
             remoteModelsLoading = false
@@ -555,6 +605,19 @@ internal fun AppShell(
                 remoteModelsSnapshot = modelsRes.value
                 if (remoteCurrentModel == null) remoteCurrentModel = modelsRes.value.currentModel
                 if (remoteCurrentThinking == null) remoteCurrentThinking = modelsRes.value.currentThinkingLevel
+            }
+            if (peerSid == null && conversationId != null) {
+                val pending = RemoteSessionRegistry.pendingModelSelection(conversationId)
+                val pendingProvider = pending?.providerId
+                val pendingModelId = pending?.modelId
+                if (!pendingProvider.isNullOrBlank() && !pendingModelId.isNullOrBlank()) {
+                    val displayName = remoteModelsSnapshot?.models
+                        ?.firstOrNull { it.providerId == pendingProvider && it.id == pendingModelId }
+                        ?.displayName
+                        ?: pendingModelId
+                    remoteCurrentModel = RemoteModelRef(pendingProvider, pendingModelId, displayName)
+                }
+                pending?.thinkingLevel?.let { remoteCurrentThinking = it }
             }
             if (commandsRes is RemoteControlResult.Ok) {
                 remoteCommands = commandsRes.value
@@ -632,6 +695,8 @@ internal fun AppShell(
         conversations = state.conversations,
         archivedConversations = state.archivedConversations,
         archivedCount = state.archivedCount,
+        superMode = appMode == AppMode.SUPER,
+        superReady = superUiState.thread.ready,
     )
     ShellIntakeHost(
         openSessionId = openSessionId,
@@ -641,18 +706,49 @@ internal fun AppShell(
         chat = intakeChat,
         chatSnapshot = {
             val latest = chatViewModel.state.value
+            val latestSuper = superChatViewModel.state.value
             ShellIntakeChatState(
                 latest.ready, latest.historyLoaded, latest.sending, latest.switchingConversation,
                 latest.conversationId, latest.conversationCwd, latest.conversations,
                 latest.archivedConversations, latest.archivedCount,
+                superMode = uiPreferences.appMode == AppMode.SUPER,
+                superReady = latestSuper.thread.ready,
             )
         },
         actions = ShellIntakeActions(
             onOpenSession = { sessionId ->
                 drawerOpen = false
-                navigator.reset(AppDestination.Chat)
-                chatViewModel.openConversation(sessionId)
-                onOpenSessionConsumed()
+                scope.launch {
+                    val currentMode = graph.appPreferences.read().appMode
+                    when {
+                        sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID -> {
+                            if (currentMode != AppMode.SUPER) {
+                                graph.appPreferences.setAppMode(AppMode.SUPER)
+                            }
+                            navigator.reset(AppDestination.Chat)
+                        }
+
+                        sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX) -> {
+                            val workerId = sessionId.removePrefix(NotificationCenter.WORKER_TARGET_PREFIX).trim()
+                            if (currentMode != AppMode.SUPER) {
+                                graph.appPreferences.setAppMode(AppMode.SUPER)
+                            }
+                            navigator.reset(AppDestination.Chat)
+                            if (workerId.isNotEmpty()) {
+                                navigator.push(AppDestination.WorkerMonitor(workerId))
+                            }
+                        }
+
+                        else -> {
+                            if (currentMode == AppMode.SUPER) {
+                                graph.appPreferences.setAppMode(AppMode.NORMAL)
+                            }
+                            navigator.reset(AppDestination.Chat)
+                            chatViewModel.openConversation(sessionId)
+                        }
+                    }
+                    onOpenSessionConsumed()
+                }
             },
             onSessionMissing = {
                 Toast.makeText(context, sessionMissingMessage, Toast.LENGTH_SHORT).show()
@@ -672,11 +768,24 @@ internal fun AppShell(
                 onPluginImportConsumed()
             },
             onShareStaged = { payload ->
+                val toSuper = uiPreferences.appMode == AppMode.SUPER
                 val staged = withContext(Dispatchers.IO) { graph.shareStaging.stage(payload.streams) }
                 staged.files.forEach { stagedFile ->
-                    graph.shareStaging.shareUri(stagedFile.file)?.let(chatViewModel::attach)
+                    graph.shareStaging.shareUri(stagedFile.file)?.let { uri ->
+                        if (toSuper) {
+                            superChatViewModel.attach(uri)
+                        } else {
+                            chatViewModel.attach(uri)
+                        }
+                    }
                 }
-                if (payload.text.isNotBlank()) chatViewModel.onInputChange(payload.text)
+                if (payload.text.isNotBlank()) {
+                    if (toSuper) {
+                        superChatViewModel.onInputChange(payload.text)
+                    } else {
+                        chatViewModel.onInputChange(payload.text)
+                    }
+                }
                 staged.failures.forEach { failure ->
                     Toast.makeText(context, graph.shareStaging.messageFor(failure), Toast.LENGTH_SHORT).show()
                 }
@@ -790,7 +899,11 @@ internal fun AppShell(
 
     fun openMiniappCreate() {
         drawerOpen = false
-        chatViewModel.newSession(AgentRuntimeHost.HOME_ID, MINIAPP_SKILL_COMMAND)
+        if (uiPreferences.appMode == AppMode.SUPER) {
+            superChatViewModel.onInputChange(appResources.getString(R.string.super_miniapp_create_prompt))
+        } else {
+            chatViewModel.newSession(AgentRuntimeHost.HOME_ID, MINIAPP_SKILL_COMMAND)
+        }
         navigator.reset(AppDestination.Chat)
     }
 
@@ -826,11 +939,15 @@ internal fun AppShell(
         onDismiss = { drawerOpen = false },
         onSwipeStart = { keyboard?.hide() },
     )
-    val canSwipeOpenDrawer = navigator.current == AppDestination.Chat &&
-        !drawerOpen &&
-        !modelsOpen &&
-        !overlays.anyModalOpen
+    val canSwipeOpenDrawer =
+        (navigator.current == AppDestination.Chat || navigator.current is AppDestination.WorkerMonitor) &&
+            !drawerOpen &&
+            !modelsOpen &&
+            !superUiState.draft.modelsOpen &&
+            !overlays.anyModalOpen
 
+    val motionEnabled = LocalDdMotionEnabled.current
+    val drawerParallaxShape = remember { RoundedCornerShape(24.dp) }
     CompositionLocalProvider(LocalHapticsEnabled provides true) {
     Box(Modifier.fillMaxSize().background(colors.paper)) {
         val reminderCount = remember(timers, state.conversationId) {
@@ -843,6 +960,18 @@ internal fun AppShell(
             navigator = navigator,
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    val p = if (motionEnabled) drawerController.progress.coerceIn(0f, 1f) else 0f
+                    val scale = 1f - 0.035f * p
+                    scaleX = scale
+                    scaleY = scale
+                    if (p > 0.001f) {
+                        clip = true
+                        shape = drawerParallaxShape
+                    } else {
+                        clip = false
+                    }
+                }
                 .drawerOpenSwipeGesture(
                     enabled = canSwipeOpenDrawer,
                     controller = drawerController,
@@ -859,44 +988,17 @@ internal fun AppShell(
                 val canControlRemoteModel = activeWorkspace != null && activeWorkspace.id in remoteControlsWorkspaceIds
                 val remoteFilesVisible = activeWorkspace != null && activeWorkspace.id in remoteFilesWorkspaceIds
                 val reloadVisible = remoteWs == null || canControlRemoteModel
-                val remotePresentContext = remember(remoteWs, attachmentRoot, remoteDevices, relayState) {
-                    val remote = remoteWs ?: return@remember null
-                    val supportsArtifacts = relayState == RelayLiveState.Online &&
-                        remote.online &&
-                        graph.remoteTransport.supportsPeerCapability(
-                            remote.deviceId,
-                            RemoteArtifactClient.CAP_PRESENT_ARTIFACTS,
-                        )
-                    object : RemotePresentContext {
-                        override val deviceName: String = remote.deviceName
-                        override val supportsArtifacts: Boolean = supportsArtifacts
-                        override fun cachedFile(artifactId: String, name: String, size: Long?): File? =
-                            graph.remoteArtifactClient.cachedFile(attachmentRoot, artifactId, name, size)
-
-                        override suspend fun fetch(
-                            artifactId: String,
-                            name: String,
-                            size: Long?,
-                            onProgress: (Long, Long) -> Unit,
-                        ): Result<File> = when (
-                            val res = graph.remoteArtifactClient.fetch(
-                                deviceId = remote.deviceId,
-                                botId = remote.botId,
-                                workspaceRoot = attachmentRoot,
-                                artifactId = artifactId,
-                                name = name,
-                                expectedSize = size,
-                                onProgress = onProgress,
-                            )
-                        ) {
-                            is RemoteArtifactResult.Ok -> Result.success(res.file)
-                            RemoteArtifactResult.PeerUpgradeRequired ->
-                                Result.failure(IllegalStateException(remotePeerUpgradeMessage))
-                            is RemoteArtifactResult.Error ->
-                                Result.failure(IllegalStateException(localizeRemoteError(res.code, remoteActionFailedMessage)))
-                        }
-                    }
-                }
+                val remotePresentContext = rememberRemotePresentContext(
+                    deviceId = remoteWs?.deviceId,
+                    deviceName = remoteWs?.deviceName.orEmpty(),
+                    botId = remoteWs?.botId,
+                    attachmentRoot = attachmentRoot,
+                    isRemoteOnline = remoteWs?.online == true,
+                    relayState = relayState,
+                    remoteTransport = graph.remoteTransport,
+                    remoteArtifactClient = graph.remoteArtifactClient,
+                )
+                val effectiveCompactionPercent = normalizeCompactionTriggerPercent(uiPreferences.compactionTriggerPercent)
                 val effectiveState = remember(
                     frozenState,
                     configuredProviders,
@@ -934,6 +1036,31 @@ internal fun AppShell(
                     .firstOrNull { it.id == state.conversationId }
                     ?.memoryExcluded == true
                 val memoryToggleVisible = remoteWs == null && state.conversationId != null
+                if (appMode == AppMode.SUPER) {
+                    SuperChatScreen(
+                        viewModel = superChatViewModel,
+                        attachmentStore = graph.attachmentStore,
+                        superDir = superDir,
+                        attachmentRoot = superRouterWorkspace,
+                        configuredProviders = configuredProviderList,
+                        nickname = nickname,
+                        processDetail = uiPreferences.processDetail,
+                        chatFontScale = uiPreferences.chatFontScale,
+                        voiceLanguage = appLanguage,
+                        onOpenDrawer = { drawerOpen = true },
+                        onOpenTeam = { navigator.push(AppDestination.SuperTeam) },
+                        onOpenSettings = { navigator.push(AppDestination.SuperSettings) },
+                        onOpenWorkerMonitor = { workerId ->
+                            navigator.push(AppDestination.WorkerMonitor(workerId))
+                        },
+                        onManageProviders = ::openProviders,
+                        onOpenMiniapp = { id -> navigator.push(AppDestination.MiniappDetail(id)) },
+                        onOpenPluginPage = { pluginId, pageId ->
+                            navigator.push(AppDestination.PluginPage(pluginId, pageId))
+                        },
+                        compactionTriggerPercent = effectiveCompactionPercent,
+                    )
+                } else {
                 ChatScreen(
                     state = effectiveState,
                     nickname = nickname,
@@ -950,6 +1077,8 @@ internal fun AppShell(
                         onInputChange = chatViewModel::onInputChange,
                         onSend = ::submitChatInput,
                         onStop = chatViewModel::stop,
+                        onDismissError = chatViewModel::clearError,
+                        onRetryLoad = chatViewModel::retryCurrentSession,
                         onOpenDrawer = { drawerOpen = true },
                         onManageProviders = ::openProviders,
                         onReload = {
@@ -1004,33 +1133,43 @@ internal fun AppShell(
                                     val previousThinking = remoteCurrentThinking
                                     val targetProvider = option.providerId.ifBlank { effectiveState.providerId }
                                     val targetThinking = option.thinkingLevels.resolveThinkingLevel(effectiveState.thinkingLevel)
-                                    val peerSid = state.conversationId?.let(RemoteSessionRegistry::peerSessionId)
+                                    val conversationId = state.conversationId
+                                    val peerSid = conversationId?.let(RemoteSessionRegistry::peerSessionId)
                                     remoteCurrentModel = RemoteModelRef(targetProvider, option.id, option.displayName)
                                     remoteCurrentThinking = targetThinking
-                                    scope.launch {
-                                        when (
-                                            val res = graph.remoteBotControlClient.setModel(
-                                                remoteWs.deviceId,
-                                                remoteWs.botId,
-                                                targetProvider,
-                                                option.id,
-                                                peerSid,
-                                                targetThinking,
-                                            )
-                                        ) {
-                                            is RemoteControlResult.Ok -> {
-                                                res.value.first?.let { remoteCurrentModel = it }
-                                                res.value.second?.let { remoteCurrentThinking = it }
-                                                remoteControlRefreshEpoch += 1
-                                            }
-                                            is RemoteControlResult.Error -> {
-                                                remoteCurrentModel = previousModel
-                                                remoteCurrentThinking = previousThinking
-                                                Toast.makeText(
-                                                    context,
-                                                    localizeRemoteError(res.code, switchModelFailedMessage),
-                                                    Toast.LENGTH_SHORT,
-                                                ).show()
+                                    if (peerSid == null && conversationId != null) {
+                                        RemoteSessionRegistry.setPendingModel(
+                                            conversationId,
+                                            targetProvider,
+                                            option.id,
+                                            targetThinking,
+                                        )
+                                    } else {
+                                        scope.launch {
+                                            when (
+                                                val res = graph.remoteBotControlClient.setModel(
+                                                    remoteWs.deviceId,
+                                                    remoteWs.botId,
+                                                    targetProvider,
+                                                    option.id,
+                                                    peerSid,
+                                                    targetThinking,
+                                                )
+                                            ) {
+                                                is RemoteControlResult.Ok -> {
+                                                    res.value.first?.let { remoteCurrentModel = it }
+                                                    res.value.second?.let { remoteCurrentThinking = it }
+                                                    remoteControlRefreshEpoch += 1
+                                                }
+                                                is RemoteControlResult.Error -> {
+                                                    remoteCurrentModel = previousModel
+                                                    remoteCurrentThinking = previousThinking
+                                                    Toast.makeText(
+                                                        context,
+                                                        localizeRemoteError(res.code, switchModelFailedMessage),
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                }
                                             }
                                         }
                                     }
@@ -1050,33 +1189,43 @@ internal fun AppShell(
                                     val previousModel = remoteCurrentModel
                                     val previousThinking = remoteCurrentThinking
                                     val targetThinking = targetModel.thinkingLevels.resolveThinkingLevel(effectiveState.thinkingLevel)
-                                    val peerSid = state.conversationId?.let(RemoteSessionRegistry::peerSessionId)
+                                    val conversationId = state.conversationId
+                                    val peerSid = conversationId?.let(RemoteSessionRegistry::peerSessionId)
                                     remoteCurrentModel = RemoteModelRef(providerId, targetModel.id, targetModel.displayName)
                                     remoteCurrentThinking = targetThinking
-                                    scope.launch {
-                                        when (
-                                            val res = graph.remoteBotControlClient.setModel(
-                                                remoteWs.deviceId,
-                                                remoteWs.botId,
-                                                providerId,
-                                                targetModel.id,
-                                                peerSid,
-                                                targetThinking,
-                                            )
-                                        ) {
-                                            is RemoteControlResult.Ok -> {
-                                                res.value.first?.let { remoteCurrentModel = it }
-                                                res.value.second?.let { remoteCurrentThinking = it }
-                                                remoteControlRefreshEpoch += 1
-                                            }
-                                            is RemoteControlResult.Error -> {
-                                                remoteCurrentModel = previousModel
-                                                remoteCurrentThinking = previousThinking
-                                                Toast.makeText(
-                                                    context,
-                                                    localizeRemoteError(res.code, switchModelFailedMessage),
-                                                    Toast.LENGTH_SHORT,
-                                                ).show()
+                                    if (peerSid == null && conversationId != null) {
+                                        RemoteSessionRegistry.setPendingModel(
+                                            conversationId,
+                                            providerId,
+                                            targetModel.id,
+                                            targetThinking,
+                                        )
+                                    } else {
+                                        scope.launch {
+                                            when (
+                                                val res = graph.remoteBotControlClient.setModel(
+                                                    remoteWs.deviceId,
+                                                    remoteWs.botId,
+                                                    providerId,
+                                                    targetModel.id,
+                                                    peerSid,
+                                                    targetThinking,
+                                                )
+                                            ) {
+                                                is RemoteControlResult.Ok -> {
+                                                    res.value.first?.let { remoteCurrentModel = it }
+                                                    res.value.second?.let { remoteCurrentThinking = it }
+                                                    remoteControlRefreshEpoch += 1
+                                                }
+                                                is RemoteControlResult.Error -> {
+                                                    remoteCurrentModel = previousModel
+                                                    remoteCurrentThinking = previousThinking
+                                                    Toast.makeText(
+                                                        context,
+                                                        localizeRemoteError(res.code, switchModelFailedMessage),
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                }
                                             }
                                         }
                                     }
@@ -1088,28 +1237,33 @@ internal fun AppShell(
                         onThinkingLevelChange = { level ->
                             if (remoteWs != null) {
                                 val previousThinking = remoteCurrentThinking
-                                val peerSid = state.conversationId?.let(RemoteSessionRegistry::peerSessionId)
+                                val conversationId = state.conversationId
+                                val peerSid = conversationId?.let(RemoteSessionRegistry::peerSessionId)
                                 remoteCurrentThinking = level
-                                scope.launch {
-                                    when (
-                                        val res = graph.remoteBotControlClient.setThinkingLevel(
-                                            remoteWs.deviceId,
-                                            remoteWs.botId,
-                                            level,
-                                            peerSid,
-                                        )
-                                    ) {
-                                        is RemoteControlResult.Ok -> {
-                                            remoteCurrentThinking = res.value
-                                            remoteControlRefreshEpoch += 1
-                                        }
-                                        is RemoteControlResult.Error -> {
-                                            remoteCurrentThinking = previousThinking
-                                            Toast.makeText(
-                                                context,
-                                                localizeRemoteError(res.code, switchThinkingFailedMessage),
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
+                                if (peerSid == null && conversationId != null) {
+                                    RemoteSessionRegistry.setPendingThinking(conversationId, level)
+                                } else {
+                                    scope.launch {
+                                        when (
+                                            val res = graph.remoteBotControlClient.setThinkingLevel(
+                                                remoteWs.deviceId,
+                                                remoteWs.botId,
+                                                level,
+                                                peerSid,
+                                            )
+                                        ) {
+                                            is RemoteControlResult.Ok -> {
+                                                remoteCurrentThinking = res.value
+                                                remoteControlRefreshEpoch += 1
+                                            }
+                                            is RemoteControlResult.Error -> {
+                                                remoteCurrentThinking = previousThinking
+                                                Toast.makeText(
+                                                    context,
+                                                    localizeRemoteError(res.code, switchThinkingFailedMessage),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            }
                                         }
                                     }
                                 }
@@ -1307,7 +1461,7 @@ internal fun AppShell(
                                 } else {
                                     scope.launch {
                                         val count = withContext(Dispatchers.IO) {
-                                            runCatching { graph.memory.countBySession(sid) }.getOrDefault(0)
+                                            runCatching { graph.memory.countEventsBySession(sid) }.getOrDefault(0)
                                         }
                                         if (count > 0) {
                                             excludeConfirmSession = sid to count
@@ -1337,11 +1491,11 @@ internal fun AppShell(
                         memoryToggleVisible = memoryToggleVisible,
                     ),
                     scrollAnchorFor = chatViewModel::scrollAnchorFor,
-                    autoCollapseProcess = uiPreferences.autoCollapseProcess,
                     processDetail = uiPreferences.processDetail,
                     chatFontScale = uiPreferences.chatFontScale,
                     voiceLanguage = appLanguage,
                 )
+                }
             },
         ) { destination ->
             AppRouteContent(
@@ -1367,6 +1521,19 @@ internal fun AppShell(
                         modelLabel = defaultModelLabel,
                         modelConfig = defaultModelConfig,
                         configuredProviderIds = configuredProviders,
+                        processDetail = uiPreferences.processDetail,
+                        chatFontScale = uiPreferences.chatFontScale,
+                        voiceLanguage = appLanguage,
+                        appMode = uiPreferences.appMode,
+                        compactionTriggerPercent = normalizeCompactionTriggerPercent(uiPreferences.compactionTriggerPercent),
+                        workerCompactionTriggerPercent = normalizeCompactionTriggerPercent(
+                            if (uiPreferences.superWorkerCompactionOverrideEnabled) {
+                                uiPreferences.superWorkerCompactionPercent
+                            } else {
+                                uiPreferences.compactionTriggerPercent
+                            },
+                        ),
+                        conversationStrings = shellConversationStrings,
                     ),
                     onOpenChat = ::openChat,
                     onOpenMiniappCreate = ::openMiniappCreate,
@@ -1436,6 +1603,11 @@ internal fun AppShell(
             remoteCapabilitiesWorkspaceIds = remoteCapabilitiesWorkspaceIds,
             remoteShowArchivedWorkspaceIds = showArchivedRemoteWorkspaces,
             canCreateRemoteBotDeviceIds = canCreateRemoteBotDeviceIds,
+            appMode = appMode,
+            superWorkers = superWorkers,
+            superBlueprints = superBlueprints,
+            activeWorkerId = (navigator.current as? AppDestination.WorkerMonitor)?.workerId,
+            userSubtitle = if (state.providerId in configuredProviders) state.modelLabel else "",
         )
         val drawerActions = ShellDrawerActions(
             onNavigate = { destination -> drawerOpen = false; navigator.push(destination) },
@@ -1676,6 +1848,45 @@ internal fun AppShell(
                     }
                 }
             },
+            onToggleAppMode = {
+                val nextMode = if (uiPreferences.appMode == AppMode.SUPER) {
+                    AppMode.NORMAL
+                } else {
+                    AppMode.SUPER
+                }
+                scope.launch { graph.appPreferences.setAppMode(nextMode) }
+                navigator.reset(AppDestination.Chat)
+            },
+            onOpenSuperTeam = {
+                drawerOpen = false
+                navigator.push(AppDestination.SuperTeam)
+            },
+            onOpenWorkerMonitor = { workerId ->
+                drawerOpen = false
+                val current = navigator.current
+                if (current is AppDestination.WorkerMonitor && current.workerId == workerId) {
+                    return@ShellDrawerActions
+                }
+                if (current is AppDestination.WorkerMonitor) {
+                    navigator.reset(AppDestination.Chat)
+                }
+                navigator.push(AppDestination.WorkerMonitor(workerId))
+            },
+            onDeleteWorker = { workerId ->
+                scope.launch {
+                    try {
+                        graph.superRuntime.deleteWorker(workerId)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (err: Exception) {
+                        Toast.makeText(
+                            context,
+                            err.message?.takeIf { it.isNotBlank() } ?: remoteActionFailedMessage,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            },
         )
         AppOverlays(
             graph = graph,
@@ -1689,6 +1900,7 @@ internal fun AppShell(
             remoteTargets = remoteTargets,
             remoteBotNamesByDevice = remoteBotNamesByDevice,
             drawerController = drawerController,
+            compactionTriggerPercent = normalizeCompactionTriggerPercent(uiPreferences.compactionTriggerPercent),
         )
 
         excludeConfirmSession?.let { (sid, count) ->
@@ -1714,7 +1926,7 @@ internal fun AppShell(
                             excludeConfirmSession = null
                             scope.launch {
                                 val cleared = withContext(Dispatchers.IO) {
-                                    runCatching { graph.memory.deleteBySession(sid) }.getOrDefault(0)
+                                    runCatching { graph.memory.deleteEventsBySession(sid) }.getOrDefault(0)
                                 }
                                 Toast.makeText(
                                     context,

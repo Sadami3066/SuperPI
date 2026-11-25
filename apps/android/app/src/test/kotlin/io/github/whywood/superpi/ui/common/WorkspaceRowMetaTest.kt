@@ -70,7 +70,12 @@ class WorkspaceRowMetaTest {
             workspaceMenuActions(local),
         )
         assertEquals(
-            listOf(WorkspaceMenuAction.NEW_SESSION, WorkspaceMenuAction.PIN, WorkspaceMenuAction.SETTINGS),
+            listOf(
+                WorkspaceMenuAction.NEW_SESSION,
+                WorkspaceMenuAction.RENAME,
+                WorkspaceMenuAction.PIN,
+                WorkspaceMenuAction.SETTINGS,
+            ),
             workspaceMenuActions(localHome),
         )
         assertEquals(

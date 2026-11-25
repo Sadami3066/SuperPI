@@ -1,6 +1,6 @@
 # Self-Hosting the Relay (`apps/relay`)
 
-`apps/relay` is a lightweight Node.js ≥ 24 service that lets your SuperPI Android phones and Desktop clients discover each other, route bot sessions, transfer files, and synchronize shared **Memory v2** state. It never runs models, executes tools, or reads provider keys.
+`apps/relay` is a lightweight Node.js ≥ 24 service that lets your SuperPI Android phones and Desktop clients discover each other, route bot sessions and `super-worker` tasks, transfer files, and synchronize shared **Memory v3** state. It never runs models, executes tools, or reads provider keys.
 
 ## 1. Run with Docker (Recommended)
 
@@ -71,5 +71,5 @@ SUPERPI_CERT_IPS="192.168.1.50" ./apps/relay/scripts/gen-cert.sh ./certs
 
 - Health check: `GET /v1/health` returns running relay version and wire protocol version.
 - Pair your first device using the `https://<host>:<port>/#fp=<sha256>` link (or QR code) plus the one-time **login secret**.
-- Subsequent phones/desktops can scan a **short-lived pairing code** generated from any already-paired device without exposing the master secret.
-- On Android, if you enable **Allow remote control of this phone**, exempt SuperPI from battery optimization so WebSocket connections survive screen-off idle.
+- Additional phones can scan a **short-lived pairing code** generated from any already-paired device without exposing the master secret.
+- On Android, if you enable **Let other devices use this phone**, exempt SuperPI from battery optimization so WebSocket connections survive screen-off idle.

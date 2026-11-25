@@ -33,4 +33,12 @@ internal class WorkspaceStoreDirectory(
     override suspend fun add(workspace: RuntimeWorkspace) = store.add(workspace)
 
     override suspend fun remove(id: String) = store.remove(id)
+
+    override suspend fun readHomeDefaultModel(): ModelConfig? = store.readHomeDefaultModel()
+
+    override suspend fun updateHomeDefaultModel(model: ModelConfig?) = store.updateHomeDefaultModel(model)
+
+    override suspend fun readHomeProfile(): HomeWorkspaceProfile = store.readHomeProfile()
+
+    override suspend fun updateHomeProfile(profile: HomeWorkspaceProfile) = store.updateHomeProfile(profile)
 }

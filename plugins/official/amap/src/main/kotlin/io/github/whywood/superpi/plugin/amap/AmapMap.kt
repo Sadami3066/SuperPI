@@ -102,8 +102,8 @@ internal class AmapMapLoader(
         if (key.isEmpty()) {
             return AmapMapLoad.Unavailable(
                 localizer.t(
-                    "配置高德 Key 后可以显示地图预览。",
-                    "Add an Amap key to show the map preview.",
+                    "配置高德地图服务凭证后可以显示地图预览。",
+                    "Add an Amap Maps service credential to show the map preview.",
                 ),
                 retryable = false,
             )
@@ -137,8 +137,8 @@ internal class AmapMapLoader(
             return when (failure) {
                 AmapFailure.INVALID_KEY -> AmapMapLoad.Unavailable(
                     localizer.t(
-                        "地图预览需要在开放平台为这个高德 Key 开启静态地图服务。",
-                        "The map preview needs the static map service enabled for this Amap key.",
+                        "地图预览需要在开放平台为这个服务凭证开启静态地图服务。",
+                        "The map preview needs the static map service enabled for this service credential.",
                     ),
                     retryable = false,
                 )

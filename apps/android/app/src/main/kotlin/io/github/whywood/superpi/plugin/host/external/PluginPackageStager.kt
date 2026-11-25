@@ -121,6 +121,7 @@ internal class PluginPackageStager(
         val staging = File(parent, ".staging-${versionRoot.name}-${clock()}")
         staging.deleteRecursively()
         var installed = false
+        var writingTarget = false
         try {
             val bundleDir = File(staging, PluginPaths.BUNDLE_DIR).apply { mkdirs() }
             val assetsDir = File(staging, PluginPaths.ASSETS_DIR).apply { mkdirs() }
@@ -128,6 +129,7 @@ internal class PluginPackageStager(
             candidate.pkg.copyBundleTo(File(bundleDir, BUNDLE_FILE))
             candidate.pkg.extractAssets(assetsDir)
             candidate.pkg.extractLib(libDir)
+            writingTarget = true
             if (versionRoot.exists()) versionRoot.deleteRecursively()
             if (!staging.renameTo(versionRoot)) {
                 staging.copyRecursively(versionRoot, overwrite = true)
@@ -136,7 +138,10 @@ internal class PluginPackageStager(
             installed = true
             return versionRoot
         } finally {
-            if (!installed) runCatching { staging.deleteRecursively() }
+            if (!installed) {
+                runCatching { staging.deleteRecursively() }
+                if (writingTarget) runCatching { versionRoot.deleteRecursively() }
+            }
         }
     }
 

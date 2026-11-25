@@ -10,7 +10,6 @@ import io.github.muntashirakon.adb.AdbStream
 import io.github.muntashirakon.adb.android.AdbMdns
 import io.github.whywood.superpi.runtime.RootCommandResult
 import io.github.whywood.superpi.data.LocalizedContext
-import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,8 +30,9 @@ class AdbBootstrap(context: Context) {
     private val preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val notifier = AdbPairingNotifier(LocalizedContext(appContext))
     private val operationLock = Mutex()
+    private val tokenLock = Any()
     private val manager by lazy { LocalAdbManager(appContext) }
-    private val shell by lazy { ShellClient(daemonPort, token) }
+    private val shell by lazy { ShellClient(daemonPort) { token } }
     private val mutableState =
         MutableStateFlow(
             AdbBridgeState(
@@ -49,8 +49,10 @@ class AdbBootstrap(context: Context) {
     val daemonPort: Int = DAEMON_PORT
 
     val token: String
-        get() = preferences.getString(KEY_TOKEN, null) ?: UUID.randomUUID().toString().replace("-", "").also {
-            preferences.edit().putString(KEY_TOKEN, it).apply()
+        get() = synchronized(tokenLock) {
+            preferences.getString(KEY_TOKEN, null) ?: ShellAuth.randomHex(32).also {
+                preferences.edit().putString(KEY_TOKEN, it).commit()
+            }
         }
 
     val paired: Boolean
@@ -58,7 +60,18 @@ class AdbBootstrap(context: Context) {
 
     suspend fun isDaemonAlive(): Boolean = withContext(Dispatchers.IO) { shell.isAlive() }
 
+    suspend fun stopDaemon() = withContext(Dispatchers.IO) {
+        operationLock.withLock {
+            runCatching { shell.shutdown() }
+            mutableState.update { it.refreshed(false) }
+        }
+    }
+
     suspend fun refreshState() {
+        if (mutableState.value.mode == AdbConnectMode.WIRELESS && !isWirelessDebuggingEnabled()) {
+            stopDaemon()
+            return
+        }
         val alive = isDaemonAlive()
         if (alive && mutableState.value.mode == AdbConnectMode.WIRELESS) markPaired(true)
         mutableState.update { it.refreshed(alive) }
@@ -175,6 +188,10 @@ class AdbBootstrap(context: Context) {
 
     private suspend fun ensureDaemonUnderLock(): Result<Unit> {
         val mode = mutableState.value.mode
+        if (mode == AdbConnectMode.WIRELESS && !isWirelessDebuggingEnabled()) {
+            runCatching { shell.shutdown() }
+            return failWith(AdbBridgeException(AdbBridgeError.WIRELESS_DEBUGGING_DISABLED))
+        }
         if (shell.isAlive()) {
             if (mode == AdbConnectMode.WIRELESS) markPaired(true)
             mutableState.update { it.daemonStarted() }
@@ -290,10 +307,12 @@ class AdbBootstrap(context: Context) {
         throw AdbBridgeException(AdbBridgeError.PAIRING_FAILED, lastFailure)
     }
 
+    private fun isWirelessDebuggingEnabled(): Boolean = runCatching {
+        Settings.Global.getInt(appContext.contentResolver, SETTING_ADB_WIFI_ENABLED, 0) == 1
+    }.getOrDefault(true)
+
     private fun requireWirelessDebugging() {
-        val enabled = runCatching {
-            Settings.Global.getInt(appContext.contentResolver, SETTING_ADB_WIFI_ENABLED, 0) == 1
-        }.getOrDefault(true)
+        val enabled = isWirelessDebuggingEnabled()
         Log.i(TAG, "wireless debugging enabled=$enabled")
         if (!enabled) throw AdbBridgeException(AdbBridgeError.WIRELESS_DEBUGGING_DISABLED)
     }
@@ -337,7 +356,14 @@ class AdbBootstrap(context: Context) {
         runCatching { appContext.startActivity(intent) }
     }
 
+    private fun rotateToken(): String = synchronized(tokenLock) {
+        ShellAuth.randomHex(32).also { next ->
+            preferences.edit().putString(KEY_TOKEN, next).commit()
+        }
+    }
+
     private fun startDaemon() {
+        val rotatedToken = rotateToken()
         val apk = appContext.applicationInfo.sourceDir
         val daemonClass = ShellDaemon::class.java.name
         val script = buildString {
@@ -352,7 +378,7 @@ class AdbBootstrap(context: Context) {
             append(' ')
             append(daemonPort)
             append(' ')
-            append(token)
+            append(rotatedToken)
             append(" </dev/null >/data/local/tmp/shd.log 2>&1 &\n")
             append("sleep 1\n")
         }

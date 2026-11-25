@@ -95,8 +95,10 @@ class MainScreenControllerTest {
     @Test
     fun mainShellTextQuotesUntrustedInput(): Unit = runBlocking {
         shell.available = true
-        controller().typeText(null, "x'; echo injected")
+        val result = controller().typeText(null, "x'; echo injected")
         assertEquals("input -d 0 text 'x'\\'';%secho%sinjected'", shell.commands.single())
+        assertEquals("", result.text)
+        assertFalse(result.verified)
     }
 
     @Test

@@ -87,6 +87,7 @@ internal class PlatformGraph(private val deps: PlatformGraphDeps) {
                 deps.host().reconfigure()
                 accessibilityBootstrap.onPrivilegeReady()
             },
+            onAdbDisabled = { adbBridge.stopDaemon() },
         )
     }
 

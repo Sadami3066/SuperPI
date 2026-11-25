@@ -56,6 +56,6 @@ internal fun rideCreateGuidance(translate: RideTranslate): String = translate(
 )
 
 internal fun rideCancelGuidance(translate: RideTranslate): String = translate(
-    "取消结果以滴滴返回为准；订单已开始或司机已接单时无法通过接口取消。",
-    "The cancellation result comes from DiDi; once the trip starts or a driver accepts, it cannot be cancelled through the API.",
+    "取消结果以滴滴返回为准；订单已开始或司机已接单时无法取消。",
+    "The cancellation result comes from DiDi; once the trip starts or a driver accepts, it cannot be cancelled.",
 )

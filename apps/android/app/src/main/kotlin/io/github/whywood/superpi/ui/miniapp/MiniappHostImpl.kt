@@ -58,8 +58,12 @@ internal class MiniappHostImpl(
 ) : MiniappHostGateway {
     private val notifications = MiniappNotificationCenter(context, appId, appName)
     private val calendar = AndroidArrangeCalendarGateway(context)
-    private val speaker: TextSpeaker by lazy { TextSpeaker(context) }
-    private val recognizer: SpeechRecognizerController by lazy { SpeechRecognizerController(context) }
+    private val speakerLazy = lazy { TextSpeaker(context) }
+    private val speaker: TextSpeaker
+        get() = speakerLazy.value
+    private val recognizerLazy = lazy { SpeechRecognizerController(context) }
+    private val recognizer: SpeechRecognizerController
+        get() = recognizerLazy.value
 
     override suspend fun env(): MiniappEnv {
         val configuration = context.resources.configuration
@@ -336,6 +340,15 @@ internal class MiniappHostImpl(
                 description = created.description?.takeIf { it.isNotBlank() },
                 location = created.location?.takeIf { it.isNotBlank() },
             )
+        }
+    }
+
+    fun close() {
+        if (speakerLazy.isInitialized()) {
+            speakerLazy.value.release()
+        }
+        if (recognizerLazy.isInitialized()) {
+            recognizerLazy.value.stopListening()
         }
     }
 

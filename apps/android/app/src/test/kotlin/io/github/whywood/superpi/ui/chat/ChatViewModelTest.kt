@@ -14,6 +14,7 @@ import io.github.whywood.superpi.data.AttachmentImport
 import io.github.whywood.superpi.data.AttachmentKind
 import io.github.whywood.superpi.data.AttachmentRef
 import io.github.whywood.superpi.data.AttachmentStore
+import io.github.whywood.superpi.data.SendWhileRunning
 import io.github.whywood.superpi.runtime.AgentRuntime
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.AssistantRole
@@ -26,6 +27,7 @@ import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ModelSettings
+import io.github.whywood.superpi.runtime.OpenedSession
 import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.ProviderSummary
 import io.github.whywood.superpi.runtime.QueuedInput
@@ -951,7 +953,7 @@ class ChatViewModelTest {
         assertEquals("model-2", viewModel.state.value.modelId)
         assertEquals("model-2", runtime.sessionModels["session-b"]?.modelId)
         assertEquals("model", runtime.sessionModels["session-a"]?.modelId)
-        assertEquals(ModelConfig("deepseek", "model-2", ThinkingLevel.OFF), settings.saved.last())
+        assertTrue(settings.saved.isEmpty())
 
         viewModel.openConversation("session-a")
         settle()
@@ -1655,6 +1657,64 @@ class ChatViewModelTest {
 
         assertEquals(emptyList<QueuedInput>(), viewModel.state.value.queuedInputs)
         assertEquals("draft text\n\nfirst\n\nsecond\n\nthird", viewModel.state.value.input)
+    }
+
+    @Test
+    fun submitQueuedFailureRestoresDraftAndClearErrorClearsBanner() = runTest(dispatcher) {
+        val runtime = FakeAgentRuntime().apply {
+            steerError = IllegalStateException("steer boom")
+        }
+        val viewModel = viewModel(runtime)
+        settle()
+
+        viewModel.onInputChange("first turn")
+        viewModel.send()
+        runCurrent()
+        assertTrue(viewModel.state.value.sending)
+
+        viewModel.quote(42L, "quoted context")
+        viewModel.onInputChange("follow-up draft")
+        viewModel.send(SendWhileRunning.STEER)
+        settle()
+
+        assertEquals("follow-up draft", viewModel.state.value.input)
+        assertEquals("quoted context", viewModel.state.value.quote?.text)
+        assertTrue(viewModel.state.value.error.orEmpty().contains("steer boom"))
+
+        viewModel.clearError()
+        assertNull(viewModel.state.value.error)
+    }
+
+    @Test
+    fun retryCurrentSessionRecoversAfterOpenSessionFailure() = runTest(dispatcher) {
+        val sessionA = ConversationSummary("session-a", "Session A", 10L, "a.jsonl", HOME_CWD)
+        val base = FakeAgentRuntime().apply {
+            sessions = listOf(sessionA)
+        }
+        var failNextOpen = true
+        val flakyRuntime = object : AgentRuntime by base {
+            override suspend fun openSession(filePath: String, cwd: String): OpenedSession {
+                if (failNextOpen) {
+                    failNextOpen = false
+                    throw IllegalStateException("open boom")
+                }
+                return base.openSession(filePath, cwd)
+            }
+        }
+        val viewModel = viewModel(flakyRuntime)
+        settle()
+
+        assertEquals("session-a", viewModel.state.value.conversationId)
+        assertFalse(viewModel.state.value.historyLoaded)
+        assertFalse(viewModel.state.value.switchingConversation)
+        assertTrue(viewModel.state.value.error.orEmpty().contains("open boom"))
+
+        viewModel.retryCurrentSession()
+        settle()
+
+        assertTrue(viewModel.state.value.historyLoaded)
+        assertFalse(viewModel.state.value.switchingConversation)
+        assertNull(viewModel.state.value.error)
     }
 
     private class FakeProviders(

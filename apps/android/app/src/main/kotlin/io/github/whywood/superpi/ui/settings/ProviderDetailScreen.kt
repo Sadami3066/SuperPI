@@ -30,17 +30,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
+import io.github.whywood.superpi.design.DdEmptyState
 import io.github.whywood.superpi.design.DdGroupCard
 import io.github.whywood.superpi.design.DdIconButton
 import io.github.whywood.superpi.design.DdIcons
 import io.github.whywood.superpi.design.DdListRow
 import io.github.whywood.superpi.design.DdPageScaffold
 import io.github.whywood.superpi.design.DdRowDivider
+import io.github.whywood.superpi.design.DdSearchField
+import io.github.whywood.superpi.design.DdSectionLabel
 import io.github.whywood.superpi.design.DdSpacing
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdTextField
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.runtime.ModelConfig
+import io.github.whywood.superpi.runtime.ModelOption
 import io.github.whywood.superpi.runtime.ProviderAuthKind
 import io.github.whywood.superpi.runtime.ProviderOAuthService
 import io.github.whywood.superpi.runtime.ProviderSummary
@@ -61,6 +66,9 @@ fun ProviderDetailScreen(
     onSaveApiKey: suspend (String) -> Result<Unit>,
     onClearApiKey: suspend () -> Result<Unit>,
     modifier: Modifier = Modifier,
+    models: List<ModelOption> = emptyList(),
+    defaultModel: ModelConfig? = null,
+    onSelectDefaultModel: ((String) -> Unit)? = null,
 ) {
     val colors = superPiColors()
     val scope = rememberCoroutineScope()
@@ -155,6 +163,64 @@ fun ProviderDetailScreen(
                         onSave = onSaveApiKey,
                         onClear = onClearApiKey,
                     )
+                }
+            }
+            if (configured && models.isNotEmpty() && onSelectDefaultModel != null) {
+                var modelQuery by remember(provider.id) { mutableStateOf("") }
+                val cleanModelQuery = modelQuery.trim()
+                val filteredModels = remember(models, cleanModelQuery) {
+                    if (cleanModelQuery.isEmpty()) {
+                        models
+                    } else {
+                        models.filter { model ->
+                            model.displayName.contains(cleanModelQuery, ignoreCase = true) ||
+                                model.id.contains(cleanModelQuery, ignoreCase = true)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                DdSectionLabel(
+                    stringResource(R.string.settings_provider_models_section),
+                    Modifier.padding(start = DdSpacing.Xs),
+                )
+                Spacer(Modifier.height(10.dp))
+                if (models.size > 8) {
+                    DdSearchField(
+                        query = modelQuery,
+                        onQueryChange = { modelQuery = it },
+                        placeholder = stringResource(R.string.settings_provider_model_search),
+                        clearContentDescription = stringResource(R.string.search_clear),
+                        fieldTestTag = "provider_detail_model_search",
+                    )
+                    Spacer(Modifier.height(DdSpacing.Md))
+                }
+                DdGroupCard {
+                    if (filteredModels.isEmpty()) {
+                        DdEmptyState(
+                            text = stringResource(R.string.settings_provider_no_model_result),
+                            modifier = Modifier.padding(vertical = DdSpacing.Xl),
+                        )
+                    } else {
+                        filteredModels.forEachIndexed { idx, model ->
+                            if (idx > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                            val isDefault = defaultModel?.providerId == provider.id && defaultModel.modelId == model.id
+                            DdListRow(
+                                title = model.displayName.ifBlank { model.id },
+                                onClick = { onSelectDefaultModel(model.id) },
+                                trailing = if (isDefault) {
+                                    {
+                                        StatusPill(
+                                            text = stringResource(R.string.settings_provider_default_badge),
+                                            active = true,
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                modifier = Modifier.testTag("provider_model_${model.id}"),
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(48.dp))

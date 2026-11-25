@@ -19,13 +19,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.whywood.superpi.SuperPIApplication
 import io.github.whywood.superpi.MainActivity
 import io.github.whywood.superpi.R
+import io.github.whywood.superpi.conversation.ConversationState
 import io.github.whywood.superpi.core.AssistantEntry
 import io.github.whywood.superpi.service.Diagnostics
 import io.github.whywood.superpi.core.resolveAttachmentRoot
+import io.github.whywood.superpi.data.AppMode
 import io.github.whywood.superpi.data.LanguagePreferences
 import io.github.whywood.superpi.data.OverlayEntryMode
 import io.github.whywood.superpi.data.UiPreferences
 import io.github.whywood.superpi.runtime.AgentRuntimeHost
+import io.github.whywood.superpi.runtime.RuntimeActivity
+import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.service.AgentService
 import io.github.whywood.superpi.theme.HostTheme
 import io.github.whywood.superpi.service.AppVisibility
@@ -38,6 +43,9 @@ import io.github.whywood.superpi.ui.common.shareChooser
 import io.github.whywood.superpi.ui.common.ProvideHostFiles
 import io.github.whywood.superpi.ui.common.chat.ProvidePluginManager
 import io.github.whywood.superpi.ui.shell.rememberShellConversationStrings
+import io.github.whywood.superpi.ui.superagent.SuperChatViewModel
+import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 
@@ -48,7 +56,7 @@ class AssistantOverlayActivity : ComponentActivity() {
         OverlayDraftStore(PreferencesOverlayDraftPersistence(this))
     }
     private var controller: AssistantOverlayController? = null
-    private var requestedSessionId: String? = null
+    private var requestedSessionId by mutableStateOf<String?>(null)
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(LanguagePreferences.wrap(newBase))
@@ -64,6 +72,21 @@ class AssistantOverlayActivity : ComponentActivity() {
         val language = LanguagePreferences(this).read()
         setContent {
             val chatUiStrings = rememberShellConversationStrings()
+            val scope = rememberCoroutineScope()
+            val uiPreferences by graph.appPreferences.preferences.collectAsStateWithLifecycle(
+                initialValue = null,
+            )
+            val autoSpeak by graph.voicePreferences.autoSpeak.collectAsStateWithLifecycle(
+                initialValue = false,
+            )
+            val overlayEntryMode by graph.overlayEntryPreferences.mode.collectAsStateWithLifecycle(
+                initialValue = OverlayEntryMode.VOICE,
+            )
+            val prefs = uiPreferences
+            val isSuperOverlay = prefs?.appMode == AppMode.SUPER &&
+                (requestedSessionId == null ||
+                    requestedSessionId == SuperRuntime.SUPER_THREAD_SESSION_ID ||
+                    requestedSessionId?.startsWith(NotificationCenter.WORKER_TARGET_PREFIX) == true)
             val controller = remember {
                 AssistantOverlayController(
                     runtime = graph.host,
@@ -81,94 +104,237 @@ class AssistantOverlayActivity : ComponentActivity() {
                 )
             }
             this.controller = controller
-            LaunchedEffect(controller) {
-                runCatching { graph.processRuntime.start() }.onFailure {
-                    Diagnostics.log(this@AssistantOverlayActivity, "overlay: process start failed", it)
+            LaunchedEffect(controller, prefs != null, isSuperOverlay) {
+                if (prefs == null) return@LaunchedEffect
+                try {
+                    graph.processRuntime.start()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Diagnostics.log(this@AssistantOverlayActivity, "overlay: process start failed", error)
                 }
-                controller.start()
+                if (!isSuperOverlay) {
+                    controller.start()
+                }
             }
-            val autoSpeak by graph.voicePreferences.autoSpeak.collectAsStateWithLifecycle(
-                initialValue = false,
-            )
-            val overlayEntryMode by graph.overlayEntryPreferences.mode.collectAsStateWithLifecycle(
-                initialValue = OverlayEntryMode.VOICE,
-            )
-            val uiPreferences by graph.appPreferences.preferences.collectAsStateWithLifecycle(
-                initialValue = UiPreferences(),
-            )
-            val state by controller.state.collectAsStateWithLifecycle()
+            val superDir = remember { File(graph.agentDir, "super") }
+            val superRouterWorkspace = remember(superDir) { File(superDir, "router/workspace") }
+            val superChatViewModel = remember(superDir, superRouterWorkspace, scope) {
+                SuperChatViewModel(
+                    superRuntime = graph.superRuntime,
+                    providers = graph.providerCatalog,
+                    configuredProviderIds = graph::configuredProviderIds,
+                    attachmentStore = graph.attachmentStore,
+                    superDir = superDir,
+                    routerWorkspaceDir = superRouterWorkspace,
+                    scope = scope,
+                    strings = chatUiStrings,
+                )
+            }
+            LaunchedEffect(chatUiStrings) {
+                superChatViewModel.updateStrings(chatUiStrings)
+            }
+            LaunchedEffect(prefs != null, isSuperOverlay) {
+                if (prefs != null && isSuperOverlay) {
+                    try {
+                        graph.superRuntime.ensureStarted()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Diagnostics.log(this@AssistantOverlayActivity, "overlay: super start failed", error)
+                    }
+                }
+            }
+            val normalState by controller.state.collectAsStateWithLifecycle()
+            val superUiState by superChatViewModel.state.collectAsStateWithLifecycle()
+            val superTitle = NotificationCenter.SUPER_DISPLAY_TITLE
+            val state = remember(isSuperOverlay, normalState, superUiState, superTitle, superRouterWorkspace) {
+                if (!isSuperOverlay) {
+                    normalState
+                } else {
+                    val thread = superUiState.thread
+                    val toolName = thread.activeToolText?.takeIf { it.isNotBlank() }
+                    val activity = when {
+                        !thread.busy -> null
+                        toolName != null -> RuntimeActivity.RunningTool(toolName)
+                        else -> RuntimeActivity.Thinking
+                    }
+                    val ws = RuntimeWorkspace(
+                        id = SuperRuntime.SUPER_THREAD_SESSION_ID,
+                        name = superTitle,
+                        cwd = superRouterWorkspace.absolutePath,
+                    )
+                    val targetSessionId = requestedSessionId?.takeIf {
+                        it.startsWith(NotificationCenter.WORKER_TARGET_PREFIX)
+                    } ?: SuperRuntime.SUPER_THREAD_SESSION_ID
+                    val overlayError = when {
+                        !thread.ready && thread.error != null -> AssistantOverlayError.StartFailed
+                        superUiState.error != null -> AssistantOverlayError.SendFailed
+                        else -> null
+                    }
+                    AssistantOverlayState(
+                        conversation = ConversationState(
+                            messages = superUiState.messages,
+                            loaded = thread.ready,
+                            sending = thread.busy,
+                            activity = activity,
+                        ),
+                        sessionId = targetSessionId,
+                        sessionTitle = superTitle,
+                        conversationCwd = superRouterWorkspace.absolutePath,
+                        workspaceId = SuperRuntime.SUPER_THREAD_SESSION_ID,
+                        workspaces = listOf(ws),
+                        allSessions = emptyList(),
+                        providers = superChatViewModel.configuredProviders(),
+                        providerId = thread.providerId,
+                        modelId = thread.modelId,
+                        modelLabel = thread.modelLabel,
+                        models = superUiState.models,
+                        thinkingLevel = thread.thinkingLevel,
+                        thinkingLevels = superUiState.thinkingLevels,
+                        attachments = superUiState.draft.attachments,
+                        importingAttachment = superUiState.draft.importingAttachment,
+                        error = overlayError,
+                    )
+                }
+            }
             val pendingQuestions by graph.questionCenter.pending.collectAsStateWithLifecycle()
-            val sessionQuestions = remember(pendingQuestions, state.sessionId) {
-                pendingQuestions.filter { it.sessionId == state.sessionId }
+            val sessionQuestions = remember(isSuperOverlay, pendingQuestions, state.sessionId, superUiState) {
+                if (!isSuperOverlay) {
+                    pendingQuestions.filter { it.sessionId == state.sessionId }
+                } else {
+                    val superQ = superUiState.thread.pendingQuestion?.copy(
+                        sessionId = SuperRuntime.SUPER_THREAD_SESSION_ID,
+                    )
+                    val workerQs = superUiState.pendingWorkerApprovals.map { (worker, q) ->
+                        q.copy(sessionId = NotificationCenter.workerSessionTarget(worker.workerId))
+                    }
+                    listOfNotNull(superQ) + workerQs
+                }
             }
             val context = LocalContext.current
-            val scope = rememberCoroutineScope()
             val missingFileMessage = stringResource(R.string.assistant_attach_missing)
             val shareFailedMessage = stringResource(R.string.present_share_failed)
             val shareTitle = stringResource(R.string.assistant_attach_share)
             var preview by remember { mutableStateOf<AssistantOverlayPreview?>(null) }
             var attachSheetOpen by remember { mutableStateOf(false) }
             var cameraSheetOpen by remember { mutableStateOf(false) }
-            val attachmentPickers = rememberAttachmentPickers { uri -> controller.attach(uri) }
-            val attachmentRoot = remember(state.conversationCwd) {
-                resolveAttachmentRoot(state.conversationCwd, graph.homeDir)
+            val attachmentPickers = rememberAttachmentPickers { uri ->
+                if (isSuperOverlay) superChatViewModel.attach(uri) else controller.attach(uri)
+            }
+            val attachmentRoot = remember(isSuperOverlay, state.conversationCwd, superRouterWorkspace) {
+                if (isSuperOverlay) {
+                    superRouterWorkspace
+                } else {
+                    resolveAttachmentRoot(state.conversationCwd, graph.homeDir)
+                }
             }
 
             val openFile: (String) -> Unit = { raw ->
                 scope.launch {
-                    val resolved = graph.attachmentStore.resolve(raw, attachmentRoot)
-                    if (resolved == null) {
-                        Toast.makeText(context, missingFileMessage, Toast.LENGTH_SHORT).show()
+                    if (isSuperOverlay) {
+                        val resolved = superChatViewModel.resolveFile(raw)
+                        if (resolved == null) {
+                            Toast.makeText(context, missingFileMessage, Toast.LENGTH_SHORT).show()
+                        } else {
+                            preview = AssistantOverlayPreview(
+                                attachment = resolved.first,
+                                file = resolved.second,
+                            )
+                        }
                     } else {
-                        preview = AssistantOverlayPreview(
-                            attachment = resolved,
-                            file = graph.attachmentStore.file(resolved, attachmentRoot),
-                        )
+                        val resolved = graph.attachmentStore.resolve(raw, attachmentRoot)
+                        if (resolved == null) {
+                            Toast.makeText(context, missingFileMessage, Toast.LENGTH_SHORT).show()
+                        } else {
+                            preview = AssistantOverlayPreview(
+                                attachment = resolved,
+                                file = graph.attachmentStore.file(resolved, attachmentRoot),
+                            )
+                        }
                     }
                 }
             }
             val shareFile: (String) -> Unit = { raw ->
                 scope.launch {
-                    val resolved = graph.attachmentStore.resolve(raw, attachmentRoot)
-                    if (resolved == null) {
-                        Toast.makeText(context, missingFileMessage, Toast.LENGTH_SHORT).show()
-                    } else {
-                        val intent = graph.attachmentStore.shareIntent(resolved, attachmentRoot)
-                        if (intent != null) {
-                            context.startActivity(shareChooser(context, intent, shareTitle))
+                    if (isSuperOverlay) {
+                        val resolved = superChatViewModel.resolveFile(raw)
+                        if (resolved == null) {
+                            Toast.makeText(context, missingFileMessage, Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, shareFailedMessage, Toast.LENGTH_SHORT).show()
+                            val intent = graph.attachmentStore.shareIntent(resolved.first, resolved.second.parentFile ?: attachmentRoot)
+                            if (intent != null) {
+                                context.startActivity(shareChooser(context, intent, shareTitle))
+                            } else {
+                                Toast.makeText(context, shareFailedMessage, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } else {
+                        val resolved = graph.attachmentStore.resolve(raw, attachmentRoot)
+                        if (resolved == null) {
+                            Toast.makeText(context, missingFileMessage, Toast.LENGTH_SHORT).show()
+                        } else {
+                            val intent = graph.attachmentStore.shareIntent(resolved, attachmentRoot)
+                            if (intent != null) {
+                                context.startActivity(shareChooser(context, intent, shareTitle))
+                            } else {
+                                Toast.makeText(context, shareFailedMessage, Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 }
             }
 
             HostTheme(controller = graph.themeController) {
-                ProvidePluginManager(graph.pluginManager) {
-                    ProvideHostFiles(graph.hostFiles) {
-                AssistantOverlayScreen(
-                    state = state,
-                    pendingQuestions = sessionQuestions,
-                    preview = preview,
-                    draftStore = draftStore,
-                    config = AssistantOverlayConfig(
-                        autoSpeak = autoSpeak,
-                        entryMode = overlayEntryMode,
-                        autoCollapseProcess = uiPreferences.autoCollapseProcess,
-                        processDetail = uiPreferences.processDetail,
-                        chatFontScale = uiPreferences.chatFontScale,
-                        language = language,
-                        attachmentRoot = attachmentRoot,
-                    ),
+                if (prefs != null) {
+                    ProvidePluginManager(graph.pluginManager) {
+                        ProvideHostFiles(graph.hostFiles) {
+                    AssistantOverlayScreen(
+                        state = state,
+                        pendingQuestions = sessionQuestions,
+                        preview = preview,
+                        draftStore = draftStore,
+                        config = AssistantOverlayConfig(
+                            autoSpeak = autoSpeak,
+                            entryMode = overlayEntryMode,
+                            processDetail = prefs.processDetail,
+                            chatFontScale = prefs.chatFontScale,
+                            language = language,
+                            attachmentRoot = attachmentRoot,
+                            switcherVisible = !isSuperOverlay,
+                        ),
                     actions = AssistantOverlayActions(
                         onDismiss = { finish() },
                         onOpenInApp = ::openInApp,
-                        onSend = controller::send,
-                        onStop = controller::stop,
-                        onRetry = controller::retry,
-                        onToggleStep = controller::toggleStep,
+                        onSend = { text, followUp ->
+                            if (isSuperOverlay) {
+                                superChatViewModel.sendDirect(text)
+                            } else {
+                                controller.send(text, followUp)
+                            }
+                        },
+                        onStop = {
+                            if (isSuperOverlay) superChatViewModel.stop() else controller.stop()
+                        },
+                        onRetry = { msgId ->
+                            if (isSuperOverlay) superChatViewModel.retryMessage(msgId) else controller.retry(msgId)
+                        },
+                        onToggleStep = { msgId, stepId ->
+                            if (isSuperOverlay) superChatViewModel.toggleStep(stepId) else controller.toggleStep(msgId, stepId)
+                        },
                         onAnswerQuestion = { pending, answers ->
-                            graph.questionCenter.answer(pending.requestId, answers)
+                            when {
+                                pending.sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID -> {
+                                    superChatViewModel.answerSuperQuestion(pending.requestId, answers)
+                                }
+
+                                pending.sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX) -> {
+                                    val workerId = pending.sessionId.removePrefix(NotificationCenter.WORKER_TARGET_PREFIX)
+                                    superChatViewModel.answerWorkerQuestion(workerId, pending.requestId, answers)
+                                }
+
+                                else -> graph.questionCenter.answer(pending.requestId, answers)
+                            }
                         },
                         onOpenPreview = { attachment ->
                             preview = AssistantOverlayPreview(
@@ -178,25 +344,35 @@ class AssistantOverlayActivity : ComponentActivity() {
                         },
                         onPickAttachment = { attachSheetOpen = true },
                         onOpenCamera = { cameraSheetOpen = true },
-                        onRemoveAttachment = controller::removeAttachment,
+                        onRemoveAttachment = { id ->
+                            if (isSuperOverlay) superChatViewModel.removeAttachment(id) else controller.removeAttachment(id)
+                        },
                         onOpenFile = openFile,
                         onShareFile = shareFile,
                         onOpenMiniapp = { state.sessionId?.let(::openInApp) },
                         onOpenSession = controller::openSession,
                         onNewSessionInWorkspace = { workspaceId -> controller.newSession(workspaceId) },
                         onRefreshLists = controller::refreshLists,
-                        onSelectProvider = controller::selectProvider,
-                        onSelectModel = controller::selectModel,
-                        onSelectThinking = controller::selectThinking,
+                        onSelectProvider = { providerId ->
+                            if (isSuperOverlay) superChatViewModel.setProvider(providerId) else controller.selectProvider(providerId)
+                        },
+                        onSelectModel = { modelId ->
+                            if (isSuperOverlay) superChatViewModel.setModel(modelId) else controller.selectModel(modelId)
+                        },
+                        onSelectThinking = { level ->
+                            if (isSuperOverlay) superChatViewModel.setThinkingLevel(level) else controller.selectThinking(level)
+                        },
                         onClearQueue = controller::clearQueue,
                         onRemoveQueued = controller::removeQueued,
                         onSendQueued = controller::sendQueued,
-                        onRetryStart = controller::start,
+                        onRetryStart = {
+                            if (isSuperOverlay) superChatViewModel.retryLastError() else controller.start()
+                        },
                         onDismissPreview = { preview = null },
                         onSharePreview = {
                             scope.launch {
                                 preview?.let { current ->
-                                    val intent = graph.attachmentStore.shareIntent(current.attachment, attachmentRoot)
+                                    val intent = graph.attachmentStore.shareIntent(current.attachment, current.file.parentFile ?: attachmentRoot)
                                     if (intent != null) {
                                         context.startActivity(shareChooser(context, intent, shareTitle))
                                     } else {
@@ -225,12 +401,13 @@ class AssistantOverlayActivity : ComponentActivity() {
                         onDismiss = { cameraSheetOpen = false },
                         onCaptured = { uri ->
                             cameraSheetOpen = false
-                            controller.attach(uri)
+                            if (isSuperOverlay) superChatViewModel.attach(uri) else controller.attach(uri)
                         },
                     )
                 }
                 }
                     }
+                }
             }
         }
     }
@@ -241,7 +418,11 @@ class AssistantOverlayActivity : ComponentActivity() {
         val sessionId = intent.requestedSessionId() ?: return
         requestedSessionId = sessionId
         graph.activeSessionId.value = sessionId
-        controller?.openSession(sessionId)
+        val isSuperTarget = sessionId == SuperRuntime.SUPER_THREAD_SESSION_ID ||
+            sessionId.startsWith(NotificationCenter.WORKER_TARGET_PREFIX)
+        if (!isSuperTarget) {
+            controller?.openSession(sessionId)
+        }
     }
 
     override fun onStart() {
@@ -251,7 +432,12 @@ class AssistantOverlayActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        controller?.state?.value?.sessionId?.let { outState.putString(STATE_SESSION_ID, it) }
+        val superSession = requestedSessionId?.takeIf {
+            it == SuperRuntime.SUPER_THREAD_SESSION_ID ||
+                it.startsWith(NotificationCenter.WORKER_TARGET_PREFIX)
+        }
+        val toSave = superSession ?: controller?.state?.value?.sessionId
+        toSave?.let { outState.putString(STATE_SESSION_ID, it) }
     }
 
     override fun onStop() {

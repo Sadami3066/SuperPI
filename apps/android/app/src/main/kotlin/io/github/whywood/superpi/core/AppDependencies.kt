@@ -39,8 +39,7 @@ import io.github.whywood.superpi.runtime.SdkCredentialStore
 import io.github.whywood.superpi.runtime.SkillCatalog
 import io.github.whywood.superpi.runtime.MiniappAgentService
 import io.github.whywood.superpi.runtime.MiniappStore
-import io.github.whywood.superpi.runtime.memory.MemoryDreamer
-import io.github.whywood.superpi.runtime.memory.MemoryIngestor
+import io.github.whywood.superpi.runtime.memory.MemoryAgentService
 import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
 import io.github.whywood.superpi.service.ProcessRuntime
@@ -137,17 +136,17 @@ interface FeatureDependencies {
 
     val memory: MemoryStore
 
-    val memoryIngestor: MemoryIngestor
-
-    val memoryDreamer: MemoryDreamer
+    val memoryAgent: MemoryAgentService
 
     val memoryPreferences: MemoryPreferencesStore
 
-    val memorySync: io.github.whywood.superpi.data.relay.RelayMemorySync
+    val memoryModelRouter: io.github.whywood.superpi.runtime.memory.MemoryModelRouter
 
     val relayController: RelayController
 
     val relayLive: RelayLive
+
+    val relayMemorySync: io.github.whywood.superpi.data.relay.RelayMemorySync
 
     val remoteTransport: io.github.whywood.superpi.remote.RemoteAgentTransport
 
@@ -159,6 +158,8 @@ interface FeatureDependencies {
 
     val remoteArtifactClient: io.github.whywood.superpi.remote.RemoteArtifactClient
 
+    val superRuntime: io.github.whywood.superpi.runtime.SuperRuntime
+
     val updateManager: UpdateManager
 }
 
@@ -167,7 +168,7 @@ interface ServiceDependencies {
 
     val customProviderStore: CustomProviderStore
 
-    fun reloadCustomProviders()
+    suspend fun reloadCustomProviders()
 
     fun configuredProviderIds(): Set<String>
 

@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -36,12 +37,21 @@ import kotlinx.coroutines.launch
 
 private const val UNFREEZE_GRACE_MILLIS = 160L
 
+private class ActiveTransition(
+    val outgoing: AppDestination,
+    val incoming: AppDestination,
+    val direction: Int,
+    initialProgress: Float = 0f,
+) {
+    val progress = Animatable(initialProgress)
+}
+
 object AppScreenTransition {
-    const val SHARED_AXIS_FRACTION = 0.25f
+    const val SHARED_AXIS_FRACTION = 0.18f
 
     const val OUTGOING_PARALLAX_FRACTION = 0.12f
 
-    const val OUTGOING_DIM_ALPHA = 0.16f
+    const val OUTGOING_DIM_ALPHA = 0.10f
 
     fun direction(initial: AppDestination, target: AppDestination): Int = when {
         target.depth > initial.depth -> 1
@@ -71,48 +81,67 @@ fun AnimatedScreenHost(
     val saveableState = rememberSaveableStateHolder()
     val scope = rememberCoroutineScope()
     val motionEnabled = LocalDdMotionEnabled.current
-    val covered = navigator.current != AppDestination.Chat
-    var baseFrozen by remember { mutableStateOf(false) }
-    var baseDrawSuspended by remember { mutableStateOf(false) }
-    LaunchedEffect(covered, motionEnabled) {
-        if (covered) {
-            baseFrozen = true
-            if (motionEnabled) delay(DdMotion.SCREEN.toLong())
-            baseDrawSuspended = true
-        } else {
-            baseDrawSuspended = false
-            if (motionEnabled) delay(DdMotion.SCREEN.toLong() + UNFREEZE_GRACE_MILLIS)
-            baseFrozen = false
-        }
-    }
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val directionSign = if (rtl) -1f else 1f
-    val progress = remember { Animatable(1f) }
     val previewFraction = remember { mutableFloatStateOf(0f) }
     val visited = remember { mutableSetOf<String>() }
-    var front by remember { mutableStateOf(navigator.current) }
-    var back by remember { mutableStateOf<AppDestination?>(null) }
-    var direction by remember { mutableIntStateOf(0) }
+    var settledDestination by remember { mutableStateOf(navigator.current) }
+    var activeTransition by remember { mutableStateOf<ActiveTransition?>(null) }
     var previewTarget by remember { mutableStateOf<AppDestination?>(null) }
     var previewDirection by remember { mutableIntStateOf(0) }
     var skipNextTransition by remember { mutableStateOf(false) }
     var reboundJob by remember { mutableStateOf<Job?>(null) }
+    val preview = previewTarget.takeIf { activeTransition == null }
+    val screenCovered = settledDestination != AppDestination.Chat &&
+        activeTransition == null &&
+        preview == null
+    var baseFrozen by remember { mutableStateOf(screenCovered) }
+    var baseDrawSuspended by remember { mutableStateOf(screenCovered) }
+    LaunchedEffect(screenCovered, motionEnabled) {
+        if (screenCovered) {
+            baseFrozen = true
+            baseDrawSuspended = true
+        } else {
+            baseDrawSuspended = false
+            if (motionEnabled) delay(UNFREEZE_GRACE_MILLIS)
+            baseFrozen = false
+        }
+    }
 
     PredictiveBackHandler(
-        enabled = predictiveBackEnabled && navigator.canPop && back == null,
+        enabled = predictiveBackEnabled && navigator.canPop,
     ) { events ->
-        val target = AppScreenTransition.popTarget(navigator.stack) ?: return@PredictiveBackHandler
+        val anchor = settledDestination
+        val target = if (activeTransition == null && navigator.current == anchor) {
+            AppScreenTransition.popTarget(navigator.stack)
+        } else {
+            null
+        }
+        if (target == null) {
+            var completed = false
+            try {
+                events.collect { }
+                completed = true
+            } catch (_: CancellationException) {
+            }
+            if (completed && navigator.canPop) {
+                navigator.pop()
+            }
+            return@PredictiveBackHandler
+        }
         reboundJob?.cancel()
-        previewDirection = AppScreenTransition.direction(front, target)
+        previewDirection = AppScreenTransition.direction(anchor, target)
         previewFraction.floatValue = 0f
         previewTarget = target
         var predictive = false
+        var collected = false
         try {
             events.collect { event ->
                 predictive = true
                 previewFraction.floatValue = event.progress
             }
-        } catch (cancellation: CancellationException) {
+            collected = true
+        } catch (_: CancellationException) {
             if (previewTarget == target) {
                 if (predictive) {
                     reboundJob = scope.launch {
@@ -121,32 +150,45 @@ fun AnimatedScreenHost(
                             targetValue = 0f,
                             animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
                         ) { value, _ -> previewFraction.floatValue = value }
-                        previewTarget = null
+                        if (previewTarget == target) previewTarget = null
                     }
                 } else {
                     previewTarget = null
                 }
             }
             return@PredictiveBackHandler
+        } finally {
+            if (!collected && !predictive && previewTarget == target) {
+                previewTarget = null
+            }
         }
-        if (previewTarget != target || navigator.current != front) {
-            previewTarget = null
+        if (previewTarget != target || activeTransition != null || navigator.current != anchor) {
+            if (previewTarget == target) previewTarget = null
             return@PredictiveBackHandler
         }
         if (predictive) {
-            if (motionEnabled) {
-                animate(
-                    initialValue = previewFraction.floatValue,
-                    targetValue = 1f,
-                    animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
-                ) { value, _ -> previewFraction.floatValue = value }
-            } else {
-                previewFraction.floatValue = 1f
-            }
-            skipNextTransition = true
-            if (!navigator.pop()) {
-                skipNextTransition = false
-                previewTarget = null
+            try {
+                if (motionEnabled && previewFraction.floatValue < 0.99f) {
+                    animate(
+                        initialValue = previewFraction.floatValue,
+                        targetValue = 1f,
+                        animationSpec = tween(DdMotion.FAST, easing = DdMotion.EaseOut),
+                    ) { value, _ -> previewFraction.floatValue = value }
+                } else {
+                    previewFraction.floatValue = 1f
+                }
+                if (previewTarget != target || activeTransition != null || navigator.current != anchor) {
+                    if (previewTarget == target) previewTarget = null
+                    return@PredictiveBackHandler
+                }
+                skipNextTransition = true
+                if (!navigator.pop()) {
+                    skipNextTransition = false
+                    previewTarget = null
+                }
+            } catch (cancelled: CancellationException) {
+                if (previewTarget == target) previewTarget = null
+                throw cancelled
             }
         } else {
             previewTarget = null
@@ -158,47 +200,62 @@ fun AnimatedScreenHost(
         val target = navigator.current
         reboundJob?.cancel()
         if (skipNextTransition) {
-            skipNextTransition = false
-            previewTarget = null
-            if (target == front) return@LaunchedEffect
-            back = null
-            front = target
+            Snapshot.withMutableSnapshot {
+                skipNextTransition = false
+                previewTarget = null
+                activeTransition = null
+                settledDestination = target
+            }
             withFrameNanos { }
             pruneVisitedStates(navigator, saveableState, visited)
             return@LaunchedEffect
         }
-        if (target == front) {
-            previewTarget = null
+        val currentFront = activeTransition?.incoming ?: settledDestination
+        if (target == currentFront) {
+            if (activeTransition == null) previewTarget = null
             return@LaunchedEffect
         }
-        previewTarget = null
-        if (back != null) {
-            back = null
-            progress.snapTo(1f)
+        val transition = ActiveTransition(
+            outgoing = currentFront,
+            incoming = target,
+            direction = AppScreenTransition.direction(currentFront, target),
+            initialProgress = if (motionEnabled) 0f else 1f,
+        )
+        Snapshot.withMutableSnapshot {
+            previewTarget = null
+            activeTransition = transition
         }
-        val outgoing = front
-        direction = AppScreenTransition.direction(outgoing, target)
-        back = outgoing.takeIf { it != AppDestination.Chat }
-        front = target
-        if (motionEnabled) {
-            progress.snapTo(0f)
-            progress.animateTo(1f, animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseOut))
-        } else {
-            progress.snapTo(1f)
+        try {
+            if (motionEnabled) {
+                transition.progress.animateTo(
+                    1f,
+                    animationSpec = tween(DdMotion.SCREEN, easing = DdMotion.EaseOut),
+                )
+            }
+        } finally {
+            Snapshot.withMutableSnapshot {
+                if (activeTransition === transition) {
+                    settledDestination = target
+                    activeTransition = null
+                }
+            }
         }
-        back = null
         withFrameNanos { }
         pruneVisitedStates(navigator, saveableState, visited)
     }
 
     Box(modifier) {
-        val preview = previewTarget.takeIf { back == null }
+        val currentTransition = activeTransition
+        val activePreview = previewTarget.takeIf { currentTransition == null }
         val scrim = superPiColors().scrim
         val baseReveal: () -> Float = {
             when {
-                preview == AppDestination.Chat -> (1f - previewFraction.floatValue).coerceIn(0f, 1f)
-                covered && back == null -> progress.value
-                !covered && back != null -> (1f - progress.value).coerceIn(0f, 1f)
+                activePreview == AppDestination.Chat -> (1f - previewFraction.floatValue).coerceIn(0f, 1f)
+                currentTransition != null && currentTransition.outgoing == AppDestination.Chat ->
+                    currentTransition.progress.value
+                currentTransition != null && currentTransition.incoming == AppDestination.Chat ->
+                    (1f - currentTransition.progress.value).coerceIn(0f, 1f)
+                settledDestination != AppDestination.Chat -> 1f
                 else -> 0f
             }
         }
@@ -206,7 +263,7 @@ fun AnimatedScreenHost(
             Modifier
                 .fillMaxSize()
                 .drawWithContent {
-                    if (!covered || !baseDrawSuspended || preview == AppDestination.Chat) {
+                    if (!screenCovered || !baseDrawSuspended || activePreview == AppDestination.Chat) {
                         drawContent()
                         val reveal = baseReveal()
                         if (reveal > 0f) {
@@ -221,7 +278,7 @@ fun AnimatedScreenHost(
                     }
                 }
                 .graphicsLayer {
-                    if (!covered || !baseDrawSuspended || preview == AppDestination.Chat) {
+                    if (!screenCovered || !baseDrawSuspended || activePreview == AppDestination.Chat) {
                         val reveal = baseReveal()
                         translationX = -reveal *
                             AppScreenTransition.OUTGOING_PARALLAX_FRACTION *
@@ -232,9 +289,17 @@ fun AnimatedScreenHost(
         ) {
             base(baseFrozen)
         }
-        val incoming = preview ?: front
-        val outgoing = if (preview != null) front.takeIf { it != preview } else back
-        val activeDirection = if (preview != null) previewDirection else direction
+        val incoming = activePreview ?: currentTransition?.incoming ?: settledDestination
+        val outgoing = when {
+            activePreview != null -> settledDestination.takeIf { it != activePreview }
+            currentTransition != null -> currentTransition.outgoing
+            else -> null
+        }
+        val activeDirection = when {
+            activePreview != null -> previewDirection
+            currentTransition != null -> currentTransition.direction
+            else -> 0
+        }
         val pages = buildList {
             if (activeDirection < 0) {
                 if (incoming != AppDestination.Chat) add(incoming)
@@ -244,10 +309,10 @@ fun AnimatedScreenHost(
                 if (incoming != AppDestination.Chat) add(incoming)
             }
         }
-        val fraction: () -> Float = if (preview != null) {
-            { previewFraction.floatValue }
-        } else {
-            { progress.value }
+        val fraction: () -> Float = when {
+            activePreview != null -> { { previewFraction.floatValue } }
+            currentTransition != null -> { { currentTransition.progress.value } }
+            else -> { { 1f } }
         }
         pages.forEach { page ->
             key(page.routeKey) {
@@ -263,7 +328,7 @@ fun AnimatedScreenHost(
                 )
             }
         }
-        if (back != null) {
+        if (currentTransition != null) {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } })
         }
     }

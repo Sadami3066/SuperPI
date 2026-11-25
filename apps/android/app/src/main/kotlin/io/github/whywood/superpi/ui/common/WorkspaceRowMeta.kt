@@ -57,7 +57,7 @@ internal fun workspaceMenuActions(
         if (remote != null && remote.online && supportsBotManage) {
             add(WorkspaceMenuAction.EDIT_REMOTE)
         }
-        if (!workspace.isHome && meta.manageable) add(WorkspaceMenuAction.RENAME)
+        if (meta.manageable) add(WorkspaceMenuAction.RENAME)
         add(WorkspaceMenuAction.PIN)
         if (meta.manageable) add(WorkspaceMenuAction.SETTINGS)
         val canDeleteRemote = remote != null && remote.online && supportsBotManage && !isProtectedDefault

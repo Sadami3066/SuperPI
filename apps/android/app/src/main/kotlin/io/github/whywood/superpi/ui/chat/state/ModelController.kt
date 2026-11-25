@@ -118,7 +118,6 @@ internal class ModelController(
                 } else {
                     runtime.setSessionModel(sessionId, model.providerId, model.modelId, model.thinkingLevel)
                 }
-                settings.save(ModelConfig(model.providerId, model.modelId, model.thinkingLevel))
                 succeeded = true
             } catch (cancelled: CancellationException) {
                 throw cancelled

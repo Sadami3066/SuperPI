@@ -77,6 +77,7 @@ internal fun MailAccountsSheet(
     }
 
     fun updateNotify(account: MailAccount, notify: Boolean) {
+        actionError = null
         scope.launch {
             runCatching { repository.updateAccount(account.id, MailAccountUpdate(notify = notify)) }
                 .onFailure {
@@ -90,6 +91,7 @@ internal fun MailAccountsSheet(
     }
 
     fun deleteDraft(draft: MailDraft) {
+        actionError = null
         scope.launch {
             runCatching { repository.deleteDraft(draft.id) }
                 .onFailure {
@@ -255,6 +257,7 @@ internal fun MailAccountsSheet(
             destructive = true,
             onConfirm = {
                 removeTarget = null
+                actionError = null
                 scope.launch {
                     runCatching { repository.removeAccount(account.id) }
                         .onFailure {
@@ -382,7 +385,6 @@ private fun DraftItem(
                 icon = DdIcons.Trash,
                 onClick = onDelete,
                 contentDescription = host.t("删除草稿", "Delete draft"),
-                size = 36.dp,
                 iconSize = 16.dp,
                 tint = colors.inkTertiary,
             )

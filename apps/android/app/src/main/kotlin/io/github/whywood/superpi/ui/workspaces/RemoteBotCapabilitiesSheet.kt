@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.whywood.superpi.R
 import io.github.whywood.superpi.data.WorkspaceToolPolicy
@@ -144,6 +145,7 @@ fun RemoteBotCapabilitiesSheet(
                         text = loadError.orEmpty(),
                         style = DdType.bodySmall,
                         color = colors.danger,
+                        textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(10.dp))
                     DdTextAction(
@@ -252,7 +254,7 @@ fun RemoteBotCapabilitiesSheet(
                         },
                         onClick = { applyPolicyUpdate(policy.copy(screenTools = !policy.screenTools)) },
                     )
-                    DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+                    DdRowDivider()
                     DdListRow(
                         title = stringResource(R.string.bot_tools_miniapp),
                         enabled = !saving,
@@ -266,6 +268,16 @@ fun RemoteBotCapabilitiesSheet(
                             )
                         },
                         onClick = { applyPolicyUpdate(policy.copy(miniappTools = !policy.miniappTools)) },
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    BotMemoryPolicySection(
+                        policy = policy,
+                        isHome = active.isHome,
+                        enabled = !saving,
+                        useCardContainer = false,
+                        tagPrefix = "remote_memory",
+                        onSelectScope = { scope -> applyPolicyUpdate(policy.copy(memoryScope = scope)) },
+                        onToggleDispatch = { checked -> applyPolicyUpdate(policy.copy(memoryDispatch = checked)) },
                     )
                     Spacer(Modifier.height(24.dp))
                 }
@@ -296,7 +308,7 @@ private fun CapabilityToggleSection(
         return
     }
     items.forEachIndexed { index, (id, label) ->
-        if (index > 0) DdRowDivider(leadingInset = DdSpacing.RowHorizontal)
+        if (index > 0) DdRowDivider()
         val checked = id in enabledIds
         DdListRow(
             title = label,

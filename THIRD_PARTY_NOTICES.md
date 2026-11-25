@@ -88,13 +88,13 @@ For at least three years from the date this APK was first distributed, any third
 
 ## 2. Code Libraries Compiled into the APK
 
-### 2.1 pi2kotlin SDK 0.7.0 (SuperPI-KotlinSDK)
+### 2.1 pi2kotlin SDK 0.7.1 (SuperPI-KotlinSDK)
 
-- Artifacts: `io.github.whywood.superpi.sdk:pi-coding-agent-android:0.7.0`, `pi-ai-android`, `pi-agent-android`, `pi-mcp-android` (published to SuperPI-Maven)
+- Artifacts: `io.github.whywood.superpi.sdk:pi-coding-agent-android:0.7.1`, `pi-ai-android`, `pi-agent-android`, `pi-mcp-android` (published to SuperPI-Maven)
 - Copyright lines: `Copyright (c) 2026 pi2kotlin contributors`, `Copyright (c) 2025 Mario Zechner and pi contributors`
 - License: MIT
-- Source: <https://github.com/Sadami3066/SuperPI-KotlinSDK> tag `v0.7.0` (`LICENSE`)
-- Declared in this repository: `gradle/libs.versions.toml` (`pi = "0.7.0"`; dependency coordinates in `[libraries]` in the same file)
+- Source: <https://github.com/Sadami3066/SuperPI-KotlinSDK> tag `v0.7.1` (`LICENSE`)
+- Declared in this repository: `gradle/libs.versions.toml` (`pi = "0.7.1"`; dependency coordinates in `[libraries]` in the same file)
 - Full license text: `licenses/pi2kotlin-MIT.txt`
 - Note: the upstream AAR/POM carries no LICENSE/NOTICE metadata; this entry provides the copyright and license notices required when distributing the binary.
 

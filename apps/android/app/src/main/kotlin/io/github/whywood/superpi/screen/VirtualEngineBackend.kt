@@ -23,6 +23,8 @@ class VirtualEngineBackend(
 
     override suspend fun screenshot(): ByteArray? = requireEngine().screenshot()
 
+    override fun latestFrameBytes(): ByteArray? = engineProvider()?.latestFrameBytes()
+
     override suspend fun launch(packageName: String): VirtualScreenLaunchReport = requireEngine().launchWithReport(packageName)
 
     override fun reconnecting(): Boolean = engineProvider()?.reconnecting == true

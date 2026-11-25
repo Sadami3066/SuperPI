@@ -426,9 +426,6 @@ internal class ImapClient(
         }
     }
 
-    private fun responseReader(): ImapResponseReader =
-        reader ?: throw MailConnectionLostException()
-
     private fun outputStream(): BufferedOutputStream =
         output ?: throw MailConnectionLostException()
 

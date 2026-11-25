@@ -42,6 +42,7 @@ import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.superPiColors
 import io.github.whywood.superpi.runtime.ConversationQueries
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.ui.common.DelayedLoadingBlock
 import io.github.whywood.superpi.runtime.CronSummary
 import io.github.whywood.superpi.runtime.Timer
@@ -72,13 +73,16 @@ fun TimerScreen(
     onBack: () -> Unit,
     onOpenConversation: (String) -> Unit,
     modifier: Modifier = Modifier,
+    superRuntime: SuperRuntime? = null,
+    superMode: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
-    val holder = remember(service, runtime, initialConversationId) {
+    val holder = remember(service, runtime, initialConversationId, superRuntime, superMode) {
         TimersStateHolder(
-            source = TimerServiceDataSource(service, runtime),
+            source = TimerServiceDataSource(service, runtime, superRuntime, superMode),
             scope = scope,
             initialConversationId = initialConversationId,
+            superMode = superMode,
         )
     }
     LaunchedEffect(holder) { holder.load() }
@@ -271,10 +275,23 @@ private fun TimerRow(timer: Timer, conversationText: String?, onOpen: () -> Unit
         contentDescription = timer.name,
     ) {
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).alpha(if (timer.enabled) 1f else 0.55f)) {
-                Text(timer.name, style = DdType.body, color = colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(DdSpacing.Xxs))
-                Text(subtitle, style = DdType.bodySmall, color = colors.inkTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f)) {
+                Column(Modifier.alpha(if (timer.enabled) 1f else 0.55f)) {
+                    Text(timer.name, style = DdType.body, color = colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(DdSpacing.Xxs))
+                    Text(subtitle, style = DdType.bodySmall, color = colors.inkTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (timer.lastError != null) {
+                    Spacer(Modifier.height(DdSpacing.Xxs))
+                    Text(
+                        text = stringResource(deliveryErrorRes(timer.lastError)),
+                        style = DdType.bodySmall,
+                        color = colors.danger,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("timer_error_${timer.id}"),
+                    )
+                }
             }
             Spacer(Modifier.width(DdSpacing.Md))
             DdSwitch(timer.enabled, onToggle, Modifier.testTag("timer_switch_${timer.id}"))
