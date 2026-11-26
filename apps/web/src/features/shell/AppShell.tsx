@@ -30,6 +30,8 @@ export function AppShell() {
   const locale = useSettingsStore((s) => s.locale);
   const refreshSettingsData = useSettingsStore((s) => s.refreshSettingsData);
   const workbenchOpen = useWorkbenchStore((s) => s.open);
+  const togglePanel = useWorkbenchStore((s) => s.togglePanel);
+  const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -74,11 +76,33 @@ export function AppShell() {
         } else {
           openSettings("general");
         }
+      } else if (key === "j" && !e.shiftKey) {
+        e.preventDefault();
+        togglePanel("terminal");
+      } else if (e.shiftKey && key === "e") {
+        e.preventDefault();
+        togglePanel("files");
+      } else if (e.shiftKey && key === "g") {
+        e.preventDefault();
+        togglePanel("diff");
+      } else if (e.shiftKey && key === "b" && isElectron) {
+        e.preventDefault();
+        togglePanel("browser");
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeSessionId, bots, client, createSession, locale, settingsOpen, summariesById]);
+  }, [
+    activeSessionId,
+    bots,
+    client,
+    createSession,
+    isElectron,
+    locale,
+    settingsOpen,
+    summariesById,
+    togglePanel,
+  ]);
 
   return (
     <div

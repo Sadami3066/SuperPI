@@ -1,6 +1,8 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { IconX } from "@tabler/icons-react";
+import { useEffect } from "react";
 import { useI18n } from "../../i18n";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { BrandIcon } from "../shared/BrandAssets";
 import { ArchivedSettings } from "./ArchivedSettings";
 import { GeneralSettings } from "./GeneralSettings";
@@ -21,6 +23,14 @@ export function SettingsModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
+
+  useEffect(() => {
+    if (!open) return undefined;
+    useWorkbenchStore.getState().pushOverlay();
+    return () => {
+      useWorkbenchStore.getState().popOverlay();
+    };
+  }, [open]);
 
   const navItems: Array<{ id: SettingsTabId; label: string; iconName: string }> = [
     { id: "general", label: t("settings.navGeneral"), iconName: "system/appearance" },

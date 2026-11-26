@@ -1,10 +1,20 @@
 import { useMemo, useState } from "react";
-import { IconMessage, IconPlus, IconSearch, IconSettings } from "@tabler/icons-react";
+import {
+  IconFolder,
+  IconGitBranch,
+  IconMessage,
+  IconPlus,
+  IconSearch,
+  IconSettings,
+  IconTerminal2,
+  IconWorld,
+} from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Dialog, Input } from "../../ui";
 
 export function CommandPalette({
@@ -29,6 +39,8 @@ export function CommandPalette({
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const selectSession = useSessionStore((s) => s.selectSession);
   const createSession = useSessionStore((s) => s.createSession);
+  const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
+  const openPanel = useWorkbenchStore((s) => s.openPanel);
 
   const botNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -110,6 +122,56 @@ export function CommandPalette({
             <IconSettings size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("nav.settings")}</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
+              openPanel("files");
+            }}
+            className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <IconFolder size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <span className="font-medium">{t("wb.filesTitle")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
+              openPanel("diff");
+            }}
+            className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <IconGitBranch size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <span className="font-medium">{t("wb.diffTitle")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
+              openPanel("terminal");
+            }}
+            className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <IconTerminal2 size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <span className="font-medium">{t("wb.terminalTitle")}</span>
+          </button>
+
+          {isElectron && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenChange(false);
+                openPanel("browser");
+              }}
+              className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+            >
+              <IconWorld size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+              <span className="font-medium">{t("wb.browserTitle")}</span>
+            </button>
+          )}
 
           {items.length > 0 && (
             <div className="my-1 h-[0.5px]" style={{ background: "var(--pi-hairline)" }} />

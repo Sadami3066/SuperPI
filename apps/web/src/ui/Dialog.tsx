@@ -1,6 +1,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { IconX } from "@tabler/icons-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
+import { useWorkbenchStore } from "../stores/workbenchStore";
 
 export function Dialog({
   open,
@@ -17,6 +18,14 @@ export function Dialog({
   maxWidthClass?: string;
   children: ReactNode;
 }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    useWorkbenchStore.getState().pushOverlay();
+    return () => {
+      useWorkbenchStore.getState().popOverlay();
+    };
+  }, [open]);
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>

@@ -1,5 +1,12 @@
 import { lazy, useEffect, useMemo } from "react";
-import { IconInfoCircle } from "@tabler/icons-react";
+import {
+  IconFileCode,
+  IconFolder,
+  IconGitBranch,
+  IconInfoCircle,
+  IconTerminal2,
+  IconWorld,
+} from "@tabler/icons-react";
 import { AppShell } from "./features/shell/AppShell";
 import { ConnectionScreen } from "./features/shell/ConnectionScreen";
 import { I18nContext, translate } from "./i18n";
@@ -9,10 +16,51 @@ import { TooltipProvider } from "./ui";
 import { registerWorkbenchPanel } from "./workbench/registry";
 
 registerWorkbenchPanel({
+  id: "files",
+  labelKey: "wb.filesTitle",
+  icon: IconFolder,
+  order: 10,
+  Component: lazy(() => import("./workbench/FilesPanel")),
+});
+
+registerWorkbenchPanel({
+  id: "preview",
+  labelKey: "wb.previewTitle",
+  icon: IconFileCode,
+  order: 20,
+  Component: lazy(() => import("./workbench/PreviewPanel")),
+});
+
+registerWorkbenchPanel({
+  id: "diff",
+  labelKey: "wb.diffTitle",
+  icon: IconGitBranch,
+  order: 30,
+  Component: lazy(() => import("./workbench/DiffWorktreePanel")),
+});
+
+registerWorkbenchPanel({
+  id: "terminal",
+  labelKey: "wb.terminalTitle",
+  icon: IconTerminal2,
+  order: 40,
+  Component: lazy(() => import("./workbench/TerminalPanel")),
+});
+
+registerWorkbenchPanel({
+  id: "browser",
+  labelKey: "wb.browserTitle",
+  icon: IconWorld,
+  order: 50,
+  requiresElectron: true,
+  Component: lazy(() => import("./workbench/BrowserPanel")),
+});
+
+registerWorkbenchPanel({
   id: "session-inspector",
   labelKey: "wb.inspectorTitle",
   icon: IconInfoCircle,
-  order: 10,
+  order: 60,
   Component: lazy(() => import("./workbench/SessionInspectorPanel")),
 });
 

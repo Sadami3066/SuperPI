@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { IconDownload, IconFile, IconPhoto } from "@tabler/icons-react";
+import { IconDownload, IconExternalLink, IconFile, IconPhoto } from "@tabler/icons-react";
 import type { PresentedItem } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button } from "../../ui";
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
@@ -55,6 +56,17 @@ function ImageArtifactCard({
     triggerBlobDownload(blob, item.name);
   };
 
+  const handleOpenPreview = () => {
+    if (!item.path) return;
+    useWorkbenchStore.getState().openFileInPreview({
+      source: "artifact",
+      sessionId,
+      path: item.path,
+      name: item.name,
+      mime: item.mime,
+    });
+  };
+
   return (
     <div
       className="overflow-hidden rounded-[14px]"
@@ -64,12 +76,14 @@ function ImageArtifactCard({
       }}
     >
       {srcUrl ? (
-        <img
-          src={srcUrl}
-          alt={item.title || item.name}
-          className="max-h-[360px] w-full object-contain"
-          style={{ background: "var(--pi-code-bg)" }}
-        />
+        <button type="button" onClick={handleOpenPreview} className="block w-full">
+          <img
+            src={srcUrl}
+            alt={item.title || item.name}
+            className="max-h-[360px] w-full object-contain"
+            style={{ background: "var(--pi-code-bg)" }}
+          />
+        </button>
       ) : (
         <div
           className="flex h-32 items-center justify-center gap-2 text-[12.5px]"
@@ -113,6 +127,17 @@ export function PresentCard({
     triggerBlobDownload(blob, item.name);
   };
 
+  const handleOpenPreview = (item: PresentedItem) => {
+    if (!item.path) return;
+    useWorkbenchStore.getState().openFileInPreview({
+      source: "artifact",
+      sessionId,
+      path: item.path,
+      name: item.name,
+      mime: item.mime,
+    });
+  };
+
   return (
     <div className="my-2.5 space-y-2">
       {items.map((item, idx) => {
@@ -134,7 +159,12 @@ export function PresentCard({
               border: "0.5px solid var(--pi-hairline)",
             }}
           >
-            <div className="flex min-w-0 items-center gap-2.5">
+            <button
+              type="button"
+              disabled={!item.path}
+              onClick={() => handleOpenPreview(item)}
+              className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+            >
               <div
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]"
                 style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
@@ -154,12 +184,17 @@ export function PresentCard({
                   </div>
                 )}
               </div>
-            </div>
+            </button>
             {item.path && (
-              <Button variant="secondary" size="sm" onClick={() => void handleDownload(item)}>
-                <IconDownload size={14} stroke={1.7} />
-                <span>{t("present.download")}</span>
-              </Button>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button variant="secondary" size="sm" onClick={() => handleOpenPreview(item)}>
+                  <IconExternalLink size={13.5} stroke={1.7} />
+                  <span>{t("present.open")}</span>
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void handleDownload(item)}>
+                  <IconDownload size={14} stroke={1.7} />
+                </Button>
+              </div>
             )}
           </div>
         );

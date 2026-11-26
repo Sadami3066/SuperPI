@@ -3,16 +3,22 @@ import type {
   HostBotDto,
   HostBotModelsResponse,
   HostBotPolicyDto,
+  HostCheckpointDto,
   HostCompactResponse,
+  HostCreateWorktreeResponse,
   HostCustomModelDto,
   HostCustomProviderDto,
+  HostGitDiffResponse,
+  HostGitSummaryResponse,
   HostHealthDto,
   HostOAuthStatusDto,
+  HostOpenEditorResponse,
   HostPendingQuestionDto,
   HostProviderDto,
   HostQueuedInputDto,
   HostRelayDeviceDto,
   HostRelayStatusDto,
+  HostRestoreCheckpointResponse,
   HostSessionDetailDto,
   HostSessionSummaryDto,
   HostSettingsDto,
@@ -20,6 +26,14 @@ import type {
   HostSseEvent,
   HostStagedAttachmentDto,
   HostStatusDto,
+  HostTerminalInfoDto,
+  HostTerminalStreamFrame,
+  HostWorkspaceFileListResponse,
+  HostWorkspaceFileReadResponse,
+  HostWorkspaceSearchResponse,
+  HostWorktreeDiffResponse,
+  HostWorktreeDto,
+  HostWorktreeOpResponse,
   PermissionMode,
   QuestionAnswerInput,
 } from "./types";
@@ -580,6 +594,307 @@ export class HostClient {
         currentSource.close();
         currentSource = null;
       }
+    };
+  }
+
+  listBotFiles(botId: string, relPath = ""): Promise<HostWorkspaceFileListResponse> {
+    const query = relPath ? `?path=${encodeURIComponent(relPath)}` : "";
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/files${query}`);
+  }
+
+  readBotFile(botId: string, relPath: string): Promise<HostWorkspaceFileReadResponse> {
+    return this.request(
+      `/api/v1/bots/${encodeURIComponent(botId)}/files/read?path=${encodeURIComponent(relPath)}`,
+    );
+  }
+
+  async fetchBotFileRaw(botId: string, relPath: string, download = false): Promise<Blob> {
+    const query = `path=${encodeURIComponent(relPath)}${download ? "&download=1" : ""}`;
+    const resp = await fetch(
+      `${this.baseUrl}/api/v1/bots/${encodeURIComponent(botId)}/files/raw?${query}`,
+      {
+        headers: { Authorization: `Bearer ${this.token}` },
+      },
+    );
+    if (!resp.ok) {
+      throw new HostApiError(resp.status, `HTTP ${resp.status}`);
+    }
+    return resp.blob();
+  }
+
+  uploadBotFile(
+    botId: string,
+    body: { path: string; dataBase64: string; overwrite?: boolean },
+  ): Promise<HostHealthDto> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/files/upload`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  mkdirBotFile(botId: string, relPath: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/files/mkdir`, {
+      method: "POST",
+      body: JSON.stringify({ path: relPath }),
+    });
+  }
+
+  renameBotFile(botId: string, from: string, to: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/files/rename`, {
+      method: "POST",
+      body: JSON.stringify({ from, to }),
+    });
+  }
+
+  deleteBotFile(botId: string, relPath: string, recursive = false): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/bots/${encodeURIComponent(botId)}/files?path=${encodeURIComponent(relPath)}&recursive=${recursive ? "true" : "false"}`,
+      { method: "DELETE" },
+    );
+  }
+
+  searchBotFiles(
+    botId: string,
+    query: string,
+    basePath = "",
+  ): Promise<HostWorkspaceSearchResponse> {
+    const params = new URLSearchParams({ q: query });
+    if (basePath) params.set("path", basePath);
+    return this.request(
+      `/api/v1/bots/${encodeURIComponent(botId)}/files/search?${params.toString()}`,
+    );
+  }
+
+  getGitSummary(botId: string, worktreeId?: string | null): Promise<HostGitSummaryResponse> {
+    const q = worktreeId ? `?worktreeId=${encodeURIComponent(worktreeId)}` : "";
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/git/summary${q}`);
+  }
+
+  getGitDiff(
+    botId: string,
+    options?: { path?: string | null; worktreeId?: string | null },
+  ): Promise<HostGitDiffResponse> {
+    const params = new URLSearchParams();
+    if (options?.path) params.set("path", options.path);
+    if (options?.worktreeId) params.set("worktreeId", options.worktreeId);
+    const qs = params.toString();
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/git/diff${qs ? `?${qs}` : ""}`);
+  }
+
+  stageGitPath(
+    botId: string,
+    body: { path?: string; all?: boolean; worktreeId?: string | null },
+  ): Promise<HostGitSummaryResponse> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/git/stage`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  unstageGitPath(
+    botId: string,
+    body: { path?: string; all?: boolean; worktreeId?: string | null },
+  ): Promise<HostGitSummaryResponse> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/git/unstage`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  revertGitPath(
+    botId: string,
+    body: { path: string; worktreeId?: string | null },
+  ): Promise<HostGitSummaryResponse> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/git/revert`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  commitGit(
+    botId: string,
+    body: { message: string; stageAll?: boolean; worktreeId?: string | null },
+  ): Promise<HostWorktreeOpResponse> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/git/commit`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  openInExternalEditor(
+    botId: string,
+    body?: { editor?: string; worktreeId?: string | null },
+  ): Promise<HostOpenEditorResponse> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/open-editor`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  listWorktrees(botId: string): Promise<HostWorktreeDto[]> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/worktrees`);
+  }
+
+  createWorktree(
+    botId: string,
+    body?: { label?: string; createSession?: boolean },
+  ): Promise<HostCreateWorktreeResponse> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/worktrees`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  getWorktreeDiff(wtId: string): Promise<HostWorktreeDiffResponse> {
+    return this.request(`/api/v1/worktrees/${encodeURIComponent(wtId)}/diff`);
+  }
+
+  commitWorktree(wtId: string, message = ""): Promise<HostWorktreeOpResponse> {
+    return this.request(`/api/v1/worktrees/${encodeURIComponent(wtId)}/commit`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  applyWorktree(wtId: string): Promise<HostWorktreeOpResponse> {
+    return this.request(`/api/v1/worktrees/${encodeURIComponent(wtId)}/apply`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  deleteWorktree(wtId: string, deleteBranch = true): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/worktrees/${encodeURIComponent(wtId)}?deleteBranch=${deleteBranch ? "true" : "false"}`,
+      { method: "DELETE" },
+    );
+  }
+
+  listCheckpoints(sessionId: string): Promise<HostCheckpointDto[]> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints`);
+  }
+
+  restoreCheckpoint(
+    sessionId: string,
+    cpId: string,
+    mode: "files_only" | "files_and_chat" = "files_only",
+  ): Promise<HostRestoreCheckpointResponse> {
+    return this.request(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/checkpoints/${encodeURIComponent(cpId)}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({ mode }),
+      },
+    );
+  }
+
+  forkSession(
+    sessionId: string,
+    body?: { upToUserTurn?: number; title?: string },
+  ): Promise<{ sessionId: string; filePath?: string | null; cwd: string }> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/fork`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  listTerminals(botId: string): Promise<HostTerminalInfoDto[]> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/terminals`);
+  }
+
+  createTerminal(
+    botId: string,
+    body?: { worktreeId?: string | null; fresh?: boolean },
+  ): Promise<HostTerminalInfoDto> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/terminals`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  sendTerminalInput(termId: string, data: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/terminals/${encodeURIComponent(termId)}/input`, {
+      method: "POST",
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  deleteTerminal(termId: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/terminals/${encodeURIComponent(termId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  streamTerminal(
+    termId: string,
+    onFrame: (frame: HostTerminalStreamFrame) => void,
+    onError?: (err: Error) => void,
+  ): () => void {
+    const controller = new AbortController();
+    let closed = false;
+
+    const run = async () => {
+      try {
+        const resp = await fetch(
+          `${this.baseUrl}/api/v1/terminals/${encodeURIComponent(termId)}/stream`,
+          {
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              Accept: "text/event-stream",
+            },
+            signal: controller.signal,
+          },
+        );
+        if (!resp.ok || !resp.body) {
+          throw new HostApiError(resp.status, `HTTP ${resp.status}`);
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let dataLines: string[] = [];
+
+        const flushBlock = () => {
+          if (dataLines.length === 0) return;
+          const payload = dataLines.join("\n");
+          dataLines = [];
+          try {
+            const frame = JSON.parse(payload) as HostTerminalStreamFrame;
+            onFrame(frame);
+          } catch {
+            void 0;
+          }
+        };
+
+        while (!closed) {
+          const { done, value } = await reader.read();
+          if (done) {
+            flushBlock();
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const rawLine of lines) {
+            const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+            if (line === "") {
+              flushBlock();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trimStart());
+            }
+          }
+        }
+      } catch (err) {
+        if (!closed && !controller.signal.aborted) {
+          onError?.(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      closed = true;
+      controller.abort();
     };
   }
 }

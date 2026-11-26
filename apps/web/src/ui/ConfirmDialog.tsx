@@ -1,4 +1,6 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import { useEffect } from "react";
+import { useWorkbenchStore } from "../stores/workbenchStore";
 import { Button } from "./Button";
 
 export function ConfirmDialog({
@@ -20,6 +22,14 @@ export function ConfirmDialog({
   danger?: boolean;
   onConfirm: () => void;
 }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    useWorkbenchStore.getState().pushOverlay();
+    return () => {
+      useWorkbenchStore.getState().popOverlay();
+    };
+  }, [open]);
+
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialogPrimitive.Portal>

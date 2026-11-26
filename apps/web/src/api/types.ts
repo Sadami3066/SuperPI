@@ -427,6 +427,8 @@ export interface SessionSummary {
   archived: boolean;
   memoryExcluded: boolean;
   busy: boolean;
+  worktreeId?: string | null;
+  worktreeBranch?: string | null;
 }
 
 export interface SessionTranscript {
@@ -447,3 +449,145 @@ export interface QuestionAnswerInput {
   custom?: string;
   skipped?: boolean;
 }
+
+export interface HostWorkspaceFileEntryDto {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  sizeBytes: number;
+  modifiedAt: number;
+}
+
+export interface HostWorkspaceFileListResponse {
+  botId: string;
+  root: string;
+  path: string;
+  entries: HostWorkspaceFileEntryDto[];
+}
+
+export interface HostWorkspaceFileReadResponse {
+  botId: string;
+  path: string;
+  content: string;
+  sizeBytes: number;
+  truncated: boolean;
+  isBinary: boolean;
+}
+
+export interface HostWorkspaceSearchResponse {
+  botId: string;
+  query: string;
+  entries: HostWorkspaceFileEntryDto[];
+}
+
+export interface HostGitFileSummaryDto {
+  path: string;
+  indexStatus: string;
+  workTreeStatus: string;
+  staged: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface HostGitSummaryResponse {
+  isGitRepo: boolean;
+  branch?: string | null;
+  worktreeId?: string | null;
+  totalAdditions: number;
+  totalDeletions: number;
+  files: HostGitFileSummaryDto[];
+}
+
+export interface HostGitDiffResponse {
+  path?: string | null;
+  diff: string;
+  truncated: boolean;
+}
+
+export interface HostWorktreeDto {
+  id: string;
+  botId: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  baseBranch: string;
+  baseCommit: string;
+  label: string;
+  sessionId?: string | null;
+  workerId?: string | null;
+  createdAt: number;
+}
+
+export interface HostCreateWorktreeResponse {
+  worktree: HostWorktreeDto;
+  sessionId?: string | null;
+}
+
+export interface HostWorktreeOpResponse {
+  ok: boolean;
+  message: string;
+  conflicts: string[];
+}
+
+export interface HostWorktreeDiffResponse {
+  worktree: HostWorktreeDto;
+  files: HostGitFileSummaryDto[];
+  diff: string;
+  truncated: boolean;
+  totalAdditions: number;
+  totalDeletions: number;
+  aheadCommits: number;
+}
+
+export interface HostOpenEditorResponse {
+  ok: boolean;
+  editor: string;
+  message: string;
+}
+
+export interface HostCheckpointDto {
+  id: string;
+  sessionId: string;
+  turnIndex: number;
+  label: string;
+  messageCount: number;
+  createdAt: number;
+}
+
+export interface HostRestoreCheckpointResponse {
+  ok: boolean;
+  message: string;
+  backupCheckpointId?: string | null;
+  restoredFiles: number;
+}
+
+export interface HostTerminalInfoDto {
+  id: string;
+  botId: string;
+  cwd: string;
+  shell: string;
+  alive: boolean;
+  createdAt: number;
+  history: string;
+}
+
+export interface HostTerminalStreamFrame {
+  type: "history" | "output" | "exit" | string;
+  data?: string;
+  exitCode?: number | null;
+}
+
+export type OpenPreviewTarget =
+  | {
+      source: "workspace";
+      botId: string;
+      path: string;
+      name: string;
+    }
+  | {
+      source: "artifact";
+      sessionId: string;
+      path: string;
+      name: string;
+      mime?: string;
+    };

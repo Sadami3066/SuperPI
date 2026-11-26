@@ -16,6 +16,28 @@ export interface DesktopEnv {
   homeDir: string;
 }
 
+export interface BrowserBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserNavState {
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  error: string | null;
+}
+
+export interface BrowserPageContext {
+  url: string;
+  title: string;
+  text: string;
+}
+
 interface ElectronPreloadBridge {
   getEnv(): Promise<Omit<DesktopEnv, "isElectron"> & { isElectron: true }>;
   getHostConnection(): Promise<{
@@ -44,6 +66,17 @@ interface ElectronPreloadBridge {
   windowClose(): Promise<void>;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
+  browserMount(bounds: BrowserBounds, url?: string): Promise<BrowserNavState>;
+  browserSetBounds(bounds: BrowserBounds): Promise<void>;
+  browserHide(): Promise<void>;
+  browserNavigate(rawUrl: string): Promise<BrowserNavState>;
+  browserBack(): Promise<BrowserNavState>;
+  browserForward(): Promise<BrowserNavState>;
+  browserReload(): Promise<BrowserNavState>;
+  browserStop(): Promise<BrowserNavState>;
+  browserDestroy(): Promise<void>;
+  browserGetPageContext(): Promise<BrowserPageContext | null>;
+  onBrowserState(cb: (state: BrowserNavState) => void): () => void;
 }
 
 declare global {
@@ -219,4 +252,70 @@ export function subscribeWindowMaximized(cb: (maximized: boolean) => void): () =
   const native = getElectronBridge();
   if (!native) return () => {};
   return native.onWindowMaximizedChange(cb);
+}
+
+export async function browserMount(bounds: BrowserBounds, url?: string): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserMount(bounds, url);
+}
+
+export async function browserSetBounds(bounds: BrowserBounds): Promise<void> {
+  const native = getElectronBridge();
+  if (!native) return;
+  await native.browserSetBounds(bounds);
+}
+
+export async function browserHide(): Promise<void> {
+  const native = getElectronBridge();
+  if (!native) return;
+  await native.browserHide();
+}
+
+export async function browserNavigate(rawUrl: string): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserNavigate(rawUrl);
+}
+
+export async function browserBack(): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserBack();
+}
+
+export async function browserForward(): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserForward();
+}
+
+export async function browserReload(): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserReload();
+}
+
+export async function browserStop(): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserStop();
+}
+
+export async function browserDestroy(): Promise<void> {
+  const native = getElectronBridge();
+  if (!native) return;
+  await native.browserDestroy();
+}
+
+export async function browserGetPageContext(): Promise<BrowserPageContext | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserGetPageContext();
+}
+
+export function subscribeBrowserState(cb: (state: BrowserNavState) => void): () => void {
+  const native = getElectronBridge();
+  if (!native) return () => {};
+  return native.onBrowserState(cb);
 }

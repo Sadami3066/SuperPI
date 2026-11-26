@@ -166,6 +166,8 @@ function mapSummary(dto: HostSessionSummaryDto, botId: string): SessionSummary {
     archived: dto.archived,
     memoryExcluded: dto.memoryExcluded,
     busy: dto.busy,
+    worktreeId: dto.worktreeId ?? null,
+    worktreeBranch: dto.worktreeBranch ?? null,
   };
 }
 
