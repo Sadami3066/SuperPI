@@ -476,7 +476,7 @@ class LocalControlServer(
         private val SSE_AUTHORIZED_KEY = io.ktor.util.AttributeKey<Boolean>("superpi.sseAuthorized")
 
         private val ALLOWED_ORIGIN_REGEX = Regex(
-            pattern = """^(https?://(127\.0\.0\.1|localhost)(:\d{1,5})?|https?://tauri\.localhost|tauri://localhost)$""",
+            pattern = """^(https?://(127\.0\.0\.1|localhost)(:\d{1,5})?|superpi://app)$""",
             option = RegexOption.IGNORE_CASE,
         )
 

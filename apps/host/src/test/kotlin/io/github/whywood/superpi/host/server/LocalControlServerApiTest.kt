@@ -97,14 +97,13 @@ class LocalControlServerApiTest {
             assertEquals(403, resp.code)
         }
 
-        // Tauri origin allowed
-        val tauriReq = authReq(port, "/api/v1/health")
-            .header("Origin", "tauri://localhost")
+        val electronReq = authReq(port, "/api/v1/health")
+            .header("Origin", "superpi://app")
             .get()
             .build()
-        http.newCall(tauriReq).execute().use { resp ->
+        http.newCall(electronReq).execute().use { resp ->
             assertEquals(200, resp.code)
-            assertEquals("tauri://localhost", resp.header("Access-Control-Allow-Origin"))
+            assertEquals("superpi://app", resp.header("Access-Control-Allow-Origin"))
         }
 
         // Localhost preflight OPTIONS succeeds with 204
