@@ -1,426 +1,404 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, Tray } from 'electron'
-import { existsSync } from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { BotStore, type BotRecord } from './bot-store'
+import fs from "node:fs";
+import path from "node:path";
 import {
-  clearRemoteSessions,
-  findRemoteSession,
-  forgetRemoteSession,
-  loadDesktopState,
-  rememberRemoteSession,
-  rememberSession,
-  saveDesktopState,
-  type DesktopState,
-} from './desktop-state'
-import { PiRpcClient, type PiRpcEvent } from './pi/rpc-client'
-import { listSessions, resumableSession } from './pi/sessions'
-import { modelOptions, piStatePayload, thinkingLevelOptions } from './pi/state'
-import { RelayService } from './relay/service'
-import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, closeAction, restoreWindowBounds, type CloseAction } from './shell'
-import type { BotSessionPayload, BotSessionResult, PiStatePayload } from '../shared/ipc'
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  protocol,
+  shell,
+  Tray,
+} from "electron";
+import {
+  DESKTOP_IPC_CHANNELS,
+  type DesktopBridge,
+  type DesktopEnvInfo,
+} from "../shared/bridge.js";
+import { HostManager } from "./host-manager.js";
+import { loadWindowState, saveWindowState } from "./window-state.js";
 
-const homeDir = path.join(os.homedir(), '.superpi')
-const botStore = new BotStore()
-const windows = new Set<BrowserWindow>()
-const clients = new Map<string, PiRpcClient>()
-let shellState: DesktopState = loadDesktopState(homeDir)
-let tray: Tray | null = null
-let quitting = false
-let saveTimer: ReturnType<typeof setTimeout> | null = null
+const APP_SCHEME = "superpi";
+const APP_ORIGIN = `${APP_SCHEME}://app`;
 
-const relay = new RelayService({
-  homeDir,
-  bots: () => botStore.list().map((bot) => ({ id: bot.id, name: bot.name })),
-  host: {
-    botIds: () => botStore.list().map((bot) => bot.id),
-    createClient: async (botId: string) => {
-      const bot = resolveBot(botId)
-      const client = spawnPiClient(bot, null)
-      client.onExit((error) => {
-        if (error) console.error(`remote pi exited for bot ${bot.id}: ${error.message}`)
-      })
-      await client.start()
-      return client
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
     },
   },
-  remoteSessions: {
-    find: (deviceId, botId) => findRemoteSession(shellState, deviceId, botId),
-    save: (deviceId, botId, sessionId, afterSeq) => {
-      shellState = rememberRemoteSession(shellState, deviceId, botId, sessionId, afterSeq)
-      scheduleSaveState()
-    },
-    clear: (deviceId, botId) => {
-      shellState = forgetRemoteSession(shellState, deviceId, botId)
-      scheduleSaveState()
-    },
-    clearAll: () => {
-      shellState = clearRemoteSessions(shellState)
-      scheduleSaveState()
-    },
-  },
-  broadcast: (status) => broadcast('relay:state', status),
-  broadcastMemory: (summary) => broadcast('memory:state', summary),
-  onRemoteEvent: (payload) => broadcast('remote:event', payload),
-})
+]);
 
-function broadcast(channel: string, payload: unknown): void {
-  for (const window of windows) {
-    if (!window.isDestroyed()) window.webContents.send(channel, payload)
+const MIME_BY_EXT: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+};
+
+function resolveRepoRoot(): string | null {
+  const fromDist = path.resolve(__dirname, "..", "..", "..", "..");
+  if (fs.existsSync(path.join(fromDist, "apps", "web"))) {
+    return fromDist;
   }
-}
-
-function resolveBot(botId: string | null): BotRecord {
-  const bots = botStore.list()
-  if (botId !== null) {
-    const bot = bots.find((entry) => entry.id === botId)
-    if (!bot) throw new Error(`unknown bot: ${botId}`)
-    return bot
+  const fromCwd = path.resolve(process.cwd(), "..", "..");
+  if (fs.existsSync(path.join(fromCwd, "apps", "web"))) {
+    return fromCwd;
   }
-  const remembered = shellState.lastBotId === null ? undefined : bots.find((bot) => bot.id === shellState.lastBotId)
-  const bot = remembered ?? bots[0]
-  if (!bot) throw new Error('no bots are configured')
-  return bot
+  return null;
 }
 
-function spawnPiClient(bot: BotRecord, resumeSession: string | null): PiRpcClient {
-  const extension = path.join(__dirname, '../../extensions/superpi-memory.mjs')
-  const args = ['--mode', 'rpc']
-  if (resumeSession) args.push('--session', resumeSession)
-  if (existsSync(extension)) args.push('-e', extension)
-  return new PiRpcClient({
-    command: process.env.SUPERPI_PI_BIN ?? 'pi',
-    args,
-    cwd: bot.cwd,
-    env: { ...process.env, ...relay.memoryEnvironment() },
-  })
+function resolveWebDistDir(repoRoot: string | null): string {
+  const packaged = path.join(process.resourcesPath, "web-dist");
+  if (app.isPackaged && fs.existsSync(path.join(packaged, "index.html"))) {
+    return packaged;
+  }
+  if (repoRoot) {
+    return path.join(repoRoot, "apps", "web", "dist");
+  }
+  return path.resolve(__dirname, "..", "..", "..", "web", "dist");
 }
 
-async function ensureClient(bot: BotRecord): Promise<PiRpcClient> {
-  const existing = clients.get(bot.id)
-  if (existing?.running) return existing
-  const client = spawnPiClient(bot, resumableSession(shellState.lastSession[bot.id]))
-  client.onEvent((event: PiRpcEvent) => {
-    broadcast('pi:event', { botId: bot.id, event })
-    if (event.type === 'agent_settled') void rememberClientSession(bot.id, client)
-  })
-  client.onExit((error) => {
-    clients.delete(bot.id)
-    if (error) {
-      console.error(`pi exited for bot ${bot.id}: ${error.message}`)
-      const stderr = client.getStderr().trim()
-      if (stderr !== '') console.error(stderr.slice(-2000))
-    } else {
-      console.error(`pi exited cleanly for bot ${bot.id}: ${JSON.stringify(client.getLastExit())}`)
-    }
-    broadcast('pi:exit', { botId: bot.id, message: error?.message ?? null })
-  })
-  clients.set(bot.id, client)
+function resolveIconPath(repoRoot: string | null, fileName: string): string | null {
+  const candidates = [
+    path.join(process.resourcesPath, "icons", fileName),
+    repoRoot ? path.join(repoRoot, "apps", "desktop", "assets", "icons", fileName) : "",
+    path.resolve(__dirname, "..", "..", "assets", "icons", fileName),
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p)) ?? null;
+}
+
+function isAllowedExternalUrl(rawUrl: string): boolean {
   try {
-    await client.start()
-  } catch (failure) {
-    clients.delete(bot.id)
-    console.error(`pi failed to start for bot ${bot.id}: ${failure instanceof Error ? failure.message : String(failure)}`)
-    throw failure
-  }
-  return client
-}
-
-async function rememberClientSession(botId: string, client: PiRpcClient): Promise<void> {
-  try {
-    const raw = await client.getState()
-    shellState = rememberSession(shellState, botId, resumableSession(piStatePayload(raw).sessionFile))
-    scheduleSaveState()
+    const parsed = new URL(rawUrl);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:";
   } catch {
-    return
+    return false;
   }
 }
 
-async function sessionSnapshot(bot: BotRecord, client: PiRpcClient): Promise<BotSessionPayload> {
-  const raw = await client.getState()
-  const messages = await client.getMessages<{ messages?: unknown[] }>()
-  const payload = piStatePayload(raw)
-  shellState = rememberSession(shellState, bot.id, resumableSession(payload.sessionFile))
-  shellState = { ...shellState, lastBotId: bot.id }
-  scheduleSaveState()
-  return {
-    botId: bot.id,
-    state: payload,
-    messages: messages.messages ?? [],
-    sessions: listSessions(bot.cwd),
-  }
-}
-
-async function openBot(requestedBotId: string | null): Promise<BotSessionPayload> {
-  const bot = resolveBot(requestedBotId)
-  const client = await ensureClient(bot)
-  return sessionSnapshot(bot, client)
-}
-
-async function newBotSession(botId: string): Promise<BotSessionResult> {
-  const bot = resolveBot(botId)
-  const client = await ensureClient(bot)
-  const result = await client.newSession<{ cancelled?: boolean }>()
-  const snapshot = await sessionSnapshot(bot, client)
-  if (result.cancelled === true) {
-    return { ...snapshot, cancelled: true }
-  }
-  shellState = rememberSession(shellState, bot.id, null)
-  scheduleSaveState()
-  return { ...snapshot, cancelled: false }
-}
-
-async function switchBotSession(botId: string, sessionPath: string): Promise<BotSessionResult> {
-  const bot = resolveBot(botId)
-  if (!path.isAbsolute(sessionPath) || !sessionPath.endsWith('.jsonl') || !existsSync(sessionPath)) {
-    throw new Error('That session is no longer available')
-  }
-  const client = await ensureClient(bot)
-  const result = await client.switchSession<{ cancelled?: boolean }>(sessionPath)
-  const snapshot = await sessionSnapshot(bot, client)
-  return { ...snapshot, cancelled: result.cancelled === true }
-}
-
-function primaryWindow(): BrowserWindow | null {
-  for (const window of windows) {
-    if (!window.isDestroyed()) return window
-  }
-  return null
-}
-
-function rememberWindowBounds(): void {
-  const window = primaryWindow()
-  if (!window) return
-  shellState = {
-    ...shellState,
-    window: { bounds: window.getNormalBounds(), maximized: window.isMaximized() },
-  }
-  scheduleSaveState()
-}
-
-function scheduleSaveState(): void {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    saveDesktopState(shellState, homeDir)
-  }, 400)
-}
-
-function flushState(): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-  }
-  saveDesktopState(shellState, homeDir)
-}
-
-function showWindow(): void {
-  const window = primaryWindow()
-  if (!window) {
-    createWindow()
-    return
-  }
-  if (window.isMinimized()) window.restore()
-  window.show()
-  window.focus()
-}
-
-function toggleWindow(): void {
-  const window = primaryWindow()
-  if (!window) {
-    createWindow()
-    return
-  }
-  if (window.isVisible() && !window.isMinimized()) {
-    window.hide()
-    return
-  }
-  showWindow()
-}
-
-function createWindow(): BrowserWindow {
-  const bounds = restoreWindowBounds(
-    shellState.window?.bounds ?? null,
-    screen.getAllDisplays().map((display) => display.workArea),
-  )
-  const window = new BrowserWindow({
-    ...bounds,
-    minWidth: MIN_WINDOW_WIDTH,
-    minHeight: MIN_WINDOW_HEIGHT,
-    backgroundColor: '#121316',
-    show: false,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  })
-  windows.add(window)
-  if (shellState.window?.maximized) window.maximize()
-  window.once('ready-to-show', () => {
-    if (!quitting) window.show()
-  })
-  window.on('resize', rememberWindowBounds)
-  window.on('move', rememberWindowBounds)
-  window.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !(input.control || input.meta)) return
-    if (input.key.toLowerCase() !== 'w') return
-    event.preventDefault()
-    window.close()
-  })
-  window.on('close', (event) => {
-    const action: CloseAction = closeAction(quitting, tray !== null)
-    if (action === 'close') {
-      rememberWindowBounds()
-      return
+function registerAppProtocol(webDistDir: string): void {
+  const rootResolved = path.resolve(webDistDir);
+  protocol.handle(APP_SCHEME, async (request) => {
+    try {
+      const parsed = new URL(request.url);
+      let rel = decodeURIComponent(parsed.pathname).replace(/^\/+/, "");
+      if (!rel || rel.endsWith("/")) {
+        rel = `${rel}index.html`;
+      }
+      const candidate = path.resolve(rootResolved, rel);
+      const insideRoot =
+        candidate === rootResolved || candidate.startsWith(rootResolved + path.sep);
+      const target =
+        insideRoot && fs.existsSync(candidate) && fs.statSync(candidate).isFile()
+          ? candidate
+          : path.join(rootResolved, "index.html");
+      const data = await fs.promises.readFile(target);
+      const ext = path.extname(target).toLowerCase();
+      return new Response(data, {
+        status: 200,
+        headers: {
+          "Content-Type": MIME_BY_EXT[ext] ?? "application/octet-stream",
+        },
+      });
+    } catch {
+      return new Response("Not Found", { status: 404 });
     }
-    event.preventDefault()
-    rememberWindowBounds()
-    flushState()
-    if (action === 'hide') window.hide()
-    else window.minimize()
-  })
-  window.on('closed', () => windows.delete(window))
-  void window.loadFile(path.join(__dirname, '../renderer/index.html'))
-  return window
+  });
+}
+
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let allowWindowClose = false;
+let shutdownStarted = false;
+let currentLocale: "zh-CN" | "en" = "zh-CN";
+
+const repoRoot = resolveRepoRoot();
+const hostManager = new HostManager({
+  resourceDir: app.isPackaged ? process.resourcesPath : null,
+  repoRoot,
+});
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
+function buildTrayMenu(): Menu {
+  const isEn = currentLocale === "en";
+  return Menu.buildFromTemplate([
+    {
+      label: isEn ? "Show Super PI" : "显示 Super PI",
+      click: () => focusMainWindow(),
+    },
+    { type: "separator" },
+    {
+      label: isEn ? "Quit Super PI" : "退出 Super PI",
+      click: () => {
+        allowWindowClose = true;
+        app.quit();
+      },
+    },
+  ]);
 }
 
 function createTray(): void {
-  if (tray) return
-  const icon = nativeImage.createFromPath(path.join(__dirname, '../../assets/tray.png'))
-  try {
-    const created = new Tray(icon)
-    created.setToolTip('SuperPI')
-    created.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: 'Show SuperPI', click: () => showWindow() },
-        { type: 'separator' },
-        { label: 'Quit SuperPI', click: () => requestQuit() },
-      ]),
-    )
-    created.on('click', () => toggleWindow())
-    tray = created
-  } catch (failure) {
-    console.error(`tray unavailable: ${failure instanceof Error ? failure.message : String(failure)}`)
+  const iconPath =
+    resolveIconPath(repoRoot, "tray.png") ??
+    resolveIconPath(repoRoot, "32x32.png") ??
+    resolveIconPath(repoRoot, "icon.png");
+  if (!iconPath) return;
+  const img = nativeImage.createFromPath(iconPath);
+  if (img.isEmpty()) return;
+  tray = new Tray(img);
+  tray.setToolTip("Super PI");
+  tray.setContextMenu(buildTrayMenu());
+  tray.on("click", () => focusMainWindow());
+}
+
+function createMainWindow(): void {
+  const devUrl = process.env.SUPERPI_DEV_URL?.trim();
+  const bounds = loadWindowState(hostManager.homeDir);
+  const appIconPath = resolveIconPath(repoRoot, "icon.png");
+  const isMac = process.platform === "darwin";
+  const isWin = process.platform === "win32";
+
+  const win = new BrowserWindow({
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    minWidth: 960,
+    minHeight: 640,
+    show: false,
+    title: "Super PI",
+    icon: appIconPath ?? undefined,
+    backgroundColor: "#f4f4f2",
+    frame: true,
+    ...(isMac
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 14, y: 16 },
+        }
+      : {}),
+    ...(isWin
+      ? {
+          titleBarStyle: "hidden" as const,
+          titleBarOverlay: {
+            color: "#f4f4f2",
+            symbolColor: "#111113",
+            height: 40,
+          },
+        }
+      : {}),
+    webPreferences: {
+      preload: path.join(__dirname, "..", "preload", "index.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+  });
+
+  if (bounds.maximized) {
+    win.maximize();
   }
-}
 
-async function shutdown(): Promise<void> {
-  rememberWindowBounds()
-  flushState()
-  if (tray) {
-    tray.destroy()
-    tray = null
-  }
-  await relay.dispose()
-  await Promise.all([...clients.values()].map((client) => client.stop()))
-  clients.clear()
-}
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (!win.isDestroyed()) saveWindowState(hostManager.homeDir, win);
+    }, 300);
+  };
 
-function requestQuit(): void {
-  if (quitting) return
-  quitting = true
-  void shutdown().finally(() => app.quit())
-}
-
-function registerIpc(): void {
-  ipcMain.handle('bots:list', () => botStore.list())
-  ipcMain.handle('bot:open', (_event, botId: string | null) => openBot(botId))
-  ipcMain.handle('bot:sessions', (_event, botId: string) => listSessions(resolveBot(botId).cwd))
-  ipcMain.handle('bot:state', async (_event, botId: string) => {
-    const bot = resolveBot(botId)
-    const client = await ensureClient(bot)
-    return piStatePayload(await client.getState())
-  })
-  ipcMain.handle('bot:models', async (_event, botId: string) => {
-    const bot = resolveBot(botId)
-    const client = await ensureClient(bot)
-    return modelOptions(await client.getAvailableModels())
-  })
-  ipcMain.handle('bot:thinking-levels', async (_event, botId: string) => {
-    const bot = resolveBot(botId)
-    const client = await ensureClient(bot)
-    return thinkingLevelOptions(await client.getAvailableThinkingLevels())
-  })
-  ipcMain.handle('bot:set-model', async (_event, payload: { botId: string; provider: string; id: string }) => {
-    const bot = resolveBot(payload.botId)
-    const client = await ensureClient(bot)
-    await client.setModel(payload.provider, payload.id)
-    return piStatePayload(await client.getState())
-  })
-  ipcMain.handle('bot:set-thinking-level', async (_event, payload: { botId: string; level: string }) => {
-    const bot = resolveBot(payload.botId)
-    const client = await ensureClient(bot)
-    await client.setThinkingLevel(payload.level)
-    return piStatePayload(await client.getState())
-  })
-  ipcMain.handle('bot:new-session', (_event, botId: string) => newBotSession(botId))
-  ipcMain.handle('bot:switch-session', (_event, payload: { botId: string; sessionPath: string }) =>
-    switchBotSession(payload.botId, payload.sessionPath),
-  )
-
-  ipcMain.handle('bot:prompt', async (_event, payload: { botId: string; text: string }) => {
-    const bot = resolveBot(payload.botId)
-    const client = await ensureClient(bot)
-    return client.prompt(payload.text)
-  })
-
-  ipcMain.handle('bot:abort', async (_event, botId: string) => {
-    const client = clients.get(botId)
-    if (!client) return null
-    return client.abort()
-  })
-
-  ipcMain.handle('relay:status', () => relay.status())
-  ipcMain.handle('relay:pair', (_event, input: { link: string; loginSecret?: string; deviceName?: string }) =>
-    relay.pair(input),
-  )
-  ipcMain.handle('relay:logout', () => relay.logout())
-  ipcMain.handle('remote:start', (_event, input: { deviceId: string; botId: string }) => relay.startRemote(input))
-  ipcMain.handle('remote:prompt', (_event, input: { sessionId: string; text: string }) => {
-    relay.promptRemote(input.sessionId, input.text)
-  })
-  ipcMain.handle('remote:abort', (_event, sessionId: string) => {
-    relay.abortRemote(sessionId)
-  })
-  ipcMain.handle('remote:resume', (_event, sessionId: string) => relay.resumeRemote(sessionId))
-  ipcMain.handle('remote:close', (_event, sessionId: string) => {
-    relay.closeRemote(sessionId)
-  })
-  ipcMain.handle('memory:status', () => relay.memoryStatus())
-
-  ipcMain.handle('bots:save', (_event, bots: BotRecord[]) => botStore.save(bots))
-  ipcMain.handle('bots:add', (_event, bot: BotRecord) => botStore.add(bot))
-  ipcMain.handle('bots:remove', (_event, id: string) => botStore.remove(id))
-}
-
-function start(): void {
-  registerIpc()
-  createTray()
-  createWindow()
-  app.on('activate', () => showWindow())
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit()
-  })
-  app.on('before-quit', (event) => {
-    if (quitting) return
-    event.preventDefault()
-    requestQuit()
-  })
-  app.on('will-quit', () => {
-    if (tray) {
-      tray.destroy()
-      tray = null
+  win.on("resize", scheduleSave);
+  win.on("move", scheduleSave);
+  win.on("close", (event) => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveWindowState(hostManager.homeDir, win);
+    if (!allowWindowClose && tray && process.platform === "darwin") {
+      event.preventDefault();
+      win.hide();
     }
-  })
-  process.on('SIGINT', requestQuit)
-  process.on('SIGTERM', requestQuit)
+  });
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+
+  win.once("ready-to-show", () => {
+    win.show();
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      void shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+
+  win.webContents.on("will-navigate", (event, url) => {
+    const allowedPrefix = devUrl ? devUrl.replace(/\/+$/, "") : APP_ORIGIN;
+    if (!url.startsWith(allowedPrefix)) {
+      event.preventDefault();
+      if (isAllowedExternalUrl(url)) {
+        void shell.openExternal(url);
+      }
+    }
+  });
+
+  if (devUrl) {
+    void win.loadURL(devUrl);
+  } else {
+    void win.loadURL(`${APP_ORIGIN}/index.html`);
+  }
+
+  mainWindow = win;
 }
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
-} else {
-  app.on('second-instance', () => showWindow())
-  void app.whenReady().then(start)
+function registerIpcHandlers(): void {
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.getEnv, async (): Promise<DesktopEnvInfo> => {
+    const platform =
+      process.platform === "darwin" || process.platform === "win32"
+        ? process.platform
+        : "linux";
+    return {
+      isElectron: true,
+      version: app.getVersion(),
+      platform,
+      arch: process.arch,
+      homeDir: hostManager.homeDir,
+    };
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.getHostConnection, async () => {
+    return hostManager.ensureConnected();
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.reconnectHost, async () => {
+    return hostManager.reconnect();
+  });
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.pickDirectory,
+    async (_event, title?: string): Promise<string | null> => {
+      const targetWin = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+      const result = targetWin
+        ? await dialog.showOpenDialog(targetWin, {
+            title: title || (currentLocale === "en" ? "Select Workspace Folder" : "选择工作区目录"),
+            properties: ["openDirectory", "createDirectory"],
+          })
+        : await dialog.showOpenDialog({
+            title: title || (currentLocale === "en" ? "Select Workspace Folder" : "选择工作区目录"),
+            properties: ["openDirectory", "createDirectory"],
+          });
+      if (result.canceled || result.filePaths.length === 0) return null;
+      return result.filePaths[0] ?? null;
+    },
+  );
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.openExternal, async (_event, url: string) => {
+    if (typeof url === "string" && isAllowedExternalUrl(url)) {
+      await shell.openExternal(url);
+    }
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.revealInFileManager, async (_event, absPath: string) => {
+    if (typeof absPath !== "string" || !absPath.trim()) return;
+    if (fs.existsSync(absPath)) {
+      shell.showItemInFolder(absPath);
+    }
+  });
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.setLanguage,
+    async (_event, locale: "zh-CN" | "en") => {
+      currentLocale = locale === "en" ? "en" : "zh-CN";
+      if (tray) {
+        tray.setContextMenu(buildTrayMenu());
+      }
+    },
+  );
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.setThemeAppearance,
+    async (_event, _dark: boolean, surfaceColor: string, inkColor: string) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (typeof surfaceColor === "string" && surfaceColor.startsWith("#")) {
+        mainWindow.setBackgroundColor(surfaceColor);
+      }
+      if (process.platform === "win32" && typeof mainWindow.setTitleBarOverlay === "function") {
+        mainWindow.setTitleBarOverlay({
+          color: surfaceColor,
+          symbolColor: inkColor,
+          height: 40,
+        });
+      }
+    },
+  );
 }
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    focusMainWindow();
+  });
+
+  void app.whenReady().then(() => {
+    if (!process.env.SUPERPI_DEV_URL) {
+      registerAppProtocol(resolveWebDistDir(repoRoot));
+    }
+    registerIpcHandlers();
+    createTray();
+    createMainWindow();
+
+    void hostManager.ensureConnected().catch(() => undefined);
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+      } else {
+        focusMainWindow();
+      }
+    });
+  });
+
+  app.on("before-quit", (event) => {
+    allowWindowClose = true;
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    event.preventDefault();
+    void hostManager.shutdownIfOwned().finally(() => {
+      app.exit(0);
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+}
+
+export type { DesktopBridge };

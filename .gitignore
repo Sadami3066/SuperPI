@@ -26,9 +26,10 @@ node_modules/
 apps/relay/data/
 apps/relay/certs/
 apps/web/dist/
-apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/resources/sidecar/
-apps/desktop/src-tauri/gen/
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/
+apps/desktop/resources/sidecar/
 
 # 设计源光栅图只在本地保留（文本来源与 manifest 在 assets/ 下）
 assets/**/*.png

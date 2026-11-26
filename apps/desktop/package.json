@@ -1,39 +1,29 @@
 {
   "name": "@superpi/desktop",
-  "version": "0.1.0",
   "private": true,
+  "version": "2.0.3",
   "type": "module",
-  "description": "Desktop shell for SuperPI, built on the pi agent harness",
+  "description": "Cross-platform Electron desktop shell for SuperPI",
   "engines": {
     "node": ">=22"
   },
   "main": "dist/main/index.cjs",
   "scripts": {
     "build:main": "esbuild src/main/index.ts src/preload/index.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist --out-extension:.js=.cjs",
-    "build:renderer": "vite build",
-    "build": "pnpm run build:main && pnpm run build:renderer",
-    "start": "electron .",
-    "start:nosandbox": "electron . --no-sandbox",
-    "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/ensure-electron.mjs"
-  },
-  "dependencies": {
-    "@superpi/protocol": "workspace:*",
-    "ws": "^8.23.0"
+    "test": "vitest run",
+    "stage:sidecar": "node scripts/stage-sidecar.mjs",
+    "dev": "node scripts/dev.mjs",
+    "start": "electron .",
+    "build": "pnpm --filter @superpi/web build && pnpm run build:main",
+    "package": "pnpm run build && electron-builder"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
-    "@types/ws": "^8.18.2",
-    "@vitejs/plugin-react": "^5.0.4",
     "electron": "^38.2.2",
+    "electron-builder": "^26.0.12",
     "esbuild": "^0.25.11",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
     "typescript": "^5.9.3",
-    "vite": "^7.1.12",
     "vitest": "^3.2.4"
   }
 }

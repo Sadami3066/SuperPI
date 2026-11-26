@@ -22,38 +22,21 @@ jobs:
         include:
           - os: ubuntu-24.04
             target_platform: linux-x64
-            rust_target: x86_64-unknown-linux-gnu
-            tauri_args: "--bundles deb,appimage --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--linux AppImage deb"
           - os: windows-latest
             target_platform: windows-x64
-            rust_target: x86_64-pc-windows-msvc
-            tauri_args: "--bundles nsis,msi --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--win nsis"
           - os: macos-latest
             target_platform: macos-arm64
-            rust_target: aarch64-apple-darwin
-            tauri_args: "--target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--mac dmg --arm64"
           - os: macos-15-intel
             target_platform: macos-x64
-            rust_target: x86_64-apple-darwin
-            tauri_args: "--target x86_64-apple-darwin --bundles dmg --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--mac dmg --x64"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag_name || github.ref }}
-
-      - name: Install Linux Tauri dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev \
-            libfuse2
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -73,39 +56,40 @@ jobs:
           node-version: "24"
           cache: pnpm
 
-      - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Install JS workspace & build @superpi/web
+      - name: Install JS workspace & build Electron app
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @superpi/web build
+          pnpm --filter @superpi/desktop build
 
       - name: Package self-contained Host sidecar (jlink)
         shell: bash
         run: ./gradlew -Psuperpi.hostOnly=true -Psuperpi.strictBoundaries=true -PsuperpiTargetPlatform=${{ matrix.target_platform }} :apps:host:packageHostDist --no-daemon
 
-      - name: Stage sidecar into Tauri resources
+      - name: Stage sidecar into Electron resources
         shell: bash
         env:
           SUPERPI_TARGET_PLATFORM: ${{ matrix.target_platform }}
         run: pnpm --filter @superpi/desktop stage:sidecar
 
-      - name: Build and upload Tauri v2 release bundles
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Electron release artifacts
+        shell: bash
+        working-directory: apps/desktop
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-          NO_STRIP: "true"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec electron-builder ${{ matrix.builder_args }} --publish never
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
         with:
-          projectPath: apps/desktop
-          tauriScript: pnpm tauri
-          tagName: ${{ inputs.tag_name || github.ref_name }}
-          releaseName: "Super PI Desktop ${{ inputs.tag_name || github.ref_name }}"
-          releaseBody: "Cross-platform Super PI Desktop installers for Windows (NSIS/MSI), macOS (Apple Silicon & Intel DMG), and Linux (DEB/AppImage)."
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.tauri_args }}
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: "Super PI Desktop ${{ inputs.tag_name || github.ref_name }}"
+          body: "Cross-platform Super PI Desktop installers for Windows (NSIS), macOS (Apple Silicon & Intel DMG), and Linux (DEB/AppImage)."
+          draft: true
+          files: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml

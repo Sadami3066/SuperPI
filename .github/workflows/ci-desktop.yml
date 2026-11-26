@@ -26,28 +26,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             target_platform: linux-x64
-            tauri_args: "--bundles deb --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--linux deb"
           - os: windows-latest
             target_platform: windows-x64
-            tauri_args: "--bundles nsis --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--win nsis"
           - os: macos-latest
             target_platform: macos-arm64
-            tauri_args: "--bundles app --config src-tauri/tauri.ci.conf.json"
+            builder_args: "--mac dir"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux WebKitGTK & Tauri deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -67,42 +55,24 @@ jobs:
           node-version: "24"
           cache: pnpm
 
-      - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-
-      - name: Install JS workspace & build @superpi/web
+      - name: Install JS workspace & verify TypeScript packages
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @superpi/web typecheck
-          pnpm --filter @superpi/web test
-          pnpm --filter @superpi/web build
+          pnpm check:ts
+          pnpm --filter @superpi/desktop build
 
       - name: Package self-contained Host sidecar (jlink)
         shell: bash
         run: ./gradlew -Psuperpi.hostOnly=true -Psuperpi.strictBoundaries=true -PsuperpiTargetPlatform=${{ matrix.target_platform }} :apps:host:packageHostDist --no-daemon
 
-      - name: Stage sidecar into Tauri resources
+      - name: Stage sidecar into Electron resources
         shell: bash
         env:
           SUPERPI_TARGET_PLATFORM: ${{ matrix.target_platform }}
         run: pnpm --filter @superpi/desktop stage:sidecar
 
-      - name: Rust clippy & unit tests
-        shell: bash
-        working-directory: apps/desktop/src-tauri
-        run: |
-          cargo clippy --all-targets -- -D warnings
-          cargo test
-
-      - name: Build Tauri v2 desktop bundle
+      - name: Build Electron desktop bundle
         shell: bash
         working-directory: apps/desktop
-        run: pnpm tauri build ${{ matrix.tauri_args }}
+        run: pnpm exec electron-builder ${{ matrix.builder_args }} --publish never

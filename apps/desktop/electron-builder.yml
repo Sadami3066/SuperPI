@@ -1,0 +1,35 @@
+appId: io.github.whywood.superpi.desktop
+productName: Super PI
+copyright: Copyright © 2026 SuperPI Contributors
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: ../web/dist
+    to: web-dist
+  - from: resources/sidecar
+    to: sidecar
+  - from: assets/icons
+    to: icons
+asar: true
+linux:
+  icon: assets/icons/icon.png
+  category: Development
+  target:
+    - AppImage
+    - deb
+mac:
+  icon: assets/icons/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  icon: assets/icons/icon.ico
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

@@ -13,7 +13,9 @@
     "test": "pnpm -r test",
     "dev:relay": "pnpm --filter @superpi/relay dev",
     "dev:web": "pnpm --filter @superpi/web dev",
+    "dev:desktop": "pnpm --filter @superpi/desktop dev",
     "build:web": "pnpm --filter @superpi/web build",
+    "build:desktop": "pnpm --filter @superpi/desktop build",
     "check:ts": "pnpm typecheck && pnpm test"
   }
 }
