@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { IconArrowDown } from "@tabler/icons-react";
 import type { ChatTurn, HostPendingQuestionDto, QuestionAnswerInput } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useStreamStore } from "../../stores/streamStore";
 import { AskQuestionCard } from "./AskQuestionCard";
+import { MessageAnchorRail } from "./MessageAnchorRail";
 import { useChatScroll } from "./scrollPolicy";
+import { SelectionReplyBar } from "./SelectionReplyBar";
 import { StreamingTurnView } from "./StreamingTurnView";
 import { TurnItem } from "./TurnItem";
 
@@ -52,6 +54,15 @@ export function MessageList({
     overscan: 6,
     getItemKey: (index) => turns[index]?.id ?? index,
   });
+
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const handleJumpToIndex = useCallback(
+    (idx: number) => {
+      setActiveTurnId(turns[idx]?.id ?? null);
+      virtualizer.scrollToIndex(idx, { align: "start" });
+    },
+    [turns, virtualizer],
+  );
 
   const lastAssistantId = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -143,6 +154,14 @@ export function MessageList({
           <IconArrowDown size={16} stroke={1.8} />
         </button>
       )}
+
+      <MessageAnchorRail
+        turns={turns}
+        activeTurnId={activeTurnId}
+        onJumpToIndex={handleJumpToIndex}
+      />
+
+      <SelectionReplyBar containerRef={scrollRef} onQuote={onQuote} />
     </div>
   );
 }

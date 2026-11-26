@@ -379,3 +379,25 @@ body,
     color: var(--pi-ink-secondary) !important;
   }
 }
+
+@keyframes pi-composer-breathe {
+  0%,
+  100% {
+    box-shadow: var(--pi-composer-shadow), 0 0 0 1px var(--pi-accent-soft);
+  }
+  50% {
+    box-shadow: var(--pi-composer-shadow), 0 0 0 2px var(--pi-accent);
+  }
+}
+
+.pi-composer-shell[data-streaming="true"] {
+  border-color: var(--pi-accent) !important;
+  animation: pi-composer-breathe 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pi-composer-shell[data-streaming="true"] {
+    animation: none !important;
+    box-shadow: var(--pi-composer-shadow), 0 0 0 1.5px var(--pi-accent) !important;
+  }
+}

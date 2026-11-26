@@ -322,7 +322,7 @@ export const Composer = memo(function Composer({
           </div>
         )}
 
-        <div className="pi-composer-shell px-3.5 pt-2.5 pb-2">
+        <div className="pi-composer-shell px-3.5 pt-2.5 pb-2" data-streaming={isStreaming ? "true" : "false"}>
           {quotedText && (
             <div
               className="mb-2 flex items-center justify-between gap-2 rounded-[9px] px-3 py-1.5 text-[12px]"
@@ -515,7 +515,9 @@ export const Composer = memo(function Composer({
             className={`max-h-[160px] w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-[1.55] outline-none placeholder:opacity-55 disabled:opacity-45 ${
               isHero ? "min-h-[54px]" : "min-h-[34px]"
             }`}
-            style={{ color: "var(--pi-ink)" }}
+            style={{
+              color: composerText.trimStart().startsWith("/") ? "var(--pi-accent)" : "var(--pi-ink)",
+            }}
           />
 
           <div className="mt-1.5 flex items-center justify-between gap-2 pt-0.5">
@@ -604,6 +606,7 @@ export const Composer = memo(function Composer({
           {isHero && workspaceLabel && (
             <div
               className="mt-2 flex items-center gap-2 pt-2 text-[11.5px]"
+              title={workspacePath || undefined}
               style={{
                 borderTop: "0.5px solid var(--pi-hairline)",
                 color: "var(--pi-ink-tertiary)",
@@ -613,14 +616,6 @@ export const Composer = memo(function Composer({
               <span className="font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
                 {workspaceLabel}
               </span>
-              {workspacePath && (
-                <span
-                  className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: "var(--pi-font-mono)" }}
-                >
-                  {workspacePath}
-                </span>
-              )}
             </div>
           )}
         </div>

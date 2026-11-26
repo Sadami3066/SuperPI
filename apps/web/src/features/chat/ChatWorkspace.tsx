@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconLayoutSidebarRight } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
+import { extractLatestTodosFromTurns } from "../../api/todo";
 import type { HostBotDto, PermissionMode, QuestionAnswerInput } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { windowToggleMaximize } from "../../platform/bridge";
@@ -16,20 +17,41 @@ import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { WindowControls } from "../shell/WindowControls";
 import { Composer } from "./Composer";
 import { ContextMeter } from "./ContextMeter";
+import { GoalBar } from "./GoalBar";
 import { MessageList } from "./MessageList";
+import { TodoPanel } from "./TodoPanel";
+import { UsageSheet } from "./UsageSheet";
 
-function resolveGreetingKey():
-  | "chat.greetingMorning"
-  | "chat.greetingAfternoon"
-  | "chat.greetingEvening"
-  | "chat.greetingNight"
-  | "chat.greetingDefault" {
+type GreetingPair = {
+  plain:
+    | "chat.greetingMorning"
+    | "chat.greetingAfternoon"
+    | "chat.greetingEvening"
+    | "chat.greetingNight"
+    | "chat.greetingDefault";
+  named:
+    | "chat.greetingMorningNamed"
+    | "chat.greetingAfternoonNamed"
+    | "chat.greetingEveningNamed"
+    | "chat.greetingNightNamed"
+    | "chat.greetingDefaultNamed";
+};
+
+function resolveGreetingKeys(): GreetingPair {
   const hour = new Date().getHours();
-  if (hour >= 5 && hour < 12) return "chat.greetingMorning";
-  if (hour >= 12 && hour < 17) return "chat.greetingAfternoon";
-  if (hour >= 17 && hour < 21) return "chat.greetingEvening";
-  if (hour >= 21 || hour < 4) return "chat.greetingNight";
-  return "chat.greetingDefault";
+  if (hour >= 5 && hour < 12) {
+    return { plain: "chat.greetingMorning", named: "chat.greetingMorningNamed" };
+  }
+  if (hour >= 12 && hour < 17) {
+    return { plain: "chat.greetingAfternoon", named: "chat.greetingAfternoonNamed" };
+  }
+  if (hour >= 17 && hour < 21) {
+    return { plain: "chat.greetingEvening", named: "chat.greetingEveningNamed" };
+  }
+  if (hour >= 21 || hour < 4) {
+    return { plain: "chat.greetingNight", named: "chat.greetingNightNamed" };
+  }
+  return { plain: "chat.greetingDefault", named: "chat.greetingDefaultNamed" };
 }
 
 export function ChatWorkspace({
@@ -57,6 +79,7 @@ export function ChatWorkspace({
   const setPermissionMode = useBotStore((s) => s.setPermissionMode);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const summariesById = useSessionStore((s) => s.summariesById);
   const summaryFromList = useSessionStore((s) => s.summariesById[s.activeSessionId]);
   const archivedMatch = useSessionStore((s) =>
     s.archivedSessions.find((x) => x.id === s.activeSessionId),
@@ -66,6 +89,9 @@ export function ChatWorkspace({
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
   const planFirst = useSessionStore((s) => Boolean(s.planFirstBySession[s.activeSessionId]));
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
+  const setComposerText = useSessionStore((s) => s.setComposerText);
+  const requestComposerFocus = useSessionStore((s) => s.requestComposerFocus);
+  const selectSession = useSessionStore((s) => s.selectSession);
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const stopSession = useSessionStore((s) => s.stopSession);
   const retrySession = useSessionStore((s) => s.retrySession);
@@ -78,6 +104,9 @@ export function ChatWorkspace({
 
   const hasLiveRun = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]));
   const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]?.streaming));
+  const liveRunBlocks = useStreamStore((s) =>
+    activeSessionId ? s.activeBySession[activeSessionId]?.blocks : undefined,
+  );
 
   const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
@@ -153,7 +182,12 @@ export function ChatWorkspace({
     );
   }, [activeSessionId, pendingQuestions, transcript?.pendingQuestion]);
 
-  const greetingKey = useMemo(() => resolveGreetingKey(), [activeSessionId]);
+  const foreignQuestion = useMemo(
+    () => pendingQuestions.find((q) => q.sessionId !== activeSessionId) ?? null,
+    [activeSessionId, pendingQuestions],
+  );
+
+  const greetingKeys = useMemo(() => resolveGreetingKeys(), [activeSessionId]);
 
   const handleQuote = useCallback(
     (txt: string) => {
@@ -189,7 +223,13 @@ export function ChatWorkspace({
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
   const turns = transcript?.turns ?? [];
+  const latestTodos = useMemo(
+    () => extractLatestTodosFromTurns(turns, liveRunBlocks),
+    [turns, liveRunBlocks],
+  );
+  const userNickname = hostSettings?.userNickname?.trim() || "";
   const isHeroEmpty = turns.length === 0 && !hasLiveRun && !activeQuestion;
+  const starterPrompts = [t("chat.starter1"), t("chat.starter2"), t("chat.starter3")];
 
   const composerElement = (variant: "hero" | "docked") => (
     <Composer
@@ -379,51 +419,22 @@ export function ChatWorkspace({
         <div className="pi-no-drag flex items-center gap-1">
           <Popover
             align="end"
-            className="w-[260px] p-3.5"
+            className="w-[272px] p-3.5"
             trigger={<ContextMeter percent={ctxPct} usage={usage} />}
           >
-            <div className="space-y-3 text-[12.5px]">
-              <div className="font-semibold" style={{ color: "var(--pi-ink)" }}>
-                {t("usage.title")}
-              </div>
-              <div className="space-y-1.5" style={{ color: "var(--pi-ink-secondary)" }}>
-                <div className="flex justify-between">
-                  <span>{t("usage.context")}</span>
-                  <span>
-                    {usage ? `${usage.contextTokens.toLocaleString()} / ${usage.contextWindow.toLocaleString()}` : "—"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{t("usage.input")}</span>
-                  <span>{usage ? usage.inputTokens.toLocaleString() : "0"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{t("usage.output")}</span>
-                  <span>{usage ? usage.outputTokens.toLocaleString() : "0"}</span>
-                </div>
-                {usage && usage.cost > 0 && (
-                  <div className="flex justify-between">
-                    <span>{t("usage.cost")}</span>
-                    <span>${usage.cost.toFixed(4)}</span>
-                  </div>
-                )}
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="w-full"
-                disabled={compacting || isStreaming || !client}
-                onClick={() => {
-                  if (!client) return;
-                  setCompacting(true);
-                  void compactSession(client, activeSessionId, locale).finally(() =>
-                    setCompacting(false),
-                  );
-                }}
-              >
-                {compacting ? t("usage.compacting") : t("usage.compactNow")}
-              </Button>
-            </div>
+            <UsageSheet
+              percent={ctxPct}
+              usage={usage}
+              compacting={compacting}
+              busy={isStreaming || !client}
+              onCompact={() => {
+                if (!client) return;
+                setCompacting(true);
+                void compactSession(client, activeSessionId, locale).finally(() =>
+                  setCompacting(false),
+                );
+              }}
+            />
           </Popover>
 
           <IconButton
@@ -451,6 +462,28 @@ export function ChatWorkspace({
         </div>
       )}
 
+      {foreignQuestion && (
+        <div className="px-4 pt-2">
+          <NoticeBar
+            tone="warning"
+            message={t("chat.foreignQuestionBanner", {
+              title: summariesById[foreignQuestion.sessionId]?.title || t("nav.untitledChat"),
+            })}
+            action={
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  if (client) void selectSession(client, foreignQuestion.sessionId, locale);
+                }}
+              >
+                {t("chat.foreignQuestionJump")}
+              </Button>
+            }
+          />
+        </div>
+      )}
+
       {isHeroEmpty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10">
           <div className="flex w-full max-w-[680px] flex-col items-center">
@@ -459,9 +492,31 @@ export function ChatWorkspace({
               className="mb-5 text-center text-[24px] font-semibold tracking-[-0.02em]"
               style={{ color: "var(--pi-ink)" }}
             >
-              {t(greetingKey)}
+              {userNickname
+                ? t(greetingKeys.named, { name: userNickname })
+                : t(greetingKeys.plain)}
             </h1>
             {composerElement("hero")}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              {starterPrompts.map((promptText) => (
+                <button
+                  key={promptText}
+                  type="button"
+                  onClick={() => {
+                    setComposerText(activeSessionId, promptText);
+                    requestComposerFocus();
+                  }}
+                  className="rounded-full px-3.5 py-1.5 text-[12.5px] transition-colors hover:bg-[var(--pi-hover)]"
+                  style={{
+                    background: "var(--pi-paper)",
+                    color: "var(--pi-ink-secondary)",
+                    border: "0.5px solid var(--pi-hairline)",
+                  }}
+                >
+                  {promptText}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       ) : (
@@ -478,6 +533,10 @@ export function ChatWorkspace({
             onDismissQuestion={handleDismissQuestion}
             scrollRefOut={snapToBottomRef}
           />
+          <div className="shrink-0 px-4">
+            <GoalBar sessionId={activeSessionId} />
+            <TodoPanel todos={latestTodos} sessionKey={activeSessionId} />
+          </div>
           {composerElement("docked")}
         </>
       )}

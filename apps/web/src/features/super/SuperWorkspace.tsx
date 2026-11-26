@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconLayoutSidebarRight } from "@tabler/icons-react";
 import { formatWorkerStatus } from "../../api/formatters";
 import {
@@ -6,7 +6,8 @@ import {
   mapHostMessageToTurn,
   normalizeThinkingLevel,
 } from "../../api/mappers";
-import type { HostWorkerDto } from "../../api/types";
+import { extractLatestTodosFromTurns } from "../../api/todo";
+import type { HostWorkerDto, QuestionAnswerInput } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { windowToggleMaximize } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -14,12 +15,12 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
 import { SUPER_SESSION_ID, useSuperStore } from "../../stores/superStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
-import { Badge, Button, ConfirmDialog, IconButton, Popover } from "../../ui";
-import { AskQuestionCard } from "../chat/AskQuestionCard";
+import { Badge, Button, ConfirmDialog, IconButton, NoticeBar, Popover } from "../../ui";
 import { ContextMeter } from "../chat/ContextMeter";
+import { MessageList } from "../chat/MessageList";
 import { ModelPicker } from "../chat/ModelPicker";
-import { StreamingTurnView } from "../chat/StreamingTurnView";
-import { TurnItem } from "../chat/TurnItem";
+import { TodoPanel } from "../chat/TodoPanel";
+import { UsageSheet } from "../chat/UsageSheet";
 import { BrandIcon, PiActivityIcon, PiMascot } from "../shared/BrandAssets";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { WindowControls } from "../shell/WindowControls";
@@ -48,6 +49,30 @@ function workerPriority(w: HostWorkerDto): number {
   if (w.status === "idle") return 2;
   return 3;
 }
+
+function isWorkerActiveStatus(status: string): boolean {
+  return (
+    status === "running" ||
+    status === "working" ||
+    status === "waiting_approval" ||
+    status === "queued" ||
+    status === "stalled"
+  );
+}
+
+const SUPER_PLAIN_GREETINGS = [
+  "super.greeting1",
+  "super.greeting2",
+  "super.greeting3",
+  "super.greeting4",
+] as const;
+
+const SUPER_NAMED_GREETINGS = [
+  "super.greetingNamed1",
+  "super.greetingNamed2",
+  "super.greetingNamed3",
+  "super.greetingNamed4",
+] as const;
 
 export function SuperWorkspace({
   activeView,
@@ -102,10 +127,12 @@ export function SuperWorkspace({
   const [resetting, setResetting] = useState(false);
   const [sending, setSending] = useState(false);
   const [images, setImages] = useState<StagedImage[]>([]);
-  const [showWorkersRail, setShowWorkersRail] = useState(true);
+  const [showWorkersRail, setShowWorkersRail] = useState(false);
   const [deleteWorkerTarget, setDeleteWorkerTarget] = useState<HostWorkerDto | null>(null);
+  const [greetingIndex] = useState(() => Math.floor(Math.random() * SUPER_PLAIN_GREETINGS.length));
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const snapToBottomRef = useRef<(() => void) | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -139,6 +166,26 @@ export function SuperWorkspace({
     [workers],
   );
 
+  const activeWorkers = useMemo(
+    () => workers.filter((w) => isWorkerActiveStatus(w.status)),
+    [workers],
+  );
+
+  const savedWorkers = useMemo(
+    () => workers.filter((w) => !isWorkerActiveStatus(w.status)),
+    [workers],
+  );
+
+  const waitingWorker = useMemo(
+    () => workers.find((w) => w.status === "waiting_approval" || Boolean(w.pendingQuestion)) ?? null,
+    [workers],
+  );
+
+  const latestTodos = useMemo(
+    () => extractLatestTodosFromTurns(turns, liveRun?.blocks),
+    [turns, liveRun?.blocks],
+  );
+
   const enabledTeamCount = useMemo(
     () => team.filter((b) => b.enabledInSuper).length,
     [team],
@@ -157,16 +204,34 @@ export function SuperWorkspace({
   const busy = Boolean(state?.busy || isStreaming);
   const compactProcess = hostSettings?.processDetail === "compact";
   const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
+  const userNickname = hostSettings?.userNickname?.trim() || "";
 
-  const scrollToBottom = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  };
+  const handleQuote = useCallback(
+    (quoted: string) => {
+      const cur = useSuperStore.getState().composerText;
+      setComposerText(cur ? `${cur}\n\n> ${quoted}` : `> ${quoted}`);
+      textareaRef.current?.focus();
+    },
+    [setComposerText],
+  );
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [turns.length, state?.pendingQuestion?.requestId]);
+  const handleRetry = useCallback(() => {
+    if (client) void refreshState(client);
+  }, [client, refreshState]);
+
+  const handleAnswerQuestion = useCallback(
+    async (reqId: string, answers: QuestionAnswerInput[]) => {
+      if (client) await answerQuestion(client, reqId, answers);
+    },
+    [answerQuestion, client],
+  );
+
+  const handleDismissQuestion = useCallback(
+    async (reqId: string) => {
+      if (client) await dismissQuestion(client, reqId);
+    },
+    [client, dismissQuestion],
+  );
 
   const handleAttachImages = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -212,7 +277,7 @@ export function SuperWorkspace({
           name: img.name,
         })),
       );
-      scrollToBottom();
+      snapToBottomRef.current?.();
     } catch {
       setImages(snapshotImages);
     } finally {
@@ -220,14 +285,101 @@ export function SuperWorkspace({
     }
   };
 
-  const lastAssistantIdx = useMemo(() => {
-    for (let i = turns.length - 1; i >= 0; i--) {
-      if (turns[i].role === "assistant") return i;
-    }
-    return -1;
-  }, [turns]);
-
   const isEmpty = turns.length === 0 && !liveRun && !state?.pendingQuestion;
+  const starterPrompts = [t("super.starter1"), t("super.starter2"), t("super.starter3")];
+
+  const renderWorkerCard = (w: HostWorkerDto) => {
+    const isActive =
+      w.status === "running" ||
+      w.status === "working" ||
+      w.status === "waiting_approval";
+    return (
+      <div
+        key={w.workerId}
+        className="rounded-[12px] p-3 transition-colors"
+        style={{
+          background: "var(--pi-surface)",
+          border: "0.5px solid var(--pi-hairline)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedWorkerId(w.workerId)}
+          className="w-full space-y-1.5 text-left"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+                {w.title || w.botName}
+              </div>
+              <div className="truncate text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                {w.botName}
+                {w.isRemote && w.deviceName ? ` · ${w.deviceName}` : ""}
+              </div>
+            </div>
+            <Badge tone={workerTone(w.status)}>{formatWorkerStatus(w.status, t)}</Badge>
+          </div>
+
+          {(w.activeStepText || w.lastSummary || w.lastError) && (
+            <div
+              className="line-clamp-2 text-[12px] leading-[1.45]"
+              style={{ color: w.lastError ? "var(--pi-danger)" : "var(--pi-ink-secondary)" }}
+            >
+              {w.activeStepText || w.lastError || w.lastSummary}
+            </div>
+          )}
+
+          {w.steps.length > 0 && (
+            <div className="space-y-1 pt-0.5">
+              {w.steps.slice(-2).map((step, idx) => (
+                <div
+                  key={`${step.label}-${idx}`}
+                  className="flex items-center justify-between gap-2 text-[11px]"
+                  style={{ color: step.isError ? "var(--pi-danger)" : "var(--pi-ink-tertiary)" }}
+                >
+                  <span className="truncate">{step.label}</span>
+                  <span className="shrink-0">{formatWorkerStatus(step.status, t)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </button>
+
+        <div
+          className="mt-2.5 flex items-center justify-between gap-1 pt-2"
+          style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelectedWorkerId(w.workerId)}
+          >
+            {t("super.inspectWorker")}
+          </Button>
+          <div className="flex items-center gap-1">
+            {isActive && (
+              <IconButton
+                size="sm"
+                label={t("chat.stop")}
+                onClick={() => {
+                  if (client) void stopWorker(client, w.workerId);
+                }}
+              >
+                <BrandIcon name="action/stop" size={13.5} />
+              </IconButton>
+            )}
+            <IconButton
+              size="sm"
+              label={t("common.delete")}
+              onClick={() => setDeleteWorkerTarget(w)}
+            >
+              <BrandIcon name="action/delete" size={13.5} />
+            </IconButton>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -256,47 +408,20 @@ export function SuperWorkspace({
         <div className="pi-no-drag flex items-center gap-1">
           <Popover
             align="end"
-            className="w-[260px] p-3.5"
+            className="w-[272px] p-3.5"
             trigger={<ContextMeter percent={ctxPct} usage={usage} />}
           >
-            <div className="space-y-3 text-[12.5px]">
-              <div className="font-semibold" style={{ color: "var(--pi-ink)" }}>
-                {t("usage.title")}
-              </div>
-              {usage ? (
-                <div className="space-y-1.5" style={{ color: "var(--pi-ink-secondary)" }}>
-                  <div className="flex justify-between">
-                    <span>{t("usage.context")}</span>
-                    <span className="tabular-nums">
-                      {usage.contextTokens.toLocaleString()} / {usage.contextWindow.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>{t("usage.input")}</span>
-                    <span className="tabular-nums">{usage.inputTokens.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>{t("usage.output")}</span>
-                    <span className="tabular-nums">{usage.outputTokens.toLocaleString()}</span>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ color: "var(--pi-ink-tertiary)" }}>—</div>
-              )}
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="flex-1"
-                  disabled={compacting || busy}
-                  onClick={() => {
-                    if (!client) return;
-                    setCompacting(true);
-                    void compact(client).finally(() => setCompacting(false));
-                  }}
-                >
-                  {compacting ? t("usage.compacting") : t("usage.compactNow")}
-                </Button>
+            <UsageSheet
+              percent={ctxPct}
+              usage={usage}
+              compacting={compacting}
+              busy={busy}
+              onCompact={() => {
+                if (!client) return;
+                setCompacting(true);
+                void compact(client).finally(() => setCompacting(false));
+              }}
+              extraAction={
                 <Button
                   variant="ghost"
                   size="sm"
@@ -305,8 +430,8 @@ export function SuperWorkspace({
                 >
                   {t("super.reset")}
                 </Button>
-              </div>
-            </div>
+              }
+            />
           </Popover>
 
           <Button
@@ -350,6 +475,51 @@ export function SuperWorkspace({
         </div>
       </header>
 
+      {activeWorkers.length > 0 && (
+        <div
+          className="flex shrink-0 items-center justify-between gap-2 px-4 py-1.5"
+          style={{
+            background: "var(--pi-paper)",
+            borderBottom: "0.5px solid var(--pi-hairline)",
+          }}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+            {activeWorkers.map((w) => {
+              const needsApproval = w.status === "waiting_approval" || Boolean(w.pendingQuestion);
+              return (
+                <button
+                  key={w.workerId}
+                  type="button"
+                  onClick={() => setSelectedWorkerId(w.workerId)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                  style={{
+                    background: "var(--pi-surface)",
+                    border: "0.5px solid var(--pi-hairline)",
+                    color: "var(--pi-ink)",
+                  }}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${needsApproval ? "" : "animate-pulse"}`}
+                    style={{
+                      background: needsApproval ? "var(--pi-warning)" : "var(--pi-accent)",
+                    }}
+                  />
+                  <span className="max-w-[140px] truncate">{w.title || w.botName}</span>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowWorkersRail((v) => !v)}
+            className="shrink-0 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-secondary)" }}
+          >
+            {t("super.activeStripCount", { count: activeWorkers.length })}
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {error && (
@@ -379,10 +549,12 @@ export function SuperWorkspace({
 
           {isEmpty ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6">
-              <div className="flex w-full max-w-[540px] flex-col items-center text-center">
+              <div className="flex w-full max-w-[580px] flex-col items-center text-center">
                 <PiMascot mood={loading ? "thinking" : "wave"} size={64} dark={dark} className="mb-4" />
-                <h2 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
-                  {t("super.heroTitle")}
+                <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
+                  {userNickname
+                    ? t(SUPER_NAMED_GREETINGS[greetingIndex], { name: userNickname })
+                    : t(SUPER_PLAIN_GREETINGS[greetingIndex])}
                 </h2>
                 <p
                   className="mt-1.5 text-[13.5px] leading-[1.6]"
@@ -390,6 +562,26 @@ export function SuperWorkspace({
                 >
                   {t("super.heroDesc")}
                 </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  {starterPrompts.map((promptText) => (
+                    <button
+                      key={promptText}
+                      type="button"
+                      onClick={() => {
+                        setComposerText(promptText);
+                        textareaRef.current?.focus();
+                      }}
+                      className="rounded-full px-3.5 py-1.5 text-[12.5px] transition-colors hover:bg-[var(--pi-hover)]"
+                      style={{
+                        background: "var(--pi-paper)",
+                        color: "var(--pi-ink-secondary)",
+                        border: "0.5px solid var(--pi-hairline)",
+                      }}
+                    >
+                      {promptText}
+                    </button>
+                  ))}
+                </div>
                 {enabledTeamCount === 0 && (
                   <Button
                     variant="secondary"
@@ -404,56 +596,54 @@ export function SuperWorkspace({
               </div>
             </div>
           ) : (
-            <div ref={scrollRef} data-scrollable className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-              <div className="mx-auto w-full max-w-[760px] space-y-1">
-                {turns.map((turn, idx) => (
-                  <TurnItem
-                    key={turn.id}
-                    turn={turn}
-                    sessionId={SUPER_SESSION_ID}
-                    isLastAssistant={idx === lastAssistantIdx}
-                    compactProcess={compactProcess}
-                    dark={dark}
-                    onQuote={(quoted) => {
-                      setComposerText(composerText ? `${composerText}\n\n> ${quoted}` : `> ${quoted}`);
-                    }}
-                    onRetry={() => {
-                      if (client) void refreshState(client);
-                    }}
-                  />
-                ))}
-
-                <StreamingTurnView
-                  sessionId={SUPER_SESSION_ID}
-                  compactProcess={compactProcess}
-                  dark={dark}
-                  onRetry={() => {
-                    if (client) void refreshState(client);
-                  }}
-                  onLayoutTick={scrollToBottom}
-                />
-
-                {state?.activeToolText && !liveRun && (
-                  <div className="flex items-center gap-2 py-1 text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
-                    <PiActivityIcon size={16} dark={dark} />
-                    <span>{state.activeToolText}</span>
-                  </div>
-                )}
-
-                {state?.pendingQuestion && client && (
-                  <AskQuestionCard
-                    key={state.pendingQuestion.requestId}
-                    question={state.pendingQuestion}
-                    onSubmit={(reqId, answers) => answerQuestion(client, reqId, answers)}
-                    onDismiss={(reqId) => dismissQuestion(client, reqId)}
-                  />
-                )}
-              </div>
-            </div>
+            <MessageList
+              sessionId={SUPER_SESSION_ID}
+              turns={turns}
+              pendingQuestion={state?.pendingQuestion ?? null}
+              compactProcess={compactProcess}
+              dark={dark}
+              onQuote={handleQuote}
+              onRetry={handleRetry}
+              onAnswerQuestion={handleAnswerQuestion}
+              onDismissQuestion={handleDismissQuestion}
+              scrollRefOut={snapToBottomRef}
+            />
           )}
 
           <div className="shrink-0 px-4 pt-2 pb-4">
-            <div className="pi-composer-shell mx-auto w-full max-w-[760px] rounded-[22px] p-2.5">
+            {state?.activeToolText && !liveRun && (
+              <div className="mx-auto mb-2 flex w-full max-w-[820px] items-center gap-2 px-1 text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
+                <PiActivityIcon size={16} dark={dark} />
+                <span>{state.activeToolText}</span>
+              </div>
+            )}
+
+            {waitingWorker && (
+              <div className="mx-auto mb-2 w-full max-w-[820px]">
+                <NoticeBar
+                  tone="warning"
+                  message={t("super.waitingApproval", {
+                    name: waitingWorker.title || waitingWorker.botName,
+                  })}
+                  action={
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setSelectedWorkerId(waitingWorker.workerId)}
+                    >
+                      {t("super.openWorker")}
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+
+            <TodoPanel todos={latestTodos} sessionKey={SUPER_SESSION_ID} />
+
+            <div
+              className="pi-composer-shell mx-auto w-full max-w-[820px] rounded-[22px] p-2.5"
+              data-streaming={busy ? "true" : "false"}
+            >
               {images.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2 px-1">
                   {images.map((img) => (
@@ -477,6 +667,7 @@ export function SuperWorkspace({
               )}
 
               <textarea
+                ref={textareaRef}
                 rows={2}
                 value={composerText}
                 onChange={(e) => setComposerText(e.target.value)}
@@ -567,7 +758,7 @@ export function SuperWorkspace({
 
         {showWorkersRail && (
           <aside
-            className="hidden w-[296px] shrink-0 flex-col lg:flex"
+            className="flex w-[300px] shrink-0 flex-col"
             style={{
               background: "var(--pi-paper)",
               borderLeft: "0.5px solid var(--pi-hairline)",
@@ -578,23 +769,32 @@ export function SuperWorkspace({
               style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
             >
               <span className="text-[12.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                {t("super.workersTitle")} ({workers.length})
+                {t("super.workersDrawerTitle")} ({workers.length})
               </span>
-              <IconButton
-                size="sm"
-                label={t("common.refresh")}
-                onClick={() => {
-                  if (client) void refreshState(client);
-                }}
-              >
-                <BrandIcon name="action/retry" size={13.5} />
-              </IconButton>
+              <div className="flex items-center gap-0.5">
+                <IconButton
+                  size="sm"
+                  label={t("common.refresh")}
+                  onClick={() => {
+                    if (client) void refreshState(client);
+                  }}
+                >
+                  <BrandIcon name="action/retry" size={13.5} />
+                </IconButton>
+                <IconButton
+                  size="sm"
+                  label={t("common.close")}
+                  onClick={() => setShowWorkersRail(false)}
+                >
+                  <BrandIcon name="navigation/close" size={13.5} />
+                </IconButton>
+              </div>
             </div>
 
-            <div data-scrollable className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3">
+            <div data-scrollable className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
               {workers.length === 0 ? (
                 <div
-                  className="rounded-[12px] px-3 py-6 text-center text-[12.5px] leading-[1.55]"
+                  className="rounded-[12px] px-3 py-6 text-center text-[12.5px] leading-[1.55] whitespace-pre-line"
                   style={{
                     background: "var(--pi-surface)",
                     border: "0.5px solid var(--pi-hairline)",
@@ -604,98 +804,30 @@ export function SuperWorkspace({
                   {t("super.noWorkers")}
                 </div>
               ) : (
-                workers.map((w) => {
-                  const isActive =
-                    w.status === "running" ||
-                    w.status === "working" ||
-                    w.status === "waiting_approval";
-                  return (
-                    <div
-                      key={w.workerId}
-                      className="rounded-[12px] p-3 transition-colors"
-                      style={{
-                        background: "var(--pi-surface)",
-                        border: "0.5px solid var(--pi-hairline)",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedWorkerId(w.workerId)}
-                        className="w-full space-y-1.5 text-left"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-[13px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                              {w.title || w.botName}
-                            </div>
-                            <div className="truncate text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                              {w.botName}
-                              {w.isRemote && w.deviceName ? ` · ${w.deviceName}` : ""}
-                            </div>
-                          </div>
-                          <Badge tone={workerTone(w.status)}>{formatWorkerStatus(w.status, t)}</Badge>
-                        </div>
-
-                        {(w.activeStepText || w.lastSummary || w.lastError) && (
-                          <div
-                            className="line-clamp-2 text-[12px] leading-[1.45]"
-                            style={{ color: w.lastError ? "var(--pi-danger)" : "var(--pi-ink-secondary)" }}
-                          >
-                            {w.activeStepText || w.lastError || w.lastSummary}
-                          </div>
-                        )}
-
-                        {w.steps.length > 0 && (
-                          <div className="space-y-1 pt-0.5">
-                            {w.steps.slice(-2).map((step, idx) => (
-                              <div
-                                key={`${step.label}-${idx}`}
-                                className="flex items-center justify-between gap-2 text-[11px]"
-                                style={{ color: step.isError ? "var(--pi-danger)" : "var(--pi-ink-tertiary)" }}
-                              >
-                                <span className="truncate">{step.label}</span>
-                                <span className="shrink-0">{formatWorkerStatus(step.status, t)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </button>
-
+                <>
+                  {activeWorkers.length > 0 && (
+                    <div className="space-y-2">
                       <div
-                        className="mt-2.5 flex items-center justify-between gap-1 pt-2"
-                        style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+                        className="px-1 text-[11px] font-semibold tracking-wide"
+                        style={{ color: "var(--pi-ink-tertiary)" }}
                       >
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedWorkerId(w.workerId)}
-                        >
-                          {t("super.inspectWorker")}
-                        </Button>
-                        <div className="flex items-center gap-1">
-                          {isActive && (
-                            <IconButton
-                              size="sm"
-                              label={t("chat.stop")}
-                              onClick={() => {
-                                if (client) void stopWorker(client, w.workerId);
-                              }}
-                            >
-                              <BrandIcon name="action/stop" size={13.5} />
-                            </IconButton>
-                          )}
-                          <IconButton
-                            size="sm"
-                            label={t("common.delete")}
-                            onClick={() => setDeleteWorkerTarget(w)}
-                          >
-                            <BrandIcon name="action/delete" size={13.5} />
-                          </IconButton>
-                        </div>
+                        {t("super.workersActiveGroup")} ({activeWorkers.length})
                       </div>
+                      {activeWorkers.map(renderWorkerCard)}
                     </div>
-                  );
-                })
+                  )}
+                  {savedWorkers.length > 0 && (
+                    <div className="space-y-2">
+                      <div
+                        className="px-1 text-[11px] font-semibold tracking-wide"
+                        style={{ color: "var(--pi-ink-tertiary)" }}
+                      >
+                        {t("super.workersSavedGroup")} ({savedWorkers.length})
+                      </div>
+                      {savedWorkers.map(renderWorkerCard)}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </aside>

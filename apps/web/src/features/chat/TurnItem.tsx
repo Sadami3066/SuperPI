@@ -123,6 +123,9 @@ export function renderTurnBlock(
   if (block.kind === "answered_ask") {
     return <AnsweredAskCard key={block.key} entries={block.entries} />;
   }
+  if (block.card.customType === "todo_write") {
+    return null;
+  }
   return <CustomCardFallback key={block.key} card={block.card} />;
 }
 

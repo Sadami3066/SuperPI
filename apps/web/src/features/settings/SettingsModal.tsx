@@ -71,10 +71,13 @@ export function SettingsModal({
     },
     { id: "skills", label: t("settings.navSkills"), iconName: "ai/skills" },
     { id: "mcp", label: t("settings.navMcp"), iconName: "ai/connectors" },
-    { id: "diagnostics", label: t("settings.navDiagnostics"), iconName: "status/info" },
   ];
 
-  const navItems = [...primaryNav, ...capabilityNav];
+  const footerNav: Array<{ id: SettingsTabId; label: string; iconName: string }> = [
+    { id: "diagnostics", label: t("settings.aboutDiagnostics"), iconName: "status/info" },
+  ];
+
+  const navItems = [...primaryNav, ...capabilityNav, ...footerNav];
   const activeNav = navItems.find((n) => n.id === tab) ?? navItems[0];
 
   return (
@@ -149,6 +152,30 @@ export function SettingsModal({
                         {item.badge}
                       </span>
                     )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              className="mt-3 pt-2"
+              style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+            >
+              {footerNav.map((item) => {
+                const active = item.id === tab;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelectTab(item.id)}
+                    className="flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: active ? "var(--pi-wash)" : "transparent",
+                      color: active ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    <BrandIcon name={item.iconName} size={15} />
+                    <span className="truncate">{item.label}</span>
                   </button>
                 );
               })}

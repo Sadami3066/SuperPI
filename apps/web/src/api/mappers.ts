@@ -14,7 +14,6 @@ import type {
 
 const ATTACHMENTS_OPEN = "<attachments>";
 const ATTACHMENTS_CLOSE = "</attachments>";
-const TODO_CUSTOM_TYPE = "todo_write";
 
 export function normalizeThinkingLevel(raw?: string | null): ThinkingLevel {
   const lower = (raw ?? "").trim().toLowerCase();
@@ -333,7 +332,6 @@ export function mapHostMessageToTurn(
     } else if (st.kind === "notice" && st.text && st.text.trim()) {
       notices.push(st.text.trim());
     } else if (st.kind === "custom_card" && (st.payload || st.text)) {
-      if (st.customType === TODO_CUSTOM_TYPE) continue;
       flushActivity();
       blocks.push({
         key: `cc-${st.id}-${blocks.length}`,
@@ -354,7 +352,6 @@ export function mapHostMessageToTurn(
   }
   if (
     dto.customType &&
-    dto.customType !== TODO_CUSTOM_TYPE &&
     dto.customPayload &&
     !blocks.some((b) => b.kind === "custom_card" && b.card.customType === dto.customType)
   ) {

@@ -398,16 +398,15 @@ export function MemorySettings() {
                     </div>
                   </div>
                   {block.content && (
-                    <pre
-                      className="max-h-36 overflow-y-auto rounded-[8px] px-3 py-2 text-[12px] whitespace-pre-wrap"
+                    <div
+                      className="max-h-40 overflow-y-auto rounded-[10px] px-3 py-2.5 text-[13px] leading-[1.6] whitespace-pre-wrap"
                       style={{
                         background: "var(--pi-paper)",
                         color: "var(--pi-ink-secondary)",
-                        fontFamily: "var(--pi-font-mono)",
                       }}
                     >
                       {block.content}
-                    </pre>
+                    </div>
                   )}
                 </Card>
               ))}

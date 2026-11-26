@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n, type AppLanguagePreference } from "../../i18n";
 import { FONT_STYLES, THEME_PRESETS, type AppearanceMode, type FontStyleId, type ThemePresetId } from "../../platform/theme";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { Card, Select, Slider, Switch, Tabs, TabsList, TabsTrigger } from "../../ui";
+import { Button, Card, Input, Select, Slider, Switch, Tabs, TabsList, TabsTrigger } from "../../ui";
 
 export function GeneralSettings() {
   const { t, locale } = useI18n();
@@ -23,11 +23,21 @@ export function GeneralSettings() {
 
   const [fontScaleDraft, setFontScaleDraft] = useState(hostSettings?.chatFontScale ?? 100);
   const [compactDraft, setCompactDraft] = useState(hostSettings?.compactionTriggerPercent ?? 75);
+  const [nicknameDraft, setNicknameDraft] = useState(hostSettings?.userNickname ?? "");
+  const [nicknameSaved, setNicknameSaved] = useState(false);
+  const nicknameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (nicknameTimerRef.current !== null) clearTimeout(nicknameTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (hostSettings) {
       setFontScaleDraft(hostSettings.chatFontScale);
       setCompactDraft(hostSettings.compactionTriggerPercent);
+      setNicknameDraft(hostSettings.userNickname ?? "");
     }
   }, [hostSettings]);
 
@@ -66,8 +76,54 @@ export function GeneralSettings() {
     [t],
   );
 
+  const processDetailOptions = useMemo(
+    () => [
+      { value: "detailed", label: t("settings.processDetailed") },
+      { value: "compact", label: t("settings.processCompact") },
+    ],
+    [t],
+  );
+
   return (
     <div className="space-y-5">
+      {hostSettings && (
+        <Card className="space-y-3 p-5">
+          <div className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+            {t("settings.profileSection")}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+              {t("settings.nicknameLabel")}
+            </span>
+            <div className="flex items-center gap-2 sm:w-[280px]">
+              <Input
+                value={nicknameDraft}
+                maxLength={64}
+                placeholder={t("settings.nicknamePlaceholder")}
+                onChange={(e) => {
+                  setNicknameDraft(e.target.value);
+                  setNicknameSaved(false);
+                }}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!client || nicknameDraft.trim() === (hostSettings.userNickname ?? "").trim()}
+                onClick={() => {
+                  if (!client) return;
+                  void patchHostSettings(client, { userNickname: nicknameDraft.trim() }).then(() => {
+                    setNicknameSaved(true);
+                    if (nicknameTimerRef.current !== null) clearTimeout(nicknameTimerRef.current);
+                    nicknameTimerRef.current = setTimeout(() => setNicknameSaved(false), 1500);
+                  });
+                }}
+              >
+                {nicknameSaved ? t("bot.saved") : t("common.save")}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
       <Card className="space-y-4 p-5">
         <div className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
           {t("settings.themePreset")}
@@ -223,6 +279,20 @@ export function GeneralSettings() {
                 if (client) void patchHostSettings(client, { sendWhileRunning: v });
               }}
               options={runningSendOptions}
+              className="w-[210px]"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+              {t("settings.processDetailLabel")}
+            </span>
+            <Select
+              value={hostSettings.processDetail === "compact" ? "compact" : "detailed"}
+              onValueChange={(v) => {
+                if (client) void patchHostSettings(client, { processDetail: v });
+              }}
+              options={processDetailOptions}
               className="w-[210px]"
             />
           </div>

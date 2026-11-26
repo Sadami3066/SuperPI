@@ -43,6 +43,8 @@ export interface BotStoreState {
       name?: string;
       intro?: string;
       clearIntro?: boolean;
+      avatar?: string;
+      clearAvatar?: boolean;
       defaultModel?: string;
       defaultThinkingLevel?: string;
       updateDefaultModel?: boolean;

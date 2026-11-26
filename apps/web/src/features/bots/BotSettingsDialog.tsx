@@ -18,6 +18,35 @@ import {
   TabsTrigger,
   Textarea,
 } from "../../ui";
+import { BotAvatar } from "../shared/BrandAssets";
+
+async function resizeImageToDataUrl(file: File, maxDim = 256): Promise<string | null> {
+  if (!file.type.startsWith("image/")) return null;
+  const srcUrl = await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+  if (!srcUrl) return null;
+  const img = await new Promise<HTMLImageElement | null>((resolve) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => resolve(null);
+    el.src = srcUrl;
+  });
+  if (!img || !img.width || !img.height) return null;
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/png");
+}
 
 export function BotSettingsDialog({
   bot,
@@ -28,6 +57,7 @@ export function BotSettingsDialog({
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
+  const dark = useSettingsStore((s) => s.dark);
   const providers = useSettingsStore((s) => s.providers);
   const loadBotDetails = useBotStore((s) => s.loadBotDetails);
   const updateBotProfile = useBotStore((s) => s.updateBotProfile);
@@ -39,7 +69,10 @@ export function BotSettingsDialog({
   const [tab, setTab] = useState("identity");
   const [name, setName] = useState("");
   const [intro, setIntro] = useState("");
+  const [avatarDraft, setAvatarDraft] = useState<string>("");
+  const [clearAvatarFlag, setClearAvatarFlag] = useState(false);
   const [defaultModel, setDefaultModel] = useState("");
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [permissionMode, setPermMode] = useState<PermissionMode>("workspace_auto");
   const [agentsDoc, setAgentsDoc] = useState("");
   const [policy, setPolicy] = useState<HostBotPolicyDto | null>(null);
@@ -60,6 +93,8 @@ export function BotSettingsDialog({
     setTab("identity");
     setName(bot.name);
     setIntro(bot.intro ?? "");
+    setAvatarDraft(bot.avatar ?? "");
+    setClearAvatarFlag(false);
     setDefaultModel(bot.defaultModel ?? "");
     setPermMode((bot.permissionMode as PermissionMode) || "workspace_auto");
     setSavedFlag(false);
@@ -115,6 +150,8 @@ export function BotSettingsDialog({
         name: name.trim() || bot.name,
         intro: intro.trim(),
         clearIntro: !intro.trim(),
+        ...(avatarDraft && avatarDraft !== (bot.avatar ?? "") ? { avatar: avatarDraft } : {}),
+        ...(clearAvatarFlag ? { clearAvatar: true } : {}),
         defaultModel: defaultModel || undefined,
         updateDefaultModel: !bot.isRemote,
       });
@@ -160,6 +197,60 @@ export function BotSettingsDialog({
           </TabsList>
 
           <TabsContent value="identity" className="space-y-3.5">
+            {!bot.isRemote && (
+              <div className="flex items-center gap-3.5 pb-1">
+                <BotAvatar
+                  avatar={clearAvatarFlag ? null : avatarDraft || bot.avatar}
+                  name={name || bot.name}
+                  isRemote={bot.isRemote}
+                  dark={dark}
+                  size={52}
+                />
+                <div className="space-y-1.5">
+                  <div className="text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                    {t("bot.avatarLabel")}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        const resized = await resizeImageToDataUrl(file);
+                        if (resized) {
+                          setAvatarDraft(resized);
+                          setClearAvatarFlag(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => avatarInputRef.current?.click()}
+                    >
+                      {t("bot.avatarUpload")}
+                    </Button>
+                    {(avatarDraft || bot.avatar) && !clearAvatarFlag && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setAvatarDraft("");
+                          setClearAvatarFlag(true);
+                        }}
+                      >
+                        {t("bot.avatarReset")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="block text-[12.5px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
                 {t("bot.nameLabel")}

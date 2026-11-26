@@ -361,7 +361,6 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   },
 
   addCustomCard: (sessionId, runId, customType, payload, text) => {
-    if (customType === "todo_write") return;
     get().flushPending();
     set((s) => {
       const cur = ensureTargetRun(s.activeBySession, sessionId, runId);
