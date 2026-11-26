@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { IconDeviceMobile } from "@tabler/icons-react";
+
+export type MascotMood = "wave" | "thinking" | "waiting" | "done" | "alert" | "confused";
 
 export function PiBrandMark({
   size = 28,
@@ -20,6 +22,112 @@ export function PiBrandMark({
       draggable={false}
       className={`shrink-0 rounded-[8px] object-contain select-none ${className}`}
       style={{ width: size, height: size }}
+    />
+  );
+}
+
+export function PiActivityIcon({
+  size = 16,
+  dark,
+  className = "",
+}: {
+  size?: number;
+  dark: boolean;
+  className?: string;
+}) {
+  const img = (
+    <img
+      src="/brand/process_activity.webp"
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      draggable={false}
+      className={`shrink-0 object-contain select-none ${className}`}
+      style={{ width: size, height: size }}
+    />
+  );
+
+  if (!dark) return img;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-full"
+      style={{
+        width: size + 4,
+        height: size + 4,
+        background: "rgba(244, 244, 242, 0.92)",
+      }}
+    >
+      {img}
+    </span>
+  );
+}
+
+export function PiMascot({
+  mood,
+  size = 56,
+  dark,
+  className = "",
+}: {
+  mood: MascotMood;
+  size?: number;
+  dark: boolean;
+  className?: string;
+}) {
+  const src = `/brand/v2_${mood}.webp`;
+  const img = (
+    <img
+      src={src}
+      alt="Super PI"
+      width={size}
+      height={size}
+      draggable={false}
+      className={`shrink-0 object-contain select-none ${className}`}
+      style={{ width: size, height: size }}
+    />
+  );
+
+  if (!dark) return img;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-[18px] p-1.5"
+      style={{ background: "rgba(244, 244, 242, 0.92)" }}
+    >
+      {img}
+    </span>
+  );
+}
+
+export function BrandIcon({
+  name,
+  size = 16,
+  className = "",
+  style,
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const maskUrl = `url("/icons/${name}.png")`;
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block shrink-0 select-none ${className}`}
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: "currentColor",
+        maskImage: maskUrl,
+        WebkitMaskImage: maskUrl,
+        maskSize: "contain",
+        WebkitMaskSize: "contain",
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskPosition: "center",
+        WebkitMaskPosition: "center",
+        ...style,
+      }}
     />
   );
 }

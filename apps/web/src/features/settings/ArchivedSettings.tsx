@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { IconArchive, IconRestore, IconTrash } from "@tabler/icons-react";
+import { IconRestore, IconTrash } from "@tabler/icons-react";
 import type { SessionSummary } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { Button, Card, ConfirmDialog, EmptyState } from "../../ui";
+import { Button, Card, ConfirmDialog } from "../../ui";
+import { PiMascot } from "../shared/BrandAssets";
 
 export function ArchivedSettings({
   onOpenSession,
@@ -14,6 +15,7 @@ export function ArchivedSettings({
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
+  const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
   const archivedSessions = useSessionStore((s) => s.archivedSessions);
   const selectSession = useSessionStore((s) => s.selectSession);
@@ -25,7 +27,12 @@ export function ArchivedSettings({
   if (archivedSessions.length === 0) {
     return (
       <Card>
-        <EmptyState icon={<IconArchive size={20} />} title={t("archived.empty")} />
+        <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+          <PiMascot mood="waiting" size={52} dark={dark} className="mb-3" />
+          <div className="text-[14px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+            {t("archived.empty")}
+          </div>
+        </div>
       </Card>
     );
   }

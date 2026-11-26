@@ -39,6 +39,23 @@ export function formatClockTime(ts?: number | null, locale: "zh-CN" | "en" = "zh
   });
 }
 
+export function formatRelativeTime(
+  ts?: number | null,
+  locale: "zh-CN" | "en" = "zh-CN",
+  nowMs = Date.now(),
+): string {
+  if (!ts || ts <= 0) return "";
+  const diffSec = Math.max(0, Math.floor((nowMs - ts) / 1000));
+  if (diffSec < 60) return locale === "en" ? "now" : "刚刚";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}d`;
+  return `${Math.floor(diffDays / 30)}mo`;
+}
+
 export function computeContextPercent(usage?: HostUsageDto | null): number {
   if (!usage || usage.contextWindow <= 0) return 0;
   const active = usage.contextTokens > 0 ? usage.contextTokens : 0;
@@ -228,18 +245,20 @@ export function parseQuestionEntriesFromTool(tool: ToolTraceItem): AnsweredQuest
 }
 
 export function mapToolDto(dto: HostToolTraceDto, fallbackId: string): ToolTraceItem {
-  const argsLines = Object.entries(dto.arguments ?? {})
+  const rawArgs = dto.arguments ?? {};
+  const argsLines = Object.entries(rawArgs)
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
   const summary =
-    dto.arguments?.description ??
-    dto.arguments?.command ??
-    dto.arguments?.path ??
+    rawArgs.description ??
+    rawArgs.command ??
+    rawArgs.path ??
     dto.name;
   return {
     id: dto.callId || fallbackId,
     name: dto.name,
     summary,
+    rawArgs,
     argsText: argsLines,
     output: dto.error ? `${dto.output ?? ""}\n${dto.error}`.trim() : (dto.output ?? ""),
     status: dto.status === "failed" ? "failed" : dto.status === "running" ? "running" : "done",
@@ -277,6 +296,7 @@ export function mapHostMessageToTurn(
       role: "user",
       rawText: parsed.text,
       timestamp: formatClockTime(dto.finishedAt ?? dto.startedAt, locale),
+      status: "done",
       failed: false,
       notices,
       attachments: parsed.attachments,
@@ -350,13 +370,27 @@ export function mapHostMessageToTurn(
     });
   }
 
+  const lowerStatus = dto.status.toLowerCase();
+  const isFailed = lowerStatus === "failed" || Boolean(dto.error);
+  const turnStatus: ChatTurn["status"] = isFailed
+    ? "failed"
+    : lowerStatus === "stopped" || lowerStatus === "aborted" || lowerStatus === "cancelled"
+      ? "stopped"
+      : "done";
+  const durationMs =
+    dto.startedAt > 0 && dto.finishedAt && dto.finishedAt >= dto.startedAt
+      ? dto.finishedAt - dto.startedAt
+      : undefined;
+
   return {
     id: `m-${dto.id}-${dto.runId || "hist"}`,
     runId: dto.runId,
     role: "assistant",
     rawText: dto.text,
     timestamp: formatClockTime(dto.finishedAt ?? dto.startedAt, locale),
-    failed: dto.status === "failed" || Boolean(dto.error),
+    durationMs,
+    status: turnStatus,
+    failed: isFailed,
     error: dto.error?.trim() || undefined,
     reminder: dto.reminder?.trim() || undefined,
     notices,

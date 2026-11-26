@@ -104,6 +104,7 @@ export function renderTurnBlock(
   sessionId: string,
   compactProcess: boolean,
   streaming?: boolean,
+  turnMeta?: { status?: "done" | "stopped" | "failed"; durationMs?: number; dark?: boolean },
 ) {
   if (block.kind === "activity") {
     return (
@@ -111,7 +112,10 @@ export function renderTurnBlock(
         key={block.key}
         steps={block.steps}
         streaming={streaming}
+        status={turnMeta?.status}
+        durationMs={turnMeta?.durationMs}
         compact={compactProcess}
+        dark={turnMeta?.dark}
       />
     );
   }
@@ -208,11 +212,11 @@ export const TurnItem = memo(function TurnItem({
 
         {turn.rawText && (
           <div
-            className="max-w-[78%] rounded-[20px] rounded-br-[6px] px-4 py-2.5 whitespace-pre-wrap"
+            className="max-w-[78%] rounded-[18px] rounded-br-[6px] px-4 py-2.5 whitespace-pre-wrap"
             style={{
-              background: "var(--pi-accent-soft)",
+              background: "var(--pi-wash)",
               color: "var(--pi-ink)",
-              fontSize: "calc(15px * var(--pi-chat-scale))",
+              fontSize: "calc(14.5px * var(--pi-chat-scale))",
               lineHeight: 1.6,
             }}
           >
@@ -247,7 +251,13 @@ export const TurnItem = memo(function TurnItem({
         </div>
       )}
 
-      {turn.blocks.map((block) => renderTurnBlock(block, sessionId, compactProcess, false))}
+      {turn.blocks.map((block) =>
+        renderTurnBlock(block, sessionId, compactProcess, false, {
+          status: turn.status,
+          durationMs: turn.durationMs,
+          dark,
+        }),
+      )}
 
       {turn.failed && (
         <div
@@ -310,7 +320,12 @@ export const TurnItem = memo(function TurnItem({
       )}
 
       {copyText && (
-        <div className="mt-2 flex items-center gap-1" style={{ color: "var(--pi-ink-tertiary)" }}>
+        <div
+          className={`mt-2 flex items-center gap-1 transition-opacity duration-150 ${
+            isLastAssistant ? "opacity-90" : "opacity-0 group-hover:opacity-100"
+          }`}
+          style={{ color: "var(--pi-ink-tertiary)" }}
+        >
           <button
             type="button"
             onClick={() => {

@@ -3,6 +3,7 @@ import { IconAlertCircle, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { useStreamStore } from "../../stores/streamStore";
 import { Button } from "../../ui";
+import { PiActivityIcon } from "../shared/BrandAssets";
 import { renderTurnBlock } from "./TurnItem";
 
 export function StreamingTurnView({
@@ -37,6 +38,11 @@ export function StreamingTurnView({
 
   if (!liveRun) return null;
 
+  const liveDurationMs =
+    liveRun.finishedAt && liveRun.startedAt > 0 && liveRun.finishedAt >= liveRun.startedAt
+      ? liveRun.finishedAt - liveRun.startedAt
+      : undefined;
+
   return (
     <div className="py-2">
       {liveRun.retrying && (
@@ -51,14 +57,11 @@ export function StreamingTurnView({
 
       {liveRun.blocks.length === 0 && liveRun.streaming && !liveRun.failed && (
         <div
-          className="flex items-center gap-2 py-2 text-[13px]"
-          style={{ color: "var(--pi-ink-tertiary)" }}
+          className="flex items-center gap-2 py-2 text-[12.5px] font-medium"
+          style={{ color: "var(--pi-ink-secondary)" }}
         >
-          <span
-            className="inline-block h-2 w-2 animate-pulse rounded-full"
-            style={{ background: "var(--pi-accent)" }}
-          />
-          <span>{t("activity.thinking")}</span>
+          <PiActivityIcon size={17} dark={dark} />
+          <span className="pi-text-shimmer">{t("activity.thinking")}</span>
         </div>
       )}
 
@@ -68,6 +71,11 @@ export function StreamingTurnView({
           sessionId,
           compactProcess,
           Boolean(liveRun.streaming && idx === liveRun.blocks.length - 1),
+          {
+            status: liveRun.status,
+            durationMs: liveDurationMs,
+            dark,
+          },
         ),
       )}
 

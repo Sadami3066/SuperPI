@@ -4,9 +4,7 @@ import {
   IconChecklist,
   IconFile,
   IconFileText,
-  IconPaperclip,
   IconPlayerStop,
-  IconShieldCheck,
   IconX,
 } from "@tabler/icons-react";
 import { classifyAttachmentKind, formatAttachmentSize } from "../../api/mappers";
@@ -20,6 +18,7 @@ import type {
 } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { IconButton, Select, type SelectOption } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 import { ModelPicker } from "./ModelPicker";
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -54,6 +53,9 @@ function readFileAsComposerAttachment(file: File): Promise<ComposerAttachment | 
 
 export function Composer({
   dark,
+  variant = "docked",
+  workspaceLabel,
+  workspacePath,
   sessionId,
   composerText,
   quotedText,
@@ -83,6 +85,9 @@ export function Composer({
   attachFilesRef,
 }: {
   dark: boolean;
+  variant?: "hero" | "docked";
+  workspaceLabel?: string;
+  workspacePath?: string;
   sessionId: string;
   composerText: string;
   quotedText: string | null;
@@ -213,10 +218,11 @@ export function Composer({
   );
 
   const canSend = (composerText.trim().length > 0 || attachments.length > 0) && !remoteOffline;
+  const isHero = variant === "hero";
 
   return (
-    <div className="shrink-0 px-6 pt-1 pb-5">
-      <div className="relative mx-auto w-full max-w-[740px]">
+    <div className={isHero ? "w-full" : "shrink-0 px-6 pt-1 pb-4"}>
+      <div className={`relative mx-auto w-full ${isHero ? "max-w-[680px]" : "max-w-[740px]"}`}>
         {showSlashMenu && filteredCommands.length > 0 && (
           <div className="pi-popover absolute right-0 bottom-full left-0 z-30 mb-2 max-h-[240px] overflow-y-auto p-1.5">
             {filteredCommands.map((cmd, idx) => (
@@ -251,13 +257,13 @@ export function Composer({
         )}
 
         {queuedInputs.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5 px-2">
+          <div className="mb-2 flex flex-wrap gap-1.5 px-1">
             {queuedInputs.map((q, i) => (
               <span
                 key={`${q.kind}-${i}-${q.text.slice(0, 12)}`}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px]"
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px]"
                 style={{
-                  background: "var(--pi-surface)",
+                  background: "var(--pi-paper)",
                   color: "var(--pi-ink-secondary)",
                   border: "0.5px solid var(--pi-surface-rim)",
                 }}
@@ -293,15 +299,15 @@ export function Composer({
           </div>
         )}
 
-        <div className="pi-composer-shell px-3.5 py-2.5">
+        <div className="pi-composer-shell px-3.5 pt-2.5 pb-2">
           {quotedText && (
             <div
-              className="mb-2 flex items-center justify-between gap-2 rounded-[10px] px-3 py-1.5 text-[12.5px]"
+              className="mb-2 flex items-center justify-between gap-2 rounded-[9px] px-3 py-1.5 text-[12px]"
               style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
             >
               <span className="truncate">{t("chat.quotedPrefix", { text: quotedText })}</span>
               <button type="button" onClick={onClearQuote} aria-label={t("chat.clearQuote")}>
-                <IconX size={14} />
+                <IconX size={13.5} />
               </button>
             </div>
           )}
@@ -312,7 +318,7 @@ export function Composer({
                 att.previewUrl ? (
                   <div
                     key={att.id}
-                    className="relative h-14 w-14 overflow-hidden rounded-[10px]"
+                    className="relative h-13 w-13 overflow-hidden rounded-[9px]"
                     style={{ border: "0.5px solid var(--pi-hairline)" }}
                   >
                     <img src={att.previewUrl} alt={att.name} className="h-full w-full object-cover" />
@@ -328,7 +334,7 @@ export function Composer({
                 ) : (
                   <div
                     key={att.id}
-                    className="inline-flex h-10 max-w-[220px] items-center gap-2 rounded-[10px] px-2.5 text-[12px]"
+                    className="inline-flex h-9 max-w-[220px] items-center gap-2 rounded-[9px] px-2.5 text-[12px]"
                     style={{
                       background: "var(--pi-wash)",
                       border: "0.5px solid var(--pi-hairline)",
@@ -379,7 +385,7 @@ export function Composer({
 
           <textarea
             ref={textareaRef}
-            rows={1}
+            rows={isHero ? 2 : 1}
             disabled={remoteOffline}
             value={composerText}
             onChange={(e) => onComposerChange(e.target.value)}
@@ -432,20 +438,42 @@ export function Composer({
                   ? t("chat.placeholderModEnter")
                   : t("chat.placeholder")
             }
-            className="max-h-[160px] min-h-[36px] w-full resize-none bg-transparent px-1 py-1 text-[14.5px] leading-[1.5] outline-none placeholder:opacity-55 disabled:opacity-45"
+            className={`max-h-[160px] w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-[1.55] outline-none placeholder:opacity-55 disabled:opacity-45 ${
+              isHero ? "min-h-[54px]" : "min-h-[34px]"
+            }`}
             style={{ color: "var(--pi-ink)" }}
           />
 
           <div className="mt-1.5 flex items-center justify-between gap-2 pt-0.5">
             <div className="flex min-w-0 items-center gap-1">
               <IconButton
+                size="sm"
                 label={t("chat.attach")}
                 disabled={remoteOffline}
                 onClick={() => fileInputRef.current?.click()}
               >
-                <IconPaperclip size={16} stroke={1.65} />
+                <BrandIcon name="file/attachment" size={15} />
               </IconButton>
 
+              {!isRemote && (
+                <button
+                  type="button"
+                  onClick={onTogglePlanFirst}
+                  title={t("chat.planFirstHint")}
+                  aria-pressed={planFirst}
+                  className="inline-flex h-7 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                  style={{
+                    background: planFirst ? "var(--pi-accent-soft)" : "transparent",
+                    color: planFirst ? "var(--pi-accent)" : "var(--pi-ink-tertiary)",
+                  }}
+                >
+                  <IconChecklist size={13.5} stroke={1.7} />
+                  <span className="hidden sm:inline">{t("chat.planFirst")}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5">
               <ModelPicker
                 providers={providers}
                 currentModel={currentModel}
@@ -456,65 +484,71 @@ export function Composer({
               />
 
               {!isRemote && (
-                <>
-                  <button
-                    type="button"
-                    onClick={onTogglePlanFirst}
-                    title={t("chat.planFirstHint")}
-                    aria-pressed={planFirst}
-                    className="inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{
-                      background: planFirst ? "var(--pi-accent-soft)" : "transparent",
-                      color: planFirst ? "var(--pi-accent)" : "var(--pi-ink-tertiary)",
-                    }}
-                  >
-                    <IconChecklist size={14} stroke={1.7} />
-                    <span className="hidden sm:inline">{t("chat.planFirst")}</span>
-                  </button>
+                <div className="hidden items-center gap-0.5 sm:inline-flex">
+                  <BrandIcon
+                    name="system/permissions"
+                    size={13.5}
+                    style={{ color: "var(--pi-ink-tertiary)" }}
+                  />
+                  <Select
+                    size="sm"
+                    ariaLabel={t("perm.label")}
+                    value={permissionMode}
+                    onValueChange={(v) => void onChangePermissionMode(v as PermissionMode)}
+                    options={permissionOptions}
+                  />
+                </div>
+              )}
 
-                  <div className="hidden items-center gap-0.5 sm:inline-flex">
-                    <IconShieldCheck
-                      size={13.5}
-                      stroke={1.7}
-                      style={{ color: "var(--pi-ink-tertiary)" }}
-                    />
-                    <Select
-                      size="sm"
-                      ariaLabel={t("perm.label")}
-                      value={permissionMode}
-                      onValueChange={(v) => void onChangePermissionMode(v as PermissionMode)}
-                      options={permissionOptions}
-                    />
-                  </div>
-                </>
+              {isStreaming && !composerText.trim() && attachments.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label={t("chat.stop")}
+                  title={t("chat.stop")}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90"
+                  style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
+                >
+                  <IconPlayerStop size={15} stroke={1.85} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => triggerSend()}
+                  disabled={!canSend}
+                  aria-label={t("chat.send")}
+                  title={t("chat.send")}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity disabled:opacity-35"
+                  style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
+                >
+                  <IconArrowUp size={16} stroke={1.9} />
+                </button>
               )}
             </div>
-
-            {isStreaming && !composerText.trim() && attachments.length === 0 ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label={t("chat.stop")}
-                title={t("chat.stop")}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90"
-                style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-              >
-                <IconPlayerStop size={16} stroke={1.85} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => triggerSend()}
-                disabled={!canSend}
-                aria-label={t("chat.send")}
-                title={t("chat.send")}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-opacity disabled:opacity-35"
-                style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-              >
-                <IconArrowUp size={18} stroke={1.85} />
-              </button>
-            )}
           </div>
+
+          {isHero && workspaceLabel && (
+            <div
+              className="mt-2 flex items-center gap-2 pt-2 text-[11.5px]"
+              style={{
+                borderTop: "0.5px solid var(--pi-hairline)",
+                color: "var(--pi-ink-tertiary)",
+              }}
+            >
+              <BrandIcon name="file/workspace" size={13} />
+              <span className="font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                {workspaceLabel}
+              </span>
+              {workspacePath && (
+                <span
+                  className="min-w-0 flex-1 truncate"
+                  style={{ fontFamily: "var(--pi-font-mono)" }}
+                >
+                  {workspacePath}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

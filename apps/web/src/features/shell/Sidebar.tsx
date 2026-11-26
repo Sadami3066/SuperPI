@@ -6,14 +6,14 @@ import {
   IconDownload,
   IconEdit,
   IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconMessagePlus,
   IconPin,
   IconPinnedOff,
   IconPlus,
-  IconSearch,
-  IconSettings,
   IconTrash,
 } from "@tabler/icons-react";
+import { formatRelativeTime } from "../../api/mappers";
 import type { HostBotDto, SessionSummary } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
@@ -28,7 +28,7 @@ import {
   IconButton,
   Input,
 } from "../../ui";
-import { BotAvatar, PiBrandMark } from "../shared/BrandAssets";
+import { BotAvatar, BrandIcon, PiBrandMark } from "../shared/BrandAssets";
 
 function downloadText(filename: string, content: string): void {
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -44,24 +44,20 @@ function downloadText(filename: string, content: string): void {
 
 export function Sidebar({
   open,
-  mainView,
   onToggleCollapse,
   onOpenSearch,
   onOpenCreateBot,
   onOpenBotSettings,
   onOpenSettings,
   onOpenArchived,
-  onSelectChatView,
 }: {
   open: boolean;
-  mainView: "chat" | "settings";
   onToggleCollapse: () => void;
   onOpenSearch: () => void;
   onOpenCreateBot: () => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenSettings: () => void;
   onOpenArchived: () => void;
-  onSelectChatView: () => void;
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
@@ -107,9 +103,8 @@ export function Sidebar({
     return Array.from(map.entries());
   }, [remoteBots, t]);
 
-  if (!open) return null;
-
-  const isMacOverlay = desktopEnv?.isElectron && desktopEnv.platform === "darwin";
+  const isMacOverlay = Boolean(desktopEnv?.isElectron && desktopEnv.platform === "darwin");
+  const activeBotId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
 
   const sessionsForBot = (botId: string): SessionSummary[] => {
     const ids = sessionIdsByBot[botId] ?? [];
@@ -122,13 +117,118 @@ export function Sidebar({
       });
   };
 
+  if (!open) {
+    return (
+      <aside
+        className="flex h-full w-[52px] shrink-0 flex-col items-center justify-between py-2 select-none"
+        style={{
+          background: "var(--pi-paper)",
+          borderRight: "0.5px solid var(--pi-hairline)",
+        }}
+      >
+        <div className="flex flex-col items-center gap-1.5">
+          {isMacOverlay && <div className="pi-drag-region h-[32px] w-full" />}
+          <IconButton
+            size="md"
+            label={t("nav.expandSidebar")}
+            onClick={onToggleCollapse}
+          >
+            <IconLayoutSidebarLeftExpand size={17} stroke={1.65} />
+          </IconButton>
+
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title={t("app.name")}
+            className="my-0.5 flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <PiBrandMark size={20} dark={dark} />
+          </button>
+
+          <IconButton
+            size="md"
+            label={t("nav.newChat")}
+            onClick={() => {
+              if (client && activeBotId) void createSession(client, activeBotId, locale);
+            }}
+          >
+            <BrandIcon name="chat/new_chat" size={16} />
+          </IconButton>
+
+          <IconButton
+            size="md"
+            label={t("nav.searchPlaceholder")}
+            onClick={onOpenSearch}
+          >
+            <BrandIcon name="action/search" size={15} />
+          </IconButton>
+
+          <div className="my-1 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+
+          <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
+            {bots.slice(0, 8).map((bot) => {
+              const selected = bot.id === activeBotId;
+              return (
+                <button
+                  key={bot.id}
+                  type="button"
+                  title={bot.name}
+                  onClick={() => {
+                    if (!client) return;
+                    const firstSess = sessionsForBot(bot.id)[0];
+                    if (firstSess) {
+                      void selectSession(client, firstSess.id, locale);
+                    } else if (!(bot.isRemote && !bot.online)) {
+                      void createSession(client, bot.id, locale);
+                    }
+                  }}
+                  className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+                  style={{
+                    background: selected ? "var(--pi-wash)" : "transparent",
+                  }}
+                >
+                  <BotAvatar
+                    avatar={bot.avatar}
+                    name={bot.name}
+                    isHome={bot.isHome}
+                    isRemote={bot.isRemote}
+                    dark={dark}
+                    size={20}
+                  />
+                  {bot.isRemote && (
+                    <span
+                      className="absolute right-0.5 bottom-0.5 h-1.5 w-1.5 rounded-full"
+                      style={{
+                        background: bot.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                      }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-col items-center gap-1">
+          <IconButton size="md" label={t("nav.archived")} onClick={onOpenArchived}>
+            <BrandIcon name="action/archive" size={15} />
+          </IconButton>
+          <IconButton size="md" label={t("nav.settings")} onClick={onOpenSettings}>
+            <BrandIcon name="system/settings" size={16} />
+          </IconButton>
+        </div>
+      </aside>
+    );
+  }
+
   const renderSessionRow = (session: SessionSummary) => {
-    const isCurrent = mainView === "chat" && session.id === activeSessionId;
+    const isCurrent = session.id === activeSessionId;
     const displayTitle = session.title || t("nav.untitledChat");
+    const relTime = formatRelativeTime(session.updatedAtMs, locale);
 
     if (renamingId === session.id) {
       return (
-        <div key={session.id} className="px-1.5 py-0.5">
+        <div key={session.id} className="px-1 py-0.5">
           <Input
             autoFocus
             value={renameDraft}
@@ -158,7 +258,7 @@ export function Sidebar({
     return (
       <div
         key={session.id}
-        className="group/row flex items-center gap-1 rounded-[9px] px-2 py-1.5 transition-colors hover:bg-[var(--pi-hover)]"
+        className="group/row flex h-[30px] items-center gap-1 rounded-[8px] px-2 transition-colors hover:bg-[var(--pi-hover)]"
         style={{
           background: isCurrent ? "var(--pi-wash)" : "transparent",
         }}
@@ -166,7 +266,6 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => {
-            onSelectChatView();
             if (client) void selectSession(client, session.id, locale);
           }}
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -178,10 +277,10 @@ export function Sidebar({
             />
           )}
           {session.pinned && !session.busy && (
-            <IconPin size={12} stroke={1.75} className="shrink-0 opacity-60" />
+            <IconPin size={11.5} stroke={1.75} className="shrink-0 opacity-60" />
           )}
           <span
-            className="truncate text-[13px]"
+            className="truncate text-[12.5px]"
             style={{
               color: isCurrent ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
               fontWeight: isCurrent ? 550 : 400,
@@ -191,64 +290,74 @@ export function Sidebar({
           </span>
         </button>
 
-        <DropdownMenu
-          trigger={
-            <button
-              type="button"
-              aria-label={displayTitle}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-[var(--pi-hover)]"
+        <div className="relative flex w-6 shrink-0 items-center justify-end">
+          {relTime && (
+            <span
+              className="text-[11px] tabular-nums transition-opacity group-hover/row:opacity-0"
               style={{ color: "var(--pi-ink-tertiary)" }}
             >
-              <IconDots size={14} stroke={1.75} />
-            </button>
-          }
-        >
-          <DropdownItem
-            icon={<IconEdit size={14} />}
-            label={t("nav.rename")}
-            onSelect={() => {
-              setRenamingId(session.id);
-              setRenameDraft(displayTitle);
-            }}
-          />
-          <DropdownItem
-            icon={session.pinned ? <IconPinnedOff size={14} /> : <IconPin size={14} />}
-            label={session.pinned ? t("nav.unpin") : t("nav.pin")}
-            onSelect={() => {
-              if (client) void togglePinSession(client, session.id, !session.pinned);
-            }}
-          />
-          <DropdownItem
-            icon={<IconArchive size={14} />}
-            label={t("nav.archive")}
-            onSelect={() => {
-              if (client) void toggleArchiveSession(client, session.id, true);
-            }}
-          />
-          <DropdownItem
-            label={session.memoryExcluded ? t("nav.memoryInclude") : t("nav.memoryExclude")}
-            onSelect={() => {
-              if (client) void toggleMemoryExclude(client, session.id, !session.memoryExcluded);
-            }}
-          />
-          <DropdownItem
-            icon={<IconDownload size={14} />}
-            label={t("nav.export")}
-            onSelect={() => {
-              if (!client) return;
-              void client.exportSessionJsonl(session.id).then((raw) => {
-                downloadText(`session-${session.id}.jsonl`, raw);
-              });
-            }}
-          />
-          <DropdownSeparator />
-          <DropdownItem
-            danger
-            icon={<IconTrash size={14} />}
-            label={t("nav.delete")}
-            onSelect={() => setDeleteTarget(session)}
-          />
-        </DropdownMenu>
+              {relTime}
+            </span>
+          )}
+          <DropdownMenu
+            trigger={
+              <button
+                type="button"
+                aria-label={displayTitle}
+                className="absolute right-0 flex h-5 w-5 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-[var(--pi-hover)]"
+                style={{ color: "var(--pi-ink-tertiary)" }}
+              >
+                <IconDots size={13.5} stroke={1.75} />
+              </button>
+            }
+          >
+            <DropdownItem
+              icon={<IconEdit size={14} />}
+              label={t("nav.rename")}
+              onSelect={() => {
+                setRenamingId(session.id);
+                setRenameDraft(displayTitle);
+              }}
+            />
+            <DropdownItem
+              icon={session.pinned ? <IconPinnedOff size={14} /> : <IconPin size={14} />}
+              label={session.pinned ? t("nav.unpin") : t("nav.pin")}
+              onSelect={() => {
+                if (client) void togglePinSession(client, session.id, !session.pinned);
+              }}
+            />
+            <DropdownItem
+              icon={<IconArchive size={14} />}
+              label={t("nav.archive")}
+              onSelect={() => {
+                if (client) void toggleArchiveSession(client, session.id, true);
+              }}
+            />
+            <DropdownItem
+              label={session.memoryExcluded ? t("nav.memoryInclude") : t("nav.memoryExclude")}
+              onSelect={() => {
+                if (client) void toggleMemoryExclude(client, session.id, !session.memoryExcluded);
+              }}
+            />
+            <DropdownItem
+              icon={<IconDownload size={14} />}
+              label={t("nav.export")}
+              onSelect={() => {
+                if (!client) return;
+                void client.exportSessionJsonl(session.id).then((raw) => {
+                  downloadText(`session-${session.id}.jsonl`, raw);
+                });
+              }}
+            />
+            <DropdownSeparator />
+            <DropdownItem
+              danger
+              icon={<IconTrash size={14} />}
+              label={t("nav.delete")}
+              onSelect={() => setDeleteTarget(session)}
+            />
+          </DropdownMenu>
+        </div>
       </div>
     );
   };
@@ -260,14 +369,14 @@ export function Sidebar({
 
     return (
       <div key={bot.id} className="space-y-0.5">
-        <div className="group/bot flex items-center justify-between gap-1 rounded-[9px] px-1.5 py-1 hover:bg-[var(--pi-hover)]">
+        <div className="group/bot flex h-[30px] items-center justify-between gap-1 rounded-[8px] px-1.5 hover:bg-[var(--pi-hover)]">
           <button
             type="button"
             onClick={() => toggleBotCollapse(bot.id)}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           >
             <IconChevronDown
-              size={13}
+              size={12}
               stroke={1.75}
               className="shrink-0 transition-transform duration-150"
               style={{
@@ -281,10 +390,10 @@ export function Sidebar({
               isHome={bot.isHome}
               isRemote={bot.isRemote}
               dark={dark}
-              size={20}
+              size={18}
             />
             <span
-              className="truncate text-[13px] font-medium"
+              className="truncate text-[12.5px] font-medium"
               style={{ color: offline ? "var(--pi-ink-tertiary)" : "var(--pi-ink)" }}
             >
               {bot.name}
@@ -297,24 +406,23 @@ export function Sidebar({
               label={t("nav.newChat")}
               disabled={offline}
               onClick={() => {
-                onSelectChatView();
                 if (client) void createSession(client, bot.id, locale);
               }}
             >
-              <IconMessagePlus size={14} stroke={1.7} />
+              <IconMessagePlus size={13.5} stroke={1.7} />
             </IconButton>
             <IconButton
               size="sm"
               label={t("nav.botSettings")}
               onClick={() => onOpenBotSettings(bot)}
             >
-              <IconDots size={14} stroke={1.7} />
+              <IconDots size={13.5} stroke={1.7} />
             </IconButton>
           </div>
         </div>
 
         {!collapsed && (
-          <div className="space-y-0.5 pl-3.5">
+          <div className="space-y-0.5 pl-3">
             {list.length === 0 ? (
               <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
                 {t("nav.noSessions")}
@@ -331,70 +439,97 @@ export function Sidebar({
   return (
     <>
       <aside
-        className="flex h-full w-[264px] shrink-0 flex-col select-none"
+        className="flex h-full w-[252px] shrink-0 flex-col select-none"
         style={{
-          background: "var(--pi-surface)",
+          background: "var(--pi-paper)",
           borderRight: "0.5px solid var(--pi-hairline)",
         }}
       >
         <div
-          className="pi-drag-region flex h-[48px] shrink-0 items-center justify-between px-3"
-          style={{ paddingTop: isMacOverlay ? 6 : 0 }}
+          className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between px-3"
+          style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
         >
-          <div
-            className="pi-no-drag flex items-center gap-2"
-            style={{ paddingLeft: isMacOverlay ? 64 : 0 }}
-          >
-            {!isMacOverlay && <PiBrandMark size={20} dark={dark} />}
-            <span className="text-[14px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
+          <div className="pi-no-drag flex items-center gap-2">
+            {!isMacOverlay && <PiBrandMark size={19} dark={dark} />}
+            <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
               {t("app.name")}
             </span>
           </div>
 
           <div className="pi-no-drag flex items-center gap-0.5">
-            <IconButton label={t("nav.searchPlaceholder")} onClick={onOpenSearch}>
-              <IconSearch size={16} stroke={1.7} />
-            </IconButton>
-            <IconButton label={t("nav.collapseSidebar")} onClick={onToggleCollapse}>
-              <IconLayoutSidebarLeftCollapse size={17} stroke={1.7} />
+            <IconButton size="sm" label={t("nav.collapseSidebar")} onClick={onToggleCollapse}>
+              <IconLayoutSidebarLeftCollapse size={16} stroke={1.7} />
             </IconButton>
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-2.5 py-2">
-          <div className="space-y-1.5">
+        <div className="space-y-0.5 px-2.5 pt-1 pb-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (client && activeBotId) void createSession(client, activeBotId, locale);
+            }}
+            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink)" }}
+          >
+            <BrandIcon name="chat/new_chat" size={15} />
+            <span className="flex-1 text-left">{t("nav.newChat")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-secondary)" }}
+          >
+            <BrandIcon name="action/search" size={14} />
+            <span className="flex-1 truncate text-left">{t("nav.searchPlaceholder").replace(/…$/, "")}</span>
+            <kbd
+              className="rounded px-1.5 py-0.5 text-[10px]"
+              style={{ background: "var(--pi-wash)", color: "var(--pi-ink-tertiary)" }}
+            >
+              ⌘K
+            </kbd>
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 py-1">
+          <div className="space-y-1">
             <div className="flex items-center justify-between px-1.5">
               <span
-                className="text-[11px] font-semibold uppercase tracking-wider"
+                className="text-[11px] font-semibold tracking-wide"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
                 {t("nav.localBots")}
               </span>
               <IconButton size="sm" label={t("nav.createBot")} onClick={onOpenCreateBot}>
-                <IconPlus size={14} stroke={1.85} />
+                <IconPlus size={13.5} stroke={1.85} />
               </IconButton>
             </div>
             <div className="space-y-1">{localBots.map(renderBotGroup)}</div>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <div className="px-1.5">
               <span
-                className="text-[11px] font-semibold uppercase tracking-wider"
+                className="text-[11px] font-semibold tracking-wide"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
                 {t("nav.remoteBots")}
               </span>
             </div>
             {remoteByDevice.length === 0 ? (
-              <div className="px-2 py-1 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+              <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
                 {t("nav.noRemoteBots")}
               </div>
             ) : (
-              <div className="space-y-2.5">
+              <div className="space-y-2">
                 {remoteByDevice.map(([deviceKey, group]) => (
                   <div key={deviceKey} className="space-y-1">
-                    <div className="flex items-center gap-1.5 px-2 text-[11.5px] font-medium" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    <div
+                      className="flex items-center gap-1.5 px-2 text-[11.5px] font-medium"
+                      style={{ color: "var(--pi-ink-tertiary)" }}
+                    >
                       <span
                         className="h-1.5 w-1.5 rounded-full"
                         style={{
@@ -412,23 +547,20 @@ export function Sidebar({
         </div>
 
         <div
-          className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5"
+          className="flex shrink-0 items-center justify-between gap-1.5 px-2.5 py-2"
           style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
         >
           <button
             type="button"
             onClick={onOpenSettings}
-            className="flex h-8 flex-1 items-center gap-2 rounded-[9px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: mainView === "settings" ? "var(--pi-wash)" : "transparent",
-              color: "var(--pi-ink)",
-            }}
+            className="flex h-8 flex-1 items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-secondary)" }}
           >
-            <IconSettings size={16} stroke={1.65} />
+            <BrandIcon name="system/settings" size={15} />
             <span>{t("nav.settings")}</span>
           </button>
-          <IconButton label={t("nav.archived")} onClick={onOpenArchived}>
-            <IconArchive size={16} stroke={1.65} />
+          <IconButton size="sm" label={t("nav.archived")} onClick={onOpenArchived}>
+            <BrandIcon name="action/archive" size={14.5} />
           </IconButton>
         </div>
       </aside>

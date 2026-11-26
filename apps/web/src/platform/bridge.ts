@@ -39,6 +39,11 @@ interface ElectronPreloadBridge {
   revealInFileManager(absPath: string): Promise<void>;
   setLanguage(locale: "zh-CN" | "en"): Promise<void>;
   setThemeAppearance(dark: boolean, surfaceColor: string, inkColor: string): Promise<void>;
+  windowMinimize(): Promise<void>;
+  windowToggleMaximize(): Promise<boolean>;
+  windowClose(): Promise<void>;
+  windowIsMaximized(): Promise<boolean>;
+  onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
 }
 
 declare global {
@@ -184,4 +189,34 @@ export async function syncNativeThemeAppearance(
   const native = getElectronBridge();
   if (!native) return;
   await native.setThemeAppearance(dark, surfaceColor, inkColor);
+}
+
+export async function windowMinimize(): Promise<void> {
+  const native = getElectronBridge();
+  if (!native) return;
+  await native.windowMinimize();
+}
+
+export async function windowToggleMaximize(): Promise<boolean> {
+  const native = getElectronBridge();
+  if (!native) return false;
+  return native.windowToggleMaximize();
+}
+
+export async function windowClose(): Promise<void> {
+  const native = getElectronBridge();
+  if (!native) return;
+  await native.windowClose();
+}
+
+export async function windowIsMaximized(): Promise<boolean> {
+  const native = getElectronBridge();
+  if (!native) return false;
+  return native.windowIsMaximized();
+}
+
+export function subscribeWindowMaximized(cb: (maximized: boolean) => void): () => void {
+  const native = getElectronBridge();
+  if (!native) return () => {};
+  return native.onWindowMaximizedChange(cb);
 }

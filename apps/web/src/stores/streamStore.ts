@@ -6,6 +6,8 @@ export interface LiveRunState {
   sessionId: string;
   runId: string;
   startedAt: number;
+  finishedAt?: number;
+  status?: "done" | "stopped" | "failed";
   activityText: string | null;
   retrying: boolean;
   streaming: boolean;
@@ -261,14 +263,16 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       const cur = ensureTargetRun(s.activeBySession, sessionId, runId);
       if (runId && cur.runId !== runId) return s;
 
-      const argsLines = Object.entries(args ?? {})
+      const rawArgs = args ?? {};
+      const argsLines = Object.entries(rawArgs)
         .map(([k, v]) => `${k}: ${v}`)
         .join("\n");
-      const summary = args?.description ?? args?.command ?? args?.path ?? toolName;
+      const summary = rawArgs.description ?? rawArgs.command ?? rawArgs.path ?? toolName;
       const trace: ToolTraceItem = {
         id: callId,
         name: toolName,
         summary,
+        rawArgs,
         argsText: argsLines,
         output: "",
         status: "running",
@@ -390,15 +394,24 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       if (fallbackText && !blocks.some((b) => b.kind === "text")) {
         blocks = appendTextToBlocks(blocks, fallbackText);
       }
+      const lowerStatus = (status ?? "").toLowerCase();
+      const resolvedStatus: LiveRunState["status"] =
+        lowerStatus === "failed"
+          ? "failed"
+          : lowerStatus === "stopped" || lowerStatus === "aborted" || lowerStatus === "cancelled"
+            ? "stopped"
+            : "done";
       return {
         activeBySession: {
           ...s.activeBySession,
           [sessionId]: {
             ...cur,
+            finishedAt: Date.now(),
+            status: resolvedStatus,
             streaming: false,
             retrying: false,
             activityText: null,
-            failed: status === "failed",
+            failed: resolvedStatus === "failed",
             blocks,
           },
         },
@@ -425,6 +438,8 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
           ...s.activeBySession,
           [sessionId]: {
             ...cur,
+            finishedAt: Date.now(),
+            status: "failed",
             streaming: false,
             retrying: false,
             activityText: null,

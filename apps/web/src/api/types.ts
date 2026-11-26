@@ -332,6 +332,7 @@ export interface ToolTraceItem {
   id: string;
   name: string;
   summary: string;
+  rawArgs: Record<string, string>;
   argsText: string;
   output: string;
   status: "running" | "done" | "failed";
@@ -401,6 +402,8 @@ export interface ChatTurn {
   role: "user" | "assistant";
   rawText: string;
   timestamp: string;
+  durationMs?: number;
+  status: "done" | "stopped" | "failed";
   failed: boolean;
   error?: string;
   reminder?: string;

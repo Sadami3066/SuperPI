@@ -138,14 +138,60 @@ body,
 
 .pi-composer-shell {
   background: var(--pi-composer);
-  border-radius: 24px;
-  border: 0.5px solid var(--pi-surface-rim);
+  border-radius: 16px;
+  border: 0.75px solid var(--pi-surface-rim);
   box-shadow: var(--pi-composer-shadow);
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
+.pi-composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--pi-ink-tertiary) 45%, var(--pi-hairline));
+}
+
 .pi-dark .pi-composer-shell {
-  border: 0.75px solid rgba(255, 255, 255, 0.1);
+  border: 0.75px solid rgba(255, 255, 255, 0.11);
+}
+
+.pi-dark .pi-composer-shell:focus-within {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+@keyframes pi-stream-block-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.pi-stream-block-enter {
+  animation: pi-stream-block-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pi-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.pi-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--pi-ink-tertiary) 0%,
+    var(--pi-ink-tertiary) 35%,
+    var(--pi-ink) 50%,
+    var(--pi-ink-tertiary) 65%,
+    var(--pi-ink-tertiary) 100%
+  );
+  background-size: 200% auto;
+  color: transparent !important;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: pi-shimmer 2.2s linear infinite;
 }
 
 .pi-popover {
@@ -300,5 +346,11 @@ body,
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+
+  .pi-text-shimmer {
+    animation: none !important;
+    background: none !important;
+    color: var(--pi-ink-secondary) !important;
   }
 }

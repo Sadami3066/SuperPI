@@ -623,6 +623,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       role: "user",
       rawText: baseText,
       timestamp: formatClockTime(Date.now(), locale),
+      status: "done",
       failed: false,
       notices: [],
       attachments: chips,

@@ -5,12 +5,13 @@ import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, NoticeBar } from "../../ui";
 import { WorkbenchDock } from "../../workbench/WorkbenchDock";
 import { BotSettingsDialog } from "../bots/BotSettingsDialog";
 import { CreateBotDialog } from "../bots/CreateBotDialog";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
-import { SettingsView, type SettingsTabId } from "../settings/SettingsView";
+import { SettingsModal, type SettingsTabId } from "../settings/SettingsModal";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
 
@@ -28,13 +29,25 @@ export function AppShell() {
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
   const locale = useSettingsStore((s) => s.locale);
   const refreshSettingsData = useSettingsStore((s) => s.refreshSettingsData);
+  const workbenchOpen = useWorkbenchStore((s) => s.open);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mainView, setMainView] = useState<"chat" | "settings">("chat");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createBotOpen, setCreateBotOpen] = useState(false);
   const [settingsBot, setSettingsBot] = useState<HostBotDto | null>(null);
+
+  const openSettings = (tab: SettingsTabId = "general") => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+    if (client) {
+      void refreshSettingsData(client);
+      if (tab === "archived") {
+        void loadArchivedSessions(client);
+      }
+    }
+  };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -51,41 +64,35 @@ export function AppShell() {
         e.preventDefault();
         const botId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
         if (client && botId) {
-          setMainView("chat");
+          setSettingsOpen(false);
           void createSession(client, botId, locale);
+        }
+      } else if (key === ",") {
+        e.preventDefault();
+        if (settingsOpen) {
+          setSettingsOpen(false);
+        } else {
+          openSettings("general");
         }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeSessionId, bots, client, createSession, locale, summariesById]);
-
-  const openSettings = (tab: SettingsTabId = "general") => {
-    setSettingsTab(tab);
-    setMainView("settings");
-    if (client) {
-      void refreshSettingsData(client);
-      if (tab === "archived") {
-        void loadArchivedSessions(client);
-      }
-    }
-  };
+  }, [activeSessionId, bots, client, createSession, locale, settingsOpen, summariesById]);
 
   return (
     <div
       className="flex h-screen w-screen overflow-hidden"
-      style={{ background: "var(--pi-paper)", color: "var(--pi-ink)" }}
+      style={{ background: "var(--pi-surface)", color: "var(--pi-ink)" }}
     >
       <Sidebar
         open={sidebarOpen}
-        mainView={mainView}
         onToggleCollapse={() => setSidebarOpen((v) => !v)}
         onOpenSearch={() => setPaletteOpen(true)}
         onOpenCreateBot={() => setCreateBotOpen(true)}
         onOpenBotSettings={(bot) => setSettingsBot(bot)}
         onOpenSettings={() => openSettings("general")}
         onOpenArchived={() => openSettings("archived")}
-        onSelectChatView={() => setMainView("chat")}
       />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -103,39 +110,34 @@ export function AppShell() {
           </div>
         )}
 
-        {mainView === "chat" ? (
-          <ChatWorkspace
-            sidebarOpen={sidebarOpen}
-            onOpenSidebar={() => setSidebarOpen(true)}
-            onOpenBotSettings={(bot) => setSettingsBot(bot)}
-            onOpenProvidersSettings={() => openSettings("providers")}
-          />
-        ) : (
-          <SettingsView
-            sidebarOpen={sidebarOpen}
-            tab={settingsTab}
-            onSelectTab={(tab) => openSettings(tab)}
-            onOpenSidebar={() => setSidebarOpen(true)}
-            onBackToChat={() => setMainView("chat")}
-          />
-        )}
+        <ChatWorkspace
+          showWindowControls={!workbenchOpen}
+          onOpenBotSettings={(bot) => setSettingsBot(bot)}
+          onOpenProvidersSettings={() => openSettings("providers")}
+        />
       </main>
 
-      {mainView === "chat" && <WorkbenchDock />}
+      <WorkbenchDock showWindowControls={workbenchOpen} />
+
+      <SettingsModal
+        open={settingsOpen}
+        tab={settingsTab}
+        onSelectTab={(tab) => openSettings(tab)}
+        onOpenChange={setSettingsOpen}
+      />
 
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         onOpenSettings={() => openSettings("general")}
         onOpenCreateBot={() => setCreateBotOpen(true)}
-        onSelectChatView={() => setMainView("chat")}
+        onSelectChatView={() => setSettingsOpen(false)}
       />
 
       <CreateBotDialog
         open={createBotOpen}
         onOpenChange={setCreateBotOpen}
         onCreated={(botId) => {
-          setMainView("chat");
           if (client) void createSession(client, botId, locale);
         }}
       />

@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  IconLayoutSidebarLeftExpand,
-  IconLayoutSidebarRight,
-  IconSettings,
-} from "@tabler/icons-react";
+import { IconLayoutSidebarRight, IconSettings } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
 import type { HostBotDto, PermissionMode } from "../../api/types";
 import { useI18n } from "../../i18n";
+import { windowToggleMaximize } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
@@ -14,18 +11,32 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, IconButton, NoticeBar, Popover } from "../../ui";
-import { BotAvatar, PiBrandMark } from "../shared/BrandAssets";
+import { BotAvatar, PiMascot } from "../shared/BrandAssets";
+import { WindowControls } from "../shell/WindowControls";
 import { Composer } from "./Composer";
+import { ContextMeter } from "./ContextMeter";
 import { MessageList } from "./MessageList";
 
+function resolveGreetingKey():
+  | "chat.greetingMorning"
+  | "chat.greetingAfternoon"
+  | "chat.greetingEvening"
+  | "chat.greetingNight"
+  | "chat.greetingDefault" {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return "chat.greetingMorning";
+  if (hour >= 12 && hour < 17) return "chat.greetingAfternoon";
+  if (hour >= 17 && hour < 21) return "chat.greetingEvening";
+  if (hour >= 21 || hour < 4) return "chat.greetingNight";
+  return "chat.greetingDefault";
+}
+
 export function ChatWorkspace({
-  sidebarOpen,
-  onOpenSidebar,
+  showWindowControls,
   onOpenBotSettings,
   onOpenProvidersSettings,
 }: {
-  sidebarOpen: boolean;
-  onOpenSidebar: () => void;
+  showWindowControls: boolean;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenProvidersSettings: () => void;
 }) {
@@ -60,9 +71,8 @@ export function ChatWorkspace({
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const dismissQuestion = useSessionStore((s) => s.dismissQuestion);
 
-  const isStreaming = useStreamStore((s) =>
-    Boolean(s.activeBySession[activeSessionId]?.streaming),
-  );
+  const liveRun = useStreamStore((s) => s.activeBySession[activeSessionId]);
+  const isStreaming = Boolean(liveRun?.streaming);
 
   const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
@@ -133,14 +143,74 @@ export function ChatWorkspace({
     );
   }, [activeSessionId, pendingQuestions, transcript?.pendingQuestion]);
 
+  const greetingKey = useMemo(() => resolveGreetingKey(), [activeSessionId]);
+
   if (!activeBot || !activeSessionId) {
     return null;
   }
 
-  const isMacOverlay = desktopEnv?.isElectron && desktopEnv.platform === "darwin";
+  const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
   const remoteOffline = Boolean(activeBot.isRemote && !activeBot.online);
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
+  const turns = transcript?.turns ?? [];
+  const isHeroEmpty = turns.length === 0 && !liveRun && !activeQuestion;
+
+  const composerElement = (variant: "hero" | "docked") => (
+    <Composer
+      dark={dark}
+      variant={variant}
+      workspaceLabel={activeBot.name}
+      workspacePath={activeBot.cwd}
+      sessionId={activeSessionId}
+      composerText={composerText}
+      quotedText={quotedText}
+      queuedInputs={transcript?.queuedInputs ?? []}
+      providers={effectiveProviders}
+      slashCommands={commandsByBot[activeBot.id] ?? []}
+      currentModel={currentModel}
+      currentThinking={currentThinking}
+      permissionMode={(activeBot.permissionMode as PermissionMode) || "workspace_auto"}
+      isRemote={Boolean(activeBot.isRemote)}
+      remoteOffline={remoteOffline}
+      isStreaming={isStreaming || Boolean(summary?.busy)}
+      sendKey={hostSettings?.sendKey === "mod_enter" ? "mod_enter" : "enter"}
+      sendWhileRunning={hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer"}
+      planFirst={planFirst}
+      onComposerChange={(val) => setComposerText(activeSessionId, val)}
+      onClearQuote={() => setQuotedText(activeSessionId, null)}
+      onTogglePlanFirst={() => togglePlanFirst(activeSessionId)}
+      onChangePermissionMode={async (mode) => {
+        if (client) await setPermissionMode(client, activeBot.id, mode);
+      }}
+      onModelChange={(model, thinking) => {
+        if (client) void updateSessionModel(client, activeSessionId, model, thinking, locale);
+      }}
+      onOpenProvidersSettings={onOpenProvidersSettings}
+      onSend={(overrideText, atts) => {
+        if (!client) return;
+        void sendMessage(client, {
+          sessionId: activeSessionId,
+          botId: activeBot.id,
+          locale,
+          sendWhileRunning: hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer",
+          overrideText,
+          attachments: atts,
+        });
+      }}
+      onStop={() => {
+        if (client) void stopSession(client, activeSessionId);
+      }}
+      onRemoveQueued={async (kind, text) => {
+        if (client) await removeQueuedInput(client, activeSessionId, kind, text);
+      }}
+      onPromoteQueued={async (text) => {
+        if (client) await promoteQueuedInput(client, activeSessionId, text);
+      }}
+      onSnapToBottom={() => snapToBottomRef.current?.()}
+      attachFilesRef={attachFilesRef}
+    />
+  );
 
   return (
     <div
@@ -176,36 +246,38 @@ export function ChatWorkspace({
       }}
     >
       <header
-        className="pi-drag-region flex h-[48px] shrink-0 items-center justify-between gap-3 px-4"
+        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-3 pl-4"
         style={{
-          paddingLeft: !sidebarOpen && isMacOverlay ? 78 : undefined,
+          paddingRight: showWindowControls && isFrameless ? 0 : 12,
           borderBottom: "0.5px solid var(--pi-hairline)",
+        }}
+        onDoubleClick={() => {
+          if (isFrameless) void windowToggleMaximize();
         }}
       >
         <div className="pi-no-drag flex min-w-0 items-center gap-2">
-          {!sidebarOpen && (
-            <IconButton label={t("nav.expandSidebar")} onClick={onOpenSidebar}>
-              <IconLayoutSidebarLeftExpand size={18} stroke={1.65} />
-            </IconButton>
-          )}
-          {activeBot.avatar ? (
-            <BotAvatar
-              avatar={activeBot.avatar}
-              name={activeBot.name}
-              isHome={activeBot.isHome}
-              isRemote={activeBot.isRemote}
-              dark={dark}
-              size={22}
-            />
-          ) : (
-            !sidebarOpen && <PiBrandMark size={20} dark={dark} />
-          )}
-          <span className="truncate text-[14.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+          <BotAvatar
+            avatar={activeBot.avatar}
+            name={activeBot.name}
+            isHome={activeBot.isHome}
+            isRemote={activeBot.isRemote}
+            dark={dark}
+            size={20}
+          />
+          <span className="truncate text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
             {activeBot.name}
           </span>
+          {summary?.title && (
+            <span
+              className="hidden truncate text-[12.5px] sm:inline"
+              style={{ color: "var(--pi-ink-tertiary)" }}
+            >
+              / {summary.title}
+            </span>
+          )}
           {activeBot.isRemote && activeBot.deviceName && (
             <span
-              className="hidden items-center gap-1.5 text-[12px] sm:inline-flex"
+              className="hidden items-center gap-1.5 text-[11.5px] md:inline-flex"
               style={{ color: "var(--pi-ink-tertiary)" }}
             >
               <span
@@ -222,7 +294,7 @@ export function ChatWorkspace({
             label={t("nav.botSettings")}
             onClick={() => onOpenBotSettings(activeBot)}
           >
-            <IconSettings size={15} stroke={1.65} />
+            <IconSettings size={14} stroke={1.65} />
           </IconButton>
         </div>
 
@@ -230,28 +302,7 @@ export function ChatWorkspace({
           <Popover
             align="end"
             className="w-[260px] p-3.5"
-            trigger={
-              <button
-                type="button"
-                title={t("usage.title")}
-                aria-label={t("usage.title")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                style={{ color: "var(--pi-ink-secondary)" }}
-              >
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{
-                    background:
-                      ctxPct >= 80
-                        ? "var(--pi-warning)"
-                        : ctxPct > 0
-                          ? "var(--pi-accent)"
-                          : "var(--pi-hairline)",
-                  }}
-                />
-                <span>{ctxPct}%</span>
-              </button>
-            }
+            trigger={<ContextMeter percent={ctxPct} usage={usage} />}
           >
             <div className="space-y-3 text-[12.5px]">
               <div className="font-semibold" style={{ color: "var(--pi-ink)" }}>
@@ -298,12 +349,15 @@ export function ChatWorkspace({
           </Popover>
 
           <IconButton
+            size="sm"
             label={t("chat.workbenchToggle")}
             active={workbenchOpen}
             onClick={() => toggleWorkbench("session-inspector")}
           >
-            <IconLayoutSidebarRight size={17} stroke={1.65} />
+            <IconLayoutSidebarRight size={16} stroke={1.65} />
           </IconButton>
+
+          {showWindowControls && <WindowControls />}
         </div>
       </header>
 
@@ -316,75 +370,42 @@ export function ChatWorkspace({
         </div>
       )}
 
-      <MessageList
-        sessionId={activeSessionId}
-        turns={transcript?.turns ?? []}
-        pendingQuestion={activeQuestion}
-        compactProcess={hostSettings?.processDetail === "compact"}
-        dark={dark}
-        onQuote={(txt) => setQuotedText(activeSessionId, txt)}
-        onRetry={() => {
-          if (client) void retrySession(client, activeSessionId);
-        }}
-        onAnswerQuestion={async (reqId, answers) => {
-          if (client) await answerQuestion(client, reqId, answers);
-        }}
-        onDismissQuestion={async (reqId) => {
-          if (client) await dismissQuestion(client, reqId);
-        }}
-        scrollRefOut={snapToBottomRef}
-      />
-
-      <Composer
-        dark={dark}
-        sessionId={activeSessionId}
-        composerText={composerText}
-        quotedText={quotedText}
-        queuedInputs={transcript?.queuedInputs ?? []}
-        providers={effectiveProviders}
-        slashCommands={commandsByBot[activeBot.id] ?? []}
-        currentModel={currentModel}
-        currentThinking={currentThinking}
-        permissionMode={(activeBot.permissionMode as PermissionMode) || "workspace_auto"}
-        isRemote={Boolean(activeBot.isRemote)}
-        remoteOffline={remoteOffline}
-        isStreaming={isStreaming || Boolean(summary?.busy)}
-        sendKey={hostSettings?.sendKey === "mod_enter" ? "mod_enter" : "enter"}
-        sendWhileRunning={hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer"}
-        planFirst={planFirst}
-        onComposerChange={(val) => setComposerText(activeSessionId, val)}
-        onClearQuote={() => setQuotedText(activeSessionId, null)}
-        onTogglePlanFirst={() => togglePlanFirst(activeSessionId)}
-        onChangePermissionMode={async (mode) => {
-          if (client) await setPermissionMode(client, activeBot.id, mode);
-        }}
-        onModelChange={(model, thinking) => {
-          if (client) void updateSessionModel(client, activeSessionId, model, thinking, locale);
-        }}
-        onOpenProvidersSettings={onOpenProvidersSettings}
-        onSend={(overrideText, atts) => {
-          if (!client) return;
-          void sendMessage(client, {
-            sessionId: activeSessionId,
-            botId: activeBot.id,
-            locale,
-            sendWhileRunning: hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer",
-            overrideText,
-            attachments: atts,
-          });
-        }}
-        onStop={() => {
-          if (client) void stopSession(client, activeSessionId);
-        }}
-        onRemoveQueued={async (kind, text) => {
-          if (client) await removeQueuedInput(client, activeSessionId, kind, text);
-        }}
-        onPromoteQueued={async (text) => {
-          if (client) await promoteQueuedInput(client, activeSessionId, text);
-        }}
-        onSnapToBottom={() => snapToBottomRef.current?.()}
-        attachFilesRef={attachFilesRef}
-      />
+      {isHeroEmpty ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10">
+          <div className="flex w-full max-w-[680px] flex-col items-center">
+            <PiMascot mood="wave" size={64} dark={dark} className="mb-3" />
+            <h1
+              className="mb-5 text-center text-[24px] font-semibold tracking-[-0.02em]"
+              style={{ color: "var(--pi-ink)" }}
+            >
+              {t(greetingKey)}
+            </h1>
+            {composerElement("hero")}
+          </div>
+        </div>
+      ) : (
+        <>
+          <MessageList
+            sessionId={activeSessionId}
+            turns={turns}
+            pendingQuestion={activeQuestion}
+            compactProcess={hostSettings?.processDetail === "compact"}
+            dark={dark}
+            onQuote={(txt) => setQuotedText(activeSessionId, txt)}
+            onRetry={() => {
+              if (client) void retrySession(client, activeSessionId);
+            }}
+            onAnswerQuestion={async (reqId, answers) => {
+              if (client) await answerQuestion(client, reqId, answers);
+            }}
+            onDismissQuestion={async (reqId) => {
+              if (client) await dismissQuestion(client, reqId);
+            }}
+            scrollRefOut={snapToBottomRef}
+          />
+          {composerElement("docked")}
+        </>
+      )}
 
       {draggingFiles && !remoteOffline && (
         <div

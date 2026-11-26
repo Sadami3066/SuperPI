@@ -1,14 +1,20 @@
 import { Suspense, useEffect, useRef } from "react";
 import { IconX } from "@tabler/icons-react";
 import { useI18n } from "../i18n";
+import { windowToggleMaximize } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { IconButton } from "../ui";
+import { WindowControls } from "../features/shell/WindowControls";
 import { getAvailableWorkbenchPanels, getWorkbenchPanel } from "./registry";
 
-export function WorkbenchDock() {
+export function WorkbenchDock({
+  showWindowControls = false,
+}: {
+  showWindowControls?: boolean;
+}) {
   const { t } = useI18n();
   const open = useWorkbenchStore((s) => s.open);
   const activePanelId = useWorkbenchStore((s) => s.activePanelId);
@@ -21,7 +27,9 @@ export function WorkbenchDock() {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const activeSummary = useSessionStore((s) => s.summariesById[s.activeSessionId]);
   const bots = useBotStore((s) => s.bots);
-  const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
+  const desktopEnv = useConnectionStore((s) => s.desktopEnv);
+  const isElectron = Boolean(desktopEnv?.isElectron);
+  const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
 
   const dragCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -35,8 +43,7 @@ export function WorkbenchDock() {
   const botId = activeSummary?.botId ?? bots[0]?.id ?? "home";
   const ctx = { botId, sessionId: activeSessionId || null, payload };
   const available = getAvailableWorkbenchPanels(ctx, isElectron);
-  const resolvedPanel =
-    getWorkbenchPanel(activePanelId) ?? available[0] ?? null;
+  const resolvedPanel = getWorkbenchPanel(activePanelId) ?? available[0] ?? null;
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -60,7 +67,7 @@ export function WorkbenchDock() {
       className="relative flex h-full shrink-0 flex-col"
       style={{
         width,
-        background: "var(--pi-surface)",
+        background: "var(--pi-paper)",
         borderLeft: "0.5px solid var(--pi-hairline)",
       }}
     >
@@ -72,10 +79,16 @@ export function WorkbenchDock() {
       />
 
       <div
-        className="flex h-[48px] shrink-0 items-center justify-between gap-2 px-3"
-        style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
+        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-3"
+        style={{
+          paddingRight: showWindowControls && isFrameless ? 0 : 10,
+          borderBottom: "0.5px solid var(--pi-hairline)",
+        }}
+        onDoubleClick={() => {
+          if (isFrameless) void windowToggleMaximize();
+        }}
       >
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+        <div className="pi-no-drag flex min-w-0 items-center gap-1 overflow-x-auto">
           {available.map((panel) => {
             const Icon = panel.icon;
             const active = resolvedPanel?.id === panel.id;
@@ -84,21 +97,25 @@ export function WorkbenchDock() {
                 key={panel.id}
                 type="button"
                 onClick={() => openPanel(panel.id)}
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors"
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium transition-colors"
                 style={{
                   background: active ? "var(--pi-wash)" : "transparent",
                   color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
                 }}
               >
-                <Icon size={14} stroke={1.7} />
+                <Icon size={13.5} stroke={1.7} />
                 <span>{t(panel.labelKey)}</span>
               </button>
             );
           })}
         </div>
-        <IconButton label={t("common.close")} size="sm" onClick={close}>
-          <IconX size={15} stroke={1.75} />
-        </IconButton>
+
+        <div className="pi-no-drag flex shrink-0 items-center gap-0.5">
+          <IconButton label={t("common.close")} size="sm" onClick={close}>
+            <IconX size={14.5} stroke={1.75} />
+          </IconButton>
+          {showWindowControls && <WindowControls />}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
