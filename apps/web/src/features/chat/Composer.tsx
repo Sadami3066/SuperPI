@@ -104,6 +104,7 @@ export const Composer = memo(function Composer({
   const { t } = useI18n();
   const composerText = useSessionStore((s) => s.composerTextBySession[sessionId] ?? "");
   const quotedText = useSessionStore((s) => s.quotedTextBySession[sessionId] ?? null);
+  const composerFocusTick = useSessionStore((s) => s.composerFocusTick);
   const onComposerChange = useSessionStore((s) => s.setComposerText);
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
   const togglePlanFirst = useSessionStore((s) => s.togglePlanFirst);
@@ -118,13 +119,25 @@ export const Composer = memo(function Composer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyRef = useRef<Record<string, string[]>>({});
+  const historyIdxRef = useRef<number>(-1);
+  const historyDraftRef = useRef<string>("");
   const attachmentsCountRef = useRef(0);
   attachmentsCountRef.current = attachments.length;
 
   useEffect(() => {
     setAttachments([]);
     setWarning(null);
+    historyIdxRef.current = -1;
+    historyDraftRef.current = "";
   }, [sessionId]);
+
+  useEffect(() => {
+    if (remoteOffline || composerFocusTick === 0) return;
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }, [composerFocusTick, remoteOffline]);
 
   useEffect(() => {
     return () => {
@@ -202,7 +215,16 @@ export const Composer = memo(function Composer({
 
   const triggerSend = (overrideText?: string) => {
     const files = overrideText ? [] : attachments;
-    if (!(overrideText ?? composerText).trim() && files.length === 0) return;
+    const textToSend = (overrideText ?? composerText).trim();
+    if (!textToSend && files.length === 0) return;
+    if (!overrideText && textToSend) {
+      const prevHist = historyRef.current[sessionId] ?? [];
+      if (prevHist[prevHist.length - 1] !== textToSend) {
+        historyRef.current[sessionId] = [...prevHist.slice(-49), textToSend];
+      }
+      historyIdxRef.current = -1;
+      historyDraftRef.current = "";
+    }
     onSnapToBottom();
     onSend(overrideText, files);
     if (!overrideText) setAttachments([]);
@@ -222,7 +244,7 @@ export const Composer = memo(function Composer({
   const isHero = variant === "hero";
 
   return (
-    <div className={isHero ? "w-full" : "shrink-0 px-6 pt-1 pb-4"}>
+    <div className={isHero ? "w-full" : "pi-chat-gutter shrink-0 pt-1 pb-4"}>
       <div className={`relative mx-auto w-full ${isHero ? "max-w-[680px]" : "max-w-[740px]"}`}>
         {showSlashMenu && filteredCommands.length > 0 && (
           <div className="pi-popover absolute right-0 bottom-full left-0 z-30 mb-2 max-h-[240px] overflow-y-auto p-1.5">
@@ -399,6 +421,20 @@ export const Composer = memo(function Composer({
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (e.key === "Escape") {
+                if (showSlashMenu) {
+                  e.preventDefault();
+                  onComposerChange(sessionId, "");
+                  return;
+                }
+                if (quotedText) {
+                  e.preventDefault();
+                  onClearQuote();
+                  return;
+                }
+                textareaRef.current?.blur();
+                return;
+              }
               if (showSlashMenu && filteredCommands.length > 0) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
@@ -416,6 +452,43 @@ export const Composer = memo(function Composer({
                   if (chosen) {
                     if (chosen.insertOnly) onComposerChange(sessionId, `${chosen.command} `);
                     else triggerSend(chosen.command);
+                  }
+                  return;
+                }
+              }
+              const hist = historyRef.current[sessionId] ?? [];
+              const el = textareaRef.current;
+              if (
+                hist.length > 0 &&
+                el &&
+                !e.shiftKey &&
+                !e.metaKey &&
+                !e.ctrlKey &&
+                !e.altKey
+              ) {
+                if (e.key === "ArrowUp" && el.selectionStart === 0 && el.selectionEnd === 0) {
+                  e.preventDefault();
+                  if (historyIdxRef.current < 0) {
+                    historyDraftRef.current = composerText;
+                    historyIdxRef.current = hist.length - 1;
+                  } else if (historyIdxRef.current > 0) {
+                    historyIdxRef.current -= 1;
+                  }
+                  onComposerChange(sessionId, hist[historyIdxRef.current] ?? "");
+                  return;
+                }
+                if (
+                  e.key === "ArrowDown" &&
+                  historyIdxRef.current >= 0 &&
+                  el.selectionStart === composerText.length
+                ) {
+                  e.preventDefault();
+                  if (historyIdxRef.current < hist.length - 1) {
+                    historyIdxRef.current += 1;
+                    onComposerChange(sessionId, hist[historyIdxRef.current] ?? "");
+                  } else {
+                    historyIdxRef.current = -1;
+                    onComposerChange(sessionId, historyDraftRef.current);
                   }
                   return;
                 }

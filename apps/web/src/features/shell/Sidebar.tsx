@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -7,6 +7,8 @@ import {
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostBotDto, SessionSummary } from "../../api/types";
 import { useI18n } from "../../i18n";
+import { revealInFileManager, windowToggleMaximize } from "../../platform/bridge";
+import { formatShortcut } from "../../platform/shortcuts";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
@@ -14,6 +16,9 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useSuperStore } from "../../stores/superStore";
 import {
   ConfirmDialog,
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
   DropdownItem,
   DropdownMenu,
   DropdownSeparator,
@@ -21,6 +26,35 @@ import {
   Input,
 } from "../../ui";
 import { BotAvatar, BrandIcon, PiBrandMark } from "../shared/BrandAssets";
+
+const SIDEBAR_WIDTH_KEY = "superpi:sidebarWidth";
+const DEFAULT_SIDEBAR_WIDTH = 256;
+const MIN_SIDEBAR_WIDTH = 210;
+const MAX_SIDEBAR_WIDTH = 380;
+const SNAP_COLLAPSE_PX = 150;
+const VISIBLE_SESSIONS_LIMIT = 5;
+
+function readStoredSidebarWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
+  try {
+    const raw = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(raw) && raw >= MIN_SIDEBAR_WIDTH && raw <= MAX_SIDEBAR_WIDTH) {
+      return Math.round(raw);
+    }
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+  return DEFAULT_SIDEBAR_WIDTH;
+}
+
+function saveStoredSidebarWidth(width: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+  } catch {
+    return;
+  }
+}
 
 function downloadText(filename: string, content: string): void {
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -37,7 +71,6 @@ function downloadText(filename: string, content: string): void {
 export function Sidebar({
   open,
   activeView,
-  onSelectSuper,
   onSelectChat,
   onToggleCollapse,
   onOpenSearch,
@@ -49,11 +82,10 @@ export function Sidebar({
 }: {
   open: boolean;
   activeView: "chat" | "super";
-  onSelectSuper: () => void;
   onSelectChat: () => void;
   onToggleCollapse: () => void;
   onOpenSearch: () => void;
-  onOpenCreateBot: () => void;
+  onOpenCreateBot: (target?: { deviceId: string; deviceName: string }) => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenSettings: () => void;
   onOpenAutomations: () => void;
@@ -64,60 +96,87 @@ export function Sidebar({
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
   const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
+  const relayDevices = useSettingsStore((s) => s.relayDevices);
 
   const unreadInboxCount = useSuperStore((s) => s.unreadInboxCount);
-  const activeWorkersCount = useSuperStore((s) => {
-    const workers = s.state?.workers;
-    if (!workers || workers.length === 0) return 0;
-    let count = 0;
-    for (const w of workers) {
-      if (w.status === "running" || w.status === "working" || w.status === "waiting_approval") {
-        count++;
-      }
-    }
-    return count;
-  });
-
   const bots = useBotStore((s) => s.bots);
   const collapsedBotIds = useBotStore((s) => s.collapsedBotIds);
   const toggleBotCollapse = useBotStore((s) => s.toggleBotCollapse);
 
   const summariesById = useSessionStore((s) => s.summariesById);
   const sessionIdsByBot = useSessionStore((s) => s.sessionIdsByBot);
+  const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
+  const unreadSessionIds = useSessionStore((s) => s.unreadSessionIds);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const selectSession = useSessionStore((s) => s.selectSession);
   const createSession = useSessionStore((s) => s.createSession);
+  const forkSession = useSessionStore((s) => s.forkSession);
   const renameSession = useSessionStore((s) => s.renameSession);
   const togglePinSession = useSessionStore((s) => s.togglePinSession);
   const toggleArchiveSession = useSessionStore((s) => s.toggleArchiveSession);
   const toggleMemoryExclude = useSessionStore((s) => s.toggleMemoryExclude);
   const deleteSession = useSessionStore((s) => s.deleteSession);
 
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
+  const [resizing, setResizing] = useState(false);
+  const [expandedBots, setExpandedBots] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
+
+  const isElectron = Boolean(desktopEnv?.isElectron);
+  const isMacOverlay = Boolean(isElectron && desktopEnv?.platform === "darwin");
+  const isFrameless = Boolean(isElectron && desktopEnv?.platform !== "darwin");
+  const activeBotId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
+
+  const pendingSessionIds = useMemo(
+    () => new Set(pendingQuestions.map((q) => q.sessionId)),
+    [pendingQuestions],
+  );
 
   const localBots = useMemo(() => bots.filter((b) => !b.isRemote), [bots]);
   const remoteBots = useMemo(() => bots.filter((b) => b.isRemote), [bots]);
 
-  const remoteByDevice = useMemo(() => {
-    const map = new Map<string, { deviceName: string; online: boolean; bots: HostBotDto[] }>();
+  const remoteGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      { deviceId: string; deviceName: string; platform: string; online: boolean; bots: HostBotDto[] }
+    >();
+    for (const dev of relayDevices) {
+      if (dev.isSelf) continue;
+      map.set(dev.deviceId, {
+        deviceId: dev.deviceId,
+        deviceName: dev.name,
+        platform: dev.platform || "",
+        online: dev.online,
+        bots: [],
+      });
+    }
     for (const rb of remoteBots) {
       const key = rb.deviceId || rb.deviceName || rb.id;
-      const entry = map.get(key) ?? {
+      const existing = map.get(key) ?? {
+        deviceId: key,
         deviceName: rb.deviceName || t("nav.remoteBots"),
+        platform: "",
         online: Boolean(rb.online),
         bots: [],
       };
-      entry.online = entry.online || Boolean(rb.online);
-      entry.bots.push(rb);
-      map.set(key, entry);
+      existing.online = existing.online || Boolean(rb.online);
+      existing.bots.push(rb);
+      map.set(key, existing);
     }
-    return Array.from(map.entries());
-  }, [remoteBots, t]);
-
-  const isMacOverlay = Boolean(desktopEnv?.isElectron && desktopEnv.platform === "darwin");
-  const activeBotId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      return a.deviceName.localeCompare(b.deviceName);
+    });
+  }, [relayDevices, remoteBots, t]);
 
   const sessionsForBot = (botId: string): SessionSummary[] => {
     const ids = sessionIdsByBot[botId] ?? [];
@@ -128,6 +187,57 @@ export function Sidebar({
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
         return b.updatedAtMs - a.updatedAtMs;
       });
+  };
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    let latestX = startX;
+    let moveRaf: number | null = null;
+    let snappedClosed = false;
+    setResizing(true);
+
+    const onMove = (ev: MouseEvent) => {
+      latestX = ev.clientX;
+      if (moveRaf !== null) return;
+      moveRaf = requestAnimationFrame(() => {
+        moveRaf = null;
+        const delta = latestX - startX;
+        const candidate = startW + delta;
+        if (candidate < SNAP_COLLAPSE_PX) {
+          snappedClosed = true;
+          onToggleCollapse();
+          cleanup();
+          return;
+        }
+        const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(candidate)));
+        setSidebarWidth(clamped);
+      });
+    };
+
+    const cleanup = () => {
+      if (moveRaf !== null) {
+        cancelAnimationFrame(moveRaf);
+        moveRaf = null;
+      }
+      setResizing(false);
+      if (!snappedClosed) {
+        const finalW = Math.min(
+          MAX_SIDEBAR_WIDTH,
+          Math.max(MIN_SIDEBAR_WIDTH, Math.round(startW + (latestX - startX))),
+        );
+        setSidebarWidth(finalW);
+        saveStoredSidebarWidth(finalW);
+      }
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", cleanup);
+      dragCleanupRef.current = null;
+    };
+
+    dragCleanupRef.current = cleanup;
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", cleanup);
   };
 
   if (!open) {
@@ -169,25 +279,6 @@ export function Sidebar({
             <BrandIcon name="chat/new_chat" size={16} />
           </IconButton>
 
-          <button
-            type="button"
-            title={t("super.title")}
-            onClick={onSelectSuper}
-            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "super" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/agent" size={16} />
-            {activeWorkersCount > 0 && (
-              <span
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
-                style={{ background: "var(--pi-accent)" }}
-              />
-            )}
-          </button>
-
           <IconButton
             size="md"
             label={t("nav.searchPlaceholder")}
@@ -198,46 +289,73 @@ export function Sidebar({
 
           <div className="my-1 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
 
-          <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
-            {bots.slice(0, 8).map((bot) => {
+          <div className="flex max-h-[300px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
+            {bots.slice(0, 10).map((bot) => {
               const selected = activeView === "chat" && bot.id === activeBotId;
+              const offline = Boolean(bot.isRemote && !bot.online);
               return (
-                <button
+                <ContextMenu
                   key={bot.id}
-                  type="button"
-                  title={bot.name}
-                  onClick={() => {
-                    onSelectChat();
-                    if (!client) return;
-                    const firstSess = sessionsForBot(bot.id)[0];
-                    if (firstSess) {
-                      void selectSession(client, firstSess.id, locale);
-                    } else if (!(bot.isRemote && !bot.online)) {
-                      void createSession(client, bot.id, locale);
-                    }
-                  }}
-                  className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-                  style={{
-                    background: selected ? "var(--pi-wash)" : "transparent",
-                  }}
-                >
-                  <BotAvatar
-                    avatar={bot.avatar}
-                    name={bot.name}
-                    isHome={bot.isHome}
-                    isRemote={bot.isRemote}
-                    dark={dark}
-                    size={20}
-                  />
-                  {bot.isRemote && (
-                    <span
-                      className="absolute right-0.5 bottom-0.5 h-1.5 w-1.5 rounded-full"
-                      style={{
-                        background: bot.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                  trigger={
+                    <button
+                      type="button"
+                      title={bot.name}
+                      onClick={() => {
+                        onSelectChat();
+                        if (!client) return;
+                        const firstSess = sessionsForBot(bot.id)[0];
+                        if (firstSess) {
+                          void selectSession(client, firstSess.id, locale);
+                        } else if (!offline) {
+                          void createSession(client, bot.id, locale);
+                        }
                       }}
+                      className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+                      style={{
+                        background: selected ? "var(--pi-wash)" : "transparent",
+                      }}
+                    >
+                      <BotAvatar
+                        avatar={bot.avatar}
+                        name={bot.name}
+                        isHome={bot.isHome}
+                        isRemote={bot.isRemote}
+                        dark={dark}
+                        size={20}
+                      />
+                      {bot.isRemote && (
+                        <span
+                          className="absolute right-0.5 bottom-0.5 h-1.5 w-1.5 rounded-full"
+                          style={{
+                            background: bot.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                          }}
+                        />
+                      )}
+                    </button>
+                  }
+                >
+                  <ContextMenuItem
+                    icon={<BrandIcon name="chat/new_chat" size={14} />}
+                    label={t("nav.newChat")}
+                    disabled={offline}
+                    onSelect={() => {
+                      onSelectChat();
+                      if (client) void createSession(client, bot.id, locale);
+                    }}
+                  />
+                  <ContextMenuItem
+                    icon={<BrandIcon name="system/settings" size={14} />}
+                    label={t("nav.botSettings")}
+                    onSelect={() => onOpenBotSettings(bot)}
+                  />
+                  {!bot.isRemote && isElectron && bot.cwd && (
+                    <ContextMenuItem
+                      icon={<BrandIcon name="file/folder_open" size={14} />}
+                      label={t("nav.revealFolder")}
+                      onSelect={() => void revealInFileManager(bot.cwd)}
                     />
                   )}
-                </button>
+                </ContextMenu>
               );
             })}
           </div>
@@ -270,10 +388,12 @@ export function Sidebar({
     );
   }
 
-  const renderSessionRow = (session: SessionSummary) => {
+  const renderSessionRow = (session: SessionSummary, isRemoteBot: boolean) => {
     const isCurrent = activeView === "chat" && session.id === activeSessionId;
     const displayTitle = session.title || t("nav.untitledChat");
     const relTime = formatRelativeTime(session.updatedAtMs, locale);
+    const hasPendingQuestion = pendingSessionIds.has(session.id);
+    const hasUnread = Boolean(unreadSessionIds[session.id]);
 
     if (renamingId === session.id) {
       return (
@@ -304,114 +424,201 @@ export function Sidebar({
       );
     }
 
-    return (
-      <div
-        key={session.id}
-        className="group/row flex h-[30px] items-center gap-1 rounded-[8px] px-2 transition-colors hover:bg-[var(--pi-hover)]"
-        style={{
-          background: isCurrent ? "var(--pi-wash)" : "transparent",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            onSelectChat();
-            if (client) void selectSession(client, session.id, locale);
-          }}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-        >
-          {session.busy && (
-            <span
-              className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
-              style={{ background: "var(--pi-accent)" }}
-            />
-          )}
-          {session.pinned && !session.busy && (
-            <BrandIcon name="action/pin" size={11.5} className="shrink-0 opacity-60" />
-          )}
-          <span
-            className="truncate text-[12.5px]"
-            style={{
-              color: isCurrent ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-              fontWeight: isCurrent ? 550 : 400,
-            }}
-          >
-            {displayTitle}
-          </span>
-        </button>
+    const startRename = () => {
+      setRenamingId(session.id);
+      setRenameDraft(displayTitle);
+    };
 
-        <div className="relative flex w-6 shrink-0 items-center justify-end">
-          {relTime && (
-            <span
-              className="text-[11px] tabular-nums transition-opacity group-hover/row:opacity-0"
-              style={{ color: "var(--pi-ink-tertiary)" }}
-            >
-              {relTime}
-            </span>
-          )}
-          <DropdownMenu
-            trigger={
-              <button
-                type="button"
-                aria-label={displayTitle}
-                className="absolute right-0 flex h-5 w-5 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-[var(--pi-hover)]"
-                style={{ color: "var(--pi-ink-tertiary)" }}
-              >
-                <BrandIcon name="navigation/more" size={13.5} />
-              </button>
-            }
+    const doExport = () => {
+      if (!client) return;
+      void client
+        .exportSessionJsonl(session.id)
+        .then((raw) => {
+          downloadText(`session-${session.id}.jsonl`, raw);
+        })
+        .catch(() => void 0);
+    };
+
+    return (
+      <ContextMenu
+        key={session.id}
+        trigger={
+          <div
+            className="group/row flex h-[30px] items-center gap-1 rounded-[8px] px-2 transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: isCurrent ? "var(--pi-wash)" : "transparent",
+            }}
+            onDoubleClick={startRename}
           >
-            <DropdownItem
-              icon={<BrandIcon name="action/pen" size={14} />}
-              label={t("nav.rename")}
-              onSelect={() => {
-                setRenamingId(session.id);
-                setRenameDraft(displayTitle);
+            <button
+              type="button"
+              onClick={() => {
+                onSelectChat();
+                if (client) void selectSession(client, session.id, locale);
               }}
-            />
-            <DropdownItem
-              icon={session.pinned ? <IconPinnedOff size={14} /> : <BrandIcon name="action/pin" size={14} />}
-              label={session.pinned ? t("nav.unpin") : t("nav.pin")}
-              onSelect={() => {
-                if (client) void togglePinSession(client, session.id, !session.pinned);
+              onKeyDown={(e) => {
+                if (e.key === "F2") {
+                  e.preventDefault();
+                  startRename();
+                }
               }}
-            />
-            <DropdownItem
-              icon={<BrandIcon name="action/archive" size={14} />}
-              label={t("nav.archive")}
-              onSelect={() => {
-                if (client) void toggleArchiveSession(client, session.id, true);
-              }}
-            />
-            <DropdownItem
-              label={session.memoryExcluded ? t("nav.memoryInclude") : t("nav.memoryExclude")}
-              onSelect={() => {
-                if (client) void toggleMemoryExclude(client, session.id, !session.memoryExcluded);
-              }}
-            />
-            <DropdownItem
-              icon={<BrandIcon name="action/download" size={14} />}
-              label={t("nav.export")}
-                onSelect={() => {
-                  if (!client) return;
-                  void client
-                    .exportSessionJsonl(session.id)
-                    .then((raw) => {
-                      downloadText(`session-${session.id}.jsonl`, raw);
-                    })
-                    .catch(() => void 0);
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
+            >
+              {hasPendingQuestion ? (
+                <span
+                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: "var(--pi-warning)" }}
+                />
+              ) : session.busy ? (
+                <span
+                  className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
+                  style={{ background: "var(--pi-accent)" }}
+                />
+              ) : hasUnread ? (
+                <span
+                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: "var(--pi-accent)" }}
+                />
+              ) : session.pinned ? (
+                <BrandIcon name="action/pin" size={11.5} className="shrink-0 opacity-60" />
+              ) : null}
+              <span
+                className="truncate text-[12.5px]"
+                style={{
+                  color: isCurrent ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                  fontWeight: isCurrent || hasUnread ? 550 : 400,
                 }}
-            />
-            <DropdownSeparator />
-            <DropdownItem
-              danger
-              icon={<BrandIcon name="action/delete" size={14} />}
-              label={t("nav.delete")}
-              onSelect={() => setDeleteTarget(session)}
-            />
-          </DropdownMenu>
-        </div>
-      </div>
+              >
+                {displayTitle}
+              </span>
+            </button>
+
+            <div className="relative flex w-6 shrink-0 items-center justify-end">
+              {relTime && (
+                <span
+                  className="text-[11px] tabular-nums transition-opacity group-hover/row:opacity-0"
+                  style={{ color: "var(--pi-ink-tertiary)" }}
+                >
+                  {relTime}
+                </span>
+              )}
+              <DropdownMenu
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={displayTitle}
+                    className="absolute right-0 flex h-5 w-5 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-[var(--pi-hover)]"
+                    style={{ color: "var(--pi-ink-tertiary)" }}
+                  >
+                    <BrandIcon name="navigation/more" size={13.5} />
+                  </button>
+                }
+              >
+                <DropdownItem
+                  icon={<BrandIcon name="action/pen" size={14} />}
+                  label={t("nav.rename")}
+                  onSelect={startRename}
+                />
+                <DropdownItem
+                  icon={session.pinned ? <IconPinnedOff size={14} /> : <BrandIcon name="action/pin" size={14} />}
+                  label={session.pinned ? t("nav.unpin") : t("nav.pin")}
+                  onSelect={() => {
+                    if (client) void togglePinSession(client, session.id, !session.pinned);
+                  }}
+                />
+                {!isRemoteBot && (
+                  <DropdownItem
+                    icon={<BrandIcon name="system/git_branch" size={14} />}
+                    label={t("nav.fork")}
+                    onSelect={() => {
+                      if (client) {
+                        onSelectChat();
+                        void forkSession(client, session.id, locale);
+                      }
+                    }}
+                  />
+                )}
+                <DropdownItem
+                  icon={<BrandIcon name="action/archive" size={14} />}
+                  label={t("nav.archive")}
+                  onSelect={() => {
+                    if (client) void toggleArchiveSession(client, session.id, true);
+                  }}
+                />
+                <DropdownItem
+                  label={session.memoryExcluded ? t("nav.memoryInclude") : t("nav.memoryExclude")}
+                  onSelect={() => {
+                    if (client) void toggleMemoryExclude(client, session.id, !session.memoryExcluded);
+                  }}
+                />
+                <DropdownItem
+                  icon={<BrandIcon name="action/download" size={14} />}
+                  label={t("nav.export")}
+                  onSelect={doExport}
+                />
+                <DropdownSeparator />
+                <DropdownItem
+                  danger
+                  icon={<BrandIcon name="action/delete" size={14} />}
+                  label={t("nav.delete")}
+                  onSelect={() => setDeleteTarget(session)}
+                />
+              </DropdownMenu>
+            </div>
+          </div>
+        }
+      >
+        <ContextMenuItem
+          icon={<BrandIcon name="action/pen" size={14} />}
+          label={t("nav.rename")}
+          shortcut="F2"
+          onSelect={startRename}
+        />
+        <ContextMenuItem
+          icon={session.pinned ? <IconPinnedOff size={14} /> : <BrandIcon name="action/pin" size={14} />}
+          label={session.pinned ? t("nav.unpin") : t("nav.pin")}
+          onSelect={() => {
+            if (client) void togglePinSession(client, session.id, !session.pinned);
+          }}
+        />
+        {!isRemoteBot && (
+          <ContextMenuItem
+            icon={<BrandIcon name="system/git_branch" size={14} />}
+            label={t("nav.fork")}
+            onSelect={() => {
+              if (client) {
+                onSelectChat();
+                void forkSession(client, session.id, locale);
+              }
+            }}
+          />
+        )}
+        <ContextMenuItem
+          icon={<BrandIcon name="action/archive" size={14} />}
+          label={t("nav.archive")}
+          onSelect={() => {
+            if (client) void toggleArchiveSession(client, session.id, true);
+          }}
+        />
+        <ContextMenuItem
+          label={session.memoryExcluded ? t("nav.memoryInclude") : t("nav.memoryExclude")}
+          onSelect={() => {
+            if (client) void toggleMemoryExclude(client, session.id, !session.memoryExcluded);
+          }}
+        />
+        <ContextMenuItem
+          icon={<BrandIcon name="action/download" size={14} />}
+          label={t("nav.export")}
+          onSelect={doExport}
+        />
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          danger
+          icon={<BrandIcon name="action/delete" size={14} />}
+          label={t("nav.delete")}
+          onSelect={() => setDeleteTarget(session)}
+        />
+      </ContextMenu>
     );
   };
 
@@ -419,61 +626,102 @@ export function Sidebar({
     const collapsed = Boolean(collapsedBotIds[bot.id]);
     const list = sessionsForBot(bot.id);
     const offline = Boolean(bot.isRemote && !bot.online);
+    const expandedList = Boolean(expandedBots[bot.id]);
+    const visibleList = expandedList ? list : list.slice(0, VISIBLE_SESSIONS_LIMIT);
+    const hasMore = list.length > VISIBLE_SESSIONS_LIMIT;
 
     return (
       <div key={bot.id} className="space-y-0.5">
-        <div className="group/bot flex h-[30px] items-center justify-between gap-1 rounded-[8px] px-1.5 hover:bg-[var(--pi-hover)]">
-          <button
-            type="button"
-            onClick={() => toggleBotCollapse(bot.id)}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          >
-            <BrandIcon
-              name="navigation/chevron_down"
-              size={12}
-              className="shrink-0 transition-transform duration-150"
-              style={{
-                color: "var(--pi-ink-tertiary)",
-                transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
-              }}
-            />
-            <BotAvatar
-              avatar={bot.avatar}
-              name={bot.name}
-              isHome={bot.isHome}
-              isRemote={bot.isRemote}
-              dark={dark}
-              size={18}
-            />
-            <span
-              className="truncate text-[12.5px] font-medium"
-              style={{ color: offline ? "var(--pi-ink-tertiary)" : "var(--pi-ink)" }}
-            >
-              {bot.name}
-            </span>
-          </button>
+        <ContextMenu
+          trigger={
+            <div className="group/bot flex h-[30px] items-center justify-between gap-1 rounded-[8px] px-1.5 hover:bg-[var(--pi-hover)]">
+              <button
+                type="button"
+                onClick={() => toggleBotCollapse(bot.id)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              >
+                <BrandIcon
+                  name="navigation/chevron_down"
+                  size={12}
+                  className="shrink-0 transition-transform duration-150"
+                  style={{
+                    color: "var(--pi-ink-tertiary)",
+                    transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                  }}
+                />
+                <BotAvatar
+                  avatar={bot.avatar}
+                  name={bot.name}
+                  isHome={bot.isHome}
+                  isRemote={bot.isRemote}
+                  dark={dark}
+                  size={18}
+                />
+                <span
+                  className="truncate text-[12.5px] font-medium"
+                  style={{ color: offline ? "var(--pi-ink-tertiary)" : "var(--pi-ink)" }}
+                >
+                  {bot.name}
+                </span>
+              </button>
 
-          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/bot:opacity-100">
-            <IconButton
-              size="sm"
-              label={t("nav.newChat")}
-              disabled={offline}
-              onClick={() => {
-                onSelectChat();
-                if (client) void createSession(client, bot.id, locale);
-              }}
-            >
-              <BrandIcon name="chat/new_chat" size={13.5} />
-            </IconButton>
-            <IconButton
-              size="sm"
-              label={t("nav.botSettings")}
-              onClick={() => onOpenBotSettings(bot)}
-            >
-              <BrandIcon name="navigation/more" size={13.5} />
-            </IconButton>
-          </div>
-        </div>
+              <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/bot:opacity-100">
+                <IconButton
+                  size="sm"
+                  label={t("nav.newChat")}
+                  disabled={offline}
+                  onClick={() => {
+                    onSelectChat();
+                    if (client) void createSession(client, bot.id, locale);
+                  }}
+                >
+                  <BrandIcon name="chat/new_chat" size={13.5} />
+                </IconButton>
+                <IconButton
+                  size="sm"
+                  label={t("nav.botSettings")}
+                  onClick={() => onOpenBotSettings(bot)}
+                >
+                  <BrandIcon name="navigation/more" size={13.5} />
+                </IconButton>
+              </div>
+            </div>
+          }
+        >
+          <ContextMenuItem
+            icon={<BrandIcon name="chat/new_chat" size={14} />}
+            label={t("nav.newChat")}
+            disabled={offline}
+            onSelect={() => {
+              onSelectChat();
+              if (client) void createSession(client, bot.id, locale);
+            }}
+          />
+          <ContextMenuItem
+            icon={<BrandIcon name="system/settings" size={14} />}
+            label={t("nav.botSettings")}
+            onSelect={() => onOpenBotSettings(bot)}
+          />
+          {!bot.isRemote && isElectron && bot.cwd && (
+            <ContextMenuItem
+              icon={<BrandIcon name="file/folder_open" size={14} />}
+              label={t("nav.revealFolder")}
+              onSelect={() => void revealInFileManager(bot.cwd)}
+            />
+          )}
+          {bot.cwd && (
+            <ContextMenuItem
+              icon={<BrandIcon name="action/copy" size={14} />}
+              label={t("nav.copyPath")}
+              onSelect={() => void navigator.clipboard?.writeText(bot.cwd)}
+            />
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
+            onSelect={() => toggleBotCollapse(bot.id)}
+          />
+        </ContextMenu>
 
         {!collapsed && (
           <div className="space-y-0.5 pl-3">
@@ -482,7 +730,23 @@ export function Sidebar({
                 {t("nav.noSessions")}
               </div>
             ) : (
-              list.map(renderSessionRow)
+              <>
+                {visibleList.map((s) => renderSessionRow(s, Boolean(bot.isRemote)))}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedBots((prev) => ({ ...prev, [bot.id]: !expandedList }))
+                    }
+                    className="w-full rounded-[7px] px-2 py-1 text-left text-[11.5px] transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{ color: "var(--pi-ink-tertiary)" }}
+                  >
+                    {expandedList
+                      ? t("nav.collapseSessions")
+                      : t("nav.showAllSessions", { count: list.length })}
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -492,16 +756,33 @@ export function Sidebar({
 
   return (
     <>
+      {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
+
       <aside
-        className="flex h-full w-[252px] shrink-0 flex-col select-none"
+        className="relative flex h-full shrink-0 flex-col select-none"
         style={{
+          width: sidebarWidth,
           background: "var(--pi-paper)",
           borderRight: "0.5px solid var(--pi-hairline)",
         }}
       >
         <div
+          onMouseDown={startResize}
+          onDoubleClick={() => {
+            setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+            saveStoredSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+          }}
+          role="separator"
+          aria-orientation="vertical"
+          className="absolute top-0 right-0 bottom-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
+        />
+
+        <div
           className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between px-3"
           style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
+          onDoubleClick={() => {
+            if (isFrameless) void windowToggleMaximize();
+          }}
         >
           <div className="pi-no-drag flex items-center gap-2">
             {!isMacOverlay && <PiBrandMark size={19} dark={dark} />}
@@ -517,7 +798,7 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="space-y-0.5 px-2.5 pt-1 pb-2">
+        <div className="space-y-1 px-2.5 pt-1 pb-2">
           <button
             type="button"
             onClick={() => {
@@ -529,27 +810,16 @@ export function Sidebar({
           >
             <BrandIcon name="chat/new_chat" size={15} />
             <span className="flex-1 text-left">{t("nav.newChat")}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onSelectSuper}
-            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "super" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/agent" size={15} />
-            <span className="flex-1 truncate text-left">{t("super.title")}</span>
-            {activeWorkersCount > 0 && (
-              <span
-                className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
-                style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-              >
-                {activeWorkersCount}
-              </span>
-            )}
+            <kbd
+              className="rounded px-1.5 py-0.5 text-[10px]"
+              style={{
+                background: "var(--pi-wash)",
+                color: "var(--pi-ink-tertiary)",
+                fontFamily: "var(--pi-font-mono)",
+              }}
+            >
+              {formatShortcut(["mod", "n"], desktopEnv?.platform)}
+            </kbd>
           </button>
 
           <button
@@ -562,9 +832,13 @@ export function Sidebar({
             <span className="flex-1 truncate text-left">{t("nav.searchPlaceholder").replace(/…$/, "")}</span>
             <kbd
               className="rounded px-1.5 py-0.5 text-[10px]"
-              style={{ background: "var(--pi-wash)", color: "var(--pi-ink-tertiary)" }}
+              style={{
+                background: "var(--pi-wash)",
+                color: "var(--pi-ink-tertiary)",
+                fontFamily: "var(--pi-font-mono)",
+              }}
             >
-              ⌘K
+              {formatShortcut(["mod", "k"], desktopEnv?.platform)}
             </kbd>
           </button>
         </div>
@@ -578,48 +852,64 @@ export function Sidebar({
               >
                 {t("nav.localBots")}
               </span>
-              <IconButton size="sm" label={t("nav.createBot")} onClick={onOpenCreateBot}>
+              <IconButton size="sm" label={t("nav.createBot")} onClick={() => onOpenCreateBot()}>
                 <BrandIcon name="action/add" size={13.5} />
               </IconButton>
             </div>
             <div className="space-y-1">{localBots.map(renderBotGroup)}</div>
           </div>
 
-          <div className="space-y-1">
-            <div className="px-1.5">
-              <span
-                className="text-[11px] font-semibold tracking-wide"
-                style={{ color: "var(--pi-ink-tertiary)" }}
-              >
-                {t("nav.remoteBots")}
-              </span>
-            </div>
-            {remoteByDevice.length === 0 ? (
-              <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                {t("nav.noRemoteBots")}
+          {remoteGroups.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="px-1.5">
+                <span
+                  className="text-[11px] font-semibold tracking-wide"
+                  style={{ color: "var(--pi-ink-tertiary)" }}
+                >
+                  {t("nav.remoteBots")}
+                </span>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {remoteByDevice.map(([deviceKey, group]) => (
-                  <div key={deviceKey} className="space-y-1">
+              <div className="space-y-2.5">
+                {remoteGroups.map((group) => (
+                  <div key={group.deviceId} className="space-y-1">
                     <div
-                      className="flex items-center gap-1.5 px-2 text-[11.5px] font-medium"
+                      className="flex items-center justify-between gap-1.5 px-2 text-[11.5px] font-medium"
                       style={{ color: "var(--pi-ink-tertiary)" }}
                     >
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{
-                          background: group.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
-                        }}
-                      />
-                      <span className="truncate">{group.deviceName}</span>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <BrandIcon
+                          name={group.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
+                          size={12.5}
+                        />
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{
+                            background: group.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                          }}
+                        />
+                        <span className="truncate">{group.deviceName}</span>
+                      </div>
+                      {group.online && (
+                        <IconButton
+                          size="sm"
+                          label={t("nav.createBot")}
+                          onClick={() =>
+                            onOpenCreateBot({
+                              deviceId: group.deviceId,
+                              deviceName: group.deviceName,
+                            })
+                          }
+                        >
+                          <BrandIcon name="action/add" size={12} />
+                        </IconButton>
+                      )}
                     </div>
                     {group.bots.map(renderBotGroup)}
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <div

@@ -29,6 +29,9 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
   IconButton,
   Input,
   Select,
@@ -442,94 +445,113 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                     {gitSummary.files.map((f) => {
                       const active = selectedFile === f.path;
                       const badgeLabel = f.workTreeStatus || f.indexStatus || "M";
+                      const handleToggleStage = () => {
+                        if (!client) return;
+                        const op = f.staged
+                          ? client.unstageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
+                          : client.stageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId });
+                        void op
+                          .then((next) => {
+                            setGitSummary(next);
+                            void refreshChanges();
+                          })
+                          .catch((err) =>
+                            setFeedback({
+                              tone: "err",
+                              text: err instanceof Error ? err.message : "Failed",
+                            }),
+                          );
+                      };
                       return (
-                        <div
+                        <ContextMenu
                           key={f.path}
-                          className="group flex items-center gap-2 px-3 py-1.5 text-[12px]"
-                          style={{ background: active ? "var(--pi-wash)" : "transparent" }}
+                          trigger={
+                            <div
+                              className="group flex items-center gap-2 px-3 py-1.5 text-[12px]"
+                              style={{ background: active ? "var(--pi-wash)" : "transparent" }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setSelectedFile(f.path)}
+                                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                              >
+                                <span
+                                  className="w-4 shrink-0 text-center text-[11px] font-semibold"
+                                  style={{
+                                    fontFamily: "var(--pi-font-mono)",
+                                    color: f.staged ? "var(--pi-success)" : "var(--pi-warning)",
+                                  }}
+                                >
+                                  {badgeLabel}
+                                </span>
+                                <span
+                                  className="min-w-0 flex-1 truncate"
+                                  style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink)" }}
+                                >
+                                  {f.path}
+                                </span>
+                              </button>
+
+                              <span className="shrink-0 text-[11px] tabular-nums">
+                                <span style={{ color: "var(--pi-success)" }}>+{f.additions}</span>{" "}
+                                <span style={{ color: "var(--pi-danger)" }}>-{f.deletions}</span>
+                              </span>
+
+                              <div className="flex shrink-0 items-center gap-0.5">
+                                {f.staged ? (
+                                  <IconButton
+                                    size="sm"
+                                    label={t("git.unstage")}
+                                    onClick={handleToggleStage}
+                                  >
+                                    <IconMinus size={13} />
+                                  </IconButton>
+                                ) : (
+                                  <IconButton
+                                    size="sm"
+                                    label={t("git.stage")}
+                                    onClick={handleToggleStage}
+                                  >
+                                    <IconPlus size={13} />
+                                  </IconButton>
+                                )}
+                                <IconButton
+                                  size="sm"
+                                  label={t("git.revert")}
+                                  onClick={() => setRevertTarget(f.path)}
+                                >
+                                  <IconArrowBackUp size={13} />
+                                </IconButton>
+                              </div>
+                            </div>
+                          }
                         >
-                          <button
-                            type="button"
-                            onClick={() => setSelectedFile(f.path)}
-                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                          >
-                            <span
-                              className="w-4 shrink-0 text-center text-[11px] font-semibold"
-                              style={{
-                                fontFamily: "var(--pi-font-mono)",
-                                color: f.staged ? "var(--pi-success)" : "var(--pi-warning)",
-                              }}
-                            >
-                              {badgeLabel}
-                            </span>
-                            <span
-                              className="min-w-0 flex-1 truncate"
-                              style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink)" }}
-                            >
-                              {f.path}
-                            </span>
-                          </button>
-
-                          <span className="shrink-0 text-[11px] tabular-nums">
-                            <span style={{ color: "var(--pi-success)" }}>+{f.additions}</span>{" "}
-                            <span style={{ color: "var(--pi-danger)" }}>-{f.deletions}</span>
-                          </span>
-
-                          <div className="flex shrink-0 items-center gap-0.5">
-                            {f.staged ? (
-                              <IconButton
-                                size="sm"
-                                label={t("git.unstage")}
-                                onClick={() =>
-                                  client &&
-                                  void client
-                                    .unstageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
-                                    .then((next) => {
-                                      setGitSummary(next);
-                                      void refreshChanges();
-                                    })
-                                    .catch((err) =>
-                                      setFeedback({
-                                        tone: "err",
-                                        text: err instanceof Error ? err.message : "Failed",
-                                      }),
-                                    )
-                                }
-                              >
-                                <IconMinus size={13} />
-                              </IconButton>
-                            ) : (
-                              <IconButton
-                                size="sm"
-                                label={t("git.stage")}
-                                onClick={() =>
-                                  client &&
-                                  void client
-                                    .stageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
-                                    .then((next) => {
-                                      setGitSummary(next);
-                                      void refreshChanges();
-                                    })
-                                    .catch((err) =>
-                                      setFeedback({
-                                        tone: "err",
-                                        text: err instanceof Error ? err.message : "Failed",
-                                      }),
-                                    )
-                                }
-                              >
-                                <IconPlus size={13} />
-                              </IconButton>
-                            )}
-                            <IconButton
-                              size="sm"
-                              label={t("git.revert")}
-                              onClick={() => setRevertTarget(f.path)}
-                            >
-                              <IconArrowBackUp size={13} />
-                            </IconButton>
-                          </div>
-                        </div>
+                          <ContextMenuItem
+                            label={t("preview.modePreview")}
+                            onSelect={() =>
+                              useWorkbenchStore.getState().openFileInPreview({
+                                source: "workspace",
+                                botId: bot.id,
+                                path: f.path,
+                                name: f.path.split("/").pop() || f.path,
+                              })
+                            }
+                          />
+                          <ContextMenuItem
+                            label={f.staged ? t("git.unstage") : t("git.stage")}
+                            onSelect={handleToggleStage}
+                          />
+                          <ContextMenuItem
+                            label={t("files.copyPath")}
+                            onSelect={() => void navigator.clipboard?.writeText(f.path)}
+                          />
+                          <ContextMenuSeparator />
+                          <ContextMenuItem
+                            danger
+                            label={t("git.revert")}
+                            onSelect={() => setRevertTarget(f.path)}
+                          />
+                        </ContextMenu>
                       );
                     })}
                   </Card>

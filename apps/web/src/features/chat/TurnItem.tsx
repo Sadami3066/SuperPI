@@ -3,7 +3,7 @@ import { IconAlertCircle, IconSparkles } from "@tabler/icons-react";
 import { formatAttachmentSize } from "../../api/mappers";
 import type { ChatTurn, CustomCardItem, TurnBlock } from "../../api/types";
 import { useI18n } from "../../i18n";
-import { Button } from "../../ui";
+import { Button, ContextMenu, ContextMenuItem } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import { ActivityDisclosure } from "./ActivityDisclosure";
 import { AnsweredAskCard } from "./AskQuestionCard";
@@ -168,62 +168,116 @@ export const TurnItem = memo(function TurnItem({
 
   if (turn.role === "user") {
     return (
-      <div className="flex flex-col items-end py-2">
-        {turn.attachments.length > 0 && (
-          <div className="mb-1.5 flex max-w-[78%] flex-wrap justify-end gap-1.5">
-            {turn.attachments.map((chip) => (
+      <ContextMenu
+        trigger={
+          <div className="group flex flex-col items-end gap-1.5 py-2">
+            {turn.attachments.length > 0 && (
+              <div className="mb-1 flex max-w-[78%] flex-wrap justify-end gap-1.5">
+                {turn.attachments.map((chip) => (
+                  <div
+                    key={chip.id}
+                    className="inline-flex items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 text-[12px]"
+                    style={{
+                      background: "var(--pi-surface)",
+                      border: "0.5px solid var(--pi-hairline)",
+                      color: "var(--pi-ink)",
+                    }}
+                  >
+                    {chip.previewUrl ? (
+                      <img
+                        src={chip.previewUrl}
+                        alt={chip.name}
+                        className="h-5 w-5 shrink-0 rounded-[5px] object-cover"
+                      />
+                    ) : chip.kind === "image" ? (
+                      <BrandIcon name="file/image" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
+                    ) : chip.kind === "text" ? (
+                      <BrandIcon name="file/plain" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
+                    ) : (
+                      <BrandIcon name="file/attachment" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
+                    )}
+                    <span className="max-w-[180px] truncate font-medium">{chip.name}</span>
+                    {chip.size > 0 && (
+                      <span className="shrink-0 text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                        {formatAttachmentSize(chip.size)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {turn.rawText && (
               <div
-                key={chip.id}
-                className="inline-flex items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 text-[12px]"
+                className="max-w-[78%] rounded-[18px] rounded-br-[6px] px-4 py-2.5 whitespace-pre-wrap"
                 style={{
-                  background: "var(--pi-surface)",
-                  border: "0.5px solid var(--pi-hairline)",
+                  background: "var(--pi-wash)",
                   color: "var(--pi-ink)",
+                  fontSize: "calc(14.5px * var(--pi-chat-scale))",
+                  lineHeight: 1.6,
                 }}
               >
-                {chip.previewUrl ? (
-                  <img
-                    src={chip.previewUrl}
-                    alt={chip.name}
-                    className="h-5 w-5 shrink-0 rounded-[5px] object-cover"
-                  />
-                ) : chip.kind === "image" ? (
-                  <BrandIcon name="file/image" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
-                ) : chip.kind === "text" ? (
-                  <BrandIcon name="file/plain" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
-                ) : (
-                  <BrandIcon name="file/attachment" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
-                )}
-                <span className="max-w-[180px] truncate font-medium">{chip.name}</span>
-                {chip.size > 0 && (
-                  <span className="shrink-0 text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                    {formatAttachmentSize(chip.size)}
-                  </span>
-                )}
+                {turn.rawText}
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
-        {turn.rawText && (
-          <div
-            className="max-w-[78%] rounded-[18px] rounded-br-[6px] px-4 py-2.5 whitespace-pre-wrap"
-            style={{
-              background: "var(--pi-wash)",
-              color: "var(--pi-ink)",
-              fontSize: "calc(14.5px * var(--pi-chat-scale))",
-              lineHeight: 1.6,
-            }}
-          >
-            {turn.rawText}
+            {turn.rawText && (
+              <div
+                className="flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                style={{ color: "var(--pi-ink-tertiary)" }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(turn.rawText);
+                    setCopied(true);
+                    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+                    copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
+                  }}
+                  aria-label={t("chat.copy")}
+                  title={t("chat.copy")}
+                  className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                >
+                  {copied ? <BrandIcon name="status/confirm" size={13} /> : <BrandIcon name="action/copy" size={13} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onQuote(turn.rawText.slice(0, 140))}
+                  aria-label={t("chat.quote")}
+                  title={t("chat.quote")}
+                  className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                >
+                  <BrandIcon name="action/quote" size={13} />
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        }
+      >
+        <ContextMenuItem
+          icon={<BrandIcon name="action/copy" size={14} />}
+          label={t("chat.copy")}
+          disabled={!turn.rawText}
+          onSelect={() => {
+            if (turn.rawText) void navigator.clipboard?.writeText(turn.rawText);
+          }}
+        />
+        <ContextMenuItem
+          icon={<BrandIcon name="action/quote" size={14} />}
+          label={t("chat.quote")}
+          disabled={!turn.rawText}
+          onSelect={() => {
+            if (turn.rawText) onQuote(turn.rawText.slice(0, 140));
+          }}
+        />
+      </ContextMenu>
     );
   }
 
   return (
-    <div className="group py-2">
+    <ContextMenu
+      trigger={
+        <div className="group py-2">
       {(turn.notices.length > 0 || turn.reminder) && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {turn.notices.map((n, i) => (
@@ -350,6 +404,25 @@ export const TurnItem = memo(function TurnItem({
           )}
         </div>
       )}
-    </div>
+        </div>
+      }
+    >
+      <ContextMenuItem
+        icon={<BrandIcon name="action/copy" size={14} />}
+        label={t("chat.copy")}
+        disabled={!copyText}
+        onSelect={() => {
+          if (copyText) void navigator.clipboard?.writeText(copyText);
+        }}
+      />
+      <ContextMenuItem
+        icon={<BrandIcon name="action/quote" size={14} />}
+        label={t("chat.quote")}
+        disabled={!copyText}
+        onSelect={() => {
+          if (copyText) onQuote(copyText.slice(0, 140));
+        }}
+      />
+    </ContextMenu>
   );
 });

@@ -1,5 +1,6 @@
 export { Button, type ButtonSize, type ButtonVariant } from "./Button";
 export { ConfirmDialog } from "./ConfirmDialog";
+export { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "./ContextMenu";
 export { Dialog } from "./Dialog";
 export { DropdownItem, DropdownMenu, DropdownSeparator } from "./DropdownMenu";
 export { IconButton } from "./IconButton";

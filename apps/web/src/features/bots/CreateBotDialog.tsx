@@ -8,10 +8,14 @@ import { BrandIcon } from "../shared/BrandAssets";
 
 export function CreateBotDialog({
   open,
+  targetDeviceId,
+  targetDeviceName,
   onOpenChange,
   onCreated,
 }: {
   open: boolean;
+  targetDeviceId?: string | null;
+  targetDeviceName?: string | null;
   onOpenChange: (open: boolean) => void;
   onCreated: (botId: string) => void;
 }) {
@@ -35,6 +39,7 @@ export function CreateBotDialog({
         name: name.trim() || undefined,
         intro: intro.trim() || undefined,
         dir: dir.trim() || undefined,
+        targetDeviceId: targetDeviceId || undefined,
       });
       setName("");
       setIntro("");
@@ -49,7 +54,11 @@ export function CreateBotDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={t("bot.createTitle")}>
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={targetDeviceName ? `${t("bot.createTitle")} · ${targetDeviceName}` : t("bot.createTitle")}
+    >
       <form className="space-y-3.5" onSubmit={(e) => void handleCreate(e)}>
         <div className="space-y-1">
           <label className="block text-[12.5px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
@@ -85,7 +94,7 @@ export function CreateBotDialog({
               placeholder={t("bot.dirPlaceholder")}
               className="flex-1"
             />
-            {isElectronApp() && (
+            {isElectronApp() && !targetDeviceId && (
               <Button
                 variant="secondary"
                 onClick={() => {

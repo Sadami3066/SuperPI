@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HostBotDto } from "../../api/types";
 import { useI18n } from "../../i18n";
+import { isShortcutBlockedByTarget } from "../../platform/shortcuts";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
@@ -40,7 +41,23 @@ export function AppShell() {
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createBotOpen, setCreateBotOpen] = useState(false);
+  const [createBotTargetDevice, setCreateBotTargetDevice] = useState<{
+    deviceId: string;
+    deviceName: string;
+  } | null>(null);
   const [settingsBot, setSettingsBot] = useState<HostBotDto | null>(null);
+
+  const activeSummary = useSessionStore((s) => s.summariesById[s.activeSessionId]);
+
+  useEffect(() => {
+    if (activeView === "super") {
+      document.title = `Super PI — ${t("app.name")}`;
+      return;
+    }
+    const activeBot = bots.find((b) => b.id === (activeSummary?.botId ?? bots[0]?.id));
+    const titlePart = activeSummary?.title || activeBot?.name;
+    document.title = titlePart ? `${titlePart} — Super PI` : "Super PI";
+  }, [activeSummary?.botId, activeSummary?.title, activeView, bots, t]);
 
   const openSettings = (tab: SettingsTabId = "general") => {
     setSettingsTab(tab);
@@ -55,8 +72,35 @@ export function AppShell() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
+        const state = useSessionStore.getState();
+        const ordered = Object.values(state.summariesById)
+          .filter((s) => !s.archived)
+          .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+        if (ordered.length > 1 && client) {
+          e.preventDefault();
+          const curIdx = ordered.findIndex((s) => s.id === state.activeSessionId);
+          const step = e.shiftKey ? -1 : 1;
+          const next = ordered[(curIdx + step + ordered.length) % ordered.length];
+          if (next) {
+            setActiveView("chat");
+            void state.selectSession(client, next.id, locale);
+          }
+        }
+        return;
+      }
+
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "s") {
+        if (isShortcutBlockedByTarget(e.target, { hasMod: false })) return;
+        e.preventDefault();
+        setSettingsOpen(false);
+        setActiveView((v) => (v === "super" ? "chat" : "super"));
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      if (isShortcutBlockedByTarget(e.target, { allowWhenModPressed: true, hasMod: true })) return;
       const key = e.key.toLowerCase();
       if (key === "b" && !e.shiftKey) {
         e.preventDefault();
@@ -69,6 +113,7 @@ export function AppShell() {
         const botId = useSessionStore.getState().summariesById[activeSessionId]?.botId ?? bots[0]?.id;
         if (client && botId) {
           setSettingsOpen(false);
+          setActiveView("chat");
           void createSession(client, botId, locale);
         }
       } else if (key === ",") {
@@ -117,21 +162,20 @@ export function AppShell() {
       <Sidebar
         open={sidebarOpen}
         activeView={activeView}
-        onSelectSuper={() => {
-          setSettingsOpen(false);
-          setActiveView("super");
-        }}
         onSelectChat={() => setActiveView("chat")}
         onToggleCollapse={() => setSidebarOpen((v) => !v)}
         onOpenSearch={() => setPaletteOpen(true)}
-        onOpenCreateBot={() => setCreateBotOpen(true)}
+        onOpenCreateBot={(target) => {
+          setCreateBotTargetDevice(target ?? null);
+          setCreateBotOpen(true);
+        }}
         onOpenBotSettings={(bot) => setSettingsBot(bot)}
         onOpenSettings={() => openSettings("general")}
         onOpenAutomations={() => openSettings("automations")}
         onOpenArchived={() => openSettings("archived")}
       />
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <main className="pi-chat-container flex min-h-0 min-w-0 flex-1 flex-col">
         {(sseLost || error) && (
           <div className="px-4 pt-2">
             <NoticeBar
@@ -146,18 +190,24 @@ export function AppShell() {
           </div>
         )}
 
-        {activeView === "super" ? (
-          <SuperWorkspace
-            showWindowControls={!workbenchOpen}
-            onOpenProvidersSettings={() => openSettings("providers")}
-          />
-        ) : (
-          <ChatWorkspace
-            showWindowControls={!workbenchOpen}
-            onOpenBotSettings={(bot) => setSettingsBot(bot)}
-            onOpenProvidersSettings={() => openSettings("providers")}
-          />
-        )}
+        <div key={activeView} className="pi-view-enter flex min-h-0 min-w-0 flex-1 flex-col">
+          {activeView === "super" ? (
+            <SuperWorkspace
+              activeView={activeView}
+              onChangeView={(view) => setActiveView(view)}
+              showWindowControls={!workbenchOpen}
+              onOpenProvidersSettings={() => openSettings("providers")}
+            />
+          ) : (
+            <ChatWorkspace
+              activeView={activeView}
+              onChangeView={(view) => setActiveView(view)}
+              showWindowControls={!workbenchOpen}
+              onOpenBotSettings={(bot) => setSettingsBot(bot)}
+              onOpenProvidersSettings={() => openSettings("providers")}
+            />
+          )}
+        </div>
       </main>
 
       <WorkbenchDock showWindowControls={workbenchOpen} />
@@ -179,7 +229,10 @@ export function AppShell() {
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         onOpenSettings={(tab = "general") => openSettings(tab)}
-        onOpenCreateBot={() => setCreateBotOpen(true)}
+        onOpenCreateBot={() => {
+          setCreateBotTargetDevice(null);
+          setCreateBotOpen(true);
+        }}
         onSelectChatView={() => {
           setSettingsOpen(false);
           setActiveView("chat");
@@ -192,6 +245,8 @@ export function AppShell() {
 
       <CreateBotDialog
         open={createBotOpen}
+        targetDeviceId={createBotTargetDevice?.deviceId}
+        targetDeviceName={createBotTargetDevice?.deviceName}
         onOpenChange={setCreateBotOpen}
         onCreated={(botId) => {
           setActiveView("chat");

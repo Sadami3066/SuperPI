@@ -1,5 +1,6 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
+import { useWorkbenchStore } from "../stores/workbenchStore";
 
 export function DropdownMenu({
   trigger,
@@ -12,8 +13,29 @@ export function DropdownMenu({
   align?: "start" | "center" | "end";
   sideOffset?: number;
 }) {
+  const pushedRef = useRef(false);
+
+  const handleOpenChange = (open: boolean) => {
+    if (open && !pushedRef.current) {
+      pushedRef.current = true;
+      useWorkbenchStore.getState().pushOverlay();
+    } else if (!open && pushedRef.current) {
+      pushedRef.current = false;
+      useWorkbenchStore.getState().popOverlay();
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pushedRef.current) {
+        pushedRef.current = false;
+        useWorkbenchStore.getState().popOverlay();
+      }
+    };
+  }, []);
+
   return (
-    <DropdownMenuPrimitive.Root>
+    <DropdownMenuPrimitive.Root onOpenChange={handleOpenChange}>
       <DropdownMenuPrimitive.Trigger asChild>{trigger}</DropdownMenuPrimitive.Trigger>
       <DropdownMenuPrimitive.Portal>
         <DropdownMenuPrimitive.Content

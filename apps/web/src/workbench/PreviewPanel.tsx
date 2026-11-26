@@ -17,11 +17,20 @@ import type { OpenPreviewTarget } from "../api/types";
 import { MarkdownView } from "../features/chat/MarkdownView";
 import { PiMascot } from "../features/shared/BrandAssets";
 import { useI18n } from "../i18n";
+import { revealInFileManager } from "../platform/bridge";
+import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { previewTargetKey, useWorkbenchStore } from "../stores/workbenchStore";
-import { Button, IconButton } from "../ui";
+import {
+  Button,
+  ConfirmDialog,
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  IconButton,
+} from "../ui";
 import { CodeEditorView } from "./CodeEditorView";
 import { classifyPreviewKind, parseCsvRows, type PreviewKind } from "./previewClassifier";
 import type { WorkbenchPanelContext } from "./registry";
@@ -90,15 +99,18 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
 
   const activeKey = activeTarget ? previewTargetKey(activeTarget) : "";
 
-  const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
+  const [viewMode, setViewMode] = useState<"preview" | "split" | "source">("preview");
   const [zoomPct, setZoomPct] = useState(100);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [dirtyCloseKey, setDirtyCloseKey] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<LoadedContent>(() => initialLoaded("code"));
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeTargetRef = useRef<OpenPreviewTarget | null>(activeTarget);
   activeTargetRef.current = activeTarget;
+  const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
+  const bots = useBotStore((s) => s.bots);
 
   useEffect(() => {
     return () => {
@@ -263,7 +275,32 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
     const current = useSessionStore.getState().composerTextBySession[activeSessionId] ?? "";
     const next = current ? `${current.trimEnd()} ${ref} ` : `${ref} `;
     setComposerText(activeSessionId, next);
+    useSessionStore.getState().requestComposerFocus();
   };
+
+  const requestCloseTab = useCallback(
+    (key: string) => {
+      if (key === activeKey && dirty) {
+        setDirtyCloseKey(key);
+        return;
+      }
+      closePreviewFile(key);
+    },
+    [activeKey, closePreviewFile, dirty],
+  );
+
+  const closeOtherTabs = useCallback(
+    (keepKey: string) => {
+      for (const f of openFiles) {
+        const k = previewTargetKey(f);
+        if (k !== keepKey) {
+          closePreviewFile(k);
+        }
+      }
+      setActivePreviewFile(keepKey);
+    },
+    [closePreviewFile, openFiles, setActivePreviewFile],
+  );
 
   const csvRows = useMemo(() => {
     if (loaded.kind !== "csv" || !loaded.draft) return [];
@@ -291,9 +328,20 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
 
   const supportsDualMode =
     loaded.kind === "markdown" || loaded.kind === "html" || loaded.kind === "csv";
+  const supportsSplit = loaded.kind === "markdown" || loaded.kind === "html";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className="flex h-full min-h-0 flex-col outline-none"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w" && activeKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          requestCloseTab(activeKey);
+        }
+      }}
+    >
       <div
         className="flex shrink-0 items-center gap-1 overflow-x-auto px-2 py-1.5"
         style={{
@@ -304,32 +352,79 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
         {openFiles.map((file) => {
           const key = previewTargetKey(file);
           const isCur = key === activeKey;
+          const isTabDirty = isCur && dirty;
+          const fileBot =
+            file.source === "workspace" ? bots.find((b) => b.id === file.botId) : undefined;
           return (
-            <div
+            <ContextMenu
               key={key}
-              className="group flex h-7 max-w-[170px] shrink-0 items-center gap-1 rounded-[7px] px-2 text-[12px] transition-colors"
-              style={{
-                background: isCur ? "var(--pi-surface)" : "transparent",
-                color: isCur ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
-                border: isCur ? "0.5px solid var(--pi-hairline)" : "0.5px solid transparent",
-              }}
+              trigger={
+                <div
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      requestCloseTab(key);
+                    }
+                  }}
+                  className="group flex h-7 max-w-[180px] shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-[12px] transition-colors"
+                  style={{
+                    background: isCur ? "var(--pi-surface)" : "transparent",
+                    color: isCur ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+                    border: isCur ? "0.5px solid var(--pi-hairline)" : "0.5px solid transparent",
+                  }}
+                >
+                  {isTabDirty && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: "var(--pi-accent)" }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setActivePreviewFile(key)}
+                    className="min-w-0 flex-1 truncate text-left font-medium"
+                  >
+                    {file.name}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("common.close")}
+                    onClick={() => requestCloseTab(key)}
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-[var(--pi-hover)] hover:opacity-100"
+                  >
+                    <IconX size={11} stroke={1.8} />
+                  </button>
+                </div>
+              }
             >
-              <button
-                type="button"
-                onClick={() => setActivePreviewFile(key)}
-                className="min-w-0 flex-1 truncate text-left font-medium"
-              >
-                {file.name}
-              </button>
-              <button
-                type="button"
-                aria-label={t("common.close")}
-                onClick={() => closePreviewFile(key)}
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-[var(--pi-hover)] hover:opacity-100"
-              >
-                <IconX size={11} stroke={1.8} />
-              </button>
-            </div>
+              <ContextMenuItem
+                label={t("preview.closeTab")}
+                onSelect={() => requestCloseTab(key)}
+              />
+              {openFiles.length > 1 && (
+                <ContextMenuItem
+                  label={t("preview.closeOthers")}
+                  onSelect={() => closeOtherTabs(key)}
+                />
+              )}
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                label={t("files.copyPath")}
+                onSelect={() => void navigator.clipboard?.writeText(file.path)}
+              />
+              {file.source === "workspace" &&
+                isElectron &&
+                fileBot &&
+                !fileBot.isRemote &&
+                fileBot.cwd && (
+                  <ContextMenuItem
+                    label={t("nav.revealFolder")}
+                    onSelect={() =>
+                      void revealInFileManager(`${fileBot.cwd.replace(/\/+$/, "")}/${file.path}`)
+                    }
+                  />
+                )}
+            </ContextMenu>
           );
         })}
       </div>
@@ -362,6 +457,19 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
               >
                 {t("preview.modePreview")}
               </button>
+              {supportsSplit && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("split")}
+                  className="rounded-[5px] px-2 py-0.5 text-[11.5px] font-medium"
+                  style={{
+                    background: viewMode === "split" ? "var(--pi-surface)" : "transparent",
+                    color: viewMode === "split" ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+                  }}
+                >
+                  {t("preview.modeSplit")}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setViewMode("source")}
@@ -485,6 +593,23 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
               dangerouslySetInnerHTML={{ __html: loaded.docxHtml }}
             />
           </div>
+        ) : loaded.kind === "html" && viewMode === "split" ? (
+          <div className="grid h-full grid-cols-2 divide-x divide-[var(--pi-hairline)]">
+            <CodeEditorView
+              value={loaded.draft}
+              filename={activeTarget.name}
+              dark={dark}
+              readOnly={!canSave}
+              onChange={(val) => setLoaded((cur) => ({ ...cur, draft: val }))}
+              onSave={() => void handleSave()}
+            />
+            <iframe
+              sandbox="allow-scripts"
+              srcDoc={loaded.draft}
+              title={activeTarget.name}
+              className="h-full w-full border-0 bg-white"
+            />
+          </div>
         ) : loaded.kind === "html" && viewMode === "preview" ? (
           <iframe
             sandbox="allow-scripts"
@@ -492,6 +617,20 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
             title={activeTarget.name}
             className="h-full w-full border-0 bg-white"
           />
+        ) : loaded.kind === "markdown" && viewMode === "split" ? (
+          <div className="grid h-full grid-cols-2 divide-x divide-[var(--pi-hairline)]">
+            <CodeEditorView
+              value={loaded.draft}
+              filename={activeTarget.name}
+              dark={dark}
+              readOnly={!canSave}
+              onChange={(val) => setLoaded((cur) => ({ ...cur, draft: val }))}
+              onSave={() => void handleSave()}
+            />
+            <div className="h-full overflow-y-auto p-4">
+              <MarkdownView content={loaded.draft} />
+            </div>
+          </div>
         ) : loaded.kind === "markdown" && viewMode === "preview" ? (
           <div className="h-full overflow-y-auto p-5">
             <div className="mx-auto max-w-[680px]">
@@ -551,6 +690,21 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
           />
         )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(dirtyCloseKey)}
+        onOpenChange={(v) => {
+          if (!v) setDirtyCloseKey(null);
+        }}
+        title={t("preview.dirtyCloseConfirm")}
+        description={t("preview.dirtyCloseDesc", { name: activeTarget.name })}
+        confirmLabel={t("preview.closeTab")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => {
+          if (dirtyCloseKey) closePreviewFile(dirtyCloseKey);
+          setDirtyCloseKey(null);
+        }}
+      />
     </div>
   );
 }

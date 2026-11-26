@@ -171,6 +171,29 @@ body,
   animation: pi-thinking-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes pi-view-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.pi-view-enter {
+  animation: pi-view-fade-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pi-chat-container {
+  container-type: inline-size;
+}
+
+.pi-chat-gutter {
+  padding-inline: clamp(12px, 3cqi, 28px);
+}
+
 @keyframes pi-shimmer {
   0% {
     background-position: 200% center;

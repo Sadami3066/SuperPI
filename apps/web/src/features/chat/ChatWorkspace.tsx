@@ -12,6 +12,7 @@ import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, IconButton, NoticeBar, Popover } from "../../ui";
 import { BotAvatar, BrandIcon, PiMascot } from "../shared/BrandAssets";
+import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { WindowControls } from "../shell/WindowControls";
 import { Composer } from "./Composer";
 import { ContextMeter } from "./ContextMeter";
@@ -32,10 +33,14 @@ function resolveGreetingKey():
 }
 
 export function ChatWorkspace({
+  activeView,
+  onChangeView,
   showWindowControls,
   onOpenBotSettings,
   onOpenProvidersSettings,
 }: {
+  activeView: "chat" | "super";
+  onChangeView: (view: "chat" | "super") => void;
   showWindowControls: boolean;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenProvidersSettings: () => void;
@@ -86,7 +91,10 @@ export function ChatWorkspace({
 
   const [compacting, setCompacting] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const dragDepthRef = useRef(0);
+  const renameSession = useSessionStore((s) => s.renameSession);
   const snapToBottomRef = useRef<(() => void) | null>(null);
   const attachFilesRef = useRef<((files: FileList | File[]) => void) | null>(null);
 
@@ -278,24 +286,70 @@ export function ChatWorkspace({
         }}
       >
         <div className="pi-no-drag flex min-w-0 items-center gap-2">
-          <BotAvatar
-            avatar={activeBot.avatar}
-            name={activeBot.name}
-            isHome={activeBot.isHome}
-            isRemote={activeBot.isRemote}
-            dark={dark}
-            size={20}
-          />
-          <span className="truncate text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-            {activeBot.name}
-          </span>
-          {summary?.title && (
-            <span
-              className="hidden truncate text-[12.5px] sm:inline"
-              style={{ color: "var(--pi-ink-tertiary)" }}
-            >
-              / {summary.title}
+          <ModeSwitcher activeView={activeView} onChange={onChangeView} />
+
+          <button
+            type="button"
+            onClick={() => onOpenBotSettings(activeBot)}
+            title={t("nav.botSettings")}
+            className="flex h-7 min-w-0 items-center gap-1.5 rounded-full px-2 transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <BotAvatar
+              avatar={activeBot.avatar}
+              name={activeBot.name}
+              isHome={activeBot.isHome}
+              isRemote={activeBot.isRemote}
+              dark={dark}
+              size={18}
+            />
+            <span className="max-w-[140px] truncate text-[13px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+              {activeBot.name}
             </span>
+          </button>
+
+          {editingTitle && summary ? (
+            <input
+              autoFocus
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                if (client && titleDraft.trim() && titleDraft.trim() !== summary.title) {
+                  void renameSession(client, summary.id, titleDraft);
+                }
+                setEditingTitle(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  if (client && titleDraft.trim() && titleDraft.trim() !== summary.title) {
+                    void renameSession(client, summary.id, titleDraft);
+                  }
+                  setEditingTitle(false);
+                } else if (e.key === "Escape") {
+                  setEditingTitle(false);
+                }
+              }}
+              className="h-6 min-w-[140px] max-w-[240px] rounded-[6px] px-2 text-[12.5px] outline-none"
+              style={{
+                background: "var(--pi-paper)",
+                border: "0.5px solid var(--pi-accent)",
+                color: "var(--pi-ink)",
+              }}
+            />
+          ) : (
+            summary?.title && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTitleDraft(summary.title);
+                  setEditingTitle(true);
+                }}
+                title={t("nav.rename")}
+                className="hidden max-w-[220px] truncate rounded-[6px] px-1.5 py-0.5 text-[12.5px] transition-colors hover:bg-[var(--pi-hover)] sm:inline-block"
+                style={{ color: "var(--pi-ink-tertiary)" }}
+              >
+                / {summary.title}
+              </button>
+            )
           )}
           {summary?.worktreeBranch && (
             <span
@@ -320,13 +374,6 @@ export function ChatWorkspace({
               <span>{activeBot.deviceName}</span>
             </span>
           )}
-          <IconButton
-            size="sm"
-            label={t("nav.botSettings")}
-            onClick={() => onOpenBotSettings(activeBot)}
-          >
-            <BrandIcon name="system/settings" size={14} />
-          </IconButton>
         </div>
 
         <div className="pi-no-drag flex items-center gap-1">

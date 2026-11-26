@@ -21,6 +21,7 @@ import { ModelPicker } from "../chat/ModelPicker";
 import { StreamingTurnView } from "../chat/StreamingTurnView";
 import { TurnItem } from "../chat/TurnItem";
 import { BrandIcon, PiActivityIcon, PiMascot } from "../shared/BrandAssets";
+import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { WindowControls } from "../shell/WindowControls";
 import { SuperTeamDialog } from "./SuperTeamDialog";
 import { WorkerDetailDialog } from "./WorkerDetailDialog";
@@ -49,9 +50,13 @@ function workerPriority(w: HostWorkerDto): number {
 }
 
 export function SuperWorkspace({
+  activeView,
+  onChangeView,
   showWindowControls,
   onOpenProvidersSettings,
 }: {
+  activeView: "chat" | "super";
+  onChangeView: (view: "chat" | "super") => void;
   showWindowControls: boolean;
   onOpenProvidersSettings: () => void;
 }) {
@@ -237,10 +242,7 @@ export function SuperWorkspace({
         }}
       >
         <div className="pi-no-drag flex min-w-0 items-center gap-2">
-          <BrandIcon name="ai/agent" size={16} />
-          <span className="truncate text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-            {t("super.title")}
-          </span>
+          <ModeSwitcher activeView={activeView} onChange={onChangeView} />
           {runningWorkersCount > 0 && (
             <Badge tone="accent">
               {t("super.workersRunning", { count: runningWorkersCount })}

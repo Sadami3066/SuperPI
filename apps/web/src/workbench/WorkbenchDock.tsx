@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { windowToggleMaximize } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
@@ -31,6 +31,10 @@ export function WorkbenchDock({
   const isElectron = Boolean(desktopEnv?.isElectron);
   const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
 
+  const [resizing, setResizing] = useState(false);
+  const hasOpenedRef = useRef(open);
+  if (open) hasOpenedRef.current = true;
+
   const dragCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     return () => {
@@ -38,12 +42,17 @@ export function WorkbenchDock({
     };
   }, []);
 
-  if (!open) return null;
+  if (!hasOpenedRef.current) return null;
 
   const botId = activeSummary?.botId ?? bots[0]?.id ?? "home";
   const ctx = { botId, sessionId: activeSessionId || null, payload };
   const available = getAvailableWorkbenchPanels(ctx, isElectron);
   const resolvedPanel = getWorkbenchPanel(activePanelId) ?? available[0] ?? null;
+
+  const clampDynamicWidth = (raw: number) => {
+    const maxW = typeof window !== "undefined" ? Math.min(720, Math.max(360, window.innerWidth - 420)) : 720;
+    return Math.min(maxW, Math.max(360, Math.round(raw)));
+  };
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -51,8 +60,9 @@ export function WorkbenchDock({
     const startWidth = width;
     let latestWidth = startWidth;
     let moveRaf: number | null = null;
+    setResizing(true);
     const onMove = (ev: MouseEvent) => {
-      latestWidth = startWidth + (startX - ev.clientX);
+      latestWidth = clampDynamicWidth(startWidth + (startX - ev.clientX));
       if (moveRaf !== null) return;
       moveRaf = requestAnimationFrame(() => {
         moveRaf = null;
@@ -64,7 +74,8 @@ export function WorkbenchDock({
         cancelAnimationFrame(moveRaf);
         moveRaf = null;
       }
-      setWidth(latestWidth, true);
+      setResizing(false);
+      setWidth(clampDynamicWidth(latestWidth), true);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", cleanup);
       dragCleanupRef.current = null;
@@ -75,20 +86,24 @@ export function WorkbenchDock({
   };
 
   return (
-    <aside
-      className="relative flex h-full shrink-0 flex-col"
-      style={{
-        width,
-        background: "var(--pi-paper)",
-        borderLeft: "0.5px solid var(--pi-hairline)",
-      }}
-    >
-      <div
-        onMouseDown={startResize}
-        role="separator"
-        aria-orientation="vertical"
-        className="absolute top-0 bottom-0 left-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
-      />
+    <>
+      {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
+      <aside
+        className="relative h-full shrink-0 flex-col"
+        style={{
+          display: open ? "flex" : "none",
+          width: clampDynamicWidth(width),
+          background: "var(--pi-paper)",
+          borderLeft: "0.5px solid var(--pi-hairline)",
+        }}
+      >
+        <div
+          onMouseDown={startResize}
+          onDoubleClick={() => setWidth(520, true)}
+          role="separator"
+          aria-orientation="vertical"
+          className="absolute top-0 bottom-0 left-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
+        />
 
       <div
         className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-3"
@@ -143,6 +158,7 @@ export function WorkbenchDock({
           </Suspense>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

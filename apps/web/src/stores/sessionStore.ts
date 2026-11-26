@@ -115,6 +115,8 @@ export interface SessionStoreState {
   archivedSessions: SessionSummary[];
   pendingQuestions: HostPendingQuestionDto[];
   activeSessionId: string;
+  unreadSessionIds: Record<string, true>;
+  composerFocusTick: number;
   composerTextBySession: Record<string, string>;
   quotedTextBySession: Record<string, string | null>;
   planFirstBySession: Record<string, boolean>;
@@ -138,6 +140,11 @@ export interface SessionStoreState {
   createSession: (
     client: HostClient,
     botId: string,
+    locale: "zh-CN" | "en",
+  ) => Promise<string | null>;
+  forkSession: (
+    client: HostClient,
+    sessionId: string,
     locale: "zh-CN" | "en",
   ) => Promise<string | null>;
   renameSession: (client: HostClient, sessionId: string, title: string) => Promise<void>;
@@ -193,6 +200,9 @@ export interface SessionStoreState {
   setQuotedText: (sessionId: string, value: string | null) => void;
   togglePlanFirst: (sessionId: string) => void;
   setSessionBusy: (sessionId: string, busy: boolean) => void;
+  markSessionUnread: (sessionId: string) => void;
+  clearSessionUnread: (sessionId: string) => void;
+  requestComposerFocus: () => void;
   reset: () => void;
 }
 
@@ -220,6 +230,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   archivedSessions: [],
   pendingQuestions: [],
   activeSessionId: loadStoredSessionId(),
+  unreadSessionIds: {},
+  composerFocusTick: 0,
   composerTextBySession: {},
   quotedTextBySession: {},
   planFirstBySession: {},
@@ -421,7 +433,14 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     saveStoredSessionId(sessionId);
     set((s) => {
       const nextOrder = s.transcriptsById[sessionId] ? touchLru(s.lruOrder, sessionId) : s.lruOrder;
-      return { activeSessionId: sessionId, lruOrder: nextOrder };
+      const nextUnread = { ...s.unreadSessionIds };
+      delete nextUnread[sessionId];
+      return {
+        activeSessionId: sessionId,
+        lruOrder: nextOrder,
+        unreadSessionIds: nextUnread,
+        composerFocusTick: s.composerFocusTick + 1,
+      };
     });
     await get().loadSession(client, sessionId, locale);
   },
@@ -460,12 +479,26 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       return {
         ...evicted,
         activeSessionId: id,
+        composerFocusTick: s.composerFocusTick + 1,
         summariesById: { ...s.summariesById, [id]: summary },
         sessionIdsByBot: { ...s.sessionIdsByBot, [botId]: [id, ...existingIds] },
       };
     });
     void get().loadSession(client, id, locale);
     return id;
+  },
+
+  forkSession: async (client, sessionId, locale) => {
+    const src = get().summariesById[sessionId];
+    const forkTitle = src?.title ? `${src.title} (branch)` : undefined;
+    const res = await client.forkSession(sessionId, forkTitle ? { title: forkTitle } : undefined);
+    const bots = useBotStore.getState().bots;
+    await get().refreshSessionLists(client, bots);
+    if (res.sessionId) {
+      await get().selectSession(client, res.sessionId, locale);
+      return res.sessionId;
+    }
+    return null;
   },
 
   renameSession: async (client, sessionId, title) => {
@@ -823,6 +856,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   setQuotedText: (sessionId, value) => {
     set((s) => ({
       quotedTextBySession: { ...s.quotedTextBySession, [sessionId]: value },
+      composerFocusTick: value ? s.composerFocusTick + 1 : s.composerFocusTick,
     }));
   },
 
@@ -845,6 +879,25 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     });
   },
 
+  markSessionUnread: (sessionId) => {
+    set((s) => ({
+      unreadSessionIds: { ...s.unreadSessionIds, [sessionId]: true },
+    }));
+  },
+
+  clearSessionUnread: (sessionId) => {
+    set((s) => {
+      if (!s.unreadSessionIds[sessionId]) return s;
+      const next = { ...s.unreadSessionIds };
+      delete next[sessionId];
+      return { unreadSessionIds: next };
+    });
+  },
+
+  requestComposerFocus: () => {
+    set((s) => ({ composerFocusTick: s.composerFocusTick + 1 }));
+  },
+
   reset: () => {
     inFlightLoads.clear();
     pendingLoads.clear();
@@ -855,6 +908,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       lruOrder: [],
       archivedSessions: [],
       pendingQuestions: [],
+      unreadSessionIds: {},
     });
   },
 }));

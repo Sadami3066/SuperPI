@@ -62,7 +62,7 @@ export function MessageList({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6">
+      <div ref={scrollRef} className="pi-chat-gutter min-h-0 flex-1 overflow-y-auto">
         <div ref={contentRef} className="mx-auto w-full max-w-[740px] pt-4 pb-16">
           <div
             className="relative w-full"

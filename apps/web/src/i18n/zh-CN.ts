@@ -587,6 +587,22 @@ export const zhCN = {
   "enum.platform.windows": "Windows",
   "enum.platform.linux": "Linux",
   "enum.platform.desktop": "桌面端",
+
+  "nav.fork": "复制分支",
+  "nav.revealFolder": "在文件管理器中显示",
+  "nav.copyPath": "复制路径",
+  "nav.showAllSessions": "展开全部 {count} 条对话",
+  "nav.collapseSessions": "收起列表",
+  "files.newFile": "新建文件",
+  "files.newFileName": "文件名或相对路径",
+  "preview.modeSplit": "分栏",
+  "preview.dirtyCloseConfirm": "放弃未保存的更改？",
+  "preview.dirtyCloseDesc": "「{name}」有尚未保存的修改，关闭后将丢失。",
+  "preview.closeTab": "关闭标签页",
+  "preview.closeOthers": "关闭其他标签页",
+  "code.runInTerminal": "在终端运行",
+  "code.collapse": "折叠代码块",
+  "code.expand": "展开代码块",
 } as const;
 
 export type I18nKey = keyof typeof zhCN;

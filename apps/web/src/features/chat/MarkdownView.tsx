@@ -31,6 +31,11 @@ import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { useI18n } from "../../i18n";
 import { openExternalUrl } from "../../platform/bridge";
+import { useBotStore } from "../../stores/botStore";
+import { useConnectionStore } from "../../stores/connectionStore";
+import { useSessionStore } from "../../stores/sessionStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
+import { ContextMenu, ContextMenuItem } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import {
   splitMarkdownBlocks,
@@ -147,88 +152,138 @@ const CodeBlock = memo(function CodeBlock({
     return count;
   }, [code]);
   const collapsible = !streaming && lineCount > COLLAPSE_LINE_THRESHOLD;
+  const isShellCode = /^(bash|sh|shell|zsh)$/i.test(language);
+
+  const runInTerminal = () => {
+    const client = useConnectionStore.getState().client;
+    const activeSessionId = useSessionStore.getState().activeSessionId;
+    const summary = useSessionStore.getState().summariesById[activeSessionId];
+    const bots = useBotStore.getState().bots;
+    const bot = bots.find((b) => b.id === summary?.botId) ?? bots[0];
+    if (!client || !bot || bot.isRemote) return;
+    const workbench = useWorkbenchStore.getState();
+    const worktreeId = workbench.activeWorktreeByBot[bot.id] ?? summary?.worktreeId ?? null;
+    workbench.openPanel("terminal");
+    void client
+      .listTerminals(bot.id)
+      .then(async (list) => {
+        const term = list[0] ?? (await client.createTerminal(bot.id, { worktreeId, fresh: false }));
+        const cmd = code.endsWith("\n") ? code : `${code}\n`;
+        await client.sendTerminalInput(term.id, cmd);
+      })
+      .catch(() => void 0);
+  };
 
   return (
-    <div
-      ref={rootRef}
-      className="my-3 overflow-hidden rounded-[12px]"
-      style={{
-        background: "var(--pi-code-bg)",
-        border: "0.5px solid var(--pi-surface-rim)",
-      }}
-    >
-      <div
-        className="flex items-center justify-between px-3.5 py-1.5"
-        style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[11.5px] font-medium"
-            style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
-          >
-            {language || "code"}
-          </span>
-          {collapsible && (
-            <span className="text-[11px] tabular-nums" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {lineCount}L
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {collapsible && (
-            <button
-              type="button"
-              onClick={() => {
-                const next = !collapsed;
-                setCollapsed(next);
-                if (next) {
-                  requestAnimationFrame(() => {
-                    rootRef.current?.scrollIntoView({ block: "nearest" });
-                  });
-                }
-              }}
-              aria-label={collapsed ? "Expand" : "Collapse"}
-              className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
-              style={{ color: "var(--pi-ink-tertiary)" }}
-            >
-              <BrandIcon
-                name="navigation/chevron_down"
-                size={14}
-                className="transition-transform duration-150"
-                style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
-              />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              void navigator.clipboard?.writeText(code);
-              setCopied(true);
-              if (timerRef.current !== null) clearTimeout(timerRef.current);
-              timerRef.current = setTimeout(() => setCopied(false), 1200);
-            }}
-            aria-label={t("chat.copy")}
-            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-tertiary)" }}
-          >
-            {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
-          </button>
-        </div>
-      </div>
-      {!collapsed && (
-        <pre
-          data-scrollable
-          className="overflow-x-auto px-3.5 py-3 text-[13px] leading-[1.6]"
-          style={{ fontFamily: "var(--pi-font-mono)" }}
+    <ContextMenu
+      trigger={
+        <div
+          ref={rootRef}
+          className="my-3 overflow-hidden rounded-[12px]"
+          style={{
+            background: "var(--pi-code-bg)",
+            border: "0.5px solid var(--pi-surface-rim)",
+          }}
         >
-          {deferredHtml !== null ? (
-            <code className="hljs" dangerouslySetInnerHTML={{ __html: deferredHtml }} />
-          ) : (
-            <code>{code}</code>
+          <div
+            className="flex items-center justify-between px-3.5 py-1.5"
+            style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[11.5px] font-medium"
+                style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
+              >
+                {language || "code"}
+              </span>
+              {collapsible && (
+                <span className="text-[11px] tabular-nums" style={{ color: "var(--pi-ink-tertiary)" }}>
+                  {lineCount}L
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {collapsible && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !collapsed;
+                    setCollapsed(next);
+                    if (next) {
+                      requestAnimationFrame(() => {
+                        rootRef.current?.scrollIntoView({ block: "nearest" });
+                      });
+                    }
+                  }}
+                  aria-label={collapsed ? "Expand" : "Collapse"}
+                  className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                  style={{ color: "var(--pi-ink-tertiary)" }}
+                >
+                  <BrandIcon
+                    name="navigation/chevron_down"
+                    size={14}
+                    className="transition-transform duration-150"
+                    style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
+                  />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(code);
+                  setCopied(true);
+                  if (timerRef.current !== null) clearTimeout(timerRef.current);
+                  timerRef.current = setTimeout(() => setCopied(false), 1200);
+                }}
+                aria-label={t("chat.copy")}
+                className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                style={{ color: "var(--pi-ink-tertiary)" }}
+              >
+                {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
+              </button>
+            </div>
+          </div>
+          {!collapsed && (
+            <pre
+              data-scrollable
+              className="overflow-x-auto px-3.5 py-3 text-[13px] leading-[1.6]"
+              style={{ fontFamily: "var(--pi-font-mono)" }}
+            >
+              {deferredHtml !== null ? (
+                <code className="hljs" dangerouslySetInnerHTML={{ __html: deferredHtml }} />
+              ) : (
+                <code>{code}</code>
+              )}
+            </pre>
           )}
-        </pre>
+        </div>
+      }
+    >
+      <ContextMenuItem
+        icon={<BrandIcon name="action/copy" size={14} />}
+        label={t("chat.copy")}
+        onSelect={() => {
+          void navigator.clipboard?.writeText(code);
+          setCopied(true);
+          if (timerRef.current !== null) clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => setCopied(false), 1200);
+        }}
+      />
+      {isShellCode && (
+        <ContextMenuItem
+          icon={<BrandIcon name="system/terminal" size={14} />}
+          label={t("code.runInTerminal")}
+          onSelect={runInTerminal}
+        />
       )}
-    </div>
+      {collapsible && (
+        <ContextMenuItem
+          icon={<BrandIcon name="navigation/chevron_down" size={14} />}
+          label={collapsed ? t("code.expand") : t("code.collapse")}
+          onSelect={() => setCollapsed((v) => !v)}
+        />
+      )}
+    </ContextMenu>
   );
 });
 

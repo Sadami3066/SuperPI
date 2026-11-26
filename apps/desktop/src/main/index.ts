@@ -6,7 +6,9 @@ import {
   dialog,
   ipcMain,
   Menu,
+  type MenuItemConstructorOptions,
   nativeImage,
+  nativeTheme,
   protocol,
   shell,
   Tray,
@@ -19,7 +21,7 @@ import {
 } from "../shared/bridge.js";
 import { EmbeddedBrowserManager } from "./browser-view.js";
 import { HostManager } from "./host-manager.js";
-import { loadWindowState, saveWindowState } from "./window-state.js";
+import { loadWindowState, saveWindowBackgroundColor, saveWindowState } from "./window-state.js";
 
 const APP_SCHEME = "superpi";
 const APP_ORIGIN = `${APP_SCHEME}://app`;
@@ -179,17 +181,36 @@ function createTray(): void {
 }
 
 function configureApplicationMenu(): void {
+  const editMenu: MenuItemConstructorOptions = { role: "editMenu" };
+  const viewSubmenu: MenuItemConstructorOptions[] = [
+    { role: "reload" },
+    { role: "forceReload" },
+    { type: "separator" },
+    { role: "resetZoom" },
+    { role: "zoomIn" },
+    { role: "zoomOut" },
+    { type: "separator" },
+    { role: "togglefullscreen" },
+  ];
+  if (!app.isPackaged) {
+    viewSubmenu.push({ type: "separator" }, { role: "toggleDevTools" });
+  }
+  const viewMenu: MenuItemConstructorOptions = {
+    label: "View",
+    submenu: viewSubmenu,
+  };
   if (process.platform === "darwin") {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         { role: "appMenu" },
-        { role: "editMenu" },
+        editMenu,
+        viewMenu,
         { role: "windowMenu" },
       ]),
     );
     return;
   }
-  Menu.setApplicationMenu(null);
+  Menu.setApplicationMenu(Menu.buildFromTemplate([editMenu, viewMenu]));
 }
 
 function createMainWindow(): void {
@@ -197,6 +218,8 @@ function createMainWindow(): void {
   const bounds = loadWindowState(hostManager.homeDir);
   const appIconPath = resolveIconPath(repoRoot, "icon.png");
   const isMac = process.platform === "darwin";
+  const initialBg =
+    bounds.backgroundColor || (nativeTheme.shouldUseDarkColors ? "#161614" : "#f7f6f2");
 
   const win = new BrowserWindow({
     width: bounds.width,
@@ -208,7 +231,7 @@ function createMainWindow(): void {
     show: false,
     title: "Super PI",
     icon: appIconPath ?? undefined,
-    backgroundColor: "#f4f4f2",
+    backgroundColor: initialBg,
     frame: isMac,
     ...(isMac
       ? {
@@ -282,6 +305,42 @@ function createMainWindow(): void {
       if (isAllowedExternalUrl(url)) {
         void shell.openExternal(url);
       }
+    }
+  });
+
+  win.webContents.on("context-menu", (_event, params) => {
+    const hasSelection = params.selectionText.trim().length > 0;
+    if (!params.isEditable && !hasSelection) return;
+    const isEn = currentLocale === "en";
+    const template: MenuItemConstructorOptions[] = [];
+    if (params.isEditable) {
+      template.push(
+        { role: "undo", label: isEn ? "Undo" : "撤销", enabled: params.editFlags.canUndo },
+        { role: "redo", label: isEn ? "Redo" : "重做", enabled: params.editFlags.canRedo },
+        { type: "separator" },
+        { role: "cut", label: isEn ? "Cut" : "剪切", enabled: params.editFlags.canCut },
+        { role: "copy", label: isEn ? "Copy" : "复制", enabled: params.editFlags.canCopy },
+        { role: "paste", label: isEn ? "Paste" : "粘贴", enabled: params.editFlags.canPaste },
+        { type: "separator" },
+        { role: "selectAll", label: isEn ? "Select All" : "全选" },
+      );
+    } else if (hasSelection) {
+      template.push(
+        { role: "copy", label: isEn ? "Copy" : "复制", enabled: params.editFlags.canCopy },
+        { role: "selectAll", label: isEn ? "Select All" : "全选" },
+      );
+    }
+    if (!app.isPackaged) {
+      template.push(
+        { type: "separator" },
+        {
+          label: isEn ? "Inspect Element" : "检查元素",
+          click: () => win.webContents.inspectElement(params.x, params.y),
+        },
+      );
+    }
+    if (template.length > 0) {
+      Menu.buildFromTemplate(template).popup({ window: win });
     }
   });
 
@@ -361,9 +420,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.setThemeAppearance,
     async (_event, _dark: boolean, surfaceColor: string) => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
       if (typeof surfaceColor === "string" && surfaceColor.startsWith("#")) {
-        mainWindow.setBackgroundColor(surfaceColor);
+        saveWindowBackgroundColor(hostManager.homeDir, surfaceColor);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setBackgroundColor(surfaceColor);
+        }
       }
     },
   );

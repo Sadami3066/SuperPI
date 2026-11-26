@@ -238,6 +238,9 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
   if (ev.type === "run_finished") {
     streamStore.finishRun(sid, runId, ev.status, ev.text);
     sessionStore.setSessionBusy(sid, false);
+    if (sid !== sessionStore.activeSessionId) {
+      sessionStore.markSessionUnread(sid);
+    }
     void sessionStore.loadSession(client, sid, locale, runId);
     return;
   }

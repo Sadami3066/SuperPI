@@ -9,7 +9,7 @@ import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
-import { Button, ConfirmDialog, Dialog, IconButton, Input } from "../ui";
+import { Button, ConfirmDialog, ContextMenu, ContextMenuItem, ContextMenuSeparator, Dialog, IconButton, Input } from "../ui";
 import type { WorkbenchPanelContext } from "./registry";
 
 function fileToBase64(file: File): Promise<string> {
@@ -58,6 +58,8 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
 
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [mkdirDraft, setMkdirDraft] = useState("");
+  const [newFileOpen, setNewFileOpen] = useState(false);
+  const [newFileDraft, setNewFileDraft] = useState("");
   const [renameTarget, setRenameTarget] = useState<HostWorkspaceFileEntryDto | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<HostWorkspaceFileEntryDto | null>(null);
@@ -130,6 +132,7 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
     const current = useSessionStore.getState().composerTextBySession[activeSessionId] ?? "";
     const next = current ? `${current.trimEnd()} ${token} ` : `${token} `;
     setComposerText(activeSessionId, next);
+    useSessionStore.getState().requestComposerFocus();
   };
 
   const handleUploadFiles = async (files: FileList | null) => {
@@ -168,6 +171,10 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
               className="h-8 pl-8 text-[12.5px]"
             />
           </div>
+
+          <IconButton size="sm" label={t("files.newFile")} onClick={() => setNewFileOpen(true)}>
+            <BrandIcon name="action/add" size={15} />
+          </IconButton>
 
           <IconButton size="sm" label={t("files.newFolder")} onClick={() => setMkdirOpen(true)}>
             <IconFolderPlus size={15} stroke={1.7} />
@@ -261,71 +268,160 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
         ) : (
           <div className="space-y-0.5">
             {visibleEntries.map((entry) => (
-              <div
+              <ContextMenu
                 key={entry.path}
-                className="group flex h-[32px] items-center gap-1.5 rounded-[8px] px-2 transition-colors hover:bg-[var(--pi-hover)]"
+                trigger={
+                  <div className="group flex h-[32px] items-center gap-1.5 rounded-[8px] px-2 transition-colors hover:bg-[var(--pi-hover)]">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEntry(entry)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <EntryIcon entry={entry} />
+                      <span
+                        className="min-w-0 flex-1 truncate text-[12.5px]"
+                        style={{ color: "var(--pi-ink)" }}
+                      >
+                        {searchEntries ? entry.path : entry.name}
+                      </span>
+                    </button>
+
+                    <div className="relative flex h-6 w-[108px] shrink-0 items-center justify-end">
+                      {!entry.isDirectory && (
+                        <span
+                          className="pointer-events-none text-[11px] tabular-nums transition-opacity duration-150 group-hover:opacity-0"
+                          style={{ color: "var(--pi-ink-tertiary)" }}
+                        >
+                          {formatAttachmentSize(entry.sizeBytes)}
+                        </span>
+                      )}
+
+                      <div className="absolute right-0 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <IconButton
+                          size="sm"
+                          label={t("files.insertPath")}
+                          onClick={() => handleInsertToChat(entry)}
+                        >
+                          <IconMessageForward size={13.5} stroke={1.7} />
+                        </IconButton>
+                        <IconButton
+                          size="sm"
+                          label={t("files.copyPath")}
+                          onClick={() => void navigator.clipboard?.writeText(entry.path)}
+                        >
+                          <BrandIcon name="action/copy" size={13} />
+                        </IconButton>
+                        <IconButton
+                          size="sm"
+                          label={t("files.rename")}
+                          onClick={() => {
+                            setRenameTarget(entry);
+                            setRenameDraft(entry.path);
+                          }}
+                        >
+                          <BrandIcon name="action/pen" size={13} />
+                        </IconButton>
+                        <IconButton
+                          size="sm"
+                          label={t("common.delete")}
+                          onClick={() => setDeleteTarget(entry)}
+                        >
+                          <BrandIcon name="action/delete" size={13} />
+                        </IconButton>
+                      </div>
+                    </div>
+                  </div>
+                }
               >
-                <button
-                  type="button"
-                  onClick={() => handleOpenEntry(entry)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                >
-                  <EntryIcon entry={entry} />
-                  <span
-                    className="min-w-0 flex-1 truncate text-[12.5px]"
-                    style={{ color: "var(--pi-ink)" }}
-                  >
-                    {searchEntries ? entry.path : entry.name}
-                  </span>
-                </button>
-
                 {!entry.isDirectory && (
-                  <span
-                    className="shrink-0 text-[11px] tabular-nums group-hover:hidden"
-                    style={{ color: "var(--pi-ink-tertiary)" }}
-                  >
-                    {formatAttachmentSize(entry.sizeBytes)}
-                  </span>
+                  <ContextMenuItem
+                    icon={<BrandIcon name="action/eye" size={14} />}
+                    label={t("preview.modePreview")}
+                    onSelect={() => handleOpenEntry(entry)}
+                  />
                 )}
-
-                <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                  <IconButton
-                    size="sm"
-                    label={t("files.insertPath")}
-                    onClick={() => handleInsertToChat(entry)}
-                  >
-                    <IconMessageForward size={13.5} stroke={1.7} />
-                  </IconButton>
-                  <IconButton
-                    size="sm"
-                    label={t("files.copyPath")}
-                    onClick={() => void navigator.clipboard?.writeText(entry.path)}
-                  >
-                    <BrandIcon name="action/copy" size={13} />
-                  </IconButton>
-                  <IconButton
-                    size="sm"
-                    label={t("files.rename")}
-                    onClick={() => {
-                      setRenameTarget(entry);
-                      setRenameDraft(entry.path);
+                <ContextMenuItem
+                  icon={<IconMessageForward size={14} />}
+                  label={t("files.insertPath")}
+                  onSelect={() => handleInsertToChat(entry)}
+                />
+                <ContextMenuItem
+                  icon={<BrandIcon name="action/copy" size={14} />}
+                  label={t("files.copyPath")}
+                  onSelect={() => void navigator.clipboard?.writeText(entry.path)}
+                />
+                {!bot.isRemote && isElectron && bot.cwd && (
+                  <ContextMenuItem
+                    icon={<BrandIcon name="file/folder_open" size={14} />}
+                    label={t("nav.revealFolder")}
+                    onSelect={() => {
+                      const abs = `${bot.cwd.replace(/\/+$/, "")}/${entry.path}`;
+                      void revealInFileManager(abs);
                     }}
-                  >
-                    <BrandIcon name="action/pen" size={13} />
-                  </IconButton>
-                  <IconButton
-                    size="sm"
-                    label={t("common.delete")}
-                    onClick={() => setDeleteTarget(entry)}
-                  >
-                    <BrandIcon name="action/delete" size={13} />
-                  </IconButton>
-                </div>
-              </div>
+                  />
+                )}
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  icon={<BrandIcon name="action/pen" size={14} />}
+                  label={t("files.rename")}
+                  onSelect={() => {
+                    setRenameTarget(entry);
+                    setRenameDraft(entry.path);
+                  }}
+                />
+                <ContextMenuItem
+                  danger
+                  icon={<BrandIcon name="action/delete" size={14} />}
+                  label={t("common.delete")}
+                  onSelect={() => setDeleteTarget(entry)}
+                />
+              </ContextMenu>
             ))}
           </div>
         )}
       </div>
+
+      <Dialog open={newFileOpen} onOpenChange={setNewFileOpen} title={t("files.newFile")} maxWidthClass="max-w-[380px]">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const raw = newFileDraft.trim().replace(/^\/+/, "");
+            if (!client || !raw) return;
+            const target = raw.includes("/") || !currentPath ? raw : `${currentPath}/${raw}`;
+            const fileName = target.split("/").pop() || target;
+            void client
+              .uploadBotFile(bot.id, { path: target, dataBase64: "", overwrite: false })
+              .then(() => {
+                setNewFileDraft("");
+                setNewFileOpen(false);
+                void loadDir(currentPath);
+                openFileInPreview({
+                  source: "workspace",
+                  botId: bot.id,
+                  path: target,
+                  name: fileName,
+                });
+              })
+              .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+          }}
+        >
+          <Input
+            autoFocus
+            value={newFileDraft}
+            onChange={(e) => setNewFileDraft(e.target.value)}
+            placeholder={t("files.newFileName")}
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setNewFileOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={!newFileDraft.trim()}>
+              {t("common.confirm")}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
 
       <Dialog open={mkdirOpen} onOpenChange={setMkdirOpen} title={t("files.newFolder")} maxWidthClass="max-w-[380px]">
         <form

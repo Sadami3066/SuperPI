@@ -1,5 +1,7 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
+import { useEffect, useRef } from "react";
 import { BrandIcon } from "../features/shared/BrandAssets";
+import { useWorkbenchStore } from "../stores/workbenchStore";
 
 export interface SelectOption {
   value: string;
@@ -24,11 +26,32 @@ export function Select({
   size?: "sm" | "md";
   className?: string;
 }) {
+  const pushedRef = useRef(false);
+
+  const handleOpenChange = (open: boolean) => {
+    if (open && !pushedRef.current) {
+      pushedRef.current = true;
+      useWorkbenchStore.getState().pushOverlay();
+    } else if (!open && pushedRef.current) {
+      pushedRef.current = false;
+      useWorkbenchStore.getState().popOverlay();
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pushedRef.current) {
+        pushedRef.current = false;
+        useWorkbenchStore.getState().popOverlay();
+      }
+    };
+  }, []);
+
   const triggerSize =
     size === "sm" ? "h-7 px-2.5 text-[12px] rounded-full" : "h-9 px-3 text-[13.5px] rounded-[10px]";
 
   return (
-    <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
+    <SelectPrimitive.Root value={value} onValueChange={onValueChange} onOpenChange={handleOpenChange}>
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={`inline-flex items-center justify-between gap-2 outline-none transition-colors hover:bg-[var(--pi-hover)] ${triggerSize} ${className}`}

@@ -8,6 +8,7 @@ export interface WindowBoundsState {
   x?: number;
   y?: number;
   maximized?: boolean;
+  backgroundColor?: string;
 }
 
 const DEFAULT_WIDTH = 1280;
@@ -54,6 +55,10 @@ export function loadWindowState(homeDir: string): WindowBoundsState {
       x: hasPos ? Math.round(parsed.x!) : undefined,
       y: hasPos ? Math.round(parsed.y!) : undefined,
       maximized: Boolean(parsed.maximized),
+      backgroundColor:
+        typeof parsed.backgroundColor === "string" && parsed.backgroundColor.startsWith("#")
+          ? parsed.backgroundColor
+          : undefined,
     };
   } catch {
     return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
@@ -64,6 +69,15 @@ export function saveWindowState(homeDir: string, win: BrowserWindow): void {
   try {
     const file = statePath(homeDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    let existingBackground: string | undefined;
+    try {
+      const prev = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<WindowBoundsState>;
+      if (typeof prev.backgroundColor === "string" && prev.backgroundColor.startsWith("#")) {
+        existingBackground = prev.backgroundColor;
+      }
+    } catch {
+      existingBackground = undefined;
+    }
     const maximized = win.isMaximized();
     const bounds = maximized ? win.getNormalBounds() : win.getBounds();
     const next: WindowBoundsState = {
@@ -72,6 +86,32 @@ export function saveWindowState(homeDir: string, win: BrowserWindow): void {
       x: bounds.x,
       y: bounds.y,
       maximized,
+      backgroundColor: existingBackground,
+    };
+    fs.writeFileSync(file, JSON.stringify(next), "utf8");
+  } catch {
+    return;
+  }
+}
+
+export function saveWindowBackgroundColor(homeDir: string, color: string): void {
+  if (!color.startsWith("#")) return;
+  try {
+    const file = statePath(homeDir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    let prev: Partial<WindowBoundsState> = {};
+    try {
+      prev = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<WindowBoundsState>;
+    } catch {
+      prev = {};
+    }
+    const next: WindowBoundsState = {
+      width: typeof prev.width === "number" ? prev.width : DEFAULT_WIDTH,
+      height: typeof prev.height === "number" ? prev.height : DEFAULT_HEIGHT,
+      x: typeof prev.x === "number" ? prev.x : undefined,
+      y: typeof prev.y === "number" ? prev.y : undefined,
+      maximized: Boolean(prev.maximized),
+      backgroundColor: color,
     };
     fs.writeFileSync(file, JSON.stringify(next), "utf8");
   } catch {
