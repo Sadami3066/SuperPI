@@ -55,7 +55,6 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
   const overlayCount = useWorkbenchStore((s) => s.overlayCount);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId) || context.sessionId || "";
-  const composerText = useSessionStore((s) => s.composerTextBySession[activeSessionId] ?? "");
   const setComposerText = useSessionStore((s) => s.setComposerText);
 
   const [navState, setNavState] = useState<BrowserNavState>(EMPTY_STATE);
@@ -85,6 +84,7 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
       return undefined;
     }
 
+    let boundsRaf: number | null = null;
     const syncBounds = (mountInitially: boolean) => {
       const rect = el.getBoundingClientRect();
       if (rect.width < 40 || rect.height < 40) return;
@@ -99,7 +99,11 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
           if (state) setNavState(state);
         });
       } else {
-        void browserSetBounds(bounds);
+        if (boundsRaf !== null) cancelAnimationFrame(boundsRaf);
+        boundsRaf = requestAnimationFrame(() => {
+          boundsRaf = null;
+          void browserSetBounds(bounds);
+        });
       }
     };
 
@@ -110,6 +114,7 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
     window.addEventListener("resize", onResize);
 
     return () => {
+      if (boundsRaf !== null) cancelAnimationFrame(boundsRaf);
       ro.disconnect();
       window.removeEventListener("resize", onResize);
       void browserHide();
@@ -146,7 +151,8 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
     const snippet = ctx.text.trim().slice(0, 1200);
     const header = ctx.title ? `[${ctx.title}](${ctx.url})` : ctx.url;
     const formatted = snippet ? `${header}\n\n${snippet}` : header;
-    const next = composerText ? `${composerText.trimEnd()}\n\n${formatted}\n` : `${formatted}\n`;
+    const current = useSessionStore.getState().composerTextBySession[activeSessionId] ?? "";
+    const next = current ? `${current.trimEnd()}\n\n${formatted}\n` : `${formatted}\n`;
     setComposerText(activeSessionId, next);
   };
 

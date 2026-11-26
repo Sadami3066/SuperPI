@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconGitBranch, IconLayoutSidebarRight, IconSettings } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
-import type { HostBotDto, PermissionMode } from "../../api/types";
+import type { HostBotDto, PermissionMode, QuestionAnswerInput } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { windowToggleMaximize } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
@@ -59,12 +59,8 @@ export function ChatWorkspace({
   const summary = summaryFromList ?? archivedMatch;
   const transcript = useSessionStore((s) => s.transcriptsById[s.activeSessionId]);
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
-  const composerText = useSessionStore((s) => s.composerTextBySession[s.activeSessionId] ?? "");
-  const quotedText = useSessionStore((s) => s.quotedTextBySession[s.activeSessionId] ?? null);
   const planFirst = useSessionStore((s) => Boolean(s.planFirstBySession[s.activeSessionId]));
-  const setComposerText = useSessionStore((s) => s.setComposerText);
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
-  const togglePlanFirst = useSessionStore((s) => s.togglePlanFirst);
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const stopSession = useSessionStore((s) => s.stopSession);
   const retrySession = useSessionStore((s) => s.retrySession);
@@ -75,8 +71,8 @@ export function ChatWorkspace({
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const dismissQuestion = useSessionStore((s) => s.dismissQuestion);
 
-  const liveRun = useStreamStore((s) => s.activeBySession[activeSessionId]);
-  const isStreaming = Boolean(liveRun?.streaming);
+  const hasLiveRun = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]));
+  const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]?.streaming));
 
   const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
@@ -151,6 +147,31 @@ export function ChatWorkspace({
 
   const greetingKey = useMemo(() => resolveGreetingKey(), [activeSessionId]);
 
+  const handleQuote = useCallback(
+    (txt: string) => {
+      if (activeSessionId) setQuotedText(activeSessionId, txt);
+    },
+    [activeSessionId, setQuotedText],
+  );
+
+  const handleRetry = useCallback(() => {
+    if (client && activeSessionId) void retrySession(client, activeSessionId);
+  }, [activeSessionId, client, retrySession]);
+
+  const handleAnswerQuestion = useCallback(
+    async (reqId: string, answers: QuestionAnswerInput[]) => {
+      if (client) await answerQuestion(client, reqId, answers);
+    },
+    [answerQuestion, client],
+  );
+
+  const handleDismissQuestion = useCallback(
+    async (reqId: string) => {
+      if (client) await dismissQuestion(client, reqId);
+    },
+    [client, dismissQuestion],
+  );
+
   if (!activeBot || !activeSessionId) {
     return null;
   }
@@ -160,7 +181,7 @@ export function ChatWorkspace({
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
   const turns = transcript?.turns ?? [];
-  const isHeroEmpty = turns.length === 0 && !liveRun && !activeQuestion;
+  const isHeroEmpty = turns.length === 0 && !hasLiveRun && !activeQuestion;
 
   const composerElement = (variant: "hero" | "docked") => (
     <Composer
@@ -169,8 +190,6 @@ export function ChatWorkspace({
       workspaceLabel={activeBot.name}
       workspacePath={activeBot.cwd}
       sessionId={activeSessionId}
-      composerText={composerText}
-      quotedText={quotedText}
       queuedInputs={transcript?.queuedInputs ?? []}
       providers={effectiveProviders}
       slashCommands={commandsByBot[activeBot.id] ?? []}
@@ -179,13 +198,10 @@ export function ChatWorkspace({
       permissionMode={(activeBot.permissionMode as PermissionMode) || "workspace_auto"}
       isRemote={Boolean(activeBot.isRemote)}
       remoteOffline={remoteOffline}
-      isStreaming={isStreaming || Boolean(summary?.busy)}
+      isBusy={Boolean(summary?.busy)}
       sendKey={hostSettings?.sendKey === "mod_enter" ? "mod_enter" : "enter"}
       sendWhileRunning={hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer"}
       planFirst={planFirst}
-      onComposerChange={(val) => setComposerText(activeSessionId, val)}
-      onClearQuote={() => setQuotedText(activeSessionId, null)}
-      onTogglePlanFirst={() => togglePlanFirst(activeSessionId)}
       onChangePermissionMode={async (mode) => {
         if (client) await setPermissionMode(client, activeBot.id, mode);
       }}
@@ -409,16 +425,10 @@ export function ChatWorkspace({
             pendingQuestion={activeQuestion}
             compactProcess={hostSettings?.processDetail === "compact"}
             dark={dark}
-            onQuote={(txt) => setQuotedText(activeSessionId, txt)}
-            onRetry={() => {
-              if (client) void retrySession(client, activeSessionId);
-            }}
-            onAnswerQuestion={async (reqId, answers) => {
-              if (client) await answerQuestion(client, reqId, answers);
-            }}
-            onDismissQuestion={async (reqId) => {
-              if (client) await dismissQuestion(client, reqId);
-            }}
+            onQuote={handleQuote}
+            onRetry={handleRetry}
+            onAnswerQuestion={handleAnswerQuestion}
+            onDismissQuestion={handleDismissQuestion}
             scrollRefOut={snapToBottomRef}
           />
           {composerElement("docked")}
@@ -427,7 +437,7 @@ export function ChatWorkspace({
 
       {draggingFiles && !remoteOffline && (
         <div
-          className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-[18px] border-2 border-dashed backdrop-blur-[2px]"
+          className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-[18px] border-2 border-dashed"
           style={{
             borderColor: "var(--pi-accent)",
             background: "var(--pi-accent-soft)",

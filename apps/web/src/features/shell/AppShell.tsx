@@ -27,7 +27,6 @@ export function AppShell() {
   const createSession = useSessionStore((s) => s.createSession);
   const selectSession = useSessionStore((s) => s.selectSession);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const summariesById = useSessionStore((s) => s.summariesById);
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
   const locale = useSettingsStore((s) => s.locale);
   const refreshSettingsData = useSettingsStore((s) => s.refreshSettingsData);
@@ -67,7 +66,7 @@ export function AppShell() {
         setPaletteOpen((v) => !v);
       } else if (key === "n") {
         e.preventDefault();
-        const botId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
+        const botId = useSessionStore.getState().summariesById[activeSessionId]?.botId ?? bots[0]?.id;
         if (client && botId) {
           setSettingsOpen(false);
           void createSession(client, botId, locale);
@@ -107,7 +106,6 @@ export function AppShell() {
     isElectron,
     locale,
     settingsOpen,
-    summariesById,
     togglePanel,
   ]);
 

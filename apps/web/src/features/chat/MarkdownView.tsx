@@ -29,7 +29,7 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
-import { IconCheck, IconCopy } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconCopy } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { openExternalUrl } from "../../platform/bridge";
 import {
@@ -69,19 +69,48 @@ hljs.registerLanguage("html", xml);
 hljs.registerLanguage("yaml", yaml);
 hljs.registerLanguage("yml", yaml);
 
-export function stabilizeStreamingMarkdown(raw: string, streaming?: boolean): string {
-  if (!streaming) return raw;
-  const fenceMatches = raw.match(/^\s*```/gm);
-  if (fenceMatches && fenceMatches.length % 2 === 1) {
-    return `${raw}\n\`\`\``;
+const COLLAPSE_LINE_THRESHOLD = 22;
+const HIGHLIGHT_CACHE = new Map<string, string>();
+const MAX_HIGHLIGHT_CACHE = 160;
+
+function computeHighlightedHtml(language: string, code: string): string | null {
+  const lang = language.trim().toLowerCase();
+  if (!lang || !hljs.getLanguage(lang)) return null;
+  const key = `${lang}\0${code}`;
+  const cached = HIGHLIGHT_CACHE.get(key);
+  if (cached !== undefined) return cached;
+  try {
+    const html = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    if (HIGHLIGHT_CACHE.size >= MAX_HIGHLIGHT_CACHE) {
+      const oldest = HIGHLIGHT_CACHE.keys().next().value;
+      if (oldest) HIGHLIGHT_CACHE.delete(oldest);
+    }
+    HIGHLIGHT_CACHE.set(key, html);
+    return html;
+  } catch {
+    return null;
   }
-  return raw;
 }
 
-function CodeBlock({ language, code }: { language: string; code: string }) {
+const CodeBlock = memo(function CodeBlock({
+  language,
+  code,
+  streaming = false,
+}: {
+  language: string;
+  code: string;
+  streaming?: boolean;
+}) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [deferredHtml, setDeferredHtml] = useState<string | null>(() => {
+    if (streaming) return null;
+    const lang = language.trim().toLowerCase();
+    return lang ? HIGHLIGHT_CACHE.get(`${lang}\0${code}`) ?? null : null;
+  });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -89,20 +118,39 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
     };
   }, []);
 
-  const highlightedHtml = useMemo(() => {
-    const lang = language.trim().toLowerCase();
-    try {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
-      }
-    } catch {
-      return null;
+  useEffect(() => {
+    if (streaming) {
+      setDeferredHtml(null);
+      return undefined;
     }
-    return null;
-  }, [code, language]);
+    const lang = language.trim().toLowerCase();
+    if (!lang || !hljs.getLanguage(lang)) {
+      setDeferredHtml(null);
+      return undefined;
+    }
+    const cached = HIGHLIGHT_CACHE.get(`${lang}\0${code}`);
+    if (cached !== undefined) {
+      setDeferredHtml(cached);
+      return undefined;
+    }
+    const raf = requestAnimationFrame(() => {
+      setDeferredHtml(computeHighlightedHtml(language, code));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [code, language, streaming]);
+
+  const lineCount = useMemo(() => {
+    let count = 1;
+    for (let i = 0; i < code.length; i++) {
+      if (code.charCodeAt(i) === 10) count++;
+    }
+    return count;
+  }, [code]);
+  const collapsible = !streaming && lineCount > COLLAPSE_LINE_THRESHOLD;
 
   return (
     <div
+      ref={rootRef}
       className="my-3 overflow-hidden rounded-[12px]"
       style={{
         background: "var(--pi-code-bg)",
@@ -113,41 +161,76 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
         className="flex items-center justify-between px-3.5 py-1.5"
         style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
       >
-        <span
-          className="text-[11.5px] font-medium"
-          style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
-        >
-          {language || "code"}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            void navigator.clipboard?.writeText(code);
-            setCopied(true);
-            if (timerRef.current !== null) clearTimeout(timerRef.current);
-            timerRef.current = setTimeout(() => setCopied(false), 1200);
-          }}
-          aria-label={t("chat.copy")}
-          className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
-          style={{ color: "var(--pi-ink-tertiary)" }}
-        >
-          {copied ? <IconCheck size={14} stroke={1.7} /> : <IconCopy size={14} stroke={1.7} />}
-        </button>
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[11.5px] font-medium"
+            style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
+          >
+            {language || "code"}
+          </span>
+          {collapsible && (
+            <span className="text-[11px] tabular-nums" style={{ color: "var(--pi-ink-tertiary)" }}>
+              {lineCount}L
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {collapsible && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !collapsed;
+                setCollapsed(next);
+                if (next) {
+                  requestAnimationFrame(() => {
+                    rootRef.current?.scrollIntoView({ block: "nearest" });
+                  });
+                }
+              }}
+              aria-label={collapsed ? "Expand" : "Collapse"}
+              className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+              style={{ color: "var(--pi-ink-tertiary)" }}
+            >
+              <IconChevronDown
+                size={14}
+                stroke={1.7}
+                className="transition-transform duration-150"
+                style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
+              />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(code);
+              setCopied(true);
+              if (timerRef.current !== null) clearTimeout(timerRef.current);
+              timerRef.current = setTimeout(() => setCopied(false), 1200);
+            }}
+            aria-label={t("chat.copy")}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-tertiary)" }}
+          >
+            {copied ? <IconCheck size={14} stroke={1.7} /> : <IconCopy size={14} stroke={1.7} />}
+          </button>
+        </div>
       </div>
-      <pre
-        data-scrollable
-        className="overflow-x-auto px-3.5 py-3 text-[13px] leading-[1.6]"
-        style={{ fontFamily: "var(--pi-font-mono)" }}
-      >
-        {highlightedHtml !== null ? (
-          <code className="hljs" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
-        ) : (
-          <code>{code}</code>
-        )}
-      </pre>
+      {!collapsed && (
+        <pre
+          data-scrollable
+          className="overflow-x-auto px-3.5 py-3 text-[13px] leading-[1.6]"
+          style={{ fontFamily: "var(--pi-font-mono)" }}
+        >
+          {deferredHtml !== null ? (
+            <code className="hljs" dangerouslySetInnerHTML={{ __html: deferredHtml }} />
+          ) : (
+            <code>{code}</code>
+          )}
+        </pre>
+      )}
     </div>
   );
-}
+});
 
 const baseMarkdownComponents: Components = {
   pre({ children }) {
@@ -207,20 +290,31 @@ const StaticMarkdownBlock = memo(function StaticMarkdownBlock({ content }: { con
   );
 });
 
-function useCoalescedStreamText(text: string): string {
+function useCoalescedStreamText(text: string, live: boolean): string {
   const [displayed, setDisplayed] = useState(text);
   const latestRef = useRef(text);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   latestRef.current = text;
 
   useEffect(() => {
-    if (text === displayed) return;
-    if (timerRef.current !== null) return;
+    if (!live) {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (displayed !== text) {
+        setDisplayed(text);
+      }
+      return undefined;
+    }
+    if (text === displayed) return undefined;
+    if (timerRef.current !== null) return undefined;
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       setDisplayed(latestRef.current);
     }, STREAM_COALESCE_INTERVAL_MS);
-  }, [text, displayed]);
+    return undefined;
+  }, [text, displayed, live]);
 
   useEffect(() => {
     return () => {
@@ -228,6 +322,7 @@ function useCoalescedStreamText(text: string): string {
     };
   }, []);
 
+  if (!live) return text;
   return displayed || text;
 }
 
@@ -240,21 +335,25 @@ function wrapStreamingChildren(
   skipBlockTags = false,
 ): ReactNode {
   if (typeof node === "string") {
-    if (!node) return node;
+    if (!node || !animator.hasActiveBatches) return node;
     const idx = source.indexOf(node, cursor.pos);
     if (idx < 0) return node;
     cursor.pos = idx + node.length;
     const runs = splitTextByAlpha(node, idx, animator, nowMs);
     if (runs.length === 1 && runs[0].alpha >= 1) return node;
-    return runs.map((run, i) =>
-      run.alpha >= 1 ? (
-        <Fragment key={i}>{run.text}</Fragment>
-      ) : (
-        <span key={i} style={{ opacity: run.alpha }}>
+    let offset = idx;
+    return runs.map((run, i) => {
+      const spanStart = offset;
+      offset += run.text.length;
+      if (run.alpha >= 1) {
+        return <Fragment key={i}>{run.text}</Fragment>;
+      }
+      return (
+        <span key={i} data-fade-offset={spanStart} style={{ opacity: run.alpha }}>
           {run.text}
         </span>
-      ),
-    );
+      );
+    });
   }
   if (Array.isArray(node)) {
     return node.map((child, idx) => (
@@ -277,8 +376,14 @@ function wrapStreamingChildren(
   return node;
 }
 
-function StreamingTailBlock({ content }: { content: string }) {
-  const coalesced = useCoalescedStreamText(content);
+const TailMarkdownBlock = memo(function TailMarkdownBlock({
+  content,
+  live,
+}: {
+  content: string;
+  live: boolean;
+}) {
+  const coalesced = useCoalescedStreamText(content, live);
   const reducedMotion =
     typeof window !== "undefined" &&
     Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
@@ -288,28 +393,113 @@ function StreamingTailBlock({ content }: { content: string }) {
     animatorRef.current = new StreamTextFadeAnimator();
   }
   const animator = animatorRef.current;
-
-  const [, setTick] = useState(0);
-  const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
-  if (reducedMotion) {
-    animator.finish();
-  } else {
-    animator.sync(coalesced, true, true, nowMs);
+  const wasLiveRef = useRef(live);
+  if (live) {
+    wasLiveRef.current = true;
   }
 
-  const active = animator.hasActiveBatches;
+  const tailRef = useRef<HTMLDivElement | null>(null);
+  const shouldAnimate = !reducedMotion && (live || (wasLiveRef.current && animator.hasActiveBatches));
+
+  const rendered = useMemo(() => {
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (reducedMotion || !shouldAnimate) {
+      animator.finish();
+      wasLiveRef.current = false;
+      return <StaticMarkdownBlock content={coalesced} />;
+    }
+
+    animator.sync(coalesced, true, true, nowMs);
+    if (!animator.hasActiveBatches) {
+      if (!live) wasLiveRef.current = false;
+      return <StaticMarkdownBlock content={coalesced} />;
+    }
+
+    const cursor = { pos: 0 };
+    const components: Components = {
+      ...baseMarkdownComponents,
+      code({ className, children, ...props }) {
+        const match = /language-([\w-]+)/.exec(className || "");
+        const raw = String(children);
+        const isBlock = Boolean(match) || raw.includes("\n");
+        const rawText = raw.replace(/\n$/, "");
+        if (isBlock) {
+          return <CodeBlock language={match?.[1] ?? ""} code={rawText} streaming={live} />;
+        }
+        return (
+          <code
+            {...props}
+            className="rounded-[5px] px-1.5 py-[1px] text-[0.88em]"
+            style={{
+              background: "var(--pi-inline-code-bg)",
+              fontFamily: "var(--pi-font-mono)",
+            }}
+          >
+            {children}
+          </code>
+        );
+      },
+      p({ children }) {
+        return <p>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</p>;
+      },
+      h1({ children }) {
+        return <h1>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h1>;
+      },
+      h2({ children }) {
+        return <h2>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h2>;
+      },
+      h3({ children }) {
+        return <h3>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h3>;
+      },
+      h4({ children }) {
+        return <h4>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h4>;
+      },
+      li({ children }) {
+        return <li>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs, true)}</li>;
+      },
+      td({ children }) {
+        return <td>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</td>;
+      },
+      th({ children }) {
+        return <th>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</th>;
+      },
+    };
+
+    return (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {coalesced}
+      </ReactMarkdown>
+    );
+  }, [animator, coalesced, live, reducedMotion, shouldAnimate]);
+
   useEffect(() => {
-    if (!active || reducedMotion) return;
+    if (reducedMotion || !animator.hasActiveBatches) return undefined;
     let rafId = 0;
     let cancelled = false;
     const step = () => {
       if (cancelled) return;
       const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      if (animator.advance(now)) {
-        setTick((t) => (t + 1) & 0xffff);
+      const changed = animator.advance(now);
+      const container = tailRef.current;
+      if (container && (changed || !animator.hasActiveBatches)) {
+        const nodes = container.querySelectorAll<HTMLElement>("[data-fade-offset]");
+        nodes.forEach((el) => {
+          const offsetAttr = el.getAttribute("data-fade-offset");
+          if (offsetAttr === null) return;
+          const offset = Number.parseInt(offsetAttr, 10);
+          const alpha = Number.isFinite(offset) ? animator.alphaAt(offset, now) : 1;
+          if (alpha >= 1) {
+            el.style.opacity = "";
+            el.removeAttribute("data-fade-offset");
+          } else {
+            el.style.opacity = String(alpha);
+          }
+        });
       }
       if (animator.hasActiveBatches) {
         rafId = requestAnimationFrame(step);
+      } else if (!live) {
+        wasLiveRef.current = false;
       }
     };
     rafId = requestAnimationFrame(step);
@@ -317,51 +507,14 @@ function StreamingTailBlock({ content }: { content: string }) {
       cancelled = true;
       cancelAnimationFrame(rafId);
     };
-  }, [active, animator, reducedMotion, coalesced]);
+  }, [animator, coalesced, live, reducedMotion]);
 
-  if (reducedMotion) {
-    return <StaticMarkdownBlock content={coalesced} />;
-  }
-
-  const cursor = { pos: 0 };
-  const components: Components = {
-    ...baseMarkdownComponents,
-    p({ children }) {
-      return <p>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</p>;
-    },
-    h1({ children }) {
-      return <h1>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h1>;
-    },
-    h2({ children }) {
-      return <h2>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h2>;
-    },
-    h3({ children }) {
-      return <h3>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h3>;
-    },
-    h4({ children }) {
-      return <h4>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h4>;
-    },
-    li({ children }) {
-      return <li>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs, true)}</li>;
-    },
-    td({ children }) {
-      return <td>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</td>;
-    },
-    th({ children }) {
-      return <th>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</th>;
-    },
-  };
-
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-      {coalesced}
-    </ReactMarkdown>
-  );
-}
+  return <div ref={tailRef}>{rendered}</div>;
+});
 
 export const MarkdownView = memo(function MarkdownView({
   content,
-  streaming,
+  streaming = false,
 }: {
   content: string;
   streaming?: boolean;
@@ -373,27 +526,17 @@ export const MarkdownView = memo(function MarkdownView({
 
   if (blocks.length === 0) return null;
 
-  if (!streaming) {
-    return (
-      <div className="pi-prose">
-        <StaticMarkdownBlock content={content} />
-      </div>
-    );
-  }
-
-  const prefixBlocks = blocks.slice(0, -1);
-  const tailBlock = blocks[blocks.length - 1];
+  const lastIdx = blocks.length - 1;
 
   return (
     <div className="pi-prose space-y-2.5">
-      {prefixBlocks.map((block, idx) => (
-        <div key={`p-${idx}`} className={idx > 0 ? "pi-stream-block-enter" : undefined}>
-          <StaticMarkdownBlock content={block} />
-        </div>
-      ))}
-      <div key={`t-${prefixBlocks.length}`} className="pi-stream-block-enter">
-        <StreamingTailBlock content={tailBlock} />
-      </div>
+      {blocks.map((block, idx) =>
+        idx < lastIdx ? (
+          <StaticMarkdownBlock key={`b-${idx}`} content={block} />
+        ) : (
+          <TailMarkdownBlock key={`b-${idx}`} content={block} live={Boolean(streaming)} />
+        ),
+      )}
     </div>
   );
 });

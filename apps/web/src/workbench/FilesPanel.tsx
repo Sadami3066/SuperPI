@@ -61,7 +61,6 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
   const openFileInPreview = useWorkbenchStore((s) => s.openFileInPreview);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const composerText = useSessionStore((s) => s.composerTextBySession[s.activeSessionId] ?? "");
   const setComposerText = useSessionStore((s) => s.setComposerText);
 
   const [currentPath, setCurrentPath] = useState("");
@@ -142,7 +141,8 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
   const handleInsertToChat = (entry: HostWorkspaceFileEntryDto) => {
     if (!activeSessionId) return;
     const token = `@${entry.path}`;
-    const next = composerText ? `${composerText.trimEnd()} ${token} ` : `${token} `;
+    const current = useSessionStore.getState().composerTextBySession[activeSessionId] ?? "";
+    const next = current ? `${current.trimEnd()} ${token} ` : `${token} `;
     setComposerText(activeSessionId, next);
   };
 

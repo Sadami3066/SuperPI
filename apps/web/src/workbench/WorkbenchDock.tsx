@@ -49,10 +49,22 @@ export function WorkbenchDock({
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
+    let latestWidth = startWidth;
+    let moveRaf: number | null = null;
     const onMove = (ev: MouseEvent) => {
-      setWidth(startWidth + (startX - ev.clientX));
+      latestWidth = startWidth + (startX - ev.clientX);
+      if (moveRaf !== null) return;
+      moveRaf = requestAnimationFrame(() => {
+        moveRaf = null;
+        setWidth(latestWidth, false);
+      });
     };
     const cleanup = () => {
+      if (moveRaf !== null) {
+        cancelAnimationFrame(moveRaf);
+        moveRaf = null;
+      }
+      setWidth(latestWidth, true);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", cleanup);
       dragCleanupRef.current = null;

@@ -39,7 +39,7 @@ export interface WorkbenchStoreState {
   openPanel: (panelId: string, payload?: Record<string, unknown>) => void;
   togglePanel: (panelId: string) => void;
   close: () => void;
-  setWidth: (width: number) => void;
+  setWidth: (width: number, persist?: boolean) => void;
   openFileInPreview: (target: OpenPreviewTarget) => void;
   closePreviewFile: (key: string) => void;
   setActivePreviewFile: (key: string) => void;
@@ -75,9 +75,9 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
 
   close: () => set({ open: false }),
 
-  setWidth: (width) => {
+  setWidth: (width, persist = true) => {
     const clamped = clampWidth(width);
-    if (typeof window !== "undefined") {
+    if (persist && typeof window !== "undefined") {
       try {
         window.localStorage.setItem(WIDTH_STORAGE_KEY, String(clamped));
       } catch {

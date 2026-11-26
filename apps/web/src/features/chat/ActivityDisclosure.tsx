@@ -31,6 +31,22 @@ import {
 } from "./toolPresentation";
 
 const MIN_THINKING_DWELL_MS = 380;
+const DISCLOSURE_EXPANDED_MAP = new Map<string, boolean>();
+const MAX_DISCLOSURE_CACHE = 240;
+
+function readDisclosureExpanded(persistKey?: string): boolean {
+  if (!persistKey) return false;
+  return DISCLOSURE_EXPANDED_MAP.get(persistKey) ?? false;
+}
+
+function writeDisclosureExpanded(persistKey: string | undefined, value: boolean): void {
+  if (!persistKey) return;
+  if (!DISCLOSURE_EXPANDED_MAP.has(persistKey) && DISCLOSURE_EXPANDED_MAP.size >= MAX_DISCLOSURE_CACHE) {
+    const oldest = DISCLOSURE_EXPANDED_MAP.keys().next().value;
+    if (oldest) DISCLOSURE_EXPANDED_MAP.delete(oldest);
+  }
+  DISCLOSURE_EXPANDED_MAP.set(persistKey, value);
+}
 
 function ToolKindIcon({
   kind,
@@ -408,6 +424,7 @@ export const ActivityDisclosure = memo(function ActivityDisclosure({
   durationMs,
   compact = false,
   dark = false,
+  persistKey,
 }: {
   steps: ActivityStep[];
   streaming?: boolean;
@@ -415,11 +432,16 @@ export const ActivityDisclosure = memo(function ActivityDisclosure({
   durationMs?: number;
   compact?: boolean;
   dark?: boolean;
+  persistKey?: string;
 }) {
   const { t, locale } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => readDisclosureExpanded(persistKey));
   const [displayedLine, setDisplayedLine] = useState<{ slotKey: string; text: string } | null>(null);
   const lastSwapAtRef = useRef(0);
+
+  useEffect(() => {
+    setExpanded(readDisclosureExpanded(persistKey));
+  }, [persistKey]);
 
   const runningTool = useMemo(
     () =>
@@ -502,13 +524,22 @@ export const ActivityDisclosure = memo(function ActivityDisclosure({
     <div className="mb-2.5 w-full">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() =>
+          setExpanded((v) => {
+            const next = !v;
+            writeDisclosureExpanded(persistKey, next);
+            return next;
+          })
+        }
         className="flex min-h-[34px] w-full items-center justify-between gap-2.5 rounded-[8px] px-1 py-1 text-left transition-colors hover:bg-[var(--pi-hover)]"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {streaming && <PiActivityIcon size={16} dark={dark} />}
           <span
-            className={`min-w-0 truncate text-[12.5px] font-medium ${streaming && displayedLine ? "pi-text-shimmer" : ""}`}
+            key={streaming && displayedLine ? displayedLine.slotKey : "summary"}
+            className={`min-w-0 truncate text-[12.5px] font-medium ${
+              streaming && displayedLine ? "pi-text-shimmer pi-thinking-line-enter" : ""
+            }`}
             style={{
               color: streaming
                 ? "var(--pi-ink-secondary)"

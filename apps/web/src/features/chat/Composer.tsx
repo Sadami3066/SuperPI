@@ -1,4 +1,4 @@
-import { type MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconArrowUp,
   IconChecklist,
@@ -17,6 +17,8 @@ import type {
   ThinkingLevel,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
+import { useSessionStore } from "../../stores/sessionStore";
+import { useStreamStore } from "../../stores/streamStore";
 import { IconButton, Select, type SelectOption } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import { ModelPicker } from "./ModelPicker";
@@ -51,14 +53,12 @@ function readFileAsComposerAttachment(file: File): Promise<ComposerAttachment | 
   });
 }
 
-export function Composer({
+export const Composer = memo(function Composer({
   dark,
   variant = "docked",
   workspaceLabel,
   workspacePath,
   sessionId,
-  composerText,
-  quotedText,
   queuedInputs,
   providers,
   slashCommands,
@@ -67,13 +67,10 @@ export function Composer({
   permissionMode,
   isRemote,
   remoteOffline,
-  isStreaming,
+  isBusy = false,
   sendKey,
   sendWhileRunning,
   planFirst,
-  onComposerChange,
-  onClearQuote,
-  onTogglePlanFirst,
   onChangePermissionMode,
   onModelChange,
   onOpenProvidersSettings,
@@ -89,8 +86,6 @@ export function Composer({
   workspaceLabel?: string;
   workspacePath?: string;
   sessionId: string;
-  composerText: string;
-  quotedText: string | null;
   queuedInputs: HostQueuedInputDto[];
   providers: HostProviderDto[];
   slashCommands: HostSlashCommandDto[];
@@ -99,13 +94,10 @@ export function Composer({
   permissionMode: PermissionMode;
   isRemote: boolean;
   remoteOffline: boolean;
-  isStreaming: boolean;
+  isBusy?: boolean;
   sendKey: "enter" | "mod_enter";
   sendWhileRunning: "steer" | "queue";
   planFirst: boolean;
-  onComposerChange: (val: string) => void;
-  onClearQuote: () => void;
-  onTogglePlanFirst: () => void;
   onChangePermissionMode: (mode: PermissionMode) => Promise<void>;
   onModelChange: (model: string, thinking: ThinkingLevel) => void;
   onOpenProvidersSettings: () => void;
@@ -117,6 +109,16 @@ export function Composer({
   attachFilesRef?: MutableRefObject<((files: FileList | File[]) => void) | null>;
 }) {
   const { t } = useI18n();
+  const composerText = useSessionStore((s) => s.composerTextBySession[sessionId] ?? "");
+  const quotedText = useSessionStore((s) => s.quotedTextBySession[sessionId] ?? null);
+  const onComposerChange = useSessionStore((s) => s.setComposerText);
+  const setQuotedText = useSessionStore((s) => s.setQuotedText);
+  const togglePlanFirst = useSessionStore((s) => s.togglePlanFirst);
+  const liveStreaming = useStreamStore((s) => Boolean(s.activeBySession[sessionId]?.streaming));
+  const isStreaming = liveStreaming || isBusy;
+  const onClearQuote = () => setQuotedText(sessionId, null);
+  const onTogglePlanFirst = () => togglePlanFirst(sessionId);
+
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -139,9 +141,12 @@ export function Composer({
 
   useEffect(() => {
     const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    if (!el) return undefined;
+    const raf = requestAnimationFrame(() => {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [composerText]);
 
   const allCommands = useMemo(() => {
@@ -189,15 +194,18 @@ export function Composer({
     }
   };
 
+  const appendFilesRef = useRef(appendFiles);
+  appendFilesRef.current = appendFiles;
+
   useEffect(() => {
-    if (!attachFilesRef) return;
+    if (!attachFilesRef) return undefined;
     attachFilesRef.current = (files) => {
-      void appendFiles(files);
+      void appendFilesRef.current(files);
     };
     return () => {
       attachFilesRef.current = null;
     };
-  });
+  }, [attachFilesRef]);
 
   const triggerSend = (overrideText?: string) => {
     const files = overrideText ? [] : attachments;
@@ -231,7 +239,7 @@ export function Composer({
                 type="button"
                 onClick={() => {
                   if (cmd.insertOnly) {
-                    onComposerChange(`${cmd.command} `);
+                    onComposerChange(sessionId, `${cmd.command} `);
                     textareaRef.current?.focus();
                   } else {
                     triggerSend(cmd.command);
@@ -388,7 +396,7 @@ export function Composer({
             rows={isHero ? 2 : 1}
             disabled={remoteOffline}
             value={composerText}
-            onChange={(e) => onComposerChange(e.target.value)}
+            onChange={(e) => onComposerChange(sessionId, e.target.value)}
             onPaste={(e) => {
               const files = Array.from(e.clipboardData?.files ?? []);
               if (files.length > 0) {
@@ -413,7 +421,7 @@ export function Composer({
                   e.preventDefault();
                   const chosen = filteredCommands[slashIndex] ?? filteredCommands[0];
                   if (chosen) {
-                    if (chosen.insertOnly) onComposerChange(`${chosen.command} `);
+                    if (chosen.insertOnly) onComposerChange(sessionId, `${chosen.command} `);
                     else triggerSend(chosen.command);
                   }
                   return;
@@ -553,4 +561,4 @@ export function Composer({
       </div>
     </div>
   );
-}
+});

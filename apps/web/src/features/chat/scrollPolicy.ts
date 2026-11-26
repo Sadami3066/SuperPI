@@ -1,6 +1,49 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export const STICK_BOTTOM_THRESHOLD_PX = 48;
+export const NEAR_BOTTOM_THRESHOLD_PX = 80;
+export const STICK_BOTTOM_THRESHOLD_PX = NEAR_BOTTOM_THRESHOLD_PX;
+export const SPRING_OMEGA = 10;
+export const SPRING_ZETA = 1;
+const SNAP_THRESHOLD_PX = 0.5;
+const SETTLE_VELOCITY_PX_PER_SEC = 8;
+const MIN_DT_SEC = 0.004;
+const MAX_DT_SEC = 1 / 30;
+const PROGRAMMATIC_GUARD_MS = 140;
+
+export interface SoftSpringStepResult {
+  stepPx: number;
+  nextVelocityPxPerSec: number;
+  settled: boolean;
+}
+
+export function softSpringStep(
+  overflowPx: number,
+  velocityPxPerSec: number,
+  deltaSeconds: number,
+  smooth: boolean,
+): SoftSpringStepResult {
+  if (overflowPx <= 0) {
+    return { stepPx: 0, nextVelocityPxPerSec: 0, settled: true };
+  }
+  if (!smooth) {
+    return { stepPx: overflowPx, nextVelocityPxPerSec: 0, settled: true };
+  }
+  const h = Math.min(MAX_DT_SEC, Math.max(MIN_DT_SEC, deltaSeconds));
+  const omega = SPRING_OMEGA;
+  const zeta = SPRING_ZETA;
+  const k = omega * omega;
+  const d = 2 * zeta * omega;
+  const gamma = 1 / (h * (d + h * k));
+  const bias = h * k * gamma * -overflowPx;
+  const impulse = -(velocityPxPerSec + bias) / (1 + gamma);
+  const nextVelocity = Math.max(0, velocityPxPerSec + impulse);
+  const rawStep = h * nextVelocity;
+  const remaining = overflowPx - rawStep;
+  if ((remaining <= SNAP_THRESHOLD_PX && nextVelocity <= SETTLE_VELOCITY_PX_PER_SEC) || rawStep >= overflowPx) {
+    return { stepPx: overflowPx, nextVelocityPxPerSec: 0, settled: true };
+  }
+  return { stepPx: rawStep, nextVelocityPxPerSec: nextVelocity, settled: false };
+}
 
 export interface ScrollPolicyInput {
   scrollTop: number;
@@ -26,7 +69,7 @@ export function evaluateScrollPosition(input: ScrollPolicyInput): ScrollPolicyRe
       distanceFromBottom,
     };
   }
-  if (distanceFromBottom <= STICK_BOTTOM_THRESHOLD_PX) {
+  if (distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX) {
     return {
       sticky: true,
       showJumpToBottom: false,
@@ -34,8 +77,8 @@ export function evaluateScrollPosition(input: ScrollPolicyInput): ScrollPolicyRe
     };
   }
   return {
-    sticky: input.wasSticky && distanceFromBottom <= STICK_BOTTOM_THRESHOLD_PX,
-    showJumpToBottom: !input.wasSticky || distanceFromBottom > STICK_BOTTOM_THRESHOLD_PX,
+    sticky: input.wasSticky && distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX,
+    showJumpToBottom: !input.wasSticky || distanceFromBottom > NEAR_BOTTOM_THRESHOLD_PX,
     distanceFromBottom,
   };
 }
@@ -45,102 +88,207 @@ interface SavedAnchor {
   sticky: boolean;
 }
 
-export function useChatScroll(sessionId: string, contentSignal: string | number) {
+export function useChatScroll(
+  sessionId: string,
+  contentSignal: string | number,
+  options?: { isStreaming?: boolean },
+) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const stickyRef = useRef(true);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const followingRef = useRef(true);
+  const velocityRef = useRef(0);
+  const subPixelCarryRef = useRef(0);
+  const lastFrameAtRef = useRef<number | null>(null);
+  const programmaticUntilRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const anchorsRef = useRef<Map<string, SavedAnchor>>(new Map());
   const prevSessionRef = useRef(sessionId);
+  const prevStreamingRef = useRef(Boolean(options?.isStreaming));
   const rafRef = useRef<number | null>(null);
+  const settleFrameRef = useRef<number | null>(null);
 
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
-  const cancelPendingRaf = useCallback(() => {
+  const cancelSpring = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    velocityRef.current = 0;
+    subPixelCarryRef.current = 0;
+    lastFrameAtRef.current = null;
   }, []);
 
-  const snapToBottom = useCallback(() => {
-    cancelPendingRaf();
-    const el = scrollRef.current;
-    stickyRef.current = true;
-    setShowJumpToBottom(false);
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    lastScrollTopRef.current = el.scrollTop;
-  }, [cancelPendingRaf]);
+  const kickSpring = useCallback(() => {
+    if (!followingRef.current || rafRef.current !== null) return;
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 
-  const scheduleStickToBottom = useCallback(() => {
-    if (!stickyRef.current || rafRef.current !== null) return;
-    rafRef.current = requestAnimationFrame(() => {
+    const stepFrame = (nowMs: number) => {
       rafRef.current = null;
       const el = scrollRef.current;
-      if (!el || !stickyRef.current) return;
-      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-      lastScrollTopRef.current = el.scrollTop;
-    });
-  }, []);
+      if (!el || !followingRef.current) {
+        cancelSpring();
+        return;
+      }
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      const overflow = maxTop - el.scrollTop;
+      if (overflow <= 0.5) {
+        if (overflow > 0) {
+          programmaticUntilRef.current = performance.now() + PROGRAMMATIC_GUARD_MS;
+          el.scrollTop = maxTop;
+          lastScrollTopRef.current = el.scrollTop;
+        }
+        velocityRef.current = 0;
+        subPixelCarryRef.current = 0;
+        lastFrameAtRef.current = null;
+        return;
+      }
+
+      const dtSec =
+        lastFrameAtRef.current !== null ? (nowMs - lastFrameAtRef.current) / 1000 : 1 / 60;
+      lastFrameAtRef.current = nowMs;
+
+      const step = softSpringStep(overflow, velocityRef.current, dtSec, !reducedMotion);
+      velocityRef.current = step.nextVelocityPxPerSec;
+
+      subPixelCarryRef.current += step.stepPx;
+      const movePx = Math.floor(subPixelCarryRef.current);
+      if (movePx > 0 || step.settled) {
+        programmaticUntilRef.current = performance.now() + PROGRAMMATIC_GUARD_MS;
+        if (step.settled) {
+          el.scrollTop = maxTop;
+          subPixelCarryRef.current = 0;
+        } else {
+          subPixelCarryRef.current -= movePx;
+          el.scrollTop = Math.min(maxTop, el.scrollTop + movePx);
+        }
+        lastScrollTopRef.current = el.scrollTop;
+      }
+
+      if (!step.settled && followingRef.current) {
+        rafRef.current = requestAnimationFrame(stepFrame);
+      } else {
+        velocityRef.current = 0;
+        subPixelCarryRef.current = 0;
+        lastFrameAtRef.current = null;
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(stepFrame);
+  }, [cancelSpring]);
+
+  const snapToBottom = useCallback(() => {
+    cancelSpring();
+    const el = scrollRef.current;
+    followingRef.current = true;
+    setShowJumpToBottom(false);
+    if (!el) return;
+    programmaticUntilRef.current = performance.now() + PROGRAMMATIC_GUARD_MS;
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    lastScrollTopRef.current = el.scrollTop;
+  }, [cancelSpring]);
+
+  const scheduleStickToBottom = useCallback(() => {
+    if (!followingRef.current) return;
+    kickSpring();
+  }, [kickSpring]);
 
   useEffect(() => {
     const prev = prevSessionRef.current;
     if (prev && prev !== sessionId) {
       anchorsRef.current.set(prev, {
         scrollTop: lastScrollTopRef.current,
-        sticky: stickyRef.current,
+        sticky: followingRef.current,
       });
-      if (anchorsRef.current.size > 20) {
+      if (anchorsRef.current.size > 24) {
         const firstKey = anchorsRef.current.keys().next().value;
         if (firstKey) anchorsRef.current.delete(firstKey);
       }
       prevSessionRef.current = sessionId;
     }
 
-    cancelPendingRaf();
+    cancelSpring();
     const saved = anchorsRef.current.get(sessionId);
-    const shouldStick = saved ? saved.sticky : true;
-    stickyRef.current = shouldStick;
-    setShowJumpToBottom(!shouldStick);
+    const shouldFollow = saved ? saved.sticky : true;
+    followingRef.current = shouldFollow;
+    setShowJumpToBottom(!shouldFollow);
 
     const frame = requestAnimationFrame(() => {
       const el = scrollRef.current;
       if (!el) return;
+      programmaticUntilRef.current = performance.now() + PROGRAMMATIC_GUARD_MS;
       if (saved && !saved.sticky) {
         el.scrollTop = saved.scrollTop;
         lastScrollTopRef.current = el.scrollTop;
         const dist = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
-        const reStick = dist <= STICK_BOTTOM_THRESHOLD_PX;
-        stickyRef.current = reStick;
+        const reStick = dist <= NEAR_BOTTOM_THRESHOLD_PX;
+        followingRef.current = reStick;
         setShowJumpToBottom(!reStick);
       } else {
         el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
         lastScrollTopRef.current = el.scrollTop;
-        stickyRef.current = true;
+        followingRef.current = true;
         setShowJumpToBottom(false);
       }
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [sessionId, cancelPendingRaf]);
+  }, [sessionId, cancelSpring]);
 
   useEffect(() => {
-    if (stickyRef.current) {
-      scheduleStickToBottom();
+    if (followingRef.current) {
+      kickSpring();
     }
-  }, [contentSignal, scheduleStickToBottom]);
+  }, [contentSignal, kickSpring]);
+
+  useEffect(() => {
+    const isNowStreaming = Boolean(options?.isStreaming);
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = isNowStreaming;
+    if (wasStreaming && !isNowStreaming && followingRef.current) {
+      const f1 = requestAnimationFrame(() => {
+        if (followingRef.current) kickSpring();
+        settleFrameRef.current = requestAnimationFrame(() => {
+          if (followingRef.current) kickSpring();
+        });
+      });
+      return () => {
+        cancelAnimationFrame(f1);
+        if (settleFrameRef.current !== null) {
+          cancelAnimationFrame(settleFrameRef.current);
+          settleFrameRef.current = null;
+        }
+      };
+    }
+    return undefined;
+  }, [options?.isStreaming, kickSpring]);
+
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    const contentEl = contentRef.current;
+    if (!scrollEl || typeof ResizeObserver !== "function") return undefined;
+
+    const ro = new ResizeObserver(() => {
+      if (followingRef.current) {
+        kickSpring();
+      }
+    });
+    ro.observe(scrollEl);
+    if (contentEl) ro.observe(contentEl);
+    return () => ro.disconnect();
+  }, [kickSpring, sessionId]);
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el) return undefined;
 
     const disengage = () => {
-      cancelPendingRaf();
-      if (stickyRef.current) {
-        stickyRef.current = false;
-      }
+      cancelSpring();
+      followingRef.current = false;
       const dist = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
-      if (dist > STICK_BOTTOM_THRESHOLD_PX) {
+      if (dist > NEAR_BOTTOM_THRESHOLD_PX) {
         setShowJumpToBottom(true);
       }
     };
@@ -152,32 +300,56 @@ export function useChatScroll(sessionId: string, contentSignal: string | number)
       disengage();
     };
 
+    const onPointerDown = (e: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      if (e.clientX >= rect.right - 20) {
+        cancelSpring();
+        followingRef.current = false;
+      }
+    };
+
     const onScroll = () => {
+      const isProgrammatic = performance.now() < programmaticUntilRef.current;
+      const dist = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
+      const prevTop = lastScrollTopRef.current;
+      lastScrollTopRef.current = el.scrollTop;
+
+      if (isProgrammatic) {
+        if (dist <= NEAR_BOTTOM_THRESHOLD_PX && followingRef.current) {
+          setShowJumpToBottom(false);
+        }
+        return;
+      }
+
       const result = evaluateScrollPosition({
         scrollTop: el.scrollTop,
-        prevScrollTop: lastScrollTopRef.current,
+        prevScrollTop: prevTop,
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
-        wasSticky: stickyRef.current,
+        wasSticky: followingRef.current,
       });
-      lastScrollTopRef.current = el.scrollTop;
-      stickyRef.current = result.sticky;
+      followingRef.current = result.sticky;
       setShowJumpToBottom(result.showJumpToBottom);
-      if (!result.sticky) cancelPendingRaf();
+      if (!result.sticky) {
+        cancelSpring();
+      }
     };
 
     el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("pointerdown", onPointerDown, { passive: true });
     el.addEventListener("scroll", onScroll, { passive: true });
 
     return () => {
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
       el.removeEventListener("scroll", onScroll);
-      cancelPendingRaf();
+      cancelSpring();
     };
-  }, [cancelPendingRaf]);
+  }, [cancelSpring]);
 
   return {
     scrollRef,
+    contentRef,
     showJumpToBottom,
     snapToBottom,
     scheduleStickToBottom,

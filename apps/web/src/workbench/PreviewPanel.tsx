@@ -81,7 +81,6 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
   const openPanel = useWorkbenchStore((s) => s.openPanel);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId) || context.sessionId || "";
-  const composerText = useSessionStore((s) => s.composerTextBySession[activeSessionId] ?? "");
   const setComposerText = useSessionStore((s) => s.setComposerText);
 
   const activeTarget: OpenPreviewTarget | null = useMemo(() => {
@@ -261,7 +260,8 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
   const handleQuoteToChat = () => {
     if (!activeTarget || !activeSessionId) return;
     const ref = `@${activeTarget.path}`;
-    const next = composerText ? `${composerText.trimEnd()} ${ref} ` : `${ref} `;
+    const current = useSessionStore.getState().composerTextBySession[activeSessionId] ?? "";
+    const next = current ? `${current.trimEnd()} ${ref} ` : `${ref} `;
     setComposerText(activeSessionId, next);
   };
 

@@ -75,6 +75,7 @@ export function StreamingTurnView({
             status: liveRun.status,
             durationMs: liveDurationMs,
             dark,
+            persistPrefix: `${sessionId}:${liveRun.runId}:b${idx}`,
           },
         ),
       )}

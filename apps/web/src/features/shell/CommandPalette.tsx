@@ -19,21 +19,28 @@ import { Dialog, Input } from "../../ui";
 import { type SettingsTabId } from "../settings/SettingsModal";
 import { BrandIcon } from "../shared/BrandAssets";
 
-export function CommandPalette({
-  open,
-  onOpenChange,
-  onOpenSettings,
-  onOpenCreateBot,
-  onSelectChatView,
-  onSelectSuperView,
-}: {
+interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenSettings: (tab?: SettingsTabId) => void;
   onOpenCreateBot: () => void;
   onSelectChatView: () => void;
   onSelectSuperView: () => void;
-}) {
+}
+
+export function CommandPalette(props: CommandPaletteProps) {
+  if (!props.open) return null;
+  return <CommandPaletteBody {...props} />;
+}
+
+function CommandPaletteBody({
+  open,
+  onOpenChange,
+  onOpenSettings,
+  onOpenCreateBot,
+  onSelectChatView,
+  onSelectSuperView,
+}: CommandPaletteProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const client = useConnectionStore((s) => s.client);

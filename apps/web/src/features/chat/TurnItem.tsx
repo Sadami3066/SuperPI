@@ -104,7 +104,12 @@ export function renderTurnBlock(
   sessionId: string,
   compactProcess: boolean,
   streaming?: boolean,
-  turnMeta?: { status?: "done" | "stopped" | "failed"; durationMs?: number; dark?: boolean },
+  turnMeta?: {
+    status?: "done" | "stopped" | "failed";
+    durationMs?: number;
+    dark?: boolean;
+    persistPrefix?: string;
+  },
 ) {
   if (block.kind === "activity") {
     return (
@@ -116,6 +121,7 @@ export function renderTurnBlock(
         durationMs={turnMeta?.durationMs}
         compact={compactProcess}
         dark={turnMeta?.dark}
+        persistKey={turnMeta?.persistPrefix ? `${turnMeta.persistPrefix}:${block.key}` : undefined}
       />
     );
   }
@@ -251,11 +257,12 @@ export const TurnItem = memo(function TurnItem({
         </div>
       )}
 
-      {turn.blocks.map((block) =>
+      {turn.blocks.map((block, idx) =>
         renderTurnBlock(block, sessionId, compactProcess, false, {
           status: turn.status,
           durationMs: turn.durationMs,
           dark,
+          persistPrefix: turn.runId ? `${sessionId}:${turn.runId}:b${idx}` : undefined,
         }),
       )}
 
