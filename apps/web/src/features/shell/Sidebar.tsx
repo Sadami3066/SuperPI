@@ -75,14 +75,17 @@ export function Sidebar({
   const locale = useSettingsStore((s) => s.locale);
 
   const unreadInboxCount = useSuperStore((s) => s.unreadInboxCount);
-  const superWorkers = useSuperStore((s) => s.state?.workers ?? []);
-  const activeWorkersCount = useMemo(
-    () =>
-      superWorkers.filter(
-        (w) => w.status === "running" || w.status === "working" || w.status === "waiting_approval",
-      ).length,
-    [superWorkers],
-  );
+  const activeWorkersCount = useSuperStore((s) => {
+    const workers = s.state?.workers;
+    if (!workers || workers.length === 0) return 0;
+    let count = 0;
+    for (const w of workers) {
+      if (w.status === "running" || w.status === "working" || w.status === "waiting_approval") {
+        count++;
+      }
+    }
+    return count;
+  });
 
   const bots = useBotStore((s) => s.bots);
   const collapsedBotIds = useBotStore((s) => s.collapsedBotIds);

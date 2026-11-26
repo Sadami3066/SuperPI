@@ -1,4 +1,4 @@
-import { lazy, useEffect, useMemo } from "react";
+import { Component, lazy, type ReactNode, useEffect, useMemo } from "react";
 import {
   IconFileCode,
   IconFolder,
@@ -12,7 +12,7 @@ import { ConnectionScreen } from "./features/shell/ConnectionScreen";
 import { I18nContext, translate } from "./i18n";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useSettingsStore } from "./stores/settingsStore";
-import { TooltipProvider } from "./ui";
+import { Button, TooltipProvider } from "./ui";
 import { registerWorkbenchPanel } from "./workbench/registry";
 
 registerWorkbenchPanel({
@@ -64,6 +64,56 @@ registerWorkbenchPanel({
   Component: lazy(() => import("./workbench/SessionInspectorPanel")),
 });
 
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          className="flex h-screen w-screen items-center justify-center p-6"
+          style={{ background: "var(--pi-surface)", color: "var(--pi-ink)" }}
+        >
+          <div
+            className="w-full max-w-[440px] space-y-3 rounded-[16px] p-6"
+            style={{
+              background: "var(--pi-paper)",
+              border: "0.5px solid var(--pi-hairline)",
+            }}
+          >
+            <div className="text-[15px] font-semibold" style={{ color: "var(--pi-danger)" }}>
+              UI Render Error
+            </div>
+            <div
+              className="max-h-36 overflow-auto rounded-[8px] px-3 py-2 text-[12px]"
+              style={{
+                background: "var(--pi-surface)",
+                color: "var(--pi-ink-secondary)",
+                fontFamily: "var(--pi-font-mono)",
+              }}
+            >
+              {this.state.error.message}
+            </div>
+            <div className="flex justify-end">
+              <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
+                Reload
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const status = useConnectionStore((s) => s.status);
   const error = useConnectionStore((s) => s.error);
@@ -103,20 +153,22 @@ export default function App() {
   );
 
   return (
-    <TooltipProvider>
-      <I18nContext.Provider value={i18nValue}>
-        {status === "live" ? (
-          <AppShell />
-        ) : (
-          <ConnectionScreen
-            phase={status}
-            dark={dark}
-            error={error}
-            onRetry={() => void reconnect()}
-            onSubmitToken={(tok) => void submitBrowserToken(tok)}
-          />
-        )}
-      </I18nContext.Provider>
-    </TooltipProvider>
+    <AppErrorBoundary>
+      <TooltipProvider>
+        <I18nContext.Provider value={i18nValue}>
+          {status === "live" ? (
+            <AppShell />
+          ) : (
+            <ConnectionScreen
+              phase={status}
+              dark={dark}
+              error={error}
+              onRetry={() => void reconnect()}
+              onSubmitToken={(tok) => void submitBrowserToken(tok)}
+            />
+          )}
+        </I18nContext.Provider>
+      </TooltipProvider>
+    </AppErrorBoundary>
   );
 }
