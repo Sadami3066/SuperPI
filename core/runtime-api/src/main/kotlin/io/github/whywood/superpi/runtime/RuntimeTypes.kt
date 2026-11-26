@@ -425,6 +425,8 @@ interface ConversationQueries {
 
     suspend fun history(sessionId: String): List<AssistantMessage>
 
+    suspend fun historySnapshot(sessionId: String): List<AssistantMessage> = history(sessionId)
+
     suspend fun sessionTitle(sessionId: String): String?
 
     suspend fun sessionModel(sessionId: String): SessionModelSnapshot?

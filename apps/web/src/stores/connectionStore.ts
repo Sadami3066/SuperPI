@@ -127,7 +127,21 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
         });
       return;
     }
-    if (baseType === "session_updated" || baseType === "capabilities_changed") {
+    if (baseType === "capabilities_changed") {
+      useSuperStore.getState().scheduleRefreshState(client);
+      return;
+    }
+    if (baseType === "usage_changed" && ev.usage) {
+      useSuperStore.getState().patchUsage(ev.usage);
+      return;
+    }
+    if (
+      baseType === "queue_changed" ||
+      baseType === "queue_dropped" ||
+      baseType === "user_input_admitted" ||
+      baseType === "turn_injected" ||
+      baseType === "session_updated"
+    ) {
       useSuperStore.getState().scheduleRefreshState(client);
     }
     return;
@@ -141,9 +155,6 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
     return;
   }
 
-  const sid = ev.sessionId;
-  if (!sid) return;
-
   if (
     ev.type === "session_list_changed" ||
     ev.type === "session_removed" ||
@@ -153,13 +164,30 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
     return;
   }
 
+  const sid = ev.sessionId;
+  if (!sid) return;
+
   const runId = ev.runId || "live";
+
+  if (ev.type === "usage_changed" && ev.usage) {
+    sessionStore.patchSessionUsage(sid, ev.usage);
+    return;
+  }
+
+  if (ev.type === "notice") {
+    return;
+  }
 
   if (ev.type === "queue_changed") {
     sessionStore.setQueueForSession(sid, [
       ...(ev.steering ?? []).map((text) => ({ kind: "steer" as const, text })),
       ...(ev.followUp ?? []).map((text) => ({ kind: "follow_up" as const, text })),
     ]);
+    return;
+  }
+
+  if (ev.type === "queue_dropped" || ev.type === "user_input_admitted" || ev.type === "turn_injected") {
+    void sessionStore.loadSession(client, sid, locale);
     return;
   }
 

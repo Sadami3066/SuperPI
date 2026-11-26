@@ -632,4 +632,66 @@ class LocalControlServerApiTest {
             assertTrue("Expected .agents/skills entry in /api/v1/skills", body.contains("demo-cross-harness"))
         }
     }
+
+    @Test
+    fun getSessionDoesNotEmitSessionUpdatedSseAndUiSettingsPatchSkipsReload() = runBlocking {
+        val port = server.start()
+        val botsResp = http.newCall(authReq(port, "/api/v1/bots").get().build()).execute()
+        val botsArr = botsResp.use { json.parseToJsonElement(it.body.string()).jsonArray }
+        val botId = botsArr.first().jsonObject["id"]!!.jsonPrimitive.content
+
+        val createReq = authReq(port, "/api/v1/bots/$botId/sessions")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        val sessionId = http.newCall(createReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["sessionId"]!!.jsonPrimitive.content
+        }
+
+        val ticketReq = authReq(port, "/api/v1/auth/sse-ticket")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        val ticket = http.newCall(ticketReq).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["ticket"]!!.jsonPrimitive.content
+        }
+
+        val sseHttp = http.newBuilder().readTimeout(2, TimeUnit.SECONDS).build()
+        val sseResp = sseHttp.newCall(
+            Request.Builder().url("http://127.0.0.1:$port/api/v1/events?ticket=$ticket").get().build(),
+        ).execute()
+        val reader = sseResp.body.byteStream().bufferedReader()
+
+        val readyEvent = buildString {
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.isEmpty()) break
+                appendLine(line)
+            }
+        }
+        assertTrue("Expected ready SSE event, got: $readyEvent", readyEvent.contains("event: ready"))
+
+        repeat(3) {
+            http.newCall(authReq(port, "/api/v1/sessions/$sessionId").get().build()).execute().use { resp ->
+                assertEquals(200, resp.code)
+            }
+        }
+
+        val patchReq = authReq(port, "/api/v1/settings")
+            .patch("""{"chatFontScale":115,"processDetail":"compact"}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(patchReq).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val obj = json.parseToJsonElement(resp.body.string()).jsonObject
+            assertEquals(115, obj["chatFontScale"]!!.jsonPrimitive.content.toInt())
+        }
+
+        val stream = sseResp.body.byteStream()
+        kotlinx.coroutines.delay(250L)
+        val hasBufferedReaderData = reader.ready()
+        val extraBytes = stream.available()
+        sseResp.close()
+        assertFalse("GET /sessions/{id} and UI settings patch must not emit SSE events", hasBufferedReaderData)
+        assertEquals("GET /sessions/{id} and UI settings patch must not emit SSE events", 0, extraBytes)
+    }
 }

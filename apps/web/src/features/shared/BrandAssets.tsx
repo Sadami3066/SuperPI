@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { IconDeviceMobile } from "@tabler/icons-react";
 
 export type MascotMood = "wave" | "thinking" | "waiting" | "done" | "alert" | "confused";
@@ -151,6 +151,10 @@ export function BotAvatar({
 }) {
   const [broken, setBroken] = useState(false);
 
+  useEffect(() => {
+    setBroken(false);
+  }, [avatar]);
+
   if (avatar && !broken) {
     return (
       <img
@@ -199,6 +203,11 @@ export function ProviderIcon({
   size?: number;
 }) {
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [providerId, dark]);
+
   const slug = providerId.toLowerCase().replace(/[^a-z0-9_]/g, "_");
   const folder = dark ? "dark" : "light";
   const src = `/providers/${folder}/provider_${slug}.png`;

@@ -401,12 +401,15 @@ export function Sidebar({
             <DropdownItem
               icon={<IconDownload size={14} />}
               label={t("nav.export")}
-              onSelect={() => {
-                if (!client) return;
-                void client.exportSessionJsonl(session.id).then((raw) => {
-                  downloadText(`session-${session.id}.jsonl`, raw);
-                });
-              }}
+                onSelect={() => {
+                  if (!client) return;
+                  void client
+                    .exportSessionJsonl(session.id)
+                    .then((raw) => {
+                      downloadText(`session-${session.id}.jsonl`, raw);
+                    })
+                    .catch(() => void 0);
+                }}
             />
             <DropdownSeparator />
             <DropdownItem
@@ -551,7 +554,7 @@ export function Sidebar({
             {activeWorkersCount > 0 && (
               <span
                 className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
-                style={{ background: "var(--pi-accent)", color: "#fff" }}
+                style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
               >
                 {activeWorkersCount}
               </span>

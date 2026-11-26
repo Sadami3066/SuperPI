@@ -912,6 +912,7 @@ data class SseEventPayload(
     val followUp: List<String>? = null,
     val archived: Boolean? = null,
     val deviceId: String? = null,
+    val usage: SessionUsageDto? = null,
     val timestamp: Long = System.currentTimeMillis(),
 )
 

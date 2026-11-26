@@ -145,7 +145,7 @@ export function SettingsModal({
                     {item.badge && (
                       <span
                         className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
-                        style={{ background: "var(--pi-accent)", color: "#fff" }}
+                        style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
                       >
                         {item.badge}
                       </span>

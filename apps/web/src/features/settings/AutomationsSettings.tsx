@@ -274,6 +274,7 @@ export function AutomationsSettings({
                   void client
                     .clearSettledInbox()
                     .then(setInboxItems)
+                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -349,6 +350,7 @@ export function AutomationsSettings({
                             void client
                               .updateInboxStatus(item.id, "approved")
                               .then(() => refreshInbox(client))
+                              .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                               .finally(() => setBusy(false));
                           }}
                         >
@@ -365,6 +367,7 @@ export function AutomationsSettings({
                             void client
                               .updateInboxStatus(item.id, "dismissed")
                               .then(() => refreshInbox(client))
+                              .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                               .finally(() => setBusy(false));
                           }}
                         >
@@ -378,7 +381,10 @@ export function AutomationsSettings({
                       label={t("common.delete")}
                       onClick={() => {
                         if (!client) return;
-                        void client.deleteInboxItem(item.id).then(() => refreshInbox(client));
+                        void client
+                          .deleteInboxItem(item.id)
+                          .then(() => refreshInbox(client))
+                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
                       }}
                     >
                       <IconTrash size={14} />
@@ -524,7 +530,10 @@ export function AutomationsSettings({
           if (!client || !deleteTarget) return;
           const id = deleteTarget.id;
           setDeleteTarget(null);
-          void client.deleteTimer(id).then(() => loadAll());
+          void client
+            .deleteTimer(id)
+            .then(() => loadAll())
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
         }}
       />
     </div>

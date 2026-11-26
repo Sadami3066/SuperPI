@@ -325,6 +325,7 @@ export interface HostSseEvent {
   followUp?: string[] | null;
   archived?: boolean | null;
   deviceId?: string | null;
+  usage?: HostUsageDto | null;
   timestamp?: number;
 }
 

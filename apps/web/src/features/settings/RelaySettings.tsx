@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { IconCheck, IconCopy, IconDeviceMobile, IconEdit, IconQrcode, IconTrash } from "@tabler/icons-react";
 import type { HostRelayDeviceDto } from "../../api/types";
@@ -28,6 +28,13 @@ export function RelaySettings() {
   const [renameTarget, setRenameTarget] = useState<HostRelayDeviceDto | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [revokeTarget, setRevokeTarget] = useState<HostRelayDeviceDto | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!qrLink) {
@@ -134,7 +141,8 @@ export function RelaySettings() {
                   onClick={() => {
                     void navigator.clipboard?.writeText(qrLink);
                     setCopied(true);
-                    setTimeout(() => setCopied(false), 1200);
+                    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+                    copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
                   }}
                 >
                   {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}

@@ -311,6 +311,7 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                             }
                         }
                         val collectorJob = launch {
+                            var lastEncoded: String? = null
                             val workerFlow = controller.superOrchestrator.workers.map { list ->
                                 list.firstOrNull { it.workerId == workerId }
                             }
@@ -345,7 +346,10 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                                     error = snapshot.error,
                                 )
                                 val encoded = workerStreamJson.encodeToString(WorkerDetailDto.serializer(), dto)
-                                outbound.trySend("event: worker_snapshot\ndata: $encoded\n\n")
+                                if (encoded != lastEncoded) {
+                                    lastEncoded = encoded
+                                    outbound.trySend("event: worker_snapshot\ndata: $encoded\n\n")
+                                }
                                 if (snapshot.streaming) {
                                     delay(110L)
                                 }
@@ -556,6 +560,7 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
 
     patch("/v1/settings") {
         val req = call.receive<PatchSettingsRequest>()
+        val before = controller.settingsStore.current()
         val updated = controller.settingsStore.update { cur ->
             val nextThinking = req.defaultThinkingLevel?.trim()?.let { raw ->
                 ThinkingLevel.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }?.name
@@ -582,7 +587,17 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                 customSystemInstruction = req.customSystemInstruction?.trim()?.take(4_000) ?: cur.customSystemInstruction,
             )
         }
-        controller.reloadAll()
+        val needsReload =
+            before.deviceName != updated.deviceName ||
+                before.defaultProvider != updated.defaultProvider ||
+                before.defaultModel != updated.defaultModel ||
+                before.defaultThinkingLevel != updated.defaultThinkingLevel ||
+                before.compactionTriggerPercent != updated.compactionTriggerPercent ||
+                before.userNickname != updated.userNickname ||
+                before.customSystemInstruction != updated.customSystemInstruction
+        if (needsReload) {
+            controller.reloadAll()
+        }
         call.respond(
             SettingsDto(
                 deviceName = updated.deviceName,

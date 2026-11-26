@@ -75,4 +75,38 @@ describe("UI hygiene guardrails", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("uses only defined --pi-* CSS variables and avoids hardcoded #fff on var(--pi-accent)", () => {
+    const appCss = fs.readFileSync(path.join(srcRoot, "styles", "app.css"), "utf8");
+    const themeTs = fs.readFileSync(path.join(srcRoot, "platform", "theme.ts"), "utf8");
+    const defined = new Set<string>();
+    const defRe = /(--pi-[a-z0-9-]+)\s*[:"]/g;
+    for (const src of [appCss, themeTs]) {
+      let dm: RegExpExecArray | null;
+      while ((dm = defRe.exec(src))) {
+        defined.add(dm[1]);
+      }
+    }
+
+    const files = collectSourceFiles(srcRoot, true);
+    const useRe = /var\((--pi-[a-z0-9-]+)\)/g;
+    const whiteOnAccentRe = /background:\s*["']var\(--pi-accent\)["'][^}]*color:\s*["']#fff/i;
+    const violations: string[] = [];
+
+    for (const file of files) {
+      const content = fs.readFileSync(file, "utf8");
+      const rel = path.relative(srcRoot, file);
+      let um: RegExpExecArray | null;
+      while ((um = useRe.exec(content))) {
+        if (!defined.has(um[1])) {
+          violations.push(`${rel}: undefined CSS var ${um[1]}`);
+        }
+      }
+      if (whiteOnAccentRe.test(content)) {
+        violations.push(`${rel}: hardcoded #fff text on var(--pi-accent)`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
 });

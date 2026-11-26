@@ -20,6 +20,10 @@ internal class RuntimeModels(
         return loaded.second
     }
 
+    suspend fun historySnapshot(sessionId: String): List<AssistantMessage> = mutex.withLock {
+        handles[sessionId]?.session?.history()
+    } ?: emptyList()
+
     suspend fun session(sessionId: String): SessionModelSnapshot? = mutex.withLock {
         val handle = handles[sessionId] ?: return@withLock null
         runCatching {

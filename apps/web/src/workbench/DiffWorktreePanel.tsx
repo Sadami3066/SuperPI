@@ -386,7 +386,16 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                           client &&
                           void client
                             .stageGitPath(bot.id, { all: true, worktreeId: effectiveWtId })
-                            .then(setGitSummary)
+                            .then((next) => {
+                              setGitSummary(next);
+                              void refreshChanges();
+                            })
+                            .catch((err) =>
+                              setFeedback({
+                                tone: "err",
+                                text: err instanceof Error ? err.message : "Failed",
+                              }),
+                            )
                         }
                       >
                         {t("git.stageAll")}
@@ -398,7 +407,16 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                           client &&
                           void client
                             .unstageGitPath(bot.id, { all: true, worktreeId: effectiveWtId })
-                            .then(setGitSummary)
+                            .then((next) => {
+                              setGitSummary(next);
+                              void refreshChanges();
+                            })
+                            .catch((err) =>
+                              setFeedback({
+                                tone: "err",
+                                text: err instanceof Error ? err.message : "Failed",
+                              }),
+                            )
                         }
                       >
                         {t("git.unstageAll")}
@@ -466,7 +484,16 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                                   client &&
                                   void client
                                     .unstageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
-                                    .then(setGitSummary)
+                                    .then((next) => {
+                                      setGitSummary(next);
+                                      void refreshChanges();
+                                    })
+                                    .catch((err) =>
+                                      setFeedback({
+                                        tone: "err",
+                                        text: err instanceof Error ? err.message : "Failed",
+                                      }),
+                                    )
                                 }
                               >
                                 <IconMinus size={13} />
@@ -479,7 +506,16 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                                   client &&
                                   void client
                                     .stageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
-                                    .then(setGitSummary)
+                                    .then((next) => {
+                                      setGitSummary(next);
+                                      void refreshChanges();
+                                    })
+                                    .catch((err) =>
+                                      setFeedback({
+                                        tone: "err",
+                                        text: err instanceof Error ? err.message : "Failed",
+                                      }),
+                                    )
                                 }
                               >
                                 <IconPlus size={13} />

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HostBotDto, HostBotPolicyDto, PermissionMode } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import {
   Button,
@@ -44,7 +45,15 @@ export function BotSettingsDialog({
   const [policy, setPolicy] = useState<HostBotPolicyDto | null>(null);
   const [busy, setBusy] = useState(false);
   const [savedFlag, setSavedFlag] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!bot || !client) return;
@@ -54,6 +63,7 @@ export function BotSettingsDialog({
     setDefaultModel(bot.defaultModel ?? "");
     setPermMode((bot.permissionMode as PermissionMode) || "workspace_auto");
     setSavedFlag(false);
+    setSaveError(null);
     void loadBotDetails(client, bot.id)
       .then((res) => {
         setAgentsDoc(res.doc.content ?? "");
@@ -99,6 +109,7 @@ export function BotSettingsDialog({
   const handleSave = async () => {
     if (!client) return;
     setBusy(true);
+    setSaveError(null);
     try {
       await updateBotProfile(client, bot.id, {
         name: name.trim() || bot.name,
@@ -122,7 +133,10 @@ export function BotSettingsDialog({
         });
       }
       setSavedFlag(true);
-      setTimeout(() => setSavedFlag(false), 1600);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSavedFlag(false), 1600);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
       setBusy(false);
     }
@@ -332,6 +346,12 @@ export function BotSettingsDialog({
           </TabsContent>
         </Tabs>
 
+        {saveError && (
+          <div className="mt-3 text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+            {saveError}
+          </div>
+        )}
+
         <div className="mt-5 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             {t("common.close")}
@@ -351,10 +371,17 @@ export function BotSettingsDialog({
         cancelLabel={t("common.cancel")}
         onConfirm={() => {
           if (!client) return;
-          void deleteBot(client, bot.id).then(() => {
-            setConfirmDelete(false);
-            onClose();
-          });
+          void deleteBot(client, bot.id)
+            .then(async () => {
+              const nextBots = useBotStore.getState().bots;
+              await useSessionStore.getState().refreshSessionLists(client, nextBots);
+              setConfirmDelete(false);
+              onClose();
+            })
+            .catch((err) => {
+              setSaveError(err instanceof Error ? err.message : "Failed to delete bot");
+              setConfirmDelete(false);
+            });
         }}
       />
     </>

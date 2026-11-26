@@ -3,15 +3,18 @@ package io.github.whywood.superpi.host.server
 import io.github.whywood.superpi.host.core.SuperPiController
 import io.github.whywood.superpi.remote.RemoteControlResult
 import io.github.whywood.superpi.remote.RemoteSessionRegistry
+import io.github.whywood.superpi.runtime.BackgroundTurnStarted
 import io.github.whywood.superpi.runtime.CompactionOutcome
 import io.github.whywood.superpi.runtime.GoalView
 import io.github.whywood.superpi.runtime.InputQueueKind
 import io.github.whywood.superpi.runtime.JobSnapshot
 import io.github.whywood.superpi.runtime.JobStatus
+import io.github.whywood.superpi.runtime.NoticeEvent
 import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.ThinkingLevel
+import io.github.whywood.superpi.runtime.UsageChanged
 import io.github.whywood.superpi.runtime.WorkerProgressEvent
 import io.ktor.http.CacheControl
 import io.ktor.http.ContentDisposition
@@ -94,8 +97,7 @@ internal fun Route.installSseEventRoute(
         call.response.header(HttpHeaders.Connection, "keep-alive")
         call.response.header("X-Accel-Buffering", "no")
         call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
-            // Decouple slow SSE clients from runtime SharedFlows via a per-client bounded channel.
-            val outbound = Channel<String>(capacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+            val outbound = Channel<String>(capacity = 1024, onBufferOverflow = BufferOverflow.DROP_OLDEST)
             fun enqueueFrame(frame: String) {
                 outbound.trySend(frame)
             }
@@ -118,7 +120,8 @@ internal fun Route.installSseEventRoute(
                     }
                     val runtimeJob = launch(start = CoroutineStart.UNDISPATCHED) {
                         controller.runtimeHost.events.collect { sessionEvt ->
-                            val mapped = mapRuntimeEvent(sessionEvt.sessionId, sessionEvt.event)
+                            val triggerPct = controller.settingsStore.current().compactionTriggerPercent
+                            val mapped = mapRuntimeEvent(sessionEvt.sessionId, sessionEvt.event, triggerPct)
                             if (mapped != null) {
                                 enqueue(mapped.type, mapped)
                             }
@@ -126,7 +129,8 @@ internal fun Route.installSseEventRoute(
                     }
                     val passiveRemoteJob = launch(start = CoroutineStart.UNDISPATCHED) {
                         controller.passiveRemoteEventsFlow.collect { sessionEvt ->
-                            val mapped = mapRuntimeEvent(sessionEvt.sessionId, sessionEvt.event)
+                            val triggerPct = controller.settingsStore.current().compactionTriggerPercent
+                            val mapped = mapRuntimeEvent(sessionEvt.sessionId, sessionEvt.event, triggerPct)
                             if (mapped != null) {
                                 enqueue(mapped.type, mapped)
                             }
@@ -134,7 +138,13 @@ internal fun Route.installSseEventRoute(
                     }
                     val superThreadJob = launch(start = CoroutineStart.UNDISPATCHED) {
                         controller.superThreadEventsFlow.collect { evt ->
-                            val mapped = mapRuntimeEvent(SuperRuntime.SUPER_THREAD_SESSION_ID, evt, prefix = "super_")
+                            val triggerPct = controller.settingsStore.current().compactionTriggerPercent
+                            val mapped = mapRuntimeEvent(
+                                SuperRuntime.SUPER_THREAD_SESSION_ID,
+                                evt,
+                                triggerPct,
+                                prefix = "super_",
+                            )
                             if (mapped != null) {
                                 enqueue(mapped.type, mapped)
                             }
@@ -412,7 +422,7 @@ internal fun Route.installSessionRoutes(
             call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Session not found: $sessionId"))
             return@get
         }
-        val history = runCatching { controller.runtimeHost.history(sessionId) }.getOrDefault(emptyList())
+        val history = runCatching { controller.runtimeHost.historySnapshot(sessionId) }.getOrDefault(emptyList())
         val model = runCatching { controller.runtimeHost.sessionModel(sessionId) }.getOrNull()
         val usage = runCatching { controller.runtimeHost.usage(sessionId) }.getOrNull()
         val title = runCatching { controller.runtimeHost.sessionTitle(sessionId) }.getOrNull()
@@ -554,7 +564,7 @@ internal fun Route.installSessionRoutes(
             } else {
                 controller.planFirstSessions.remove(sessionId)
             }
-            val preHistory = runCatching { controller.runtimeHost.history(sessionId) }.getOrDefault(emptyList())
+            val preHistory = runCatching { controller.runtimeHost.historySnapshot(sessionId) }.getOrDefault(emptyList())
             val userTurnIndex = preHistory.count { it.role.name.equals("USER", ignoreCase = true) }
             val preMessageCount = preHistory.size
             controller.scope.launch {
@@ -984,6 +994,7 @@ private fun mapWorkerProgressEvent(event: WorkerProgressEvent): SseEventPayload 
 private fun mapRuntimeEvent(
     sessionId: String,
     event: RuntimeEvent,
+    compactionTriggerPercent: Int = 80,
     prefix: String = "",
 ): SseEventPayload? = when (event) {
     is RuntimeEvent.RunStarted -> SseEventPayload(
@@ -1106,8 +1117,19 @@ private fun mapRuntimeEvent(
         sessionId = sessionId,
         runId = event.runId,
     )
-    else -> SseEventPayload(
-        type = "${prefix}session_updated",
+    is UsageChanged -> SseEventPayload(
+        type = "${prefix}usage_changed",
+        sessionId = sessionId,
+        runId = event.runId,
+        usage = event.usage.toDto(compactionTriggerPercent),
+    )
+    is NoticeEvent -> SseEventPayload(
+        type = "${prefix}notice",
+        sessionId = sessionId,
+        runId = event.runId,
+    )
+    is BackgroundTurnStarted -> SseEventPayload(
+        type = "${prefix}run_started",
         sessionId = sessionId,
         runId = event.runId,
     )

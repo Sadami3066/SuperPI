@@ -5,7 +5,6 @@ import {
   IconPhoto,
   IconPlayerStop,
   IconRefresh,
-  IconSettings,
   IconTrash,
   IconUsersGroup,
   IconX,
@@ -330,7 +329,6 @@ export function SuperWorkspace({
             label={t("super.workersTitle")}
             onClick={() => setShowWorkersRail((v) => !v)}
           >
-            <IconSettings size={14} stroke={1.7} className="hidden" />
             <Badge tone={runningWorkersCount > 0 ? "accent" : "neutral"}>
               {workers.length}
             </Badge>
@@ -450,6 +448,7 @@ export function SuperWorkspace({
 
                 {state?.pendingQuestion && client && (
                   <AskQuestionCard
+                    key={state.pendingQuestion.requestId}
                     question={state.pendingQuestion}
                     onSubmit={(reqId, answers) => answerQuestion(client, reqId, answers)}
                     onDismiss={(reqId) => dismissQuestion(client, reqId)}
@@ -460,14 +459,7 @@ export function SuperWorkspace({
           )}
 
           <div className="shrink-0 px-4 pt-2 pb-4">
-            <div
-              className="mx-auto w-full max-w-[760px] rounded-[22px] p-2.5"
-              style={{
-                background: "var(--pi-surface)",
-                border: "0.5px solid var(--pi-hairline-strong)",
-                boxShadow: "var(--pi-shadow-card)",
-              }}
-            >
+            <div className="pi-composer-shell mx-auto w-full max-w-[760px] rounded-[22px] p-2.5">
               {images.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2 px-1">
                   {images.map((img) => (

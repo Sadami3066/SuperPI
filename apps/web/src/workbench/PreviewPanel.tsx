@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import mammoth from "mammoth";
 import {
@@ -97,6 +97,15 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [loaded, setLoaded] = useState<LoadedContent>(() => initialLoaded("code"));
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeTargetRef = useRef<OpenPreviewTarget | null>(activeTarget);
+  activeTargetRef.current = activeTarget;
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     setViewMode("preview");
@@ -105,13 +114,14 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
   }, [activeKey]);
 
   useEffect(() => {
-    if (!client || !activeTarget) return undefined;
+    const target = activeTargetRef.current;
+    if (!client || !target || !activeKey) return undefined;
     let cancelled = false;
     let activeBlobUrl: string | null = null;
 
     const kind = classifyPreviewKind(
-      activeTarget.name,
-      activeTarget.source === "artifact" ? activeTarget.mime : undefined,
+      target.name,
+      target.source === "artifact" ? target.mime : undefined,
     );
 
     const load = async () => {
@@ -121,9 +131,9 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
       try {
         if (kind === "pdf" || kind === "image") {
           const rawBlob =
-            activeTarget.source === "workspace"
-              ? await client.fetchBotFileRaw(activeTarget.botId, activeTarget.path, false)
-              : await client.fetchSessionArtifact(activeTarget.sessionId, activeTarget.path, false);
+            target.source === "workspace"
+              ? await client.fetchBotFileRaw(target.botId, target.path, false)
+              : await client.fetchSessionArtifact(target.sessionId, target.path, false);
           if (cancelled) return;
           const typed =
             kind === "pdf" ? new Blob([rawBlob], { type: "application/pdf" }) : rawBlob;
@@ -134,9 +144,9 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
 
         if (kind === "docx") {
           const rawBlob =
-            activeTarget.source === "workspace"
-              ? await client.fetchBotFileRaw(activeTarget.botId, activeTarget.path, false)
-              : await client.fetchSessionArtifact(activeTarget.sessionId, activeTarget.path, false);
+            target.source === "workspace"
+              ? await client.fetchBotFileRaw(target.botId, target.path, false)
+              : await client.fetchSessionArtifact(target.sessionId, target.path, false);
           if (cancelled) return;
           const buf = await rawBlob.arrayBuffer();
           const result = await mammoth.convertToHtml({ arrayBuffer: buf });
@@ -151,8 +161,8 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
           return;
         }
 
-        if (activeTarget.source === "workspace") {
-          const res = await client.readBotFile(activeTarget.botId, activeTarget.path);
+        if (target.source === "workspace") {
+          const res = await client.readBotFile(target.botId, target.path);
           if (cancelled) return;
           if (res.isBinary) {
             setLoaded(initialLoaded("binary"));
@@ -168,8 +178,8 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
         }
 
         const rawBlob = await client.fetchSessionArtifact(
-          activeTarget.sessionId,
-          activeTarget.path,
+          target.sessionId,
+          target.path,
           false,
         );
         if (cancelled) return;
@@ -201,7 +211,7 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
         URL.revokeObjectURL(activeBlobUrl);
       }
     };
-  }, [activeKey, activeTarget, client]);
+  }, [activeKey, client]);
 
   const canSave =
     Boolean(activeTarget && activeTarget.source === "workspace") &&
@@ -223,7 +233,8 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
       });
       setLoaded((cur) => ({ ...cur, text: cur.draft }));
       setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 1800);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSavedNotice(false), 1800);
     } catch (err) {
       setLoaded((cur) => ({
         ...cur,

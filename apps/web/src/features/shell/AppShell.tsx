@@ -59,7 +59,7 @@ export function AppShell() {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const key = e.key.toLowerCase();
-      if (key === "b") {
+      if (key === "b" && !e.shiftKey) {
         e.preventDefault();
         setSidebarOpen((v) => !v);
       } else if (key === "k") {

@@ -218,7 +218,10 @@ export function SkillsSettings() {
           if (!client || !deleteTarget) return;
           const id = deleteTarget.id;
           setDeleteTarget(null);
-          void client.deleteSkill(id).then(() => loadSkills());
+          void client
+            .deleteSkill(id)
+            .then(() => loadSkills())
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
         }}
       />
     </div>

@@ -15,12 +15,15 @@ import type {
   HostPendingQuestionDto,
   HostQueuedInputDto,
   HostSessionSummaryDto,
+  HostUsageDto,
   QuestionAnswerInput,
   SessionSummary,
   SessionTranscript,
   ThinkingLevel,
+  TurnBlock,
 } from "../api/types";
-import { useStreamStore } from "./streamStore";
+import { useBotStore } from "./botStore";
+import { type LiveRunState, useStreamStore } from "./streamStore";
 
 export const MAX_CACHED_TRANSCRIPTS = 5;
 
@@ -65,7 +68,44 @@ function touchLru(order: string[], sessionId: string): string[] {
   return [...order.filter((id) => id !== sessionId), sessionId];
 }
 
-const sessionReqSeq = new Map<string, number>();
+function resolveBotIdByCwd(cwd: string, bots: HostBotDto[]): string {
+  const cleanCwd = cwd.replace(/\/+$/, "");
+  const matched = bots.find((b) => b.cwd.replace(/\/+$/, "") === cleanCwd);
+  return matched?.id ?? bots[0]?.id ?? "home";
+}
+
+function materializeFinishedLiveRun(
+  run: LiveRunState,
+  locale: "zh-CN" | "en",
+): ChatTurn | null {
+  if (run.streaming || run.blocks.length === 0) return null;
+  const textParts = run.blocks
+    .filter((b): b is Extract<TurnBlock, { kind: "text" }> => b.kind === "text")
+    .map((b) => b.text);
+  const rawText = textParts.join("\n\n");
+  const durationMs =
+    run.finishedAt && run.startedAt > 0 && run.finishedAt >= run.startedAt
+      ? run.finishedAt - run.startedAt
+      : undefined;
+  return {
+    id: `m-local-${run.runId}`,
+    runId: run.runId,
+    role: "assistant",
+    rawText,
+    timestamp: formatClockTime(run.finishedAt ?? run.startedAt, locale),
+    durationMs,
+    status: run.status === "failed" ? "failed" : run.status === "stopped" ? "stopped" : "done",
+    failed: run.failed,
+    error: run.error,
+    notices: [],
+    attachments: [],
+    blocks: run.blocks,
+  };
+}
+
+const inFlightLoads = new Map<string, Promise<void>>();
+const pendingLoads = new Map<string, { locale: "zh-CN" | "en"; reconcileRunId?: string }>();
+let localSeq = 0;
 
 export interface SessionStoreState {
   summariesById: Record<string, SessionSummary>;
@@ -91,6 +131,7 @@ export interface SessionStoreState {
     locale: "zh-CN" | "en",
     reconcileRunId?: string,
   ) => Promise<void>;
+  patchSessionUsage: (sessionId: string, usage: HostUsageDto) => void;
   loadArchivedSessions: (client: HostClient) => Promise<void>;
   refreshQuestions: (client: HostClient) => Promise<void>;
   selectSession: (client: HostClient, sessionId: string, locale: "zh-CN" | "en") => Promise<void>;
@@ -247,76 +288,128 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         summariesById[dto.id] = mapSummary(dto, botId);
       }
     }
-    set({ summariesById, sessionIdsByBot });
+    const curActive = get().activeSessionId;
+    const allIds = Object.keys(summariesById);
+    const nextActive = curActive && summariesById[curActive] ? curActive : allIds[0] ?? curActive;
+    if (nextActive && nextActive !== curActive) {
+      saveStoredSessionId(nextActive);
+    }
+    set({ summariesById, sessionIdsByBot, activeSessionId: nextActive });
   },
 
   loadSession: async (client, sessionId, locale, reconcileRunId) => {
-    const reqId = (sessionReqSeq.get(sessionId) ?? 0) + 1;
-    sessionReqSeq.set(sessionId, reqId);
-    try {
-      const detail = await client.getSession(sessionId);
-      if (sessionReqSeq.get(sessionId) !== reqId) return;
-
-      const turns: ChatTurn[] = detail.messages
-        .filter((m) => !m.streaming)
-        .map((m) => mapHostMessageToTurn(m, locale));
-
-      const model =
-        detail.model?.providerId && detail.model?.modelId
-          ? `${detail.model.providerId}/${detail.model.modelId}`
-          : undefined;
-      const thinking = detail.model?.thinkingLevel
-        ? normalizeThinkingLevel(detail.model.thinkingLevel)
-        : undefined;
-
-      const transcript: SessionTranscript = {
-        sessionId,
-        turns,
-        model,
-        thinking,
-        usage: detail.usage ?? null,
-        contextPercent: computeContextPercent(detail.usage),
-        queuedInputs: detail.queuedInputs ?? [],
-        pendingQuestion: detail.pendingQuestion ?? null,
-        loadedAt: Date.now(),
-      };
-
-      set((s) => {
-        const nextOrder = touchLru(s.lruOrder, sessionId);
-        const evicted = evictTranscriptLru(
-          { ...s.transcriptsById, [sessionId]: transcript },
-          nextOrder,
-          s.activeSessionId,
-        );
-        const prevSum = s.summariesById[sessionId];
-        return {
-          ...evicted,
-          summariesById: prevSum
-            ? {
-                ...s.summariesById,
-                [sessionId]: {
-                  ...prevSum,
-                  title: detail.title || prevSum.title,
-                  busy: detail.busy,
-                },
-              }
-            : s.summariesById,
-        };
+    const existing = inFlightLoads.get(sessionId);
+    if (existing) {
+      const prev = pendingLoads.get(sessionId);
+      pendingLoads.set(sessionId, {
+        locale,
+        reconcileRunId: reconcileRunId ?? prev?.reconcileRunId,
       });
-
-      if (reconcileRunId) {
-        useStreamStore.getState().clearRun(sessionId, reconcileRunId);
-      } else if (!detail.busy) {
-        useStreamStore.getState().clearRun(sessionId);
-      }
-    } catch {
-      return;
+      return existing;
     }
+
+    const promise = (async () => {
+      try {
+        const detail = await client.getSession(sessionId);
+
+        const turns: ChatTurn[] = detail.messages
+          .filter((m) => !m.streaming)
+          .map((m) => mapHostMessageToTurn(m, locale));
+
+        const model =
+          detail.model?.providerId && detail.model?.modelId
+            ? `${detail.model.providerId}/${detail.model.modelId}`
+            : undefined;
+        const thinking = detail.model?.thinkingLevel
+          ? normalizeThinkingLevel(detail.model.thinkingLevel)
+          : undefined;
+
+        const transcript: SessionTranscript = {
+          sessionId,
+          turns,
+          model,
+          thinking,
+          usage: detail.usage ?? null,
+          contextPercent: computeContextPercent(detail.usage),
+          queuedInputs: detail.queuedInputs ?? [],
+          pendingQuestion: detail.pendingQuestion ?? null,
+          loadedAt: Date.now(),
+        };
+
+        set((s) => {
+          const nextOrder = touchLru(s.lruOrder, sessionId);
+          const evicted = evictTranscriptLru(
+            { ...s.transcriptsById, [sessionId]: transcript },
+            nextOrder,
+            s.activeSessionId,
+          );
+          const prevSum = s.summariesById[sessionId];
+          return {
+            ...evicted,
+            summariesById: prevSum
+              ? {
+                  ...s.summariesById,
+                  [sessionId]: {
+                    ...prevSum,
+                    title: detail.title || prevSum.title,
+                    busy: detail.busy,
+                    cwd: detail.cwd || prevSum.cwd,
+                    worktreeId: detail.worktreeId ?? prevSum.worktreeId,
+                    worktreeBranch: detail.worktreeBranch ?? prevSum.worktreeBranch,
+                  },
+                }
+              : s.summariesById,
+          };
+        });
+
+        if (reconcileRunId) {
+          useStreamStore.getState().clearRun(sessionId, reconcileRunId);
+        } else if (!detail.busy) {
+          const live = useStreamStore.getState().activeBySession[sessionId];
+          if (live && !live.streaming && !live.runId.startsWith("pending-")) {
+            useStreamStore.getState().clearRun(sessionId);
+          }
+        }
+      } catch {
+        return;
+      } finally {
+        inFlightLoads.delete(sessionId);
+      }
+    })();
+
+    inFlightLoads.set(sessionId, promise);
+    await promise;
+
+    const queued = pendingLoads.get(sessionId);
+    if (queued) {
+      pendingLoads.delete(sessionId);
+      await get().loadSession(client, sessionId, queued.locale, queued.reconcileRunId);
+    }
+  },
+
+  patchSessionUsage: (sessionId, usage) => {
+    set((s) => {
+      const tr = s.transcriptsById[sessionId];
+      if (!tr) return s;
+      return {
+        transcriptsById: {
+          ...s.transcriptsById,
+          [sessionId]: {
+            ...tr,
+            usage,
+            contextPercent: computeContextPercent(usage),
+          },
+        },
+      };
+    });
   },
 
   loadArchivedSessions: async (client) => {
     const list = await client.listArchivedSessions().catch(() => [] as HostSessionSummaryDto[]);
-    set({ archivedSessions: list.map((s) => mapSummary(s, "home")) });
+    const bots = useBotStore.getState().bots;
+    set({
+      archivedSessions: list.map((s) => mapSummary(s, resolveBotIdByCwd(s.cwd, bots))),
+    });
   },
 
   refreshQuestions: async (client) => {
@@ -425,6 +518,9 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         activeSessionId: fallbackId,
       };
     });
+    if (!archived) {
+      await get().refreshSessionLists(client, useBotStore.getState().bots);
+    }
   },
 
   toggleMemoryExclude: async (client, sessionId, excluded) => {
@@ -618,9 +714,11 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       return;
     }
 
-    const pendingRunId = `pending-${Date.now()}`;
+    const carryTurn = liveRun ? materializeFinishedLiveRun(liveRun, locale) : null;
+    localSeq += 1;
+    const pendingRunId = `pending-${Date.now()}-${localSeq}`;
     const userTurn: ChatTurn = {
-      id: `u-local-${Date.now()}`,
+      id: `u-local-${Date.now()}-${localSeq}`,
       runId: pendingRunId,
       role: "user",
       rawText: baseText,
@@ -635,7 +733,11 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     set((s) => {
       const tr = s.transcriptsById[sessionId];
       const sum = s.summariesById[sessionId];
-      const nextTurns = tr ? [...tr.turns, userTurn] : [userTurn];
+      const baseTurns = tr ? [...tr.turns] : [];
+      if (carryTurn && !baseTurns.some((t) => t.role === "assistant" && t.runId === carryTurn.runId)) {
+        baseTurns.push(carryTurn);
+      }
+      const nextTurns = [...baseTurns, userTurn];
       const nextTr: SessionTranscript = tr
         ? { ...tr, turns: nextTurns }
         : {
@@ -744,7 +846,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   },
 
   reset: () => {
-    sessionReqSeq.clear();
+    inFlightLoads.clear();
+    pendingLoads.clear();
     set({
       summariesById: {},
       sessionIdsByBot: {},

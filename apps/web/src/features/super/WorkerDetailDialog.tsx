@@ -67,9 +67,7 @@ export function WorkerDetailDialog({
 
   const turns = useMemo(() => {
     if (!detail) return [];
-    return detail.messages
-      .filter((m) => !m.streaming)
-      .map((m) => mapHostMessageToTurn(m, locale));
+    return detail.messages.map((m) => mapHostMessageToTurn(m, locale));
   }, [detail, locale]);
 
   const lastAssistantIdx = useMemo(() => {
@@ -219,6 +217,7 @@ export function WorkerDetailDialog({
 
                 {detail.worker.pendingQuestion && client && selectedWorkerId && (
                   <AskQuestionCard
+                    key={detail.worker.pendingQuestion.requestId}
                     question={detail.worker.pendingQuestion}
                     onSubmit={async (reqId, answers) => {
                       await client.answerSuperWorkerQuestion(selectedWorkerId, reqId, answers);

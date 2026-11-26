@@ -605,7 +605,10 @@ export function McpSettings() {
                   size="sm"
                   onClick={() => {
                     if (!client || !oauthInput.trim()) return;
-                    void client.submitMcpOAuth(oauthServerName, oauthInput.trim()).then(setOauthState);
+                    void client
+                      .submitMcpOAuth(oauthServerName, oauthInput.trim())
+                      .then(setOauthState)
+                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
                   }}
                 >
                   {t("common.confirm")}
@@ -624,10 +627,13 @@ export function McpSettings() {
                 size="sm"
                 onClick={() => {
                   if (!client) return;
-                  void client.logoutMcpOAuth(oauthServerName).then(() => {
-                    setOauthServerName(null);
-                    void loadServers();
-                  });
+                  void client
+                    .logoutMcpOAuth(oauthServerName)
+                    .then(() => {
+                      setOauthServerName(null);
+                      void loadServers();
+                    })
+                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
                 }}
               >
                 {t("providers.oauthLogout")}
@@ -650,7 +656,10 @@ export function McpSettings() {
           if (!client || !deleteTarget) return;
           const serverName = deleteTarget.name;
           setDeleteTarget(null);
-          void client.deleteMcpServer(serverName).then(() => loadServers());
+          void client
+            .deleteMcpServer(serverName)
+            .then(() => loadServers())
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
         }}
       />
     </div>

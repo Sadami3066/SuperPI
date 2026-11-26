@@ -552,6 +552,8 @@ export class HostClient {
       "session_list_changed",
       "capabilities_changed",
       "session_updated",
+      "usage_changed",
+      "notice",
       "questions_changed",
       "devices_changed",
       "super_run_started",
@@ -570,6 +572,8 @@ export class HostClient {
       "super_turn_injected",
       "super_capabilities_changed",
       "super_session_updated",
+      "super_usage_changed",
+      "super_notice",
       "worker_progress",
       "worker_approval",
       "goal_changed",
@@ -801,11 +805,37 @@ export class HostClient {
     });
   }
 
-  applyWorktree(wtId: string): Promise<HostWorktreeOpResponse> {
-    return this.request(`/api/v1/worktrees/${encodeURIComponent(wtId)}/apply`, {
+  async applyWorktree(wtId: string): Promise<HostWorktreeOpResponse> {
+    const resp = await fetch(`${this.baseUrl}/api/v1/worktrees/${encodeURIComponent(wtId)}/apply`, {
       method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({}),
     });
+    if (resp.status === 409) {
+      const body = (await resp.json().catch(() => null)) as HostWorktreeOpResponse | null;
+      if (body && typeof body === "object") {
+        return {
+          ok: Boolean(body.ok),
+          message: body.message || "Merge conflicts",
+          conflicts: Array.isArray(body.conflicts) ? body.conflicts : [],
+        };
+      }
+    }
+    if (!resp.ok) {
+      let msg = `HTTP ${resp.status}`;
+      try {
+        const body = (await resp.json()) as { error?: string; message?: string };
+        msg = body.error || body.message || msg;
+      } catch {
+        const text = await resp.text().catch(() => "");
+        if (text.trim()) msg = text.trim();
+      }
+      throw new HostApiError(resp.status, msg);
+    }
+    return (await resp.json()) as HostWorktreeOpResponse;
   }
 
   deleteWorktree(wtId: string, deleteBranch = true): Promise<HostHealthDto> {

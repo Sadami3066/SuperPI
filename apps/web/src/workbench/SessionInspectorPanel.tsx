@@ -172,7 +172,7 @@ export default function SessionInspectorPanel({
               <span className="text-[12px] font-semibold" style={{ color: "var(--pi-ink-secondary)" }}>
                 {t("inspector.goalTitle")}
               </span>
-              {goal && <Badge tone={goal.phase === "running" ? "accent" : "neutral"}>{goal.phase}</Badge>}
+              {goal && <Badge tone={goal.phase === "active" ? "accent" : "neutral"}>{goal.phase}</Badge>}
             </div>
 
             {goal ? (
@@ -201,6 +201,7 @@ export default function SessionInspectorPanel({
                         void client
                           .resumeSessionGoal(context.sessionId)
                           .then((res) => setGoal(res.goal ?? null))
+                          .catch(() => void 0)
                           .finally(() => setGoalBusy(false));
                       }}
                     >
@@ -218,6 +219,7 @@ export default function SessionInspectorPanel({
                         void client
                           .pauseSessionGoal(context.sessionId)
                           .then((res) => setGoal(res.goal ?? null))
+                          .catch(() => void 0)
                           .finally(() => setGoalBusy(false));
                       }}
                     >
@@ -234,6 +236,7 @@ export default function SessionInspectorPanel({
                       void client
                         .deleteSessionGoal(context.sessionId)
                         .then(() => setGoal(null))
+                        .catch(() => void 0)
                         .finally(() => setGoalBusy(false));
                     }}
                   >
@@ -274,6 +277,7 @@ export default function SessionInspectorPanel({
                           setGoal(res.goal ?? null);
                           setGoalObjective("");
                         })
+                        .catch(() => void 0)
                         .finally(() => setGoalBusy(false));
                     }}
                   >
@@ -299,7 +303,8 @@ export default function SessionInspectorPanel({
                     if (!client || !context.sessionId) return;
                     void client
                       .clearSettledSessionJobs(context.sessionId)
-                      .then(() => refreshGoalAndJobs());
+                      .then(() => refreshGoalAndJobs())
+                      .catch(() => void 0);
                   }}
                 >
                   {t("inspector.jobsClearSettled")}
@@ -332,7 +337,8 @@ export default function SessionInspectorPanel({
                           .getSessionJobOutput(context.sessionId, job.id)
                           .then((detail) =>
                             setJobOutput({ label: job.label || job.command, detail }),
-                          );
+                          )
+                          .catch(() => void 0);
                       }}
                     >
                       {t("inspector.jobOutput")}
@@ -345,7 +351,8 @@ export default function SessionInspectorPanel({
                           if (!client || !context.sessionId) return;
                           void client
                             .killSessionJob(context.sessionId, job.id)
-                            .then(() => refreshGoalAndJobs());
+                            .then(() => refreshGoalAndJobs())
+                            .catch(() => void 0);
                         }}
                       >
                         <IconPlayerStop size={13} />

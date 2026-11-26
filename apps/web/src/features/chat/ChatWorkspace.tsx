@@ -52,7 +52,11 @@ export function ChatWorkspace({
   const setPermissionMode = useBotStore((s) => s.setPermissionMode);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const summary = useSessionStore((s) => s.summariesById[s.activeSessionId]);
+  const summaryFromList = useSessionStore((s) => s.summariesById[s.activeSessionId]);
+  const archivedMatch = useSessionStore((s) =>
+    s.archivedSessions.find((x) => x.id === s.activeSessionId),
+  );
+  const summary = summaryFromList ?? archivedMatch;
   const transcript = useSessionStore((s) => s.transcriptsById[s.activeSessionId]);
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
   const composerText = useSessionStore((s) => s.composerTextBySession[s.activeSessionId] ?? "");

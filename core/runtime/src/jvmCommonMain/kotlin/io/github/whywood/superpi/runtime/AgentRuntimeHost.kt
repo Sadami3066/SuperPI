@@ -308,6 +308,9 @@ class AgentRuntimeHost internal constructor(
 
     override suspend fun history(sessionId: String): List<AssistantMessage> = models.history(sessionId)
 
+    override suspend fun historySnapshot(sessionId: String): List<AssistantMessage> =
+        models.historySnapshot(sessionId)
+
     override suspend fun sessionTitle(sessionId: String): String? = sessionsAdmin.title(sessionId)
 
     override suspend fun sessions(workspaceId: String): List<ConversationSummary> =

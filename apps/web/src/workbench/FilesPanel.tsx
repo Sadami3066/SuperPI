@@ -79,12 +79,6 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    setCurrentPath("");
-    setQuery("");
-    setSearchEntries(null);
-  }, [context.botId]);
-
   const loadDir = useCallback(
     async (relPath: string) => {
       if (!client || !bot) return;
@@ -104,7 +98,10 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
   );
 
   useEffect(() => {
-    void loadDir(currentPath);
+    setCurrentPath("");
+    setQuery("");
+    setSearchEntries(null);
+    void loadDir("");
   }, [bot?.id, loadDir]);
 
   useEffect(() => {

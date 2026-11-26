@@ -52,8 +52,12 @@ function ImageArtifactCard({
 
   const handleDownload = async () => {
     if (!client || !item.path) return;
-    const blob = await client.fetchSessionArtifact(sessionId, item.path, true);
-    triggerBlobDownload(blob, item.name);
+    try {
+      const blob = await client.fetchSessionArtifact(sessionId, item.path, true);
+      triggerBlobDownload(blob, item.name);
+    } catch {
+      void 0;
+    }
   };
 
   const handleOpenPreview = () => {
@@ -123,8 +127,12 @@ export function PresentCard({
 
   const handleDownload = async (item: PresentedItem) => {
     if (!client || !item.path) return;
-    const blob = await client.fetchSessionArtifact(sessionId, item.path, true);
-    triggerBlobDownload(blob, item.name);
+    try {
+      const blob = await client.fetchSessionArtifact(sessionId, item.path, true);
+      triggerBlobDownload(blob, item.name);
+    } catch {
+      void 0;
+    }
   };
 
   const handleOpenPreview = (item: PresentedItem) => {

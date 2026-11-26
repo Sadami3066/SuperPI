@@ -5,6 +5,7 @@ import type {
   HostSuperSettingsDto,
   HostSuperStateResponse,
   HostSuperTeamBotDto,
+  HostUsageDto,
   QuestionAnswerInput,
 } from "../api/types";
 
@@ -63,6 +64,7 @@ export interface SuperStoreState {
   setInboxItems: (items: HostInboxItemDto[]) => void;
   bumpGoalVersion: () => void;
   bumpJobsVersion: () => void;
+  patchUsage: (usage: HostUsageDto) => void;
   reset: () => void;
 }
 
@@ -105,8 +107,12 @@ export const useSuperStore = create<SuperStoreState>((set, get) => ({
   },
 
   refreshTeam: async (client) => {
-    const team = await client.getSuperTeam();
-    set({ team });
+    try {
+      const team = await client.getSuperTeam();
+      set({ team });
+    } catch {
+      void 0;
+    }
   },
 
   setTeamBot: async (client, botRef, enabled) => {
@@ -207,6 +213,12 @@ export const useSuperStore = create<SuperStoreState>((set, get) => ({
   bumpGoalVersion: () => set((s) => ({ goalVersion: s.goalVersion + 1 })),
 
   bumpJobsVersion: () => set((s) => ({ jobsVersion: s.jobsVersion + 1 })),
+
+  patchUsage: (usage) =>
+    set((s) => {
+      if (!s.state) return s;
+      return { state: { ...s.state, usage } };
+    }),
 
   reset: () => {
     if (refreshTimer !== null) {

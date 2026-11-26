@@ -119,10 +119,15 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
   const navigateTo = async (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
+    if (shouldShowView) {
+      const next = await browserNavigate(trimmed);
+      if (next) setNavState(next);
+      return;
+    }
     const el = viewportRef.current;
     if (el) {
       const rect = el.getBoundingClientRect();
-      await browserMount(
+      const mounted = await browserMount(
         {
           x: Math.round(rect.left),
           y: Math.round(rect.top),
@@ -131,9 +136,8 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
         },
         trimmed,
       );
+      if (mounted) setNavState(mounted);
     }
-    const next = await browserNavigate(trimmed);
-    if (next) setNavState(next);
   };
 
   const handleQuotePage = async () => {

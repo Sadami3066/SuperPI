@@ -102,24 +102,28 @@ export function ProvidersSettings() {
     if (!client) return;
     stopOAuthPolling();
     setError(null);
-    const st = await client.startOAuth(providerId);
-    setOauthState(st);
-    pollTimerRef.current = setInterval(() => {
-      void client
-        .getOAuthStatus(providerId)
-        .then((next) => {
-          setOauthState(next);
-          if (next.status === "completed") {
+    try {
+      const st = await client.startOAuth(providerId);
+      setOauthState(st);
+      pollTimerRef.current = setInterval(() => {
+        void client
+          .getOAuthStatus(providerId)
+          .then((next) => {
+            setOauthState(next);
+            if (next.status === "completed") {
+              stopOAuthPolling();
+              void refreshSettingsData(client);
+            } else if (next.status === "failed" || next.status === "cancelled") {
+              stopOAuthPolling();
+            }
+          })
+          .catch(() => {
             stopOAuthPolling();
-            void refreshSettingsData(client);
-          } else if (next.status === "failed" || next.status === "cancelled") {
-            stopOAuthPolling();
-          }
-        })
-        .catch(() => {
-          stopOAuthPolling();
-        });
-    }, 1200);
+          });
+      }, 1200);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start sign in");
+    }
   };
 
   const openCustomEditor = (existing?: HostCustomProviderDto) => {

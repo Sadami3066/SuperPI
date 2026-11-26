@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HostSuperSettingsDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -42,13 +42,20 @@ export function SuperTeamDialog({
   const [busy, setBusy] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open || !client) return;
     setError(null);
     setSavedNotice(false);
     void refreshTeam(client);
-    void refreshSuperSettings(client);
+    void refreshSuperSettings(client).catch(() => void 0);
     void client
       .getSuperAgentsDoc()
       .then((doc) => setAgentsDoc(doc.content ?? ""))
@@ -63,7 +70,8 @@ export function SuperTeamDialog({
 
   const showSaved = () => {
     setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 1600);
+    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setSavedNotice(false), 1600);
   };
 
   return (

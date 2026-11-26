@@ -97,6 +97,13 @@ export function MemorySettings() {
   const [guidance, setGuidance] = useState("");
   const [prefsSaved, setPrefsSaved] = useState(false);
 
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const loadSnapshot = useCallback(async () => {
     if (!client) return;
     setLoading(true);
@@ -105,7 +112,7 @@ export function MemorySettings() {
       const next = await client.getMemorySnapshot({
         includeArchived,
         includeHistory,
-        query: query.trim() || undefined,
+        query: debouncedQuery.trim() || undefined,
       });
       setSnapshot(next);
       setPrefsMode(next.preferences.mode || "AUTO");
@@ -118,7 +125,7 @@ export function MemorySettings() {
     } finally {
       setLoading(false);
     }
-  }, [client, includeArchived, includeHistory, query]);
+  }, [client, debouncedQuery, includeArchived, includeHistory]);
 
   useEffect(() => {
     void loadSnapshot();
