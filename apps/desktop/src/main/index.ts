@@ -175,12 +175,25 @@ function createTray(): void {
   tray.on("click", () => focusMainWindow());
 }
 
+function configureApplicationMenu(): void {
+  if (process.platform === "darwin") {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: "appMenu" },
+        { role: "editMenu" },
+        { role: "windowMenu" },
+      ]),
+    );
+    return;
+  }
+  Menu.setApplicationMenu(null);
+}
+
 function createMainWindow(): void {
   const devUrl = process.env.SUPERPI_DEV_URL?.trim();
   const bounds = loadWindowState(hostManager.homeDir);
   const appIconPath = resolveIconPath(repoRoot, "icon.png");
   const isMac = process.platform === "darwin";
-  const isWin = process.platform === "win32";
 
   const win = new BrowserWindow({
     width: bounds.width,
@@ -193,23 +206,15 @@ function createMainWindow(): void {
     title: "Super PI",
     icon: appIconPath ?? undefined,
     backgroundColor: "#f4f4f2",
-    frame: true,
+    frame: isMac,
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 14, y: 16 },
+          trafficLightPosition: { x: 14, y: 12 },
         }
-      : {}),
-    ...(isWin
-      ? {
-          titleBarStyle: "hidden" as const,
-          titleBarOverlay: {
-            color: "#f4f4f2",
-            symbolColor: "#111113",
-            height: 40,
-          },
-        }
-      : {}),
+      : {
+          autoHideMenuBar: true,
+        }),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload", "index.cjs"),
       contextIsolation: true,
@@ -233,6 +238,16 @@ function createMainWindow(): void {
 
   win.on("resize", scheduleSave);
   win.on("move", scheduleSave);
+  win.on("maximize", () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send(DESKTOP_IPC_CHANNELS.windowMaximizedChanged, true);
+    }
+  });
+  win.on("unmaximize", () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send(DESKTOP_IPC_CHANNELS.windowMaximizedChanged, false);
+    }
+  });
   win.on("close", (event) => {
     if (saveTimer) clearTimeout(saveTimer);
     saveWindowState(hostManager.homeDir, win);
@@ -341,20 +356,39 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.setThemeAppearance,
-    async (_event, _dark: boolean, surfaceColor: string, inkColor: string) => {
+    async (_event, _dark: boolean, surfaceColor: string) => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       if (typeof surfaceColor === "string" && surfaceColor.startsWith("#")) {
         mainWindow.setBackgroundColor(surfaceColor);
       }
-      if (process.platform === "win32" && typeof mainWindow.setTitleBarOverlay === "function") {
-        mainWindow.setTitleBarOverlay({
-          color: surfaceColor,
-          symbolColor: inkColor,
-          height: 40,
-        });
-      }
     },
   );
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.windowMinimize, async () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.minimize();
+    }
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.windowToggleMaximize, async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+    return mainWindow.isMaximized();
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.windowClose, async () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close();
+    }
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.windowIsMaximized, async () => {
+    return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized());
+  });
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -366,6 +400,7 @@ if (!gotSingleInstanceLock) {
   });
 
   void app.whenReady().then(() => {
+    configureApplicationMenu();
     if (!process.env.SUPERPI_DEV_URL) {
       registerAppProtocol(resolveWebDistDir(repoRoot));
     }

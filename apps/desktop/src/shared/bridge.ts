@@ -24,6 +24,11 @@ export interface DesktopBridge {
   revealInFileManager(absPath: string): Promise<void>;
   setLanguage(locale: "zh-CN" | "en"): Promise<void>;
   setThemeAppearance(dark: boolean, surfaceColor: string, inkColor: string): Promise<void>;
+  windowMinimize(): Promise<void>;
+  windowToggleMaximize(): Promise<boolean>;
+  windowClose(): Promise<void>;
+  windowIsMaximized(): Promise<boolean>;
+  onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
 }
 
 export const DESKTOP_IPC_CHANNELS = {
@@ -35,4 +40,9 @@ export const DESKTOP_IPC_CHANNELS = {
   revealInFileManager: "superpi:reveal-in-file-manager",
   setLanguage: "superpi:set-language",
   setThemeAppearance: "superpi:set-theme-appearance",
+  windowMinimize: "superpi:window-minimize",
+  windowToggleMaximize: "superpi:window-toggle-maximize",
+  windowClose: "superpi:window-close",
+  windowIsMaximized: "superpi:window-is-maximized",
+  windowMaximizedChanged: "superpi:window-maximized-changed",
 } as const;

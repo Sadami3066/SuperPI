@@ -13,6 +13,19 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setLanguage, locale),
   setThemeAppearance: (dark: boolean, surfaceColor: string, inkColor: string) =>
     ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setThemeAppearance, dark, surfaceColor, inkColor),
+  windowMinimize: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowMinimize),
+  windowToggleMaximize: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowToggleMaximize),
+  windowClose: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowClose),
+  windowIsMaximized: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowIsMaximized),
+  onWindowMaximizedChange: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => {
+      cb(Boolean(maximized));
+    };
+    ipcRenderer.on(DESKTOP_IPC_CHANNELS.windowMaximizedChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(DESKTOP_IPC_CHANNELS.windowMaximizedChanged, listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("superpiDesktop", bridge);
