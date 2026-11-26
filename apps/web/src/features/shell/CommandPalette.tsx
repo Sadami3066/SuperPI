@@ -16,6 +16,8 @@ import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Dialog, Input } from "../../ui";
+import { type SettingsTabId } from "../settings/SettingsModal";
+import { BrandIcon } from "../shared/BrandAssets";
 
 export function CommandPalette({
   open,
@@ -23,12 +25,14 @@ export function CommandPalette({
   onOpenSettings,
   onOpenCreateBot,
   onSelectChatView,
+  onSelectSuperView,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: SettingsTabId) => void;
   onOpenCreateBot: () => void;
   onSelectChatView: () => void;
+  onSelectSuperView: () => void;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
@@ -103,6 +107,18 @@ export function CommandPalette({
             type="button"
             onClick={() => {
               onOpenChange(false);
+              onSelectSuperView();
+            }}
+            className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <BrandIcon name="ai/agent" size={15} />
+            <span className="font-medium">{t("super.title")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
               onOpenCreateBot();
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
@@ -115,13 +131,36 @@ export function CommandPalette({
             type="button"
             onClick={() => {
               onOpenChange(false);
-              onOpenSettings();
+              onOpenSettings("general");
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
             <IconSettings size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("nav.settings")}</span>
           </button>
+
+          {(
+            [
+              { tab: "memory" as const, icon: "ai/memory", label: t("settings.navMemory") },
+              { tab: "automations" as const, icon: "system/timer", label: t("settings.navAutomations") },
+              { tab: "skills" as const, icon: "ai/skills", label: t("settings.navSkills") },
+              { tab: "mcp" as const, icon: "ai/connectors", label: t("settings.navMcp") },
+              { tab: "diagnostics" as const, icon: "status/info", label: t("settings.navDiagnostics") },
+            ] as const
+          ).map((entry) => (
+            <button
+              key={entry.tab}
+              type="button"
+              onClick={() => {
+                onOpenChange(false);
+                onOpenSettings(entry.tab);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+            >
+              <BrandIcon name={entry.icon} size={15} />
+              <span className="font-medium">{entry.label}</span>
+            </button>
+          ))}
 
           <button
             type="button"

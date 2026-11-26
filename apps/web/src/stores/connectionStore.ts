@@ -13,6 +13,7 @@ import { useBotStore } from "./botStore";
 import { useSessionStore } from "./sessionStore";
 import { useSettingsStore } from "./settingsStore";
 import { useStreamStore } from "./streamStore";
+import { SUPER_SESSION_ID, useSuperStore } from "./superStore";
 
 export type ConnectionPhase = "connecting" | "live" | "error" | "needs_token";
 
@@ -28,6 +29,107 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
 
   if (ev.type === "questions_changed") {
     void sessionStore.refreshQuestions(client);
+    if (ev.status?.startsWith("super:")) {
+      useSuperStore.getState().scheduleRefreshState(client);
+    }
+    return;
+  }
+
+  if (ev.type === "inbox_changed") {
+    void useSuperStore.getState().refreshInbox(client);
+    return;
+  }
+
+  if (ev.type === "goal_changed") {
+    useSuperStore.getState().bumpGoalVersion();
+    return;
+  }
+
+  if (ev.type === "jobs_changed") {
+    useSuperStore.getState().bumpJobsVersion();
+    return;
+  }
+
+  if (ev.type === "worker_progress" || ev.type === "worker_approval") {
+    useSuperStore.getState().scheduleRefreshState(client);
+    return;
+  }
+
+  if (ev.type.startsWith("super_")) {
+    const baseType = ev.type.slice("super_".length);
+    const runId = ev.runId || "super-live";
+    if (baseType === "run_started") {
+      streamStore.beginRun(SUPER_SESSION_ID, runId);
+      useSuperStore.getState().scheduleRefreshState(client);
+      return;
+    }
+    if (baseType === "activity_changed") {
+      streamStore.setActivity(SUPER_SESSION_ID, runId, ev.activity ?? null);
+      return;
+    }
+    if (baseType === "text_delta" && ev.text) {
+      streamStore.enqueueTextDelta(SUPER_SESSION_ID, runId, ev.text);
+      return;
+    }
+    if (baseType === "reasoning_delta" && ev.text) {
+      streamStore.enqueueReasoningDelta(SUPER_SESSION_ID, runId, ev.text);
+      return;
+    }
+    if ((baseType === "tool_call_started" || baseType === "tool_started") && ev.toolName) {
+      streamStore.upsertToolStart(
+        SUPER_SESSION_ID,
+        runId,
+        ev.callId || `tl-${Date.now()}`,
+        ev.toolName,
+        ev.arguments,
+      );
+      return;
+    }
+    if (baseType === "tool_finished" && ev.toolName) {
+      streamStore.finishTool(
+        SUPER_SESSION_ID,
+        runId,
+        ev.callId || "",
+        ev.toolName,
+        ev.output ?? "",
+        Boolean(ev.isError),
+        ev.durationMs ?? 0,
+      );
+      return;
+    }
+    if (baseType === "custom_card" && (ev.payload || ev.text)) {
+      streamStore.addCustomCard(
+        SUPER_SESSION_ID,
+        runId,
+        ev.customType || "card",
+        ev.payload || "{}",
+        ev.text || "",
+      );
+      return;
+    }
+    if (baseType === "run_finished") {
+      streamStore.finishRun(SUPER_SESSION_ID, runId, ev.status, ev.text);
+      void useSuperStore
+        .getState()
+        .refreshState(client)
+        .finally(() => {
+          streamStore.clearRun(SUPER_SESSION_ID, runId);
+        });
+      return;
+    }
+    if (baseType === "run_failed") {
+      streamStore.failRun(SUPER_SESSION_ID, runId, ev.text?.trim() || "Run failed");
+      void useSuperStore
+        .getState()
+        .refreshState(client)
+        .finally(() => {
+          streamStore.clearRun(SUPER_SESSION_ID, runId);
+        });
+      return;
+    }
+    if (baseType === "session_updated" || baseType === "capabilities_changed") {
+      useSuperStore.getState().scheduleRefreshState(client);
+    }
     return;
   }
 
@@ -153,6 +255,7 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
       sseUnsubscribe = null;
     }
     useStreamStore.getState().resetAll();
+    useSuperStore.getState().reset();
     set({ status: "connecting", error: null, sseConnected: false, sseLost: false });
 
     const env = await getDesktopEnv().catch(() => null);
@@ -187,6 +290,8 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
 
       await sessionStore.hydrateSessionLists(client, bots, useSettingsStore.getState().locale);
       if (gen !== connectGeneration) return;
+
+      void useSuperStore.getState().refreshInbox(client);
 
       let hadSse = false;
       sseUnsubscribe = client.subscribeEvents(
@@ -231,5 +336,6 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
       sseUnsubscribe = null;
     }
     useStreamStore.getState().resetAll();
+    useSuperStore.getState().reset();
   },
 }));

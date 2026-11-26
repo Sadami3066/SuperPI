@@ -20,6 +20,7 @@ import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useSuperStore } from "../../stores/superStore";
 import {
   ConfirmDialog,
   DropdownItem,
@@ -44,19 +45,27 @@ function downloadText(filename: string, content: string): void {
 
 export function Sidebar({
   open,
+  activeView,
+  onSelectSuper,
+  onSelectChat,
   onToggleCollapse,
   onOpenSearch,
   onOpenCreateBot,
   onOpenBotSettings,
   onOpenSettings,
+  onOpenAutomations,
   onOpenArchived,
 }: {
   open: boolean;
+  activeView: "chat" | "super";
+  onSelectSuper: () => void;
+  onSelectChat: () => void;
   onToggleCollapse: () => void;
   onOpenSearch: () => void;
   onOpenCreateBot: () => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenSettings: () => void;
+  onOpenAutomations: () => void;
   onOpenArchived: () => void;
 }) {
   const { t } = useI18n();
@@ -64,6 +73,16 @@ export function Sidebar({
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
   const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
+
+  const unreadInboxCount = useSuperStore((s) => s.unreadInboxCount);
+  const superWorkers = useSuperStore((s) => s.state?.workers ?? []);
+  const activeWorkersCount = useMemo(
+    () =>
+      superWorkers.filter(
+        (w) => w.status === "running" || w.status === "working" || w.status === "waiting_approval",
+      ).length,
+    [superWorkers],
+  );
 
   const bots = useBotStore((s) => s.bots);
   const collapsedBotIds = useBotStore((s) => s.collapsedBotIds);
@@ -149,11 +168,31 @@ export function Sidebar({
             size="md"
             label={t("nav.newChat")}
             onClick={() => {
+              onSelectChat();
               if (client && activeBotId) void createSession(client, activeBotId, locale);
             }}
           >
             <BrandIcon name="chat/new_chat" size={16} />
           </IconButton>
+
+          <button
+            type="button"
+            title={t("super.title")}
+            onClick={onSelectSuper}
+            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "super" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/agent" size={16} />
+            {activeWorkersCount > 0 && (
+              <span
+                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--pi-accent)" }}
+              />
+            )}
+          </button>
 
           <IconButton
             size="md"
@@ -167,13 +206,14 @@ export function Sidebar({
 
           <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
             {bots.slice(0, 8).map((bot) => {
-              const selected = bot.id === activeBotId;
+              const selected = activeView === "chat" && bot.id === activeBotId;
               return (
                 <button
                   key={bot.id}
                   type="button"
                   title={bot.name}
                   onClick={() => {
+                    onSelectChat();
                     if (!client) return;
                     const firstSess = sessionsForBot(bot.id)[0];
                     if (firstSess) {
@@ -210,6 +250,21 @@ export function Sidebar({
         </div>
 
         <div className="flex flex-col items-center gap-1">
+          <button
+            type="button"
+            title={t("settings.navAutomations")}
+            onClick={onOpenAutomations}
+            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-secondary)" }}
+          >
+            <BrandIcon name="status/notifications" size={15.5} />
+            {unreadInboxCount > 0 && (
+              <span
+                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--pi-accent)" }}
+              />
+            )}
+          </button>
           <IconButton size="md" label={t("nav.archived")} onClick={onOpenArchived}>
             <BrandIcon name="action/archive" size={15} />
           </IconButton>
@@ -222,7 +277,7 @@ export function Sidebar({
   }
 
   const renderSessionRow = (session: SessionSummary) => {
-    const isCurrent = session.id === activeSessionId;
+    const isCurrent = activeView === "chat" && session.id === activeSessionId;
     const displayTitle = session.title || t("nav.untitledChat");
     const relTime = formatRelativeTime(session.updatedAtMs, locale);
 
@@ -266,6 +321,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => {
+            onSelectChat();
             if (client) void selectSession(client, session.id, locale);
           }}
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
@@ -406,6 +462,7 @@ export function Sidebar({
               label={t("nav.newChat")}
               disabled={offline}
               onClick={() => {
+                onSelectChat();
                 if (client) void createSession(client, bot.id, locale);
               }}
             >
@@ -467,6 +524,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => {
+              onSelectChat();
               if (client && activeBotId) void createSession(client, activeBotId, locale);
             }}
             className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
@@ -474,6 +532,27 @@ export function Sidebar({
           >
             <BrandIcon name="chat/new_chat" size={15} />
             <span className="flex-1 text-left">{t("nav.newChat")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onSelectSuper}
+            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "super" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/agent" size={15} />
+            <span className="flex-1 truncate text-left">{t("super.title")}</span>
+            {activeWorkersCount > 0 && (
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
+                style={{ background: "var(--pi-accent)", color: "#fff" }}
+              >
+                {activeWorkersCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -547,7 +626,7 @@ export function Sidebar({
         </div>
 
         <div
-          className="flex shrink-0 items-center justify-between gap-1.5 px-2.5 py-2"
+          className="flex shrink-0 items-center justify-between gap-1 px-2.5 py-2"
           style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
         >
           <button
@@ -558,6 +637,21 @@ export function Sidebar({
           >
             <BrandIcon name="system/settings" size={15} />
             <span>{t("nav.settings")}</span>
+          </button>
+          <button
+            type="button"
+            title={t("settings.navAutomations")}
+            onClick={onOpenAutomations}
+            className="relative flex h-8 w-8 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-secondary)" }}
+          >
+            <BrandIcon name="status/notifications" size={14.5} />
+            {unreadInboxCount > 0 && (
+              <span
+                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--pi-accent)" }}
+              />
+            )}
           </button>
           <IconButton size="sm" label={t("nav.archived")} onClick={onOpenArchived}>
             <BrandIcon name="action/archive" size={14.5} />

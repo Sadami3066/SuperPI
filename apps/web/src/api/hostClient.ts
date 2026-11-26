@@ -8,9 +8,24 @@ import type {
   HostCreateWorktreeResponse,
   HostCustomModelDto,
   HostCustomProviderDto,
+  HostDoctorReportDto,
   HostGitDiffResponse,
   HostGitSummaryResponse,
+  HostGoalDto,
   HostHealthDto,
+  HostInboxItemDto,
+  HostInstalledSkillDto,
+  HostJobOutputDto,
+  HostJobSnapshotDto,
+  HostMcpServerDto,
+  HostMemoryBlockDto,
+  HostMemoryEntityDetailDto,
+  HostMemoryEntityDto,
+  HostMemoryEventDto,
+  HostMemoryFullSnapshotResponse,
+  HostMemoryPreferencesDto,
+  HostMemoryRelationDto,
+  HostMemorySyncStatusDto,
   HostOAuthStatusDto,
   HostOpenEditorResponse,
   HostPendingQuestionDto,
@@ -19,15 +34,24 @@ import type {
   HostRelayDeviceDto,
   HostRelayStatusDto,
   HostRestoreCheckpointResponse,
+  HostSaveTimerRequest,
   HostSessionDetailDto,
   HostSessionSummaryDto,
   HostSettingsDto,
+  HostSkillContentResponse,
   HostSlashCommandDto,
   HostSseEvent,
   HostStagedAttachmentDto,
   HostStatusDto,
+  HostSuperSettingsDto,
+  HostSuperStateResponse,
+  HostSuperTeamBotDto,
   HostTerminalInfoDto,
   HostTerminalStreamFrame,
+  HostTimerDto,
+  HostUpsertMcpRequest,
+  HostWebSearchProviderDto,
+  HostWorkerDetailDto,
   HostWorkspaceFileListResponse,
   HostWorkspaceFileReadResponse,
   HostWorkspaceSearchResponse,
@@ -530,6 +554,27 @@ export class HostClient {
       "session_updated",
       "questions_changed",
       "devices_changed",
+      "super_run_started",
+      "super_activity_changed",
+      "super_text_delta",
+      "super_reasoning_delta",
+      "super_tool_call_started",
+      "super_tool_started",
+      "super_tool_finished",
+      "super_run_finished",
+      "super_run_failed",
+      "super_custom_card",
+      "super_queue_changed",
+      "super_queue_dropped",
+      "super_user_input_admitted",
+      "super_turn_injected",
+      "super_capabilities_changed",
+      "super_session_updated",
+      "worker_progress",
+      "worker_approval",
+      "goal_changed",
+      "jobs_changed",
+      "inbox_changed",
     ];
 
     const scheduleReconnect = () => {
@@ -896,5 +941,775 @@ export class HostClient {
       closed = true;
       controller.abort();
     };
+  }
+
+  getSuperState(): Promise<HostSuperStateResponse> {
+    return this.request("/api/v1/super/state");
+  }
+
+  setSuperModel(
+    providerId: string,
+    modelId: string,
+    thinkingLevel: string,
+  ): Promise<HostHealthDto> {
+    return this.request("/api/v1/super/model", {
+      method: "PUT",
+      body: JSON.stringify({ providerId, modelId, thinkingLevel }),
+    });
+  }
+
+  compactSuper(): Promise<HostCompactResponse> {
+    return this.request("/api/v1/super/compact", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  resetSuper(): Promise<HostHealthDto> {
+    return this.request("/api/v1/super/reset", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  sendSuperPrompt(body: {
+    text: string;
+    steer?: boolean;
+    images?: Array<{ data: string; mimeType: string; name?: string }>;
+  }): Promise<HostHealthDto> {
+    return this.request("/api/v1/super/prompt", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  abortSuper(): Promise<HostHealthDto> {
+    return this.request("/api/v1/super/abort", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  answerSuperQuestion(
+    requestId: string,
+    answers: QuestionAnswerInput[],
+  ): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/super/question/${encodeURIComponent(requestId)}/answer`,
+      {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      },
+    );
+  }
+
+  dismissSuperQuestion(requestId: string): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/super/question/${encodeURIComponent(requestId)}/dismiss`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  getSuperTeam(): Promise<HostSuperTeamBotDto[]> {
+    return this.request("/api/v1/super/team");
+  }
+
+  setSuperTeamBot(botRef: string, enabled: boolean): Promise<HostSuperTeamBotDto[]> {
+    return this.request("/api/v1/super/team", {
+      method: "PUT",
+      body: JSON.stringify({ botRef, enabled }),
+    });
+  }
+
+  getSuperSettings(): Promise<HostSuperSettingsDto> {
+    return this.request("/api/v1/super/settings");
+  }
+
+  updateSuperSettings(patch: Partial<HostSuperSettingsDto>): Promise<HostSuperSettingsDto> {
+    return this.request("/api/v1/super/settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  getSuperAgentsDoc(): Promise<HostAgentDocDto> {
+    return this.request("/api/v1/super/agents-doc");
+  }
+
+  saveSuperAgentsDoc(content: string): Promise<HostAgentDocDto> {
+    return this.request("/api/v1/super/agents-doc", {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  deleteSuperAgentsDoc(): Promise<HostHealthDto> {
+    return this.request("/api/v1/super/agents-doc", {
+      method: "DELETE",
+    });
+  }
+
+  getSuperWorker(workerId: string): Promise<HostWorkerDetailDto> {
+    return this.request(`/api/v1/super/workers/${encodeURIComponent(workerId)}`);
+  }
+
+  streamSuperWorker(
+    workerId: string,
+    handlers: {
+      onSnapshot: (detail: HostWorkerDetailDto) => void;
+      onDeleted?: () => void;
+      onError?: (err: Error) => void;
+    },
+  ): () => void {
+    const controller = new AbortController();
+    let closed = false;
+
+    const run = async () => {
+      try {
+        const resp = await fetch(
+          `${this.baseUrl}/api/v1/super/workers/${encodeURIComponent(workerId)}/stream`,
+          {
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              Accept: "text/event-stream",
+            },
+            signal: controller.signal,
+          },
+        );
+        if (!resp.ok || !resp.body) {
+          throw new HostApiError(resp.status, `HTTP ${resp.status}`);
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let eventName = "message";
+        let dataLines: string[] = [];
+
+        const flushBlock = () => {
+          if (dataLines.length === 0) {
+            eventName = "message";
+            return;
+          }
+          const payload = dataLines.join("\n");
+          const currentEvent = eventName;
+          dataLines = [];
+          eventName = "message";
+          if (currentEvent === "worker_deleted") {
+            handlers.onDeleted?.();
+            return;
+          }
+          try {
+            const detail = JSON.parse(payload) as HostWorkerDetailDto;
+            handlers.onSnapshot(detail);
+          } catch {
+            void 0;
+          }
+        };
+
+        while (!closed) {
+          const { done, value } = await reader.read();
+          if (done) {
+            flushBlock();
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const rawLine of lines) {
+            const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+            if (line === "") {
+              flushBlock();
+            } else if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trimStart());
+            }
+          }
+        }
+      } catch (err) {
+        if (!closed && !controller.signal.aborted) {
+          handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      closed = true;
+      controller.abort();
+    };
+  }
+
+  sendSuperWorkerPrompt(
+    workerId: string,
+    body: {
+      text: string;
+      images?: Array<{ data: string; mimeType: string; name?: string }>;
+    },
+  ): Promise<HostHealthDto> {
+    return this.request(`/api/v1/super/workers/${encodeURIComponent(workerId)}/prompt`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  setSuperWorkerModel(
+    workerId: string,
+    providerId: string,
+    modelId: string,
+    thinkingLevel: string,
+  ): Promise<HostHealthDto> {
+    return this.request(`/api/v1/super/workers/${encodeURIComponent(workerId)}/model`, {
+      method: "PUT",
+      body: JSON.stringify({ providerId, modelId, thinkingLevel }),
+    });
+  }
+
+  compactSuperWorker(workerId: string): Promise<HostCompactResponse> {
+    return this.request(`/api/v1/super/workers/${encodeURIComponent(workerId)}/compact`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  answerSuperWorkerQuestion(
+    workerId: string,
+    requestId: string,
+    answers: QuestionAnswerInput[],
+  ): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/super/workers/${encodeURIComponent(workerId)}/question/${encodeURIComponent(requestId)}/answer`,
+      {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      },
+    );
+  }
+
+  dismissSuperWorkerQuestion(workerId: string, requestId: string): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/super/workers/${encodeURIComponent(workerId)}/question/${encodeURIComponent(requestId)}/dismiss`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  stopSuperWorker(workerId: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/super/workers/${encodeURIComponent(workerId)}/stop`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  deleteSuperWorker(workerId: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/super/workers/${encodeURIComponent(workerId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  getMemorySnapshot(params?: {
+    includeArchived?: boolean;
+    includeHistory?: boolean;
+    query?: string;
+    limit?: number;
+  }): Promise<HostMemoryFullSnapshotResponse> {
+    const qs = new URLSearchParams();
+    if (params?.includeArchived) qs.set("includeArchived", "true");
+    if (params?.includeHistory) qs.set("includeHistory", "true");
+    if (params?.query) qs.set("query", params.query);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return this.request(`/api/v1/memory/snapshot${q ? `?${q}` : ""}`);
+  }
+
+  createMemoryBlock(body: {
+    title: string;
+    purpose?: string;
+    content?: string;
+    domain?: string;
+    pinned?: boolean;
+  }): Promise<HostMemoryBlockDto> {
+    return this.request("/api/v1/memory/blocks", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateMemoryBlock(
+    id: string,
+    body: {
+      title?: string;
+      purpose?: string;
+      content?: string;
+      domain?: string;
+      pinned?: boolean;
+      status?: string;
+    },
+  ): Promise<HostMemoryBlockDto> {
+    return this.request(`/api/v1/memory/blocks/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteMemoryBlock(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/memory/blocks/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  acceptMemoryProposal(id: string): Promise<HostMemoryBlockDto> {
+    return this.request(`/api/v1/memory/proposals/${encodeURIComponent(id)}/accept`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  dismissMemoryProposal(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/memory/proposals/${encodeURIComponent(id)}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  createMemoryEntity(body: {
+    canonicalName: string;
+    entityType?: string;
+    aliases?: string[];
+    summary?: string;
+    domain?: string;
+  }): Promise<HostMemoryEntityDto> {
+    return this.request("/api/v1/memory/entities", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  getMemoryEntity(id: string, includeHistory = false): Promise<HostMemoryEntityDetailDto> {
+    const q = includeHistory ? "?includeHistory=true" : "";
+    return this.request(`/api/v1/memory/entities/${encodeURIComponent(id)}${q}`);
+  }
+
+  updateMemoryEntity(
+    id: string,
+    body: {
+      canonicalName?: string;
+      entityType?: string;
+      aliases?: string[];
+      summary?: string;
+      clearSummary?: boolean;
+      domain?: string;
+      pinned?: boolean;
+    },
+  ): Promise<HostMemoryEntityDto> {
+    return this.request(`/api/v1/memory/entities/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  mergeMemoryEntities(body: {
+    keepId: string;
+    mergeIds: string[];
+    mergedSummary?: string;
+  }): Promise<HostHealthDto> {
+    return this.request("/api/v1/memory/entities/merge", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  createMemoryRelation(body: {
+    fromEntityName: string;
+    relationType?: string;
+    toEntityName: string;
+    label?: string;
+    domain?: string;
+  }): Promise<HostMemoryRelationDto> {
+    return this.request("/api/v1/memory/relations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteMemoryRelation(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/memory/relations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  createMemoryEvent(body: {
+    eventKind?: string;
+    content: string;
+    summary?: string;
+    tags?: string[];
+    domain?: string;
+    importance?: number;
+    pinned?: boolean;
+  }): Promise<HostMemoryEventDto> {
+    return this.request("/api/v1/memory/events", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateMemoryEvent(
+    id: string,
+    body: {
+      eventKind?: string;
+      content?: string;
+      summary?: string;
+      tags?: string[];
+      domain?: string;
+      pinned?: boolean;
+    },
+  ): Promise<HostMemoryEventDto> {
+    return this.request(`/api/v1/memory/events/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteMemoryEvent(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/memory/events/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  restoreMemoryEvent(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/memory/events/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  revertMemoryAudit(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/memory/audit/${encodeURIComponent(id)}/revert`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  updateMemoryPreferences(
+    patch: Partial<HostMemoryPreferencesDto> & {
+      clearHotModel?: boolean;
+      clearColdModel?: boolean;
+      clearSectionBudgets?: boolean;
+    },
+  ): Promise<HostMemoryPreferencesDto> {
+    return this.request("/api/v1/memory/preferences", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  consolidateMemory(): Promise<HostHealthDto> {
+    return this.request("/api/v1/memory/consolidate", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  retryPendingMemory(): Promise<HostHealthDto> {
+    return this.request("/api/v1/memory/retry-pending", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  syncMemoryNow(): Promise<HostHealthDto> {
+    return this.request("/api/v1/memory/sync", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  resolveMemorySync(mode: "MERGE" | "REPLACE_LOCAL"): Promise<HostMemorySyncStatusDto> {
+    return this.request("/api/v1/memory/sync/resolve", {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    });
+  }
+
+  async exportMemoryMarkdown(): Promise<string> {
+    const resp = await fetch(`${this.baseUrl}/api/v1/memory/export`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!resp.ok) {
+      throw new HostApiError(resp.status, `HTTP ${resp.status}`);
+    }
+    return resp.text();
+  }
+
+  listSkills(): Promise<HostInstalledSkillDto[]> {
+    return this.request("/api/v1/skills");
+  }
+
+  getSkillContent(id: string): Promise<HostSkillContentResponse> {
+    return this.request(`/api/v1/skills/${encodeURIComponent(id)}/content`);
+  }
+
+  installSkillZip(fileName: string, base64Zip: string): Promise<HostInstalledSkillDto> {
+    return this.request("/api/v1/skills/install", {
+      method: "POST",
+      body: JSON.stringify({ fileName, base64Zip }),
+    });
+  }
+
+  toggleSkill(name: string, enabled: boolean): Promise<HostHealthDto> {
+    return this.request(`/api/v1/skills/${encodeURIComponent(name)}/toggle`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  deleteSkill(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/skills/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  listMcpServers(): Promise<HostMcpServerDto[]> {
+    return this.request("/api/v1/mcp");
+  }
+
+  upsertMcpServer(name: string, body: HostUpsertMcpRequest): Promise<HostHealthDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  importMcpRaw(json: string, originalName?: string): Promise<HostHealthDto> {
+    return this.request("/api/v1/mcp/raw", {
+      method: "PUT",
+      body: JSON.stringify({ json, originalName }),
+    });
+  }
+
+  testMcpServer(body: HostUpsertMcpRequest): Promise<HostMcpServerDto> {
+    return this.request("/api/v1/mcp/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  probeMcpServer(name: string): Promise<HostMcpServerDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/probe`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  probeAllMcpServers(): Promise<HostMcpServerDto[]> {
+    return this.request("/api/v1/mcp/probe", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  toggleMcpServer(name: string, enabled: boolean): Promise<HostHealthDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  deleteMcpServer(name: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
+
+  startMcpOAuth(name: string): Promise<HostOAuthStatusDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/oauth/start`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  getMcpOAuthStatus(name: string): Promise<HostOAuthStatusDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/oauth/status`);
+  }
+
+  submitMcpOAuth(name: string, value: string): Promise<HostOAuthStatusDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/oauth/submit`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  cancelMcpOAuth(name: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/oauth/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  logoutMcpOAuth(name: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/mcp/${encodeURIComponent(name)}/oauth`, {
+      method: "DELETE",
+    });
+  }
+
+  listTimers(): Promise<HostTimerDto[]> {
+    return this.request("/api/v1/timers");
+  }
+
+  createTimer(body: HostSaveTimerRequest): Promise<HostTimerDto> {
+    return this.request("/api/v1/timers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateTimer(id: string, body: HostSaveTimerRequest): Promise<HostTimerDto> {
+    return this.request(`/api/v1/timers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  toggleTimer(id: string, enabled: boolean): Promise<HostTimerDto> {
+    return this.request(`/api/v1/timers/${encodeURIComponent(id)}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  runTimerNow(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/timers/${encodeURIComponent(id)}/run-now`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  deleteTimer(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/timers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  listInbox(): Promise<HostInboxItemDto[]> {
+    return this.request("/api/v1/inbox");
+  }
+
+  updateInboxStatus(id: string, status: "unread" | "approved" | "dismissed"): Promise<HostInboxItemDto> {
+    return this.request(`/api/v1/inbox/${encodeURIComponent(id)}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  clearSettledInbox(): Promise<HostInboxItemDto[]> {
+    return this.request("/api/v1/inbox/cleared", {
+      method: "DELETE",
+    });
+  }
+
+  deleteInboxItem(id: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/inbox/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  getSessionGoal(sessionId: string): Promise<{ goal?: HostGoalDto | null }> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goal`);
+  }
+
+  createSessionGoal(
+    sessionId: string,
+    body: { objective: string; maxRounds?: number },
+  ): Promise<{ goal?: HostGoalDto | null }> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goal`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  pauseSessionGoal(sessionId: string): Promise<{ goal?: HostGoalDto | null }> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goal/pause`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  resumeSessionGoal(sessionId: string): Promise<{ goal?: HostGoalDto | null }> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goal/resume`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  deleteSessionGoal(sessionId: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goal`, {
+      method: "DELETE",
+    });
+  }
+
+  listSessionJobs(sessionId: string): Promise<HostJobSnapshotDto[]> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/jobs`);
+  }
+
+  getSessionJobOutput(sessionId: string, jobId: string): Promise<HostJobOutputDto> {
+    return this.request(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/jobs/${encodeURIComponent(jobId)}/output`,
+    );
+  }
+
+  killSessionJob(sessionId: string, jobId: string): Promise<HostHealthDto> {
+    return this.request(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/jobs/${encodeURIComponent(jobId)}/kill`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  clearSettledSessionJobs(sessionId: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/jobs/settled`, {
+      method: "DELETE",
+    });
+  }
+
+  listWebSearchProviders(): Promise<HostWebSearchProviderDto[]> {
+    return this.request("/api/v1/web-search");
+  }
+
+  saveWebSearchKey(providerId: string, apiKey: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/web-search/${encodeURIComponent(providerId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ apiKey }),
+    });
+  }
+
+  deleteWebSearchKey(providerId: string): Promise<HostHealthDto> {
+    return this.request(`/api/v1/web-search/${encodeURIComponent(providerId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  runDoctor(probeMcp = false): Promise<HostDoctorReportDto> {
+    return this.request(`/api/v1/doctor?probeMcp=${probeMcp ? "true" : "false"}`);
+  }
+
+  async exportDoctorMarkdown(probeMcp = true): Promise<string> {
+    const resp = await fetch(
+      `${this.baseUrl}/api/v1/doctor/export?probeMcp=${probeMcp ? "true" : "false"}`,
+      {
+        headers: { Authorization: `Bearer ${this.token}` },
+      },
+    );
+    if (!resp.ok) {
+      throw new HostApiError(resp.status, `HTTP ${resp.status}`);
+    }
+    return resp.text();
   }
 }

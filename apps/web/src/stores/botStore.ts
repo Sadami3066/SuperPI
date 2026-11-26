@@ -64,6 +64,7 @@ export interface BotStoreState {
       mcpServers?: string[];
       memoryScope?: string;
       memoryDispatch?: boolean;
+      superEnabled?: boolean;
     },
   ) => Promise<HostBotPolicyDto>;
   reset: () => void;

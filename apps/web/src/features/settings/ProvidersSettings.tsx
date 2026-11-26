@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconExternalLink, IconKey, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
-import type { HostCustomProviderDto, HostOAuthStatusDto, HostProviderDto } from "../../api/types";
+import type {
+  HostCustomProviderDto,
+  HostOAuthStatusDto,
+  HostProviderDto,
+  HostWebSearchProviderDto,
+} from "../../api/types";
 import { useI18n } from "../../i18n";
 import { openExternalUrl } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -38,7 +43,18 @@ export function ProvidersSettings() {
   const [customModelsText, setCustomModelsText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchProviders, setSearchProviders] = useState<HostWebSearchProviderDto[]>([]);
+  const [editingSearch, setEditingSearch] = useState<HostWebSearchProviderDto | null>(null);
+  const [searchKeyDraft, setSearchKeyDraft] = useState("");
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!client) return;
+    void client
+      .listWebSearchProviders()
+      .then(setSearchProviders)
+      .catch(() => setSearchProviders([]));
+  }, [client]);
 
   const stopOAuthPolling = () => {
     if (pollTimerRef.current !== null) {
@@ -191,6 +207,47 @@ export function ProvidersSettings() {
           </div>
         )}
       </Card>
+
+      {searchProviders.length > 0 && (
+        <Card className="space-y-3 p-5">
+          <div className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+            {t("providers.webSearch")}
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {searchProviders.map((sp) => (
+              <button
+                key={sp.id}
+                type="button"
+                onClick={() => {
+                  setEditingSearch(sp);
+                  setSearchKeyDraft("");
+                  setError(null);
+                }}
+                className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-[var(--pi-hover)]"
+                style={{
+                  background: "var(--pi-paper)",
+                  border: "0.5px solid var(--pi-hairline)",
+                }}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                    {sp.name}
+                  </div>
+                  {sp.keyHint && (
+                    <div
+                      className="truncate text-[11px]"
+                      style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
+                    >
+                      {sp.keyHint}
+                    </div>
+                  )}
+                </div>
+                {sp.configured && <Badge tone="success">{t("providers.configured")}</Badge>}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card className="space-y-3.5 p-5">
         <div className="relative">
@@ -548,6 +605,67 @@ export function ProvidersSettings() {
             </Button>
           </div>
         </div>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(editingSearch)}
+        onOpenChange={(v) => {
+          if (!v) setEditingSearch(null);
+        }}
+        title={editingSearch?.name}
+      >
+        {editingSearch && (
+          <div className="space-y-3">
+            <Input
+              type="password"
+              value={searchKeyDraft}
+              onChange={(e) => setSearchKeyDraft(e.target.value)}
+              placeholder={editingSearch.keyHint || t("providers.keyPlaceholder")}
+            />
+            <div className="flex justify-end gap-2">
+              {editingSearch.configured && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!client) return;
+                    setBusy(true);
+                    void client
+                      .deleteWebSearchKey(editingSearch.id)
+                      .then(() => client.listWebSearchProviders())
+                      .then((list) => {
+                        setSearchProviders(list);
+                        setEditingSearch(null);
+                      })
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  {t("providers.clearKey")}
+                </Button>
+              )}
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={busy || !searchKeyDraft.trim()}
+                onClick={() => {
+                  if (!client || !searchKeyDraft.trim()) return;
+                  setBusy(true);
+                  void client
+                    .saveWebSearchKey(editingSearch.id, searchKeyDraft.trim())
+                    .then(() => client.listWebSearchProviders())
+                    .then((list) => {
+                      setSearchProviders(list);
+                      setEditingSearch(null);
+                    })
+                    .finally(() => setBusy(false));
+                }}
+              >
+                {t("providers.saveKey")}
+              </Button>
+            </div>
+          </div>
+        )}
       </Dialog>
     </div>
   );

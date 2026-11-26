@@ -113,8 +113,12 @@ export function BotSettingsDialog({
       await saveAgentsDoc(client, bot.id, agentsDoc);
       if (policy) {
         await updateBotPolicy(client, bot.id, {
+          allCapabilities: bot.isHome ? true : policy.allCapabilities,
+          skills: policy.skills,
+          mcpServers: policy.mcpServers,
           memoryScope: policy.memoryScope,
           memoryDispatch: policy.memoryDispatch,
+          superEnabled: policy.superEnabled,
         });
       }
       setSavedFlag(true);
@@ -228,6 +232,97 @@ export function BotSettingsDialog({
                     onCheckedChange={(checked) => setPolicy({ ...policy, memoryDispatch: checked })}
                   />
                 </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[13.5px]" style={{ color: "var(--pi-ink)" }}>
+                    {t("bot.superEnabled")}
+                  </span>
+                  <Switch
+                    checked={policy.superEnabled}
+                    onCheckedChange={(checked) => setPolicy({ ...policy, superEnabled: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[13.5px]" style={{ color: "var(--pi-ink)" }}>
+                    {t("bot.allCapabilities")}
+                  </span>
+                  <Switch
+                    checked={bot.isHome ? true : policy.allCapabilities}
+                    disabled={bot.isHome}
+                    onCheckedChange={(checked) => setPolicy({ ...policy, allCapabilities: checked })}
+                  />
+                </div>
+
+                {!bot.isHome && !policy.allCapabilities && (
+                  <div className="space-y-3 pt-1">
+                    {policy.availableSkills.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                          {t("bot.allowedSkills")}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {policy.availableSkills.map((sk) => {
+                            const selected = policy.skills.includes(sk);
+                            return (
+                              <button
+                                key={sk}
+                                type="button"
+                                onClick={() => {
+                                  const next = selected
+                                    ? policy.skills.filter((s) => s !== sk)
+                                    : [...policy.skills, sk];
+                                  setPolicy({ ...policy, skills: next });
+                                }}
+                                className="rounded-full px-2.5 py-1 text-[12px] transition-colors"
+                                style={{
+                                  background: selected ? "var(--pi-accent-soft)" : "var(--pi-paper)",
+                                  color: selected ? "var(--pi-accent)" : "var(--pi-ink-secondary)",
+                                  border: "0.5px solid var(--pi-hairline)",
+                                }}
+                              >
+                                {sk}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {policy.availableMcpServers.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                          {t("bot.allowedMcp")}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {policy.availableMcpServers.map((srv) => {
+                            const selected = policy.mcpServers.includes(srv);
+                            return (
+                              <button
+                                key={srv}
+                                type="button"
+                                onClick={() => {
+                                  const next = selected
+                                    ? policy.mcpServers.filter((s) => s !== srv)
+                                    : [...policy.mcpServers, srv];
+                                  setPolicy({ ...policy, mcpServers: next });
+                                }}
+                                className="rounded-full px-2.5 py-1 text-[12px] transition-colors"
+                                style={{
+                                  background: selected ? "var(--pi-accent-soft)" : "var(--pi-paper)",
+                                  color: selected ? "var(--pi-accent)" : "var(--pi-ink-secondary)",
+                                  border: "0.5px solid var(--pi-hairline)",
+                                }}
+                              >
+                                {srv}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <div className="py-6 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>

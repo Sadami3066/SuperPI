@@ -591,3 +591,374 @@ export type OpenPreviewTarget =
       name: string;
       mime?: string;
     };
+
+export interface HostWorkerStepDto {
+  label: string;
+  status: string;
+  outputPreview?: string | null;
+  isError: boolean;
+  updatedAt: number;
+}
+
+export interface HostWorkerDto {
+  workerId: string;
+  botId: string;
+  botName: string;
+  title: string;
+  status: string;
+  lastOutcome: string;
+  turnCount: number;
+  createdAt: number;
+  updatedAt: number;
+  lastSummary?: string | null;
+  lastError?: string | null;
+  activeStepText?: string | null;
+  deviceId?: string | null;
+  deviceName?: string | null;
+  isRemote: boolean;
+  pendingQuestion?: HostPendingQuestionDto | null;
+  steps: HostWorkerStepDto[];
+}
+
+export interface HostWorkerDetailDto {
+  worker: HostWorkerDto;
+  messages: HostMessageDto[];
+  streaming: boolean;
+  activeToolText?: string | null;
+  providerId: string;
+  modelId: string;
+  modelLabel: string;
+  thinkingLevel: string;
+  thinkingLevels: string[];
+  usage?: HostUsageDto | null;
+  loaded: boolean;
+  error?: string | null;
+}
+
+export interface HostSuperTeamBotDto {
+  ref: string;
+  botId: string;
+  name: string;
+  avatar?: string | null;
+  intro: string;
+  deviceId?: string | null;
+  deviceName: string;
+  isRemote: boolean;
+  online: boolean;
+  supportsSuperWorker: boolean;
+  enabledInSuper: boolean;
+  usedWorkerSlots: number;
+  maxWorkerSlots: number;
+  skills: string[];
+  mcpServers: string[];
+  memoryScope: string;
+}
+
+export interface HostSuperSettingsDto {
+  maxConcurrentWorkers: number;
+  workerMaxSlotsPerBot: number;
+  workerIdleCleanupMinutes: number;
+  workerStallTimeoutMinutes: number;
+  questionTimeoutMinutes: number;
+  coalesceWindowMs: number;
+  receiptMaxChars: number;
+  workerJobWake: boolean;
+  workerCompactionOverrideEnabled: boolean;
+  workerCompactionTriggerPercent: number;
+}
+
+export interface HostSuperStateResponse {
+  busy: boolean;
+  ready: boolean;
+  providerId: string;
+  modelId: string;
+  modelLabel: string;
+  thinkingLevel: string;
+  thinkingLevels: string[];
+  usage?: HostUsageDto | null;
+  archivedCount: number;
+  activeToolText?: string | null;
+  error?: string | null;
+  pendingQuestion?: HostPendingQuestionDto | null;
+  messages: HostMessageDto[];
+  workers: HostWorkerDto[];
+}
+
+export interface HostMemoryOverviewDto {
+  activeBlocks: number;
+  archivedBlocks: number;
+  activeEvents: number;
+  entityCount: number;
+  relationCount: number;
+  pendingProposals: number;
+  pendingDispatchJobs: number;
+  lastConsolidationAt?: number | null;
+}
+
+export interface HostMemoryBlockDto {
+  id: string;
+  slug: string;
+  title: string;
+  purpose: string;
+  content: string;
+  domain: string;
+  pinned: boolean;
+  owner: string;
+  status: string;
+  updatedAt: number;
+}
+
+export interface HostMemoryProposalDto {
+  id: string;
+  slug: string;
+  title: string;
+  purpose: string;
+  domain: string;
+  seedContent: string;
+  reason: string;
+  status: string;
+  createdAt: number;
+}
+
+export interface HostMemoryEntityDto {
+  id: string;
+  canonicalName: string;
+  entityType: string;
+  aliases: string[];
+  summary?: string | null;
+  domain: string;
+  pinned: boolean;
+  updatedAt: number;
+}
+
+export interface HostMemoryRelationDto {
+  id: string;
+  fromEntityId: string;
+  fromEntityName: string;
+  relationType: string;
+  toEntityId: string;
+  toEntityName: string;
+  label?: string | null;
+  isActive: boolean;
+}
+
+export interface HostMemoryEventDto {
+  id: string;
+  eventKind: string;
+  content: string;
+  summary?: string | null;
+  tags: string[];
+  entityNames: string[];
+  domain: string;
+  importance: number;
+  pinned: boolean;
+  eventTime: number;
+  createdAt: number;
+  status: string;
+  epistemicTier: string;
+  sourceSessionId?: string | null;
+  sourceQuote?: string | null;
+}
+
+export interface HostMemoryEntityDetailDto {
+  entity: HostMemoryEntityDto;
+  outgoingRelations: HostMemoryRelationDto[];
+  incomingRelations: HostMemoryRelationDto[];
+  linkedEvents: HostMemoryEventDto[];
+}
+
+export interface HostMemoryAuditDto {
+  id: string;
+  actor: string;
+  actionType: string;
+  targetTable: string;
+  targetId: string;
+  summaryUserText: string;
+  reason?: string | null;
+  createdAt: number;
+  revertedAt?: number | null;
+  canRevert: boolean;
+}
+
+export interface HostMemoryPreferencesDto {
+  mode: string;
+  hotProviderId?: string | null;
+  hotModelId?: string | null;
+  coldProviderId?: string | null;
+  coldModelId?: string | null;
+  hotIdleDebounceSeconds: number;
+  coldConsolidationHours: number;
+  injectionMaxChars: number;
+  profileBudgetChars?: number | null;
+  relationsBudgetChars?: number | null;
+  eventsBudgetChars?: number | null;
+  directoryBudgetChars?: number | null;
+  guidance: string;
+}
+
+export interface HostMemorySyncPromptDto {
+  accountKey: string;
+  accountIdentity: string;
+  localRecordCount: number;
+}
+
+export interface HostMemorySyncStatusDto {
+  status: string;
+  lastSyncedAt?: number | null;
+  lastErrorCode?: string | null;
+  accountSwitchPrompt?: HostMemorySyncPromptDto | null;
+}
+
+export interface HostMemoryFullSnapshotResponse {
+  overview: HostMemoryOverviewDto;
+  blocks: HostMemoryBlockDto[];
+  proposals: HostMemoryProposalDto[];
+  entities: HostMemoryEntityDto[];
+  relations: HostMemoryRelationDto[];
+  events: HostMemoryEventDto[];
+  auditLog: HostMemoryAuditDto[];
+  preferences: HostMemoryPreferencesDto;
+  consolidating: boolean;
+  syncStatus: HostMemorySyncStatusDto;
+}
+
+export interface HostInstalledSkillDto {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  installedAt: number;
+  source: string;
+  removable: boolean;
+}
+
+export interface HostSkillContentResponse {
+  id: string;
+  content: string;
+}
+
+export interface HostMcpServerDto {
+  name: string;
+  transport: string;
+  target: string;
+  enabled: boolean;
+  url?: string | null;
+  headers?: Record<string, string>;
+  command?: string | null;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string | null;
+  hasAuthToken?: boolean;
+  probeState?: string | null;
+  toolCount?: number | null;
+  error?: string | null;
+}
+
+export interface HostUpsertMcpRequest {
+  transport: "http" | "stdio";
+  url?: string;
+  headers?: Record<string, string>;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  enabled?: boolean;
+}
+
+export interface HostTimerDto {
+  id: string;
+  name: string;
+  prompt: string;
+  triggerType: "once" | "daily" | "weekly" | "cron";
+  date?: string | null;
+  time?: string | null;
+  days: number[];
+  cronExpression?: string | null;
+  enabled: boolean;
+  sessionId: string;
+  cwd: string;
+  nextRunAt?: number | null;
+  lastDeliveredAt?: number | null;
+  lastError?: string | null;
+}
+
+export interface HostSaveTimerRequest {
+  name: string;
+  prompt: string;
+  triggerType: "once" | "daily" | "weekly" | "cron";
+  date?: string;
+  time?: string;
+  days?: number[];
+  cronExpression?: string;
+  enabled?: boolean;
+  botId?: string;
+  sessionId?: string;
+}
+
+export interface HostInboxItemDto {
+  id: string;
+  source: "timer" | "worker" | "goal" | string;
+  title: string;
+  summary: string;
+  botId?: string | null;
+  sessionId?: string | null;
+  workerId?: string | null;
+  worktreeId?: string | null;
+  status: "unread" | "approved" | "dismissed" | string;
+  createdAt: number;
+}
+
+export interface HostGoalDto {
+  id: string;
+  objective: string;
+  phase: string;
+  roundsStarted: number;
+  maxRounds: number;
+  blockedReason?: string | null;
+  armed: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HostJobSnapshotDto {
+  id: string;
+  sessionId: string;
+  label: string;
+  command: string;
+  status: string;
+  startedAt: number;
+  finishedAt?: number | null;
+  exitCode?: number | null;
+  detail?: string | null;
+  outputBytes: number;
+}
+
+export interface HostJobOutputDto {
+  jobId: string;
+  output: string;
+  status: string;
+  exitCode?: number | null;
+  truncated: boolean;
+}
+
+export interface HostWebSearchProviderDto {
+  id: string;
+  name: string;
+  configured: boolean;
+  keyHint?: string | null;
+}
+
+export interface HostDoctorCheckItemDto {
+  category: string;
+  name: string;
+  status: "PASS" | "WARN" | "FAIL";
+  summary: string;
+  fixHint?: string | null;
+}
+
+export interface HostDoctorReportDto {
+  version: string;
+  homeDir: string;
+  os: string;
+  checks: HostDoctorCheckItemDto[];
+}

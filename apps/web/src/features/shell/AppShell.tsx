@@ -12,6 +12,7 @@ import { BotSettingsDialog } from "../bots/BotSettingsDialog";
 import { CreateBotDialog } from "../bots/CreateBotDialog";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { SettingsModal, type SettingsTabId } from "../settings/SettingsModal";
+import { SuperWorkspace } from "../super/SuperWorkspace";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
 
@@ -24,6 +25,7 @@ export function AppShell() {
 
   const bots = useBotStore((s) => s.bots);
   const createSession = useSessionStore((s) => s.createSession);
+  const selectSession = useSessionStore((s) => s.selectSession);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const summariesById = useSessionStore((s) => s.summariesById);
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
@@ -33,6 +35,7 @@ export function AppShell() {
   const togglePanel = useWorkbenchStore((s) => s.togglePanel);
   const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
 
+  const [activeView, setActiveView] = useState<"chat" | "super">("chat");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
@@ -88,6 +91,10 @@ export function AppShell() {
       } else if (e.shiftKey && key === "b" && isElectron) {
         e.preventDefault();
         togglePanel("browser");
+      } else if (e.shiftKey && key === "s") {
+        e.preventDefault();
+        setSettingsOpen(false);
+        setActiveView((v) => (v === "super" ? "chat" : "super"));
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -111,11 +118,18 @@ export function AppShell() {
     >
       <Sidebar
         open={sidebarOpen}
+        activeView={activeView}
+        onSelectSuper={() => {
+          setSettingsOpen(false);
+          setActiveView("super");
+        }}
+        onSelectChat={() => setActiveView("chat")}
         onToggleCollapse={() => setSidebarOpen((v) => !v)}
         onOpenSearch={() => setPaletteOpen(true)}
         onOpenCreateBot={() => setCreateBotOpen(true)}
         onOpenBotSettings={(bot) => setSettingsBot(bot)}
         onOpenSettings={() => openSettings("general")}
+        onOpenAutomations={() => openSettings("automations")}
         onOpenArchived={() => openSettings("archived")}
       />
 
@@ -134,11 +148,18 @@ export function AppShell() {
           </div>
         )}
 
-        <ChatWorkspace
-          showWindowControls={!workbenchOpen}
-          onOpenBotSettings={(bot) => setSettingsBot(bot)}
-          onOpenProvidersSettings={() => openSettings("providers")}
-        />
+        {activeView === "super" ? (
+          <SuperWorkspace
+            showWindowControls={!workbenchOpen}
+            onOpenProvidersSettings={() => openSettings("providers")}
+          />
+        ) : (
+          <ChatWorkspace
+            showWindowControls={!workbenchOpen}
+            onOpenBotSettings={(bot) => setSettingsBot(bot)}
+            onOpenProvidersSettings={() => openSettings("providers")}
+          />
+        )}
       </main>
 
       <WorkbenchDock showWindowControls={workbenchOpen} />
@@ -148,20 +169,34 @@ export function AppShell() {
         tab={settingsTab}
         onSelectTab={(tab) => openSettings(tab)}
         onOpenChange={setSettingsOpen}
+        onOpenSession={(sessionId) => {
+          if (!client) return;
+          setActiveView("chat");
+          setSettingsOpen(false);
+          void selectSession(client, sessionId, locale);
+        }}
       />
 
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
-        onOpenSettings={() => openSettings("general")}
+        onOpenSettings={(tab = "general") => openSettings(tab)}
         onOpenCreateBot={() => setCreateBotOpen(true)}
-        onSelectChatView={() => setSettingsOpen(false)}
+        onSelectChatView={() => {
+          setSettingsOpen(false);
+          setActiveView("chat");
+        }}
+        onSelectSuperView={() => {
+          setSettingsOpen(false);
+          setActiveView("super");
+        }}
       />
 
       <CreateBotDialog
         open={createBotOpen}
         onOpenChange={setCreateBotOpen}
         onCreated={(botId) => {
+          setActiveView("chat");
           if (client) void createSession(client, botId, locale);
         }}
       />

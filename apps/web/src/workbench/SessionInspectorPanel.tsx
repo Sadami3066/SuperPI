@@ -1,18 +1,25 @@
+import { useCallback, useEffect, useState } from "react";
 import {
   IconFolder,
   IconFolderOpen,
   IconGitBranch,
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconPlayerStop,
   IconTerminal2,
+  IconTrash,
   IconWorld,
 } from "@tabler/icons-react";
+import type { HostGoalDto, HostJobOutputDto, HostJobSnapshotDto } from "../api/types";
 import { useI18n } from "../i18n";
 import { revealInFileManager } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useSuperStore } from "../stores/superStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
-import { Badge, Button, Card } from "../ui";
+import { Badge, Button, Card, Dialog, IconButton, Input } from "../ui";
 import type { WorkbenchPanelContext } from "./registry";
 
 export default function SessionInspectorPanel({
@@ -21,6 +28,7 @@ export default function SessionInspectorPanel({
   context: WorkbenchPanelContext;
 }) {
   const { t } = useI18n();
+  const client = useConnectionStore((s) => s.client);
   const bot = useBotStore((s) => s.bots.find((b) => b.id === context.botId) ?? s.bots[0]);
   const transcript = useSessionStore((s) =>
     context.sessionId ? s.transcriptsById[context.sessionId] : undefined,
@@ -28,6 +36,34 @@ export default function SessionInspectorPanel({
   const hostSettings = useSettingsStore((s) => s.hostSettings);
   const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
   const openPanel = useWorkbenchStore((s) => s.openPanel);
+  const goalVersion = useSuperStore((s) => s.goalVersion);
+  const jobsVersion = useSuperStore((s) => s.jobsVersion);
+
+  const [goal, setGoal] = useState<HostGoalDto | null>(null);
+  const [goalObjective, setGoalObjective] = useState("");
+  const [goalRounds, setGoalRounds] = useState("6");
+  const [goalBusy, setGoalBusy] = useState(false);
+
+  const [jobs, setJobs] = useState<HostJobSnapshotDto[]>([]);
+  const [jobOutput, setJobOutput] = useState<{ label: string; detail: HostJobOutputDto } | null>(null);
+
+  const refreshGoalAndJobs = useCallback(async () => {
+    if (!client || !context.sessionId || bot?.isRemote) return;
+    try {
+      const [g, j] = await Promise.all([
+        client.getSessionGoal(context.sessionId).catch(() => ({ goal: null })),
+        client.listSessionJobs(context.sessionId).catch(() => []),
+      ]);
+      setGoal(g.goal ?? null);
+      setJobs(j);
+    } catch {
+      void 0;
+    }
+  }, [bot?.isRemote, client, context.sessionId]);
+
+  useEffect(() => {
+    void refreshGoalAndJobs();
+  }, [goalVersion, jobsVersion, refreshGoalAndJobs]);
 
   if (!bot) return null;
 
@@ -130,6 +166,199 @@ export default function SessionInspectorPanel({
           </div>
         </Card>
 
+        {!bot.isRemote && context.sessionId && (
+          <Card className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] font-semibold" style={{ color: "var(--pi-ink-secondary)" }}>
+                {t("inspector.goalTitle")}
+              </span>
+              {goal && <Badge tone={goal.phase === "running" ? "accent" : "neutral"}>{goal.phase}</Badge>}
+            </div>
+
+            {goal ? (
+              <div className="space-y-2 text-[12.5px]">
+                <div style={{ color: "var(--pi-ink)" }}>{goal.objective}</div>
+                <div className="text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                  {t("inspector.goalRounds", {
+                    current: goal.roundsStarted,
+                    max: goal.maxRounds,
+                  })}
+                </div>
+                {goal.blockedReason && (
+                  <div className="text-[12px]" style={{ color: "var(--pi-danger)" }}>
+                    {goal.blockedReason}
+                  </div>
+                )}
+                <div className="flex gap-1.5 pt-1">
+                  {goal.phase === "paused" ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={goalBusy}
+                      onClick={() => {
+                        if (!client || !context.sessionId) return;
+                        setGoalBusy(true);
+                        void client
+                          .resumeSessionGoal(context.sessionId)
+                          .then((res) => setGoal(res.goal ?? null))
+                          .finally(() => setGoalBusy(false));
+                      }}
+                    >
+                      <IconPlayerPlay size={13.5} />
+                      <span>{t("inspector.goalResume")}</span>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={goalBusy}
+                      onClick={() => {
+                        if (!client || !context.sessionId) return;
+                        setGoalBusy(true);
+                        void client
+                          .pauseSessionGoal(context.sessionId)
+                          .then((res) => setGoal(res.goal ?? null))
+                          .finally(() => setGoalBusy(false));
+                      }}
+                    >
+                      <IconPlayerPause size={13.5} />
+                      <span>{t("inspector.goalPause")}</span>
+                    </Button>
+                  )}
+                  <IconButton
+                    size="sm"
+                    label={t("common.delete")}
+                    onClick={() => {
+                      if (!client || !context.sessionId) return;
+                      setGoalBusy(true);
+                      void client
+                        .deleteSessionGoal(context.sessionId)
+                        .then(() => setGoal(null))
+                        .finally(() => setGoalBusy(false));
+                    }}
+                  >
+                    <IconTrash size={13.5} />
+                  </IconButton>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Input
+                  value={goalObjective}
+                  onChange={(e) => setGoalObjective(e.target.value)}
+                  placeholder={t("inspector.goalPlaceholder")}
+                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={goalRounds}
+                    onChange={(e) => setGoalRounds(e.target.value)}
+                    className="w-20"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1"
+                    disabled={goalBusy || !goalObjective.trim()}
+                    onClick={() => {
+                      if (!client || !context.sessionId || !goalObjective.trim()) return;
+                      setGoalBusy(true);
+                      void client
+                        .createSessionGoal(context.sessionId, {
+                          objective: goalObjective.trim(),
+                          maxRounds: Number(goalRounds) || undefined,
+                        })
+                        .then((res) => {
+                          setGoal(res.goal ?? null);
+                          setGoalObjective("");
+                        })
+                        .finally(() => setGoalBusy(false));
+                    }}
+                  >
+                    {t("inspector.goalStart")}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {!bot.isRemote && jobs.length > 0 && context.sessionId && (
+          <Card className="space-y-2.5 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] font-semibold" style={{ color: "var(--pi-ink-secondary)" }}>
+                {t("inspector.jobsTitle")} ({jobs.length})
+              </span>
+              {jobs.some((j) => j.status !== "running") && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (!client || !context.sessionId) return;
+                    void client
+                      .clearSettledSessionJobs(context.sessionId)
+                      .then(() => refreshGoalAndJobs());
+                  }}
+                >
+                  {t("inspector.jobsClearSettled")}
+                </Button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {jobs.map((job) => (
+                <div
+                  key={job.id}
+                  className="rounded-[10px] p-2.5 text-[12px]"
+                  style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium" style={{ color: "var(--pi-ink)" }}>
+                      {job.label || job.command}
+                    </span>
+                    <Badge tone={job.status === "running" ? "accent" : job.status === "failed" ? "danger" : "neutral"}>
+                      {job.status}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        if (!client || !context.sessionId) return;
+                        void client
+                          .getSessionJobOutput(context.sessionId, job.id)
+                          .then((detail) =>
+                            setJobOutput({ label: job.label || job.command, detail }),
+                          );
+                      }}
+                    >
+                      {t("inspector.jobOutput")}
+                    </Button>
+                    {job.status === "running" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (!client || !context.sessionId) return;
+                          void client
+                            .killSessionJob(context.sessionId, job.id)
+                            .then(() => refreshGoalAndJobs());
+                        }}
+                      >
+                        <IconPlayerStop size={13} />
+                        <span>{t("inspector.jobKill")}</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         <Card className="space-y-2.5 p-4">
           <div className="text-[12px] font-semibold" style={{ color: "var(--pi-ink-secondary)" }}>
             {t("wb.quickLaunch")}
@@ -153,6 +382,28 @@ export default function SessionInspectorPanel({
           </div>
         </Card>
       </div>
+
+      <Dialog
+        open={Boolean(jobOutput)}
+        onOpenChange={(v) => {
+          if (!v) setJobOutput(null);
+        }}
+        title={jobOutput?.label}
+        maxWidthClass="max-w-[640px]"
+      >
+        {jobOutput && (
+          <pre
+            className="max-h-[60vh] overflow-auto rounded-[10px] p-3 text-[12px] whitespace-pre-wrap"
+            style={{
+              background: "var(--pi-paper)",
+              color: "var(--pi-ink)",
+              fontFamily: "var(--pi-font-mono)",
+            }}
+          >
+            {jobOutput.detail.output || "(empty)"}
+          </pre>
+        )}
+      </Dialog>
     </div>
   );
 }
