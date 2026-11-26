@@ -13,9 +13,11 @@ import {
 } from "electron";
 import {
   DESKTOP_IPC_CHANNELS,
+  type BrowserBounds,
   type DesktopBridge,
   type DesktopEnvInfo,
 } from "../shared/bridge.js";
+import { EmbeddedBrowserManager } from "./browser-view.js";
 import { HostManager } from "./host-manager.js";
 import { loadWindowState, saveWindowState } from "./window-state.js";
 
@@ -135,6 +137,7 @@ const hostManager = new HostManager({
   resourceDir: app.isPackaged ? process.resourcesPath : null,
   repoRoot,
 });
+const browserManager = new EmbeddedBrowserManager();
 
 function focusMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -257,6 +260,7 @@ function createMainWindow(): void {
     }
   });
   win.on("closed", () => {
+    browserManager.destroy();
     if (mainWindow === win) mainWindow = null;
   });
 
@@ -389,6 +393,40 @@ function registerIpcHandlers(): void {
   ipcMain.handle(DESKTOP_IPC_CHANNELS.windowIsMaximized, async () => {
     return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized());
   });
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserMount,
+    async (_event, bounds: BrowserBounds, url?: string) => {
+      return browserManager.mount(mainWindow, bounds, url);
+    },
+  );
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserSetBounds,
+    async (_event, bounds: BrowserBounds) => {
+      browserManager.setBounds(bounds);
+    },
+  );
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserHide, async () => {
+    browserManager.hide();
+  });
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserNavigate,
+    async (_event, rawUrl: string) => {
+      return browserManager.navigate(mainWindow, rawUrl);
+    },
+  );
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserBack, async () => browserManager.goBack());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserForward, async () => browserManager.goForward());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserReload, async () => browserManager.reload());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserStop, async () => browserManager.stop());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserDestroy, async () => browserManager.destroy());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserGetPageContext, async () =>
+    browserManager.getPageContext(),
+  );
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -424,6 +462,7 @@ if (!gotSingleInstanceLock) {
     if (shutdownStarted) return;
     shutdownStarted = true;
     event.preventDefault();
+    browserManager.destroy();
     void hostManager.shutdownIfOwned().finally(() => {
       app.exit(0);
     });

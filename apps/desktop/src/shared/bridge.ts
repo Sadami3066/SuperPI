@@ -15,6 +15,28 @@ export interface DesktopEnvInfo {
   homeDir: string;
 }
 
+export interface BrowserBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserNavState {
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  error: string | null;
+}
+
+export interface BrowserPageContext {
+  url: string;
+  title: string;
+  text: string;
+}
+
 export interface DesktopBridge {
   getEnv(): Promise<DesktopEnvInfo>;
   getHostConnection(): Promise<HostConnectionInfo>;
@@ -29,6 +51,17 @@ export interface DesktopBridge {
   windowClose(): Promise<void>;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
+  browserMount(bounds: BrowserBounds, url?: string): Promise<BrowserNavState>;
+  browserSetBounds(bounds: BrowserBounds): Promise<void>;
+  browserHide(): Promise<void>;
+  browserNavigate(rawUrl: string): Promise<BrowserNavState>;
+  browserBack(): Promise<BrowserNavState>;
+  browserForward(): Promise<BrowserNavState>;
+  browserReload(): Promise<BrowserNavState>;
+  browserStop(): Promise<BrowserNavState>;
+  browserDestroy(): Promise<void>;
+  browserGetPageContext(): Promise<BrowserPageContext | null>;
+  onBrowserState(cb: (state: BrowserNavState) => void): () => void;
 }
 
 export const DESKTOP_IPC_CHANNELS = {
@@ -45,4 +78,15 @@ export const DESKTOP_IPC_CHANNELS = {
   windowClose: "superpi:window-close",
   windowIsMaximized: "superpi:window-is-maximized",
   windowMaximizedChanged: "superpi:window-maximized-changed",
+  browserMount: "superpi:browser-mount",
+  browserSetBounds: "superpi:browser-set-bounds",
+  browserHide: "superpi:browser-hide",
+  browserNavigate: "superpi:browser-navigate",
+  browserBack: "superpi:browser-back",
+  browserForward: "superpi:browser-forward",
+  browserReload: "superpi:browser-reload",
+  browserStop: "superpi:browser-stop",
+  browserDestroy: "superpi:browser-destroy",
+  browserGetPageContext: "superpi:browser-get-page-context",
+  browserStateChanged: "superpi:browser-state-changed",
 } as const;
