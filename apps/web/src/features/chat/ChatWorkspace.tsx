@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconGitBranch, IconLayoutSidebarRight, IconSettings } from "@tabler/icons-react";
+import { IconLayoutSidebarRight } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
 import type { HostBotDto, PermissionMode, QuestionAnswerInput } from "../../api/types";
 import { useI18n } from "../../i18n";
@@ -11,7 +11,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, IconButton, NoticeBar, Popover } from "../../ui";
-import { BotAvatar, PiMascot } from "../shared/BrandAssets";
+import { BotAvatar, BrandIcon, PiMascot } from "../shared/BrandAssets";
 import { WindowControls } from "../shell/WindowControls";
 import { Composer } from "./Composer";
 import { ContextMeter } from "./ContextMeter";
@@ -302,7 +302,7 @@ export function ChatWorkspace({
               className="hidden items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium md:inline-flex"
               style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
             >
-              <IconGitBranch size={11} />
+              <BrandIcon name="system/git_branch" size={11} />
               <span>{summary.worktreeBranch}</span>
             </span>
           )}
@@ -325,7 +325,7 @@ export function ChatWorkspace({
             label={t("nav.botSettings")}
             onClick={() => onOpenBotSettings(activeBot)}
           >
-            <IconSettings size={14} stroke={1.65} />
+            <BrandIcon name="system/settings" size={14} />
           </IconButton>
         </div>
 

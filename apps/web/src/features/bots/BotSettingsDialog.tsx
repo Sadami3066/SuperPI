@@ -76,7 +76,7 @@ export function BotSettingsDialog({
   }, [bot, client, loadBotDetails]);
 
   const modelOptions = useMemo(() => {
-    const opts = [{ value: "__inherit__", label: t("settings.appearanceSystem") }];
+    const opts = [{ value: "__inherit__", label: t("bot.modelInherit") }];
     for (const p of providers.filter((x) => x.configured)) {
       for (const m of p.models) {
         opts.push({ value: `${p.id}/${m.id}`, label: `${p.name} · ${m.displayName || m.id}` });
@@ -238,7 +238,7 @@ export function BotSettingsDialog({
 
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-[13.5px]" style={{ color: "var(--pi-ink)" }}>
-                    {t("nav.memoryInclude")}
+                    {t("bot.memoryDispatch")}
                   </span>
                   <Switch
                     checked={policy.memoryDispatch}

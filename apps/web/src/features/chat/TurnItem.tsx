@@ -1,21 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import {
-  IconAlertCircle,
-  IconCheck,
-  IconChevronDown,
-  IconCopy,
-  IconFile,
-  IconFileText,
-  IconGitBranch,
-  IconPhoto,
-  IconQuote,
-  IconRefresh,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconSparkles } from "@tabler/icons-react";
 import { formatAttachmentSize } from "../../api/mappers";
 import type { ChatTurn, CustomCardItem, TurnBlock } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { Button } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 import { ActivityDisclosure } from "./ActivityDisclosure";
 import { AnsweredAskCard } from "./AskQuestionCard";
 import { MarkdownView } from "./MarkdownView";
@@ -43,7 +32,7 @@ function SummaryCard({ summary }: { summary: NonNullable<ChatTurn["summary"]> })
             style={{ color: "var(--pi-ink-secondary)" }}
           >
             {isBranch ? (
-              <IconGitBranch size={14} stroke={1.7} className="shrink-0" />
+              <BrandIcon name="system/git_branch" size={14} className="shrink-0" />
             ) : (
               <IconSparkles size={14} stroke={1.7} className="shrink-0" />
             )}
@@ -54,9 +43,9 @@ function SummaryCard({ summary }: { summary: NonNullable<ChatTurn["summary"]> })
               </span>
             )}
           </div>
-          <IconChevronDown
+          <BrandIcon
+            name="navigation/chevron_down"
             size={14}
-            stroke={1.7}
             className="shrink-0 transition-transform duration-150"
             style={{
               color: "var(--pi-ink-tertiary)",
@@ -199,11 +188,11 @@ export const TurnItem = memo(function TurnItem({
                     className="h-5 w-5 shrink-0 rounded-[5px] object-cover"
                   />
                 ) : chip.kind === "image" ? (
-                  <IconPhoto size={14} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />
+                  <BrandIcon name="file/image" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
                 ) : chip.kind === "text" ? (
-                  <IconFileText size={14} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />
+                  <BrandIcon name="file/plain" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
                 ) : (
-                  <IconFile size={14} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />
+                  <BrandIcon name="file/attachment" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
                 )}
                 <span className="max-w-[180px] truncate font-medium">{chip.name}</span>
                 {chip.size > 0 && (
@@ -307,7 +296,7 @@ export const TurnItem = memo(function TurnItem({
               <div className="mt-2 flex items-center gap-2">
                 {isLastAssistant && (
                   <Button variant="primary" size="sm" onClick={onRetry}>
-                    <IconRefresh size={13} stroke={1.75} />
+                    <BrandIcon name="action/retry" size={13} />
                     <span>{t("chat.retry")}</span>
                   </Button>
                 )}
@@ -345,7 +334,7 @@ export const TurnItem = memo(function TurnItem({
             title={t("chat.copy")}
             className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
           >
-            {copied ? <IconCheck size={14} stroke={1.7} /> : <IconCopy size={14} stroke={1.6} />}
+            {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
           </button>
           <button
             type="button"
@@ -354,7 +343,7 @@ export const TurnItem = memo(function TurnItem({
             title={t("chat.quote")}
             className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconQuote size={14} stroke={1.6} />
+            <BrandIcon name="action/quote" size={14} />
           </button>
           {turn.timestamp && (
             <span className="ml-1.5 text-[11.5px]">{copied ? t("chat.copied") : turn.timestamp}</span>

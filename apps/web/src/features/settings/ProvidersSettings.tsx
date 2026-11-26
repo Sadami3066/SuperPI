@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconExternalLink, IconKey, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
+import { IconKey } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
 import type {
   HostCustomProviderDto,
@@ -12,7 +12,7 @@ import { openExternalUrl } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Badge, Button, Card, Dialog, Input, Select } from "../../ui";
-import { ProviderIcon } from "../shared/BrandAssets";
+import { BrandIcon, ProviderIcon } from "../shared/BrandAssets";
 
 export function ProvidersSettings() {
   const { t } = useI18n();
@@ -171,7 +171,7 @@ export function ProvidersSettings() {
             {t("providers.custom")}
           </div>
           <Button variant="secondary" size="sm" onClick={() => openCustomEditor()}>
-            <IconPlus size={14} stroke={1.8} />
+            <BrandIcon name="action/add" size={14} />
             <span>{t("providers.addCustom")}</span>
           </Button>
         </div>
@@ -194,7 +194,7 @@ export function ProvidersSettings() {
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Button variant="ghost" size="sm" onClick={() => openCustomEditor(cp)}>
-                    {t("nav.rename")}
+                    {t("common.edit")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -203,7 +203,7 @@ export function ProvidersSettings() {
                       if (client) void deleteCustomProvider(client, cp.id);
                     }}
                   >
-                    <IconTrash size={14} />
+                    <BrandIcon name="action/delete" size={14} />
                   </Button>
                 </div>
               </div>
@@ -255,9 +255,9 @@ export function ProvidersSettings() {
 
       <Card className="space-y-3.5 p-5">
         <div className="relative">
-          <IconSearch
+          <BrandIcon
+            name="action/search"
             size={14}
-            stroke={1.7}
             className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
             style={{ color: "var(--pi-ink-tertiary)" }}
           />
@@ -418,7 +418,7 @@ export function ProvidersSettings() {
                         size="sm"
                         onClick={() => void openExternalUrl(oauthState.url!)}
                       >
-                        <IconExternalLink size={14} />
+                        <BrandIcon name="navigation/external_link" size={14} />
                         <span>{t("providers.oauthOpen")}</span>
                       </Button>
                     )}

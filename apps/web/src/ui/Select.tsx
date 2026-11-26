@@ -1,5 +1,5 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { BrandIcon } from "../features/shared/BrandAssets";
 
 export interface SelectOption {
   value: string;
@@ -40,7 +40,7 @@ export function Select({
       >
         <SelectPrimitive.Value placeholder={placeholder} />
         <SelectPrimitive.Icon>
-          <IconChevronDown size={13} stroke={1.75} style={{ color: "var(--pi-ink-tertiary)" }} />
+          <BrandIcon name="navigation/chevron_down" size={13} style={{ color: "var(--pi-ink-tertiary)" }} />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
 
@@ -61,7 +61,7 @@ export function Select({
               >
                 <SelectPrimitive.ItemText>{opt.label}</SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator>
-                  <IconCheck size={14} stroke={2} style={{ color: "var(--pi-accent)" }} />
+                  <BrandIcon name="status/confirm" size={14} style={{ color: "var(--pi-accent)" }} />
                 </SelectPrimitive.ItemIndicator>
               </SelectPrimitive.Item>
             ))}

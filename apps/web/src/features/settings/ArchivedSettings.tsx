@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { IconRestore, IconTrash } from "@tabler/icons-react";
 import type { SessionSummary } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Button, Card, ConfirmDialog } from "../../ui";
-import { PiMascot } from "../shared/BrandAssets";
+import { BrandIcon, PiMascot } from "../shared/BrandAssets";
 
 export function ArchivedSettings({
   onOpenSession,
@@ -66,11 +65,11 @@ export function ArchivedSettings({
                   if (client) void toggleArchiveSession(client, sess.id, false);
                 }}
               >
-                <IconRestore size={14} />
+                <BrandIcon name="action/retry" size={14} />
                 <span>{t("nav.unarchive")}</span>
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(sess)}>
-                <IconTrash size={14} />
+                <BrandIcon name="action/delete" size={14} />
               </Button>
             </div>
           </div>

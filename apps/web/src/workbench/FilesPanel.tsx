@@ -1,22 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  IconChevronRight,
-  IconCopy,
-  IconEdit,
-  IconFile,
-  IconFileCode,
-  IconFolder,
-  IconFolderOpen,
-  IconFolderPlus,
-  IconMessageForward,
-  IconPhoto,
-  IconRefresh,
-  IconSearch,
-  IconTrash,
-  IconUpload,
-} from "@tabler/icons-react";
+import { IconFolderPlus, IconMessageForward, IconUpload } from "@tabler/icons-react";
 import { classifyAttachmentKind, formatAttachmentSize } from "../api/mappers";
 import type { HostWorkspaceFileEntryDto } from "../api/types";
+import { BrandIcon } from "../features/shared/BrandAssets";
 import { useI18n } from "../i18n";
 import { revealInFileManager } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
@@ -41,16 +27,16 @@ function fileToBase64(file: File): Promise<string> {
 
 function EntryIcon({ entry }: { entry: HostWorkspaceFileEntryDto }) {
   if (entry.isDirectory) {
-    return <IconFolder size={15} stroke={1.7} style={{ color: "var(--pi-accent)" }} />;
+    return <BrandIcon name="file/folder_closed" size={15} style={{ color: "var(--pi-accent)" }} />;
   }
   const kind = classifyAttachmentKind("", entry.name);
   if (kind === "image") {
-    return <IconPhoto size={15} stroke={1.65} style={{ color: "var(--pi-ink-secondary)" }} />;
+    return <BrandIcon name="file/image" size={15} style={{ color: "var(--pi-ink-secondary)" }} />;
   }
   if (kind === "text") {
-    return <IconFileCode size={15} stroke={1.65} style={{ color: "var(--pi-ink-secondary)" }} />;
+    return <BrandIcon name="file/code" size={15} style={{ color: "var(--pi-ink-secondary)" }} />;
   }
-  return <IconFile size={15} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />;
+  return <BrandIcon name="file/plain" size={15} style={{ color: "var(--pi-ink-tertiary)" }} />;
 }
 
 export default function FilesPanel({ context }: { context: WorkbenchPanelContext }) {
@@ -169,9 +155,9 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
       >
         <div className="flex items-center gap-1.5">
           <div className="relative min-w-0 flex-1">
-            <IconSearch
+            <BrandIcon
+              name="action/search"
               size={13.5}
-              stroke={1.7}
               className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2"
               style={{ color: "var(--pi-ink-tertiary)" }}
             />
@@ -201,7 +187,7 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
               label={t("wb.revealDir")}
               onClick={() => void revealInFileManager(bot.cwd)}
             >
-              <IconFolderOpen size={15} stroke={1.7} />
+              <BrandIcon name="file/folder_open" size={15} />
             </IconButton>
           )}
 
@@ -210,7 +196,7 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
             label={t("common.refresh")}
             onClick={() => void loadDir(currentPath)}
           >
-            <IconRefresh size={14.5} stroke={1.7} />
+            <BrandIcon name="action/retry" size={14.5} />
           </IconButton>
         </div>
 
@@ -239,7 +225,7 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
             const isLast = i === segments.length - 1;
             return (
               <div key={targetPath} className="flex shrink-0 items-center gap-1">
-                <IconChevronRight size={11} style={{ color: "var(--pi-ink-tertiary)" }} />
+                <BrandIcon name="navigation/chevron_right" size={11} style={{ color: "var(--pi-ink-tertiary)" }} />
                 <button
                   type="button"
                   onClick={() => void loadDir(targetPath)}
@@ -315,7 +301,7 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
                     label={t("files.copyPath")}
                     onClick={() => void navigator.clipboard?.writeText(entry.path)}
                   >
-                    <IconCopy size={13} stroke={1.7} />
+                    <BrandIcon name="action/copy" size={13} />
                   </IconButton>
                   <IconButton
                     size="sm"
@@ -325,14 +311,14 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
                       setRenameDraft(entry.path);
                     }}
                   >
-                    <IconEdit size={13} stroke={1.7} />
+                    <BrandIcon name="action/pen" size={13} />
                   </IconButton>
                   <IconButton
                     size="sm"
                     label={t("common.delete")}
                     onClick={() => setDeleteTarget(entry)}
                   >
-                    <IconTrash size={13} stroke={1.7} />
+                    <BrandIcon name="action/delete" size={13} />
                   </IconButton>
                 </div>
               </div>

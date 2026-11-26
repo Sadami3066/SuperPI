@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconEye, IconRefresh, IconTrash, IconUpload } from "@tabler/icons-react";
+import { IconUpload } from "@tabler/icons-react";
+import { formatSkillSource } from "../../api/formatters";
 import type { HostInstalledSkillDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { Badge, Button, Card, ConfirmDialog, Dialog, IconButton, Switch } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 const MAX_ZIP_BYTES = 10 * 1024 * 1024;
 
@@ -91,7 +93,7 @@ export function SkillsSettings() {
             <span>{t("skills.installZip")}</span>
           </Button>
           <IconButton size="sm" label={t("common.refresh")} onClick={() => void loadSkills()}>
-            <IconRefresh size={14} />
+            <BrandIcon name="action/retry" size={14} />
           </IconButton>
         </div>
       </div>
@@ -126,7 +128,7 @@ export function SkillsSettings() {
                     <span className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
                       {skill.name}
                     </span>
-                    <Badge tone="neutral">{skill.source}</Badge>
+                    <Badge tone="neutral">{formatSkillSource(skill.source, t)}</Badge>
                   </div>
                   {skill.description && (
                     <p className="text-[12.5px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
@@ -165,7 +167,7 @@ export function SkillsSettings() {
                       .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
                   }}
                 >
-                  <IconEye size={13.5} />
+                  <BrandIcon name="action/eye" size={13.5} />
                   <span>{t("skills.view")}</span>
                 </Button>
                 {skill.removable && (
@@ -174,7 +176,7 @@ export function SkillsSettings() {
                     label={t("common.delete")}
                     onClick={() => setDeleteTarget(skill)}
                   >
-                    <IconTrash size={14} />
+                    <BrandIcon name="action/delete" size={14} />
                   </IconButton>
                 )}
               </div>

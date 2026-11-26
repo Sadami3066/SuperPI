@@ -29,9 +29,9 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
-import { IconCheck, IconChevronDown, IconCopy } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { openExternalUrl } from "../../platform/bridge";
+import { BrandIcon } from "../shared/BrandAssets";
 import {
   splitMarkdownBlocks,
   splitTextByAlpha,
@@ -191,9 +191,9 @@ const CodeBlock = memo(function CodeBlock({
               className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
               style={{ color: "var(--pi-ink-tertiary)" }}
             >
-              <IconChevronDown
+              <BrandIcon
+                name="navigation/chevron_down"
                 size={14}
-                stroke={1.7}
                 className="transition-transform duration-150"
                 style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
               />
@@ -211,7 +211,7 @@ const CodeBlock = memo(function CodeBlock({
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
             style={{ color: "var(--pi-ink-tertiary)" }}
           >
-            {copied ? <IconCheck size={14} stroke={1.7} /> : <IconCopy size={14} stroke={1.7} />}
+            {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
           </button>
         </div>
       </div>

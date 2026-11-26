@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { IconX } from "@tabler/icons-react";
 import { type ReactNode, useEffect } from "react";
+import { BrandIcon } from "../features/shared/BrandAssets";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 
 export function Dialog({
@@ -61,7 +61,7 @@ export function Dialog({
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--pi-hover)]"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
-                <IconX size={16} stroke={1.75} />
+                <BrandIcon name="navigation/close" size={16} />
               </DialogPrimitive.Close>
             </div>
           )}

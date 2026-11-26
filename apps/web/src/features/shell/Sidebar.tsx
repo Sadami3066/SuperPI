@@ -1,17 +1,8 @@
 import { useMemo, useState } from "react";
 import {
-  IconArchive,
-  IconChevronDown,
-  IconDots,
-  IconDownload,
-  IconEdit,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
-  IconMessagePlus,
-  IconPin,
   IconPinnedOff,
-  IconPlus,
-  IconTrash,
 } from "@tabler/icons-react";
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostBotDto, SessionSummary } from "../../api/types";
@@ -336,7 +327,7 @@ export function Sidebar({
             />
           )}
           {session.pinned && !session.busy && (
-            <IconPin size={11.5} stroke={1.75} className="shrink-0 opacity-60" />
+            <BrandIcon name="action/pin" size={11.5} className="shrink-0 opacity-60" />
           )}
           <span
             className="truncate text-[12.5px]"
@@ -366,12 +357,12 @@ export function Sidebar({
                 className="absolute right-0 flex h-5 w-5 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-[var(--pi-hover)]"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
-                <IconDots size={13.5} stroke={1.75} />
+                <BrandIcon name="navigation/more" size={13.5} />
               </button>
             }
           >
             <DropdownItem
-              icon={<IconEdit size={14} />}
+              icon={<BrandIcon name="action/pen" size={14} />}
               label={t("nav.rename")}
               onSelect={() => {
                 setRenamingId(session.id);
@@ -379,14 +370,14 @@ export function Sidebar({
               }}
             />
             <DropdownItem
-              icon={session.pinned ? <IconPinnedOff size={14} /> : <IconPin size={14} />}
+              icon={session.pinned ? <IconPinnedOff size={14} /> : <BrandIcon name="action/pin" size={14} />}
               label={session.pinned ? t("nav.unpin") : t("nav.pin")}
               onSelect={() => {
                 if (client) void togglePinSession(client, session.id, !session.pinned);
               }}
             />
             <DropdownItem
-              icon={<IconArchive size={14} />}
+              icon={<BrandIcon name="action/archive" size={14} />}
               label={t("nav.archive")}
               onSelect={() => {
                 if (client) void toggleArchiveSession(client, session.id, true);
@@ -399,7 +390,7 @@ export function Sidebar({
               }}
             />
             <DropdownItem
-              icon={<IconDownload size={14} />}
+              icon={<BrandIcon name="action/download" size={14} />}
               label={t("nav.export")}
                 onSelect={() => {
                   if (!client) return;
@@ -414,7 +405,7 @@ export function Sidebar({
             <DropdownSeparator />
             <DropdownItem
               danger
-              icon={<IconTrash size={14} />}
+              icon={<BrandIcon name="action/delete" size={14} />}
               label={t("nav.delete")}
               onSelect={() => setDeleteTarget(session)}
             />
@@ -437,9 +428,9 @@ export function Sidebar({
             onClick={() => toggleBotCollapse(bot.id)}
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           >
-            <IconChevronDown
+            <BrandIcon
+              name="navigation/chevron_down"
               size={12}
-              stroke={1.75}
               className="shrink-0 transition-transform duration-150"
               style={{
                 color: "var(--pi-ink-tertiary)",
@@ -472,14 +463,14 @@ export function Sidebar({
                 if (client) void createSession(client, bot.id, locale);
               }}
             >
-              <IconMessagePlus size={13.5} stroke={1.7} />
+              <BrandIcon name="chat/new_chat" size={13.5} />
             </IconButton>
             <IconButton
               size="sm"
               label={t("nav.botSettings")}
               onClick={() => onOpenBotSettings(bot)}
             >
-              <IconDots size={13.5} stroke={1.7} />
+              <BrandIcon name="navigation/more" size={13.5} />
             </IconButton>
           </div>
         </div>
@@ -588,7 +579,7 @@ export function Sidebar({
                 {t("nav.localBots")}
               </span>
               <IconButton size="sm" label={t("nav.createBot")} onClick={onOpenCreateBot}>
-                <IconPlus size={13.5} stroke={1.85} />
+                <BrandIcon name="action/add" size={13.5} />
               </IconButton>
             </div>
             <div className="space-y-1">{localBots.map(renderBotGroup)}</div>

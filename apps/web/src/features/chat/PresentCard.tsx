@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { IconDownload, IconExternalLink, IconFile, IconPhoto } from "@tabler/icons-react";
 import type { PresentedItem } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -93,7 +93,7 @@ function ImageArtifactCard({
           className="flex h-32 items-center justify-center gap-2 text-[12.5px]"
           style={{ color: "var(--pi-ink-tertiary)" }}
         >
-          <IconPhoto size={18} stroke={1.6} />
+          <BrandIcon name="file/image" size={18} />
           <span>{error ? t("present.cardUnavailable") : t("common.loading")}</span>
         </div>
       )}
@@ -106,7 +106,7 @@ function ImageArtifactCard({
         </span>
         {item.path && (
           <Button variant="ghost" size="sm" onClick={() => void handleDownload()}>
-            <IconDownload size={14} stroke={1.7} />
+            <BrandIcon name="action/download" size={14} />
             <span>{t("present.download")}</span>
           </Button>
         )}
@@ -177,7 +177,7 @@ export function PresentCard({
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]"
                 style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
               >
-                <IconFile size={16} stroke={1.65} />
+                <BrandIcon name="file/plain" size={16} />
               </div>
               <div className="min-w-0">
                 <div className="truncate text-[13px] font-medium" style={{ color: "var(--pi-ink)" }}>
@@ -196,11 +196,11 @@ export function PresentCard({
             {item.path && (
               <div className="flex shrink-0 items-center gap-1">
                 <Button variant="secondary" size="sm" onClick={() => handleOpenPreview(item)}>
-                  <IconExternalLink size={13.5} stroke={1.7} />
+                  <BrandIcon name="navigation/external_link" size={13.5} />
                   <span>{t("present.open")}</span>
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => void handleDownload(item)}>
-                  <IconDownload size={14} stroke={1.7} />
+                  <BrandIcon name="action/download" size={14} />
                 </Button>
               </div>
             )}

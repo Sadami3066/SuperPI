@@ -1,5 +1,4 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { IconX } from "@tabler/icons-react";
 import { useEffect } from "react";
 import { useI18n } from "../../i18n";
 import { useSuperStore } from "../../stores/superStore";
@@ -191,7 +190,7 @@ export function SettingsModal({
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--pi-hover)]"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
-                <IconX size={16} stroke={1.75} />
+                <BrandIcon name="navigation/close" size={16} />
               </DialogPrimitive.Close>
             </div>
 

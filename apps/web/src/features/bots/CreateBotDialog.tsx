@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { IconFolderOpen } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { isElectronApp, pickWorkspaceDirectory } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { Button, Dialog, Input } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 export function CreateBotDialog({
   open,
@@ -94,7 +94,7 @@ export function CreateBotDialog({
                   });
                 }}
               >
-                <IconFolderOpen size={15} stroke={1.7} />
+                <BrandIcon name="file/folder_open" size={15} />
                 <span>{t("bot.pickDir")}</span>
               </Button>
             )}

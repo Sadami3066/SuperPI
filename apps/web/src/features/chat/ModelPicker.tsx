@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { IconCheck, IconChevronDown, IconSearch, IconSparkles } from "@tabler/icons-react";
+import { IconSparkles } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
 import type { HostProviderDto, ThinkingLevel } from "../../api/types";
 import { useI18n, type I18nKey } from "../../i18n";
 import { Button, Input, Popover } from "../../ui";
-import { ProviderIcon } from "../shared/BrandAssets";
+import { BrandIcon, ProviderIcon } from "../shared/BrandAssets";
 
 const THINKING_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -114,7 +114,7 @@ export function ModelPicker({
               {t(THINKING_KEY_MAP[currentThinking])}
             </span>
           )}
-          <IconChevronDown size={12} stroke={1.75} className="shrink-0 opacity-65" />
+          <BrandIcon name="navigation/chevron_down" size={12} className="shrink-0 opacity-65" />
         </button>
       }
     >
@@ -137,9 +137,9 @@ export function ModelPicker({
       ) : (
         <div className="space-y-2.5">
           <div className="relative">
-            <IconSearch
+            <BrandIcon
+              name="action/search"
               size={14}
-              stroke={1.7}
               className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2"
               style={{ color: "var(--pi-ink-tertiary)" }}
             />
@@ -217,7 +217,7 @@ export function ModelPicker({
                       }}
                     >
                       <span className="truncate font-medium">{mod.displayName || mod.id}</span>
-                      {active && <IconCheck size={14} stroke={2} className="shrink-0" />}
+                      {active && <BrandIcon name="status/confirm" size={14} className="shrink-0" />}
                     </button>
                   );
                 })}

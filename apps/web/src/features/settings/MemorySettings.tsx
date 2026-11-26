@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
+import { IconLink, IconPin, IconSparkles } from "@tabler/icons-react";
 import {
-  IconCheck,
-  IconDownload,
-  IconLink,
-  IconPin,
-  IconPlus,
-  IconRefresh,
-  IconRotateClockwise,
-  IconSearch,
-  IconSparkles,
-  IconTrash,
-  IconX,
-} from "@tabler/icons-react";
+  formatEntityKind,
+  formatEventKind,
+  formatMemoryActor,
+  formatMemoryScope,
+  formatMemoryStatus,
+  formatRelationType,
+} from "../../api/formatters";
 import { formatRelativeTime } from "../../api/mappers";
 import type {
   HostMemoryBlockDto,
@@ -21,6 +17,7 @@ import type {
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { BrandIcon } from "../shared/BrandAssets";
 import {
   Badge,
   Button,
@@ -189,7 +186,7 @@ export function MemorySettings() {
                   if (client) void runAction(() => client.syncMemoryNow());
                 }}
               >
-                <IconRefresh size={13.5} />
+                <BrandIcon name="action/retry" size={13.5} />
                 <span>{t("memory.syncNow")}</span>
               </Button>
             )}
@@ -206,7 +203,7 @@ export function MemorySettings() {
                   .catch((err) => setError(err instanceof Error ? err.message : "Export failed"));
               }}
             >
-              <IconDownload size={13.5} />
+              <BrandIcon name="action/download" size={13.5} />
               <span>{t("nav.export")}</span>
             </Button>
           </div>
@@ -281,7 +278,7 @@ export function MemorySettings() {
                 setCreateBlockOpen(true);
               }}
             >
-              <IconPlus size={14} />
+              <BrandIcon name="action/add" size={14} />
               <span>{t("memory.newBlock")}</span>
             </Button>
           </div>
@@ -311,7 +308,7 @@ export function MemorySettings() {
                           if (client) void runAction(() => client.acceptMemoryProposal(p.id));
                         }}
                       >
-                        <IconCheck size={13.5} />
+                        <BrandIcon name="status/confirm" size={13.5} />
                         <span>{t("memory.accept")}</span>
                       </Button>
                       <Button
@@ -322,7 +319,7 @@ export function MemorySettings() {
                           if (client) void runAction(() => client.dismissMemoryProposal(p.id));
                         }}
                       >
-                        <IconX size={13.5} />
+                        <BrandIcon name="navigation/close" size={13.5} />
                       </Button>
                     </div>
                   </div>
@@ -349,7 +346,7 @@ export function MemorySettings() {
                         <span className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
                           {block.title}
                         </span>
-                        <Badge tone="neutral">{block.domain}</Badge>
+                        <Badge tone="neutral">{formatMemoryScope(block.domain, t)}</Badge>
                         {block.pinned && <Badge tone="accent">{t("nav.pin")}</Badge>}
                         {block.status === "ARCHIVED" && <Badge tone="neutral">{t("nav.archive")}</Badge>}
                       </div>
@@ -395,7 +392,7 @@ export function MemorySettings() {
                           label={t("common.delete")}
                           onClick={() => setDeleteBlockTarget(block)}
                         >
-                          <IconTrash size={14} />
+                          <BrandIcon name="action/delete" size={14} />
                         </IconButton>
                       )}
                     </div>
@@ -421,7 +418,8 @@ export function MemorySettings() {
         <TabsContent value="graph" className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[180px] flex-1">
-              <IconSearch
+              <BrandIcon
+                name="action/search"
                 size={14}
                 className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
                 style={{ color: "var(--pi-ink-tertiary)" }}
@@ -450,7 +448,7 @@ export function MemorySettings() {
                 setEventModalOpen(true);
               }}
             >
-              <IconPlus size={13.5} />
+              <BrandIcon name="action/add" size={13.5} />
               <span>{t("memory.newEvent")}</span>
             </Button>
             <Button
@@ -463,7 +461,7 @@ export function MemorySettings() {
                 setEntityModalOpen(true);
               }}
             >
-              <IconPlus size={13.5} />
+              <BrandIcon name="action/add" size={13.5} />
               <span>{t("memory.newEntity")}</span>
             </Button>
             <Button
@@ -507,7 +505,7 @@ export function MemorySettings() {
                   >
                     <span>{ent.canonicalName}</span>
                     <span className="text-[10.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                      {ent.entityType}
+                      {formatEntityKind(ent.entityType, t)}
                     </span>
                   </button>
                 ))}
@@ -525,9 +523,11 @@ export function MemorySettings() {
                 <Card key={ev.id} className="space-y-1.5 p-3.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge tone="neutral">{ev.eventKind}</Badge>
-                      <Badge tone="neutral">{ev.domain}</Badge>
-                      {ev.status !== "ACTIVE" && <Badge tone="warning">{ev.status}</Badge>}
+                      <Badge tone="neutral">{formatEventKind(ev.eventKind, t)}</Badge>
+                      <Badge tone="neutral">{formatMemoryScope(ev.domain, t)}</Badge>
+                      {ev.status !== "ACTIVE" && (
+                        <Badge tone="warning">{formatMemoryStatus(ev.status, t)}</Badge>
+                      )}
                       {ev.pinned && <Badge tone="accent">{t("nav.pin")}</Badge>}
                       <span className="text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
                         {formatRelativeTime(ev.createdAt, locale)}
@@ -558,7 +558,7 @@ export function MemorySettings() {
                             if (client) void runAction(() => client.deleteMemoryEvent(ev.id));
                           }}
                         >
-                          <IconTrash size={13.5} />
+                          <BrandIcon name="action/delete" size={13.5} />
                         </IconButton>
                       ) : (
                         <IconButton
@@ -568,7 +568,7 @@ export function MemorySettings() {
                             if (client) void runAction(() => client.restoreMemoryEvent(ev.id));
                           }}
                         >
-                          <IconRotateClockwise size={13.5} />
+                          <BrandIcon name="action/retry" size={13.5} />
                         </IconButton>
                       )}
                     </div>
@@ -605,7 +605,7 @@ export function MemorySettings() {
               <Card key={entry.id} className="flex items-center justify-between gap-3 p-3.5">
                 <div className="min-w-0 space-y-0.5">
                   <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
-                    <Badge tone="neutral">{entry.actor}</Badge>
+                    <Badge tone="neutral">{formatMemoryActor(entry.actor, t)}</Badge>
                     <span className="font-medium" style={{ color: "var(--pi-ink)" }}>
                       {entry.summaryUserText || entry.actionType}
                     </span>
@@ -753,9 +753,9 @@ export function MemorySettings() {
             value={blockDomain}
             onValueChange={setBlockDomain}
             options={[
-              { value: "CUSTOM", label: "CUSTOM" },
-              { value: "PERSONAL", label: "PERSONAL" },
-              { value: "WORK", label: "WORK" },
+              { value: "CUSTOM", label: formatMemoryScope("CUSTOM", t) },
+              { value: "PERSONAL", label: formatMemoryScope("PERSONAL", t) },
+              { value: "WORK", label: formatMemoryScope("WORK", t) },
             ]}
             className="w-full"
           />
@@ -823,11 +823,11 @@ export function MemorySettings() {
             value={entityType}
             onValueChange={setEntityType}
             options={[
-              { value: "TOPIC", label: "TOPIC" },
-              { value: "PERSON", label: "PERSON" },
-              { value: "PROJECT", label: "PROJECT" },
-              { value: "ORGANIZATION", label: "ORGANIZATION" },
-              { value: "TOOL", label: "TOOL" },
+              { value: "TOPIC", label: formatEntityKind("TOPIC", t) },
+              { value: "PERSON", label: formatEntityKind("PERSON", t) },
+              { value: "PROJECT", label: formatEntityKind("PROJECT", t) },
+              { value: "ORGANIZATION", label: formatEntityKind("ORGANIZATION", t) },
+              { value: "TOOL", label: formatEntityKind("TOOL", t) },
             ]}
             className="w-full"
           />
@@ -876,7 +876,7 @@ export function MemorySettings() {
           <Input
             value={relType}
             onChange={(e) => setRelType(e.target.value)}
-            placeholder="related_to"
+            placeholder={formatRelationType("related_to", t)}
           />
           <Input
             value={relTo}
@@ -918,10 +918,10 @@ export function MemorySettings() {
             value={eventKind}
             onValueChange={setEventKind}
             options={[
-              { value: "FACT", label: "FACT" },
-              { value: "PREFERENCE", label: "PREFERENCE" },
-              { value: "DECISION", label: "DECISION" },
-              { value: "MILESTONE", label: "MILESTONE" },
+              { value: "FACT", label: formatEventKind("FACT", t) },
+              { value: "PREFERENCE", label: formatEventKind("PREFERENCE", t) },
+              { value: "DECISION", label: formatEventKind("DECISION", t) },
+              { value: "MILESTONE", label: formatEventKind("MILESTONE", t) },
             ]}
             className="w-full"
           />
@@ -976,8 +976,8 @@ export function MemorySettings() {
         {entityDetail && (
           <div className="max-h-[65vh] space-y-3 overflow-y-auto text-[13px]">
             <div className="flex items-center gap-2">
-              <Badge tone="neutral">{entityDetail.entity.entityType}</Badge>
-              <Badge tone="neutral">{entityDetail.entity.domain}</Badge>
+              <Badge tone="neutral">{formatEntityKind(entityDetail.entity.entityType, t)}</Badge>
+              <Badge tone="neutral">{formatMemoryScope(entityDetail.entity.domain, t)}</Badge>
             </div>
             {entityDetail.entity.summary && (
               <p style={{ color: "var(--pi-ink-secondary)" }}>{entityDetail.entity.summary}</p>
@@ -995,7 +995,7 @@ export function MemorySettings() {
                     style={{ background: "var(--pi-paper)" }}
                   >
                     <span>
-                      {r.fromEntityName} · <strong>{r.relationType}</strong> · {r.toEntityName}
+                      {r.fromEntityName} · <strong>{formatRelationType(r.relationType, t)}</strong> · {r.toEntityName}
                     </span>
                     <IconButton
                       size="sm"
@@ -1012,7 +1012,7 @@ export function MemorySettings() {
                         });
                       }}
                     >
-                      <IconTrash size={13} />
+                      <BrandIcon name="action/delete" size={13} />
                     </IconButton>
                   </div>
                 ))}

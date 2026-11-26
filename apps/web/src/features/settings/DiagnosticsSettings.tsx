@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { IconDownload, IconRefresh } from "@tabler/icons-react";
+import { formatDiagStatus } from "../../api/formatters";
 import type { HostDoctorReportDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { Badge, Button, Card, Switch } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 function downloadMarkdown(filename: string, content: string): void {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
@@ -54,7 +55,7 @@ export function DiagnosticsSettings() {
 
         <div className="flex items-center gap-1.5">
           <Button variant="secondary" size="sm" disabled={loading} onClick={() => void runCheck()}>
-            <IconRefresh size={14} />
+            <BrandIcon name="action/retry" size={14} />
             <span>{t("diag.runCheck")}</span>
           </Button>
           <Button
@@ -69,7 +70,7 @@ export function DiagnosticsSettings() {
                 .catch((err) => setError(err instanceof Error ? err.message : "Export failed"));
             }}
           >
-            <IconDownload size={14} />
+            <BrandIcon name="action/download" size={14} />
             <span>{t("nav.export")}</span>
           </Button>
         </div>
@@ -132,7 +133,7 @@ export function DiagnosticsSettings() {
                           : "danger"
                     }
                   >
-                    {item.status}
+                    {formatDiagStatus(item.status, t)}
                   </Badge>
                   <span className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
                     {item.name}

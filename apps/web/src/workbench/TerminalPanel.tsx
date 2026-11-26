@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
 import type { HostTerminalInfoDto } from "../api/types";
+import { BrandIcon } from "../features/shared/BrandAssets";
 import { useI18n } from "../i18n";
 import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
@@ -183,14 +183,14 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
             label={t("term.newSession")}
             onClick={() => void attachTerminal(true)}
           >
-            <IconPlus size={14} stroke={1.75} />
+            <BrandIcon name="action/add" size={14} />
           </IconButton>
           <IconButton
             size="sm"
             label={t("term.clear")}
             onClick={() => xtermRef.current?.clear()}
           >
-            <IconTrash size={13.5} stroke={1.7} />
+            <BrandIcon name="action/delete" size={13.5} />
           </IconButton>
           <IconButton
             size="sm"
@@ -204,7 +204,7 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
               }
             }}
           >
-            <IconRefresh size={13.5} stroke={1.7} />
+            <BrandIcon name="action/retry" size={13.5} />
           </IconButton>
         </div>
       </div>

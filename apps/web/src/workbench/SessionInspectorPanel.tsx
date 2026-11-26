@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  IconFolder,
-  IconFolderOpen,
-  IconGitBranch,
-  IconPlayerPause,
-  IconPlayerPlay,
-  IconPlayerStop,
-  IconTerminal2,
-  IconTrash,
-  IconWorld,
-} from "@tabler/icons-react";
+import { IconWorld } from "@tabler/icons-react";
+import { formatGoalPhase, formatJobStatus } from "../api/formatters";
 import type { HostGoalDto, HostJobOutputDto, HostJobSnapshotDto } from "../api/types";
+import { BrandIcon } from "../features/shared/BrandAssets";
 import { useI18n } from "../i18n";
 import { revealInFileManager } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
@@ -74,10 +66,10 @@ export default function SessionInspectorPanel({
   const permKey = `perm.${bot.permissionMode || "workspace_auto"}` as const;
 
   const quickEntries = [
-    { id: "files", label: t("wb.filesTitle"), icon: IconFolder, show: true },
-    { id: "diff", label: t("wb.diffTitle"), icon: IconGitBranch, show: !bot.isRemote },
-    { id: "terminal", label: t("wb.terminalTitle"), icon: IconTerminal2, show: !bot.isRemote },
-    { id: "browser", label: t("wb.browserTitle"), icon: IconWorld, show: isElectron },
+    { id: "files", label: t("wb.filesTitle"), brandIcon: "file/folder_closed", show: true },
+    { id: "diff", label: t("wb.diffTitle"), brandIcon: "system/git_branch", show: !bot.isRemote },
+    { id: "terminal", label: t("wb.terminalTitle"), brandIcon: "system/terminal", show: !bot.isRemote },
+    { id: "browser", label: t("wb.browserTitle"), brandIcon: "", show: isElectron },
   ].filter((x) => x.show);
 
   return (
@@ -157,7 +149,7 @@ export default function SessionInspectorPanel({
                     className="mt-2 w-full"
                     onClick={() => void revealInFileManager(bot.cwd)}
                   >
-                    <IconFolderOpen size={14} stroke={1.7} />
+                    <BrandIcon name="file/folder_open" size={14} />
                     <span>{t("wb.revealDir")}</span>
                   </Button>
                 )}
@@ -172,7 +164,11 @@ export default function SessionInspectorPanel({
               <span className="text-[12px] font-semibold" style={{ color: "var(--pi-ink-secondary)" }}>
                 {t("inspector.goalTitle")}
               </span>
-              {goal && <Badge tone={goal.phase === "active" ? "accent" : "neutral"}>{goal.phase}</Badge>}
+              {goal && (
+                <Badge tone={goal.phase === "active" ? "accent" : "neutral"}>
+                  {formatGoalPhase(goal.phase, t)}
+                </Badge>
+              )}
             </div>
 
             {goal ? (
@@ -205,7 +201,7 @@ export default function SessionInspectorPanel({
                           .finally(() => setGoalBusy(false));
                       }}
                     >
-                      <IconPlayerPlay size={13.5} />
+                      <BrandIcon name="action/play" size={13.5} />
                       <span>{t("inspector.goalResume")}</span>
                     </Button>
                   ) : (
@@ -223,7 +219,7 @@ export default function SessionInspectorPanel({
                           .finally(() => setGoalBusy(false));
                       }}
                     >
-                      <IconPlayerPause size={13.5} />
+                      <BrandIcon name="action/stop" size={13.5} />
                       <span>{t("inspector.goalPause")}</span>
                     </Button>
                   )}
@@ -240,7 +236,7 @@ export default function SessionInspectorPanel({
                         .finally(() => setGoalBusy(false));
                     }}
                   >
-                    <IconTrash size={13.5} />
+                    <BrandIcon name="action/delete" size={13.5} />
                   </IconButton>
                 </div>
               </div>
@@ -324,7 +320,7 @@ export default function SessionInspectorPanel({
                       {job.label || job.command}
                     </span>
                     <Badge tone={job.status === "running" ? "accent" : job.status === "failed" ? "danger" : "neutral"}>
-                      {job.status}
+                      {formatJobStatus(job.status, t)}
                     </Badge>
                   </div>
                   <div className="mt-2 flex items-center justify-end gap-1">
@@ -355,7 +351,7 @@ export default function SessionInspectorPanel({
                             .catch(() => void 0);
                         }}
                       >
-                        <IconPlayerStop size={13} />
+                        <BrandIcon name="action/stop" size={13} />
                         <span>{t("inspector.jobKill")}</span>
                       </Button>
                     )}
@@ -371,21 +367,22 @@ export default function SessionInspectorPanel({
             {t("wb.quickLaunch")}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {quickEntries.map((entry) => {
-              const Icon = entry.icon;
-              return (
-                <Button
-                  key={entry.id}
-                  variant="secondary"
-                  size="sm"
-                  className="justify-start"
-                  onClick={() => openPanel(entry.id)}
-                >
-                  <Icon size={14} stroke={1.7} />
-                  <span>{entry.label}</span>
-                </Button>
-              );
-            })}
+            {quickEntries.map((entry) => (
+              <Button
+                key={entry.id}
+                variant="secondary"
+                size="sm"
+                className="justify-start"
+                onClick={() => openPanel(entry.id)}
+              >
+                {entry.brandIcon ? (
+                  <BrandIcon name={entry.brandIcon} size={14} />
+                ) : (
+                  <IconWorld size={14} stroke={1.7} />
+                )}
+                <span>{entry.label}</span>
+              </Button>
+            ))}
           </div>
         </Card>
       </div>

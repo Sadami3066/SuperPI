@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  IconCheck,
-  IconExternalLink,
-  IconPlayerPlay,
-  IconPlus,
-  IconTrash,
-  IconX,
-} from "@tabler/icons-react";
+import { formatAutomationSource, formatAutomationStatus } from "../../api/formatters";
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostSaveTimerRequest, HostTimerDto } from "../../api/types";
 import { useI18n } from "../../i18n";
@@ -30,6 +23,7 @@ import {
   TabsTrigger,
   Textarea,
 } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 import { formatTimerSchedule, validateTimerDraft, weekdayLabel } from "./timerSchedule";
 
 export function AutomationsSettings({
@@ -161,7 +155,7 @@ export function AutomationsSettings({
         <TabsContent value="timers" className="space-y-3">
           <div className="flex justify-end">
             <Button variant="secondary" size="sm" onClick={() => openEditor()}>
-              <IconPlus size={14} />
+              <BrandIcon name="action/add" size={14} />
               <span>{t("auto.newTimer")}</span>
             </Button>
           </div>
@@ -241,7 +235,7 @@ export function AutomationsSettings({
                           .finally(() => setBusy(false));
                       }}
                     >
-                      <IconPlayerPlay size={13.5} />
+                      <BrandIcon name="action/play" size={13.5} />
                       <span>{t("auto.runNow")}</span>
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => openEditor(timer)}>
@@ -252,7 +246,7 @@ export function AutomationsSettings({
                       label={t("common.delete")}
                       onClick={() => setDeleteTarget(timer)}
                     >
-                      <IconTrash size={14} />
+                      <BrandIcon name="action/delete" size={14} />
                     </IconButton>
                   </div>
                 </Card>
@@ -295,7 +289,7 @@ export function AutomationsSettings({
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge tone={item.status === "unread" ? "accent" : "neutral"}>
-                          {item.source}
+                          {formatAutomationSource(item.source, t)}
                         </Badge>
                         <span className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
                           {item.title}
@@ -320,7 +314,7 @@ export function AutomationsSettings({
                             : "neutral"
                       }
                     >
-                      {item.status}
+                      {formatAutomationStatus(item.status, t)}
                     </Badge>
                   </div>
 
@@ -334,7 +328,7 @@ export function AutomationsSettings({
                         size="sm"
                         onClick={() => onOpenSession(item.sessionId!)}
                       >
-                        <IconExternalLink size={13.5} />
+                        <BrandIcon name="navigation/external_link" size={13.5} />
                         <span>{t("auto.openSession")}</span>
                       </Button>
                     )}
@@ -354,7 +348,7 @@ export function AutomationsSettings({
                               .finally(() => setBusy(false));
                           }}
                         >
-                          <IconCheck size={13.5} />
+                          <BrandIcon name="status/confirm" size={13.5} />
                           <span>{t("auto.approve")}</span>
                         </Button>
                         <Button
@@ -371,7 +365,7 @@ export function AutomationsSettings({
                               .finally(() => setBusy(false));
                           }}
                         >
-                          <IconX size={13.5} />
+                          <BrandIcon name="navigation/close" size={13.5} />
                           <span>{t("auto.dismiss")}</span>
                         </Button>
                       </>
@@ -387,7 +381,7 @@ export function AutomationsSettings({
                           .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
                       }}
                     >
-                      <IconTrash size={14} />
+                      <BrandIcon name="action/delete" size={14} />
                     </IconButton>
                   </div>
                 </Card>

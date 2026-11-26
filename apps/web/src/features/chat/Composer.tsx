@@ -1,12 +1,5 @@
 import { memo, type MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
-import {
-  IconArrowUp,
-  IconChecklist,
-  IconFile,
-  IconFileText,
-  IconPlayerStop,
-  IconX,
-} from "@tabler/icons-react";
+import { IconChecklist } from "@tabler/icons-react";
 import { classifyAttachmentKind, formatAttachmentSize } from "../../api/mappers";
 import type {
   ComposerAttachment,
@@ -291,7 +284,7 @@ export const Composer = memo(function Composer({
                     aria-label={t("chat.steerQueue")}
                     className="rounded-full p-0.5 hover:bg-[var(--pi-hover)]"
                   >
-                    <IconArrowUp size={12} stroke={1.8} />
+                    <BrandIcon name="navigation/arrow_up" size={12} />
                   </button>
                 )}
                 <button
@@ -300,7 +293,7 @@ export const Composer = memo(function Composer({
                   aria-label={t("chat.cancelQueue")}
                   className="rounded-full p-0.5 hover:bg-[var(--pi-hover)]"
                 >
-                  <IconX size={12} />
+                  <BrandIcon name="navigation/close" size={12} />
                 </button>
               </span>
             ))}
@@ -315,7 +308,7 @@ export const Composer = memo(function Composer({
             >
               <span className="truncate">{t("chat.quotedPrefix", { text: quotedText })}</span>
               <button type="button" onClick={onClearQuote} aria-label={t("chat.clearQuote")}>
-                <IconX size={13.5} />
+                <BrandIcon name="navigation/close" size={13.5} />
               </button>
             </div>
           )}
@@ -336,7 +329,7 @@ export const Composer = memo(function Composer({
                       aria-label={t("chat.removeAttachment")}
                       className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/65 text-white"
                     >
-                      <IconX size={10} stroke={2} />
+                      <BrandIcon name="navigation/close" size={10} />
                     </button>
                   </div>
                 ) : (
@@ -350,9 +343,9 @@ export const Composer = memo(function Composer({
                     }}
                   >
                     {att.kind === "text" ? (
-                      <IconFileText size={14} stroke={1.65} className="shrink-0" />
+                      <BrandIcon name="file/plain" size={14} className="shrink-0" />
                     ) : (
-                      <IconFile size={14} stroke={1.65} className="shrink-0" />
+                      <BrandIcon name="file/attachment" size={14} className="shrink-0" />
                     )}
                     <div className="min-w-0">
                       <div className="truncate font-medium">{att.name}</div>
@@ -366,7 +359,7 @@ export const Composer = memo(function Composer({
                       aria-label={t("chat.removeAttachment")}
                       className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-[var(--pi-hover)]"
                     >
-                      <IconX size={11} stroke={1.85} />
+                      <BrandIcon name="navigation/close" size={11} />
                     </button>
                   </div>
                 ),
@@ -517,7 +510,7 @@ export const Composer = memo(function Composer({
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90"
                   style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
                 >
-                  <IconPlayerStop size={15} stroke={1.85} />
+                  <BrandIcon name="action/stop" size={15} />
                 </button>
               ) : (
                 <button
@@ -529,7 +522,7 @@ export const Composer = memo(function Composer({
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity disabled:opacity-35"
                   style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
                 >
-                  <IconArrowUp size={16} stroke={1.9} />
+                  <BrandIcon name="navigation/arrow_up" size={16} />
                 </button>
               )}
             </div>

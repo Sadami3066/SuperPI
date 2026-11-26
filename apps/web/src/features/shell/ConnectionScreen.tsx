@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { IconKey, IconRefresh } from "@tabler/icons-react";
+import { IconKey } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import type { ConnectionPhase } from "../../stores/connectionStore";
 import { Button, Card, Input } from "../../ui";
-import { PiBrandMark, PiMascot } from "../shared/BrandAssets";
+import { BrandIcon, PiBrandMark, PiMascot } from "../shared/BrandAssets";
 import { WindowControls } from "./WindowControls";
 
 export function ConnectionScreen({
@@ -71,7 +71,7 @@ export function ConnectionScreen({
                 </p>
               </div>
               <Button variant="primary" onClick={onRetry} className="w-full">
-                <IconRefresh size={15} stroke={1.8} />
+                <BrandIcon name="action/retry" size={15} />
                 <span>{t("conn.retry")}</span>
               </Button>
             </div>

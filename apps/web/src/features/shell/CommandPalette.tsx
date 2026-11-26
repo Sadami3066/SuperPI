@@ -1,14 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  IconFolder,
-  IconGitBranch,
-  IconMessage,
-  IconPlus,
-  IconSearch,
-  IconSettings,
-  IconTerminal2,
-  IconWorld,
-} from "@tabler/icons-react";
+import { IconMessage, IconWorld } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -80,9 +71,9 @@ function CommandPaletteBody({
     <Dialog open={open} onOpenChange={onOpenChange} maxWidthClass="max-w-[520px]">
       <div className="space-y-3">
         <div className="relative">
-          <IconSearch
+          <BrandIcon
+            name="action/search"
             size={15}
-            stroke={1.7}
             className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
             style={{ color: "var(--pi-ink-tertiary)" }}
           />
@@ -106,7 +97,7 @@ function CommandPaletteBody({
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconPlus size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <BrandIcon name="chat/new_chat" size={15} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("nav.newChat")}</span>
           </button>
 
@@ -130,7 +121,7 @@ function CommandPaletteBody({
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconPlus size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <BrandIcon name="action/add" size={15} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("nav.createBot")}</span>
           </button>
 
@@ -142,7 +133,7 @@ function CommandPaletteBody({
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconSettings size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <BrandIcon name="system/settings" size={15} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("nav.settings")}</span>
           </button>
 
@@ -177,7 +168,7 @@ function CommandPaletteBody({
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconFolder size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <BrandIcon name="file/folder_closed" size={15} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("wb.filesTitle")}</span>
           </button>
 
@@ -189,7 +180,7 @@ function CommandPaletteBody({
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconGitBranch size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <BrandIcon name="system/git_branch" size={15} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("wb.diffTitle")}</span>
           </button>
 
@@ -201,7 +192,7 @@ function CommandPaletteBody({
             }}
             className="flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
           >
-            <IconTerminal2 size={15} stroke={1.75} style={{ color: "var(--pi-ink-secondary)" }} />
+            <BrandIcon name="system/terminal" size={15} style={{ color: "var(--pi-ink-secondary)" }} />
             <span className="font-medium">{t("wb.terminalTitle")}</span>
           </button>
 

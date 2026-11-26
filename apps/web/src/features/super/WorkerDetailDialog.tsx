@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { IconArrowUp, IconPlayerStop, IconTrash } from "@tabler/icons-react";
+import { formatWorkerStatus } from "../../api/formatters";
 import { mapHostMessageToTurn, normalizeThinkingLevel } from "../../api/mappers";
 import type { HostWorkerDetailDto } from "../../api/types";
 import { useI18n } from "../../i18n";
@@ -10,7 +10,7 @@ import { Badge, Button, ConfirmDialog, Dialog, Input } from "../../ui";
 import { AskQuestionCard } from "../chat/AskQuestionCard";
 import { ModelPicker } from "../chat/ModelPicker";
 import { TurnItem } from "../chat/TurnItem";
-import { PiActivityIcon } from "../shared/BrandAssets";
+import { BrandIcon, PiActivityIcon } from "../shared/BrandAssets";
 
 export function WorkerDetailDialog({
   onOpenProvidersSettings,
@@ -115,7 +115,7 @@ export function WorkerDetailDialog({
             >
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={worker.status === "failed" ? "danger" : worker.status === "running" || worker.status === "working" ? "accent" : "neutral"}>
-                  {worker.status}
+                  {formatWorkerStatus(worker.status, t)}
                 </Badge>
                 <ModelPicker
                   providers={providers}
@@ -158,7 +158,7 @@ export function WorkerDetailDialog({
                       if (client && selectedWorkerId) void stopWorker(client, selectedWorkerId);
                     }}
                   >
-                    <IconPlayerStop size={14} />
+                    <BrandIcon name="action/stop" size={14} />
                     <span>{t("chat.stop")}</span>
                   </Button>
                 )}
@@ -167,7 +167,7 @@ export function WorkerDetailDialog({
                   size="sm"
                   onClick={() => setConfirmDelete(true)}
                 >
-                  <IconTrash size={14} />
+                  <BrandIcon name="action/delete" size={14} />
                   <span>{t("common.delete")}</span>
                 </Button>
               </div>
@@ -249,7 +249,7 @@ export function WorkerDetailDialog({
               disabled={sending || !prompt.trim()}
               onClick={() => void handleSend()}
             >
-              <IconArrowUp size={14.5} stroke={2} />
+              <BrandIcon name="navigation/arrow_up" size={14.5} />
               <span>{t("chat.send")}</span>
             </Button>
           </div>

@@ -1,22 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import {
-  IconBook,
-  IconBrain,
-  IconCheck,
-  IconChevronRight,
-  IconClock,
-  IconCopy,
-  IconFile,
-  IconFolder,
-  IconLayoutGrid,
-  IconPencil,
-  IconSearch,
-  IconTarget,
-  IconTerminal2,
-} from "@tabler/icons-react";
+import { IconBook, IconBrain, IconLayoutGrid } from "@tabler/icons-react";
 import type { ActivityStep, ToolTraceItem } from "../../api/types";
 import { useI18n } from "../../i18n";
-import { PiActivityIcon } from "../shared/BrandAssets";
+import { BrandIcon, PiActivityIcon } from "../shared/BrandAssets";
 import {
   extractLiveThinkingLine,
   firstErrorLine,
@@ -62,25 +48,25 @@ function ToolKindIcon({
     case "book":
       return <IconBook {...props} />;
     case "pen":
-      return <IconPencil {...props} />;
+      return <BrandIcon name="action/pen" size={size} style={{ color }} />;
     case "terminal":
-      return <IconTerminal2 {...props} />;
+      return <BrandIcon name="system/terminal" size={size} style={{ color }} />;
     case "search":
-      return <IconSearch {...props} />;
+      return <BrandIcon name="action/search" size={size} style={{ color }} />;
     case "brain":
       return <IconBrain {...props} />;
     case "apps":
       return <IconLayoutGrid {...props} />;
     case "clock":
-      return <IconClock {...props} />;
+      return <BrandIcon name="system/timer" size={size} style={{ color }} />;
     case "folder":
-      return <IconFolder {...props} />;
+      return <BrandIcon name="file/folder_closed" size={size} style={{ color }} />;
     case "file":
-      return <IconFile {...props} />;
+      return <BrandIcon name="file/plain" size={size} style={{ color }} />;
     case "target":
-      return <IconTarget {...props} />;
+      return <BrandIcon name="ai/goal" size={size} style={{ color }} />;
     case "check":
-      return <IconCheck {...props} />;
+      return <BrandIcon name="status/confirm" size={size} style={{ color }} />;
     default:
       return (
         <span
@@ -179,9 +165,9 @@ function ReasoningRow({
           </span>
         )}
         {(expanded || !preview) && <span className="flex-1" />}
-        <IconChevronRight
+        <BrandIcon
+          name="navigation/chevron_right"
           size={12}
-          stroke={1.7}
           className="shrink-0 transition-transform duration-150"
           style={{
             color: "var(--pi-ink-tertiary)",
@@ -285,9 +271,9 @@ function ToolTimelineRow({
           </span>
         )}
 
-        <IconChevronRight
+        <BrandIcon
+          name="navigation/chevron_right"
           size={12}
-          stroke={1.7}
           className="shrink-0 transition-transform duration-150"
           style={{
             color: "var(--pi-ink-tertiary)",
@@ -332,7 +318,7 @@ function ToolTimelineRow({
                   className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
                   style={{ color: "var(--pi-ink-tertiary)" }}
                 >
-                  {copied ? <IconCheck size={12.5} stroke={1.75} /> : <IconCopy size={12.5} stroke={1.65} />}
+                  {copied ? <BrandIcon name="status/confirm" size={12.5} /> : <BrandIcon name="action/copy" size={12.5} />}
                 </button>
               </div>
               <pre
@@ -389,9 +375,9 @@ function ToolGroupNode({
         <span className="truncate text-[12px]" style={{ color: "var(--pi-ink-secondary)" }}>
           {t("activity.toolGroup", { count: tools.length })}
         </span>
-        <IconChevronRight
+        <BrandIcon
+          name="navigation/chevron_right"
           size={12}
-          stroke={1.7}
           className="shrink-0 transition-transform duration-150"
           style={{
             color: "var(--pi-ink-tertiary)",
@@ -552,9 +538,9 @@ export const ActivityDisclosure = memo(function ActivityDisclosure({
           </span>
         </div>
 
-        <IconChevronRight
+        <BrandIcon
+          name="navigation/chevron_right"
           size={13}
-          stroke={1.7}
           className="shrink-0 transition-transform duration-150"
           style={{
             color: "var(--pi-ink-tertiary)",

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { IconCheck, IconCopy, IconDeviceMobile, IconEdit, IconQrcode, IconTrash } from "@tabler/icons-react";
+import { formatPlatformName } from "../../api/formatters";
 import type { HostRelayDeviceDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Badge, Button, Card, ConfirmDialog, Dialog, Input, Switch } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 export function RelaySettings() {
   const { t } = useI18n();
@@ -101,7 +102,7 @@ export function RelaySettings() {
                     .finally(() => setBusy(false));
                 }}
               >
-                <IconQrcode size={15} />
+                <BrandIcon name="action/scan" size={15} />
                 <span>{t("relay.generateQr")}</span>
               </Button>
               <Button
@@ -145,7 +146,7 @@ export function RelaySettings() {
                     copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
                   }}
                 >
-                  {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                  {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
                   <span>{copied ? t("chat.copied") : t("relay.copyLink")}</span>
                 </Button>
               </div>
@@ -201,7 +202,11 @@ export function RelaySettings() {
                 style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <IconDeviceMobile size={16} style={{ color: "var(--pi-ink-secondary)" }} />
+                  <BrandIcon
+                    name={dev.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
+                    size={16}
+                    style={{ color: "var(--pi-ink-secondary)" }}
+                  />
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
@@ -213,7 +218,10 @@ export function RelaySettings() {
                       </Badge>
                     </div>
                     <div className="text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                      {dev.platform} · {dev.botCount} bots
+                      {t("relay.deviceSummary", {
+                        platform: formatPlatformName(dev.platform, t),
+                        count: dev.botCount,
+                      })}
                     </div>
                   </div>
                 </div>
@@ -227,11 +235,11 @@ export function RelaySettings() {
                       setRenameDraft(dev.name);
                     }}
                   >
-                    <IconEdit size={14} />
+                    <BrandIcon name="action/pen" size={14} />
                   </Button>
                   {!dev.isSelf && (
                     <Button variant="ghost" size="sm" onClick={() => setRevokeTarget(dev)}>
-                      <IconTrash size={14} />
+                      <BrandIcon name="action/delete" size={14} />
                     </Button>
                   )}
                 </div>

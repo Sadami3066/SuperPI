@@ -1,9 +1,9 @@
 import { useEffect } from "react";
-import { IconAlertCircle, IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { IconAlertCircle, IconLoader2 } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { useStreamStore } from "../../stores/streamStore";
 import { Button } from "../../ui";
-import { PiActivityIcon } from "../shared/BrandAssets";
+import { BrandIcon, PiActivityIcon } from "../shared/BrandAssets";
 import { renderTurnBlock } from "./TurnItem";
 
 export function StreamingTurnView({
@@ -103,7 +103,7 @@ export function StreamingTurnView({
               </div>
               <div className="mt-2">
                 <Button variant="primary" size="sm" onClick={onRetry}>
-                  <IconRefresh size={13} stroke={1.75} />
+                  <BrandIcon name="action/retry" size={13} />
                   <span>{t("chat.retry")}</span>
                 </Button>
               </div>

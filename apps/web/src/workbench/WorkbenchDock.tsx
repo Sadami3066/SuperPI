@@ -1,5 +1,4 @@
 import { Suspense, useEffect, useRef } from "react";
-import { IconX } from "@tabler/icons-react";
 import { useI18n } from "../i18n";
 import { windowToggleMaximize } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
@@ -7,6 +6,7 @@ import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { IconButton } from "../ui";
+import { BrandIcon } from "../features/shared/BrandAssets";
 import { WindowControls } from "../features/shell/WindowControls";
 import { getAvailableWorkbenchPanels, getWorkbenchPanel } from "./registry";
 
@@ -124,7 +124,7 @@ export function WorkbenchDock({
 
         <div className="pi-no-drag flex shrink-0 items-center gap-0.5">
           <IconButton label={t("common.close")} size="sm" onClick={close}>
-            <IconX size={14.5} stroke={1.75} />
+            <BrandIcon name="navigation/close" size={14.5} />
           </IconButton>
           {showWindowControls && <WindowControls />}
         </div>

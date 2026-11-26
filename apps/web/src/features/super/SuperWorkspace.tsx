@@ -1,14 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  IconArrowUp,
-  IconLayoutSidebarRight,
-  IconPhoto,
-  IconPlayerStop,
-  IconRefresh,
-  IconTrash,
-  IconUsersGroup,
-  IconX,
-} from "@tabler/icons-react";
+import { IconLayoutSidebarRight } from "@tabler/icons-react";
+import { formatWorkerStatus } from "../../api/formatters";
 import {
   computeContextPercent,
   mapHostMessageToTurn,
@@ -320,7 +312,7 @@ export function SuperWorkspace({
             size="sm"
             onClick={() => setTeamDialogOpen(true)}
           >
-            <IconUsersGroup size={14.5} stroke={1.7} />
+            <BrandIcon name="ai/agent" size={14.5} />
             <span className="hidden sm:inline">{t("super.teamButton")}</span>
           </Button>
 
@@ -376,7 +368,7 @@ export function SuperWorkspace({
                     if (client) void refreshState(client);
                   }}
                 >
-                  <IconRefresh size={13} />
+                  <BrandIcon name="action/retry" size={13} />
                   <span>{t("conn.retry")}</span>
                 </Button>
               </div>
@@ -403,7 +395,7 @@ export function SuperWorkspace({
                     className="mt-4"
                     onClick={() => setTeamDialogOpen(true)}
                   >
-                    <IconUsersGroup size={14} />
+                    <BrandIcon name="ai/agent" size={14} />
                     <span>{t("super.configureTeam")}</span>
                   </Button>
                 )}
@@ -475,7 +467,7 @@ export function SuperWorkspace({
                         onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
                         className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full hover:bg-[var(--pi-hover)]"
                       >
-                        <IconX size={11} />
+                        <BrandIcon name="navigation/close" size={11} />
                       </button>
                     </div>
                   ))}
@@ -519,7 +511,7 @@ export function SuperWorkspace({
                     label={t("chat.attach")}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <IconPhoto size={15.5} stroke={1.7} />
+                    <BrandIcon name="file/image" size={15.5} />
                   </IconButton>
 
                   <ModelPicker
@@ -551,7 +543,7 @@ export function SuperWorkspace({
                         if (client) void abort(client);
                       }}
                     >
-                      <IconPlayerStop size={14} />
+                      <BrandIcon name="action/stop" size={14} />
                       <span>{t("chat.stop")}</span>
                     </Button>
                   )}
@@ -562,7 +554,7 @@ export function SuperWorkspace({
                     disabled={sending || (!composerText.trim() && images.length === 0)}
                     onClick={() => void handleSend()}
                   >
-                    <IconArrowUp size={14.5} stroke={2} />
+                    <BrandIcon name="navigation/arrow_up" size={14.5} />
                     <span>{busy ? t("chat.steerTag") : t("chat.send")}</span>
                   </Button>
                 </div>
@@ -593,7 +585,7 @@ export function SuperWorkspace({
                   if (client) void refreshState(client);
                 }}
               >
-                <IconRefresh size={13.5} stroke={1.7} />
+                <BrandIcon name="action/retry" size={13.5} />
               </IconButton>
             </div>
 
@@ -639,7 +631,7 @@ export function SuperWorkspace({
                               {w.isRemote && w.deviceName ? ` · ${w.deviceName}` : ""}
                             </div>
                           </div>
-                          <Badge tone={workerTone(w.status)}>{w.status}</Badge>
+                          <Badge tone={workerTone(w.status)}>{formatWorkerStatus(w.status, t)}</Badge>
                         </div>
 
                         {(w.activeStepText || w.lastSummary || w.lastError) && (
@@ -660,7 +652,7 @@ export function SuperWorkspace({
                                 style={{ color: step.isError ? "var(--pi-danger)" : "var(--pi-ink-tertiary)" }}
                               >
                                 <span className="truncate">{step.label}</span>
-                                <span className="shrink-0">{step.status}</span>
+                                <span className="shrink-0">{formatWorkerStatus(step.status, t)}</span>
                               </div>
                             ))}
                           </div>
@@ -687,7 +679,7 @@ export function SuperWorkspace({
                                 if (client) void stopWorker(client, w.workerId);
                               }}
                             >
-                              <IconPlayerStop size={13.5} />
+                              <BrandIcon name="action/stop" size={13.5} />
                             </IconButton>
                           )}
                           <IconButton
@@ -695,7 +687,7 @@ export function SuperWorkspace({
                             label={t("common.delete")}
                             onClick={() => setDeleteWorkerTarget(w)}
                           >
-                            <IconTrash size={13.5} />
+                            <BrandIcon name="action/delete" size={13.5} />
                           </IconButton>
                         </div>
                       </div>

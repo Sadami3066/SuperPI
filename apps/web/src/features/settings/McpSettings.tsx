@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  IconBolt,
-  IconCode,
-  IconExternalLink,
-  IconKey,
-  IconPlus,
-  IconRefresh,
-  IconTrash,
-} from "@tabler/icons-react";
+import { IconBolt, IconKey } from "@tabler/icons-react";
+import { formatMcpStatus } from "../../api/formatters";
 import type {
   HostMcpServerDto,
   HostOAuthStatusDto,
@@ -28,6 +21,7 @@ import {
   Switch,
   Textarea,
 } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 function formatKeyValueLines(rec?: Record<string, string>, sep = ": "): string {
   if (!rec) return "";
@@ -221,11 +215,11 @@ export function McpSettings() {
               setImportOpen(true);
             }}
           >
-            <IconCode size={14} />
+            <BrandIcon name="file/code" size={14} />
             <span>{t("mcp.importJson")}</span>
           </Button>
           <Button variant="secondary" size="sm" onClick={() => openEditor()}>
-            <IconPlus size={14} />
+            <BrandIcon name="action/add" size={14} />
             <span>{t("mcp.addServer")}</span>
           </Button>
         </div>
@@ -264,7 +258,7 @@ export function McpSettings() {
                     <Badge tone="neutral">{srv.transport.toUpperCase()}</Badge>
                     {srv.probeState && (
                       <Badge tone={probeTone(srv.probeState)}>
-                        {srv.probeState}
+                        {formatMcpStatus(srv.probeState, t)}
                         {typeof srv.toolCount === "number" ? ` · ${srv.toolCount}` : ""}
                       </Badge>
                     )}
@@ -320,7 +314,7 @@ export function McpSettings() {
                       .finally(() => setBusy(false));
                   }}
                 >
-                  <IconRefresh size={13.5} />
+                  <BrandIcon name="action/retry" size={13.5} />
                   <span>{t("mcp.probe")}</span>
                 </Button>
 
@@ -344,7 +338,7 @@ export function McpSettings() {
                   label={t("common.delete")}
                   onClick={() => setDeleteTarget(srv)}
                 >
-                  <IconTrash size={14} />
+                  <BrandIcon name="action/delete" size={14} />
                 </IconButton>
               </div>
             </Card>
@@ -461,7 +455,9 @@ export function McpSettings() {
               style={{ background: "var(--pi-paper)" }}
             >
               <div className="flex items-center gap-2">
-                <Badge tone={probeTone(testResult.probeState)}>{testResult.probeState}</Badge>
+                <Badge tone={probeTone(testResult.probeState)}>
+                  {formatMcpStatus(testResult.probeState ?? "", t)}
+                </Badge>
                 {typeof testResult.toolCount === "number" && (
                   <span>{t("mcp.toolsCount", { count: testResult.toolCount })}</span>
                 )}
@@ -586,7 +582,7 @@ export function McpSettings() {
                 size="sm"
                 onClick={() => void openExternalUrl(oauthState.url!)}
               >
-                <IconExternalLink size={14} />
+                <BrandIcon name="navigation/external_link" size={14} />
                 <span>{t("providers.oauthOpen")}</span>
               </Button>
             )}

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { IconCheck } from "@tabler/icons-react";
 import type {
   AnsweredQuestionEntry,
   HostPendingQuestionDto,
@@ -7,6 +6,7 @@ import type {
 } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { Badge, Button, Card, Input } from "../../ui";
+import { BrandIcon } from "../shared/BrandAssets";
 
 export function AnsweredAskCard({ entries }: { entries: AnsweredQuestionEntry[] }) {
   const { t } = useI18n();
@@ -30,7 +30,7 @@ export function AnsweredAskCard({ entries }: { entries: AnsweredQuestionEntry[] 
                   className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5"
                   style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
                 >
-                  <IconCheck size={12} stroke={2} />
+                  <BrandIcon name="status/confirm" size={12} />
                   {s}
                 </span>
               ))}

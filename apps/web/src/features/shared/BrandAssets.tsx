@@ -1,5 +1,17 @@
 import { type CSSProperties, useEffect, useState } from "react";
-import { IconDeviceMobile } from "@tabler/icons-react";
+
+const SVG_ICONS = new Set([
+  "action/eye",
+  "action/pen",
+  "action/quote",
+  "action/select_all",
+  "navigation/arrow_up",
+  "navigation/chevron_down",
+  "navigation/chevron_right",
+  "system/calendar",
+  "system/desktop",
+  "system/theme",
+]);
 
 export type MascotMood = "wave" | "thinking" | "waiting" | "done" | "alert" | "confused";
 
@@ -35,7 +47,7 @@ export function PiActivityIcon({
   dark: boolean;
   className?: string;
 }) {
-  const img = (
+  return (
     <img
       src="/brand/process_activity.webp"
       alt=""
@@ -44,22 +56,12 @@ export function PiActivityIcon({
       height={size}
       draggable={false}
       className={`shrink-0 object-contain select-none ${className}`}
-      style={{ width: size, height: size }}
-    />
-  );
-
-  if (!dark) return img;
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center rounded-full"
       style={{
-        width: size + 4,
-        height: size + 4,
-        background: "rgba(244, 244, 242, 0.92)",
+        width: size,
+        height: size,
+        filter: dark ? "invert(0.92) hue-rotate(180deg)" : undefined,
       }}
-    >
-      {img}
-    </span>
+    />
   );
 }
 
@@ -75,7 +77,7 @@ export function PiMascot({
   className?: string;
 }) {
   const src = `/brand/v2_${mood}.webp`;
-  const img = (
+  return (
     <img
       src={src}
       alt="Super PI"
@@ -83,18 +85,12 @@ export function PiMascot({
       height={size}
       draggable={false}
       className={`shrink-0 object-contain select-none ${className}`}
-      style={{ width: size, height: size }}
+      style={{
+        width: size,
+        height: size,
+        filter: dark ? "invert(0.92) hue-rotate(180deg)" : undefined,
+      }}
     />
-  );
-
-  if (!dark) return img;
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center rounded-[18px] p-1.5"
-      style={{ background: "rgba(244, 244, 242, 0.92)" }}
-    >
-      {img}
-    </span>
   );
 }
 
@@ -109,7 +105,8 @@ export function BrandIcon({
   className?: string;
   style?: CSSProperties;
 }) {
-  const maskUrl = `url("/icons/${name}.png")`;
+  const ext = SVG_ICONS.has(name) ? "svg" : "png";
+  const maskUrl = `url("/icons/${name}.${ext}")`;
   return (
     <span
       aria-hidden="true"
@@ -139,7 +136,7 @@ export function BotAvatar({
   isRemote,
   dark,
   size = 24,
-  rounded = "rounded-[7px]",
+  rounded = "rounded-full",
 }: {
   avatar?: string | null;
   name: string;
@@ -165,13 +162,26 @@ export function BotAvatar({
         draggable={false}
         onError={() => setBroken(true)}
         className={`shrink-0 object-cover ${rounded}`}
-        style={{ width: size, height: size }}
+        style={{ width: size, height: size, border: "0.5px solid var(--pi-hairline)" }}
       />
     );
   }
 
-  if (isHome && !isRemote) {
-    return <PiBrandMark size={size} dark={dark} />;
+  if (isHome || !avatar) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full select-none"
+        style={{
+          width: size,
+          height: size,
+          background: "var(--pi-paper)",
+          border: "0.5px solid var(--pi-hairline)",
+        }}
+        aria-label={name}
+      >
+        <PiBrandMark size={Math.max(14, Math.round(size * 0.78))} dark={dark} className="rounded-full" />
+      </span>
+    );
   }
 
   const initial = (name.trim()[0] || "B").toUpperCase();
@@ -184,9 +194,10 @@ export function BotAvatar({
         fontSize: Math.max(10, Math.round(size * 0.46)),
         background: "var(--pi-accent-soft)",
         color: "var(--pi-accent)",
+        border: isRemote ? "0.5px solid var(--pi-hairline)" : undefined,
       }}
     >
-      {isRemote && !name.trim() ? <IconDeviceMobile size={Math.round(size * 0.56)} /> : initial}
+      {initial}
     </span>
   );
 }
