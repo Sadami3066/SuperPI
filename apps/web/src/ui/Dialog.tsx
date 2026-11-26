@@ -1,0 +1,64 @@
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { IconX } from "@tabler/icons-react";
+import type { ReactNode } from "react";
+
+export function Dialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  maxWidthClass = "max-w-[480px]",
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title?: string;
+  description?: string;
+  maxWidthClass?: string;
+  children: ReactNode;
+}) {
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay
+          className="fixed inset-0 z-50 backdrop-blur-[2px]"
+          style={{ background: "var(--pi-scrim)" }}
+        />
+        <DialogPrimitive.Content
+          className={`pi-popover fixed top-1/2 left-1/2 z-50 w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 p-5 outline-none ${maxWidthClass}`}
+        >
+          {(title || description) && (
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                {title && (
+                  <DialogPrimitive.Title
+                    className="text-[16px] font-semibold"
+                    style={{ color: "var(--pi-ink)" }}
+                  >
+                    {title}
+                  </DialogPrimitive.Title>
+                )}
+                {description && (
+                  <DialogPrimitive.Description
+                    className="mt-1 text-[13px]"
+                    style={{ color: "var(--pi-ink-tertiary)" }}
+                  >
+                    {description}
+                  </DialogPrimitive.Description>
+                )}
+              </div>
+              <DialogPrimitive.Close
+                aria-label="Close"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--pi-hover)]"
+                style={{ color: "var(--pi-ink-tertiary)" }}
+              >
+                <IconX size={16} stroke={1.75} />
+              </DialogPrimitive.Close>
+            </div>
+          )}
+          {children}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}

@@ -1,0 +1,344 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  IconAlertCircle,
+  IconCheck,
+  IconChevronDown,
+  IconCopy,
+  IconFile,
+  IconFileText,
+  IconGitBranch,
+  IconPhoto,
+  IconQuote,
+  IconRefresh,
+  IconSparkles,
+} from "@tabler/icons-react";
+import { formatAttachmentSize } from "../../api/mappers";
+import type { ChatTurn, CustomCardItem, TurnBlock } from "../../api/types";
+import { useI18n } from "../../i18n";
+import { Button } from "../../ui";
+import { ActivityDisclosure } from "./ActivityDisclosure";
+import { AnsweredAskCard } from "./AskQuestionCard";
+import { MarkdownView } from "./MarkdownView";
+import { PresentCard } from "./PresentCard";
+
+function SummaryCard({ summary }: { summary: NonNullable<ChatTurn["summary"]> }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const isBranch = summary.kind === "branch";
+  const label = isBranch ? t("chat.summaryBranch") : t("chat.summaryCompaction");
+
+  return (
+    <div className="my-2">
+      <div
+        className="overflow-hidden rounded-[12px]"
+        style={{ background: "var(--pi-surface)", border: "0.5px solid var(--pi-hairline)" }}
+      >
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left transition-colors hover:bg-[var(--pi-hover)]"
+        >
+          <div
+            className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium"
+            style={{ color: "var(--pi-ink-secondary)" }}
+          >
+            {isBranch ? (
+              <IconGitBranch size={14} stroke={1.7} className="shrink-0" />
+            ) : (
+              <IconSparkles size={14} stroke={1.7} className="shrink-0" />
+            )}
+            <span className="truncate">{label}</span>
+            {summary.tokensBefore && summary.tokensBefore > 0 && (
+              <span className="shrink-0 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                · {t("chat.summaryTokens", { tokens: summary.tokensBefore.toLocaleString() })}
+              </span>
+            )}
+          </div>
+          <IconChevronDown
+            size={14}
+            stroke={1.7}
+            className="shrink-0 transition-transform duration-150"
+            style={{
+              color: "var(--pi-ink-tertiary)",
+              transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+            }}
+          />
+        </button>
+        {expanded && summary.text && (
+          <div
+            data-scrollable
+            className="max-h-[240px] overflow-y-auto px-3.5 py-2.5 text-[12.5px]"
+            style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+          >
+            <MarkdownView content={summary.text} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CustomCardFallback({ card }: { card: CustomCardItem }) {
+  return (
+    <div
+      className="my-2 rounded-[14px] p-3.5"
+      style={{ background: "var(--pi-surface)", border: "0.5px solid var(--pi-hairline)" }}
+    >
+      {card.text ? (
+        <MarkdownView content={card.text} />
+      ) : (
+        <pre
+          data-scrollable
+          className="max-h-48 overflow-auto text-[12px]"
+          style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink-secondary)" }}
+        >
+          {card.payload}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+export function renderTurnBlock(
+  block: TurnBlock,
+  sessionId: string,
+  compactProcess: boolean,
+  streaming?: boolean,
+) {
+  if (block.kind === "activity") {
+    return (
+      <ActivityDisclosure
+        key={block.key}
+        steps={block.steps}
+        streaming={streaming}
+        compact={compactProcess}
+      />
+    );
+  }
+  if (block.kind === "text") {
+    return <MarkdownView key={block.key} content={block.text} streaming={streaming} />;
+  }
+  if (block.kind === "present") {
+    return <PresentCard key={block.key} sessionId={sessionId} items={block.items} />;
+  }
+  if (block.kind === "answered_ask") {
+    return <AnsweredAskCard key={block.key} entries={block.entries} />;
+  }
+  return <CustomCardFallback key={block.key} card={block.card} />;
+}
+
+export const TurnItem = memo(function TurnItem({
+  turn,
+  sessionId,
+  isLastAssistant,
+  compactProcess,
+  dark,
+  onQuote,
+  onRetry,
+}: {
+  turn: ChatTurn;
+  sessionId: string;
+  isLastAssistant: boolean;
+  compactProcess: boolean;
+  dark: boolean;
+  onQuote: (text: string) => void;
+  onRetry: () => void;
+}) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  const copyText = useMemo(() => {
+    const parts = turn.blocks
+      .filter((b): b is Extract<TurnBlock, { kind: "text" }> => b.kind === "text")
+      .map((b) => b.text.trim())
+      .filter(Boolean);
+    return parts.length > 0 ? parts.join("\n\n") : turn.rawText;
+  }, [turn.blocks, turn.rawText]);
+
+  if (turn.summary) {
+    return <SummaryCard summary={turn.summary} />;
+  }
+
+  if (turn.role === "user") {
+    return (
+      <div className="flex flex-col items-end py-2">
+        {turn.attachments.length > 0 && (
+          <div className="mb-1.5 flex max-w-[78%] flex-wrap justify-end gap-1.5">
+            {turn.attachments.map((chip) => (
+              <div
+                key={chip.id}
+                className="inline-flex items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 text-[12px]"
+                style={{
+                  background: "var(--pi-surface)",
+                  border: "0.5px solid var(--pi-hairline)",
+                  color: "var(--pi-ink)",
+                }}
+              >
+                {chip.previewUrl ? (
+                  <img
+                    src={chip.previewUrl}
+                    alt={chip.name}
+                    className="h-5 w-5 shrink-0 rounded-[5px] object-cover"
+                  />
+                ) : chip.kind === "image" ? (
+                  <IconPhoto size={14} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />
+                ) : chip.kind === "text" ? (
+                  <IconFileText size={14} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />
+                ) : (
+                  <IconFile size={14} stroke={1.65} style={{ color: "var(--pi-ink-tertiary)" }} />
+                )}
+                <span className="max-w-[180px] truncate font-medium">{chip.name}</span>
+                {chip.size > 0 && (
+                  <span className="shrink-0 text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {formatAttachmentSize(chip.size)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {turn.rawText && (
+          <div
+            className="max-w-[78%] rounded-[20px] rounded-br-[6px] px-4 py-2.5 whitespace-pre-wrap"
+            style={{
+              background: "var(--pi-accent-soft)",
+              color: "var(--pi-ink)",
+              fontSize: "calc(15px * var(--pi-chat-scale))",
+              lineHeight: 1.6,
+            }}
+          >
+            {turn.rawText}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="group py-2">
+      {(turn.notices.length > 0 || turn.reminder) && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {turn.notices.map((n, i) => (
+            <span
+              key={`${n}-${i}`}
+              className="rounded-full px-3 py-1 text-[12px]"
+              style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
+            >
+              {n}
+            </span>
+          ))}
+          {turn.reminder && (
+            <span
+              className="rounded-full px-3 py-1 text-[12px]"
+              style={{ background: "var(--pi-wash)", color: "var(--pi-ink-tertiary)" }}
+            >
+              {turn.reminder}
+            </span>
+          )}
+        </div>
+      )}
+
+      {turn.blocks.map((block) => renderTurnBlock(block, sessionId, compactProcess, false))}
+
+      {turn.failed && (
+        <div
+          className="mt-2.5 rounded-[14px] px-3.5 py-2.5"
+          style={{
+            background: dark ? "rgba(248, 113, 113, 0.12)" : "rgba(196, 37, 29, 0.06)",
+            border: dark
+              ? "0.5px solid rgba(248, 113, 113, 0.25)"
+              : "0.5px solid rgba(196, 37, 29, 0.16)",
+          }}
+        >
+          <div className="flex items-start gap-2">
+            <IconAlertCircle
+              size={16}
+              stroke={1.75}
+              className="mt-0.5 shrink-0"
+              style={{ color: "var(--pi-danger)" }}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] leading-[1.5]" style={{ color: "var(--pi-ink)" }}>
+                {turn.error && turn.error.length <= 220
+                  ? turn.error
+                  : turn.error
+                    ? `${turn.error.slice(0, 220)}…`
+                    : t("chat.failedGeneric")}
+              </div>
+              {showErrorDetails && turn.error && turn.error.length > 220 && (
+                <pre
+                  data-scrollable
+                  className="mt-2 max-h-[160px] overflow-auto rounded-[10px] p-2.5 text-[11.5px] leading-[1.45] whitespace-pre-wrap break-words"
+                  style={{
+                    background: "var(--pi-surface)",
+                    color: "var(--pi-ink-secondary)",
+                    fontFamily: "var(--pi-font-mono)",
+                  }}
+                >
+                  {turn.error}
+                </pre>
+              )}
+              <div className="mt-2 flex items-center gap-2">
+                {isLastAssistant && (
+                  <Button variant="primary" size="sm" onClick={onRetry}>
+                    <IconRefresh size={13} stroke={1.75} />
+                    <span>{t("chat.retry")}</span>
+                  </Button>
+                )}
+                {turn.error && turn.error.length > 220 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowErrorDetails((v) => !v)}
+                  >
+                    {showErrorDetails ? t("chat.hideDetails") : t("chat.errorDetails")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {copyText && (
+        <div className="mt-2 flex items-center gap-1" style={{ color: "var(--pi-ink-tertiary)" }}>
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(copyText);
+              setCopied(true);
+              if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+              copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
+            }}
+            aria-label={t("chat.copy")}
+            title={t("chat.copy")}
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            {copied ? <IconCheck size={14} stroke={1.7} /> : <IconCopy size={14} stroke={1.6} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => onQuote(copyText.slice(0, 140))}
+            aria-label={t("chat.quote")}
+            title={t("chat.quote")}
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
+          >
+            <IconQuote size={14} stroke={1.6} />
+          </button>
+          {turn.timestamp && (
+            <span className="ml-1.5 text-[11.5px]">{copied ? t("chat.copied") : turn.timestamp}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
