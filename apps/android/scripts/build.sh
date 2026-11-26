@@ -17,11 +17,11 @@ EOF
 case "${1:-}" in
   quick)
     shift
-    exec ./scripts/gradlew-locked :app:compileDebugKotlin "$@"
+    exec ./scripts/gradlew-locked :apps:android:app:compileDebugKotlin "$@"
     ;;
   test)
     shift
-    exec ./scripts/gradlew-locked :app:testDebugUnitTest "$@"
+    exec ./scripts/gradlew-locked :apps:android:app:testDebugUnitTest "$@"
     ;;
   check)
     shift
@@ -30,7 +30,7 @@ case "${1:-}" in
   release)
     shift
     ./scripts/check.sh --full
-    exec ./scripts/gradlew-locked :app:assembleRelease "$@"
+    exec ./scripts/gradlew-locked :apps:android:app:assembleRelease "$@"
     ;;
   status)
     ps -eo pid,rss,args | grep -E 'GradleDaemon|KotlinCompileDaemon' | grep -v grep || true
@@ -39,7 +39,7 @@ case "${1:-}" in
     du -sh "$HOME/.gradle/caches/build-cache-1" 2>/dev/null || true
     ;;
   stop)
-    ./gradlew --stop >/dev/null 2>&1 || true
+    ../../gradlew --stop >/dev/null 2>&1 || true
     pkill -f 'KotlinCompileDaemon' 2>/dev/null || true
     sleep 1
     echo "[build] daemons stopped"

@@ -29,7 +29,7 @@ if sdk="$(superpi_android_sdk)"; then
   export ANDROID_SDK_ROOT="$sdk"
 fi
 
-./scripts/gradlew-locked :app:assembleDebug :app:assembleDebugAndroidTest
+./scripts/gradlew-locked :apps:android:app:assembleDebug :apps:android:app:assembleDebugAndroidTest
 
 (
   cd "$PLUGINS_DIR"

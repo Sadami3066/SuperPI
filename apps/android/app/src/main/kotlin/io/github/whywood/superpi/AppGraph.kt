@@ -46,9 +46,9 @@ import io.github.whywood.superpi.graph.RuntimeGraphDeps
 import io.github.whywood.superpi.graph.ServiceGraph
 import io.github.whywood.superpi.graph.ServiceGraphDeps
 import io.github.whywood.superpi.plugin.manager.PluginHostManager
+import io.github.whywood.superpi.host.AndroidHostAccessController
 import io.github.whywood.superpi.runtime.AgentRuntimeHost
 import io.github.whywood.superpi.runtime.host.HostAccess
-import io.github.whywood.superpi.runtime.host.HostAccessController
 import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
 import io.github.whywood.superpi.runtime.AssistantMessage
 import io.github.whywood.superpi.runtime.AssistantRole
@@ -496,7 +496,7 @@ class AppGraph(context: Context) : AppDependencies {
         )
     }
 
-    override val hostAccess: HostAccessController get() = platformGraph.hostAccess
+    override val hostAccess: AndroidHostAccessController get() = platformGraph.hostAccess
     override val hostEnvironmentProvider: HostEnvironmentProvider get() = platformGraph.hostEnvironmentProvider
     override val rootfsBootstrap: RootfsBootstrap get() = platformGraph.rootfsBootstrap
     val adbBridge get() = platformGraph.adbBridge

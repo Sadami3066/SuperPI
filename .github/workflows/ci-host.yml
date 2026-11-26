@@ -1,0 +1,65 @@
+name: CI · Host (super-pi & Core JVM)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "core/**"
+      - "apps/host/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/ci-host.yml"
+  pull_request:
+    paths:
+      - "core/**"
+      - "apps/host/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/ci-host.yml"
+
+concurrency:
+  group: ci-host-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-root-directory: .
+
+      - name: Run Host & Shared Core JVM checks (without Android SDK)
+        env:
+          ANDROID_HOME: ""
+          ANDROID_SDK_ROOT: ""
+        run: |
+          ./scripts/gradlew-locked -Psuperpi.hostOnly=true -Psuperpi.strictBoundaries=true \
+            :core:runtime-api:test :core:runtime:jvmTest :core:relay:jvmTest :apps:host:check --no-daemon
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: host-reports
+          path: |
+            core/*/build/reports/tests
+            apps/host/build/reports/tests
+            build/reports/problems
+          if-no-files-found: ignore

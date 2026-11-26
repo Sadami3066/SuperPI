@@ -35,7 +35,7 @@ if [[ ! -f "$E2E_DDP" ]]; then
   fi
 fi
 
-./scripts/gradlew-locked :app:assembleDebug :app:assembleDebugAndroidTest
+./scripts/gradlew-locked :apps:android:app:assembleDebug :apps:android:app:assembleDebugAndroidTest
 
 superpi_install_apk "$serial" app/build/outputs/apk/debug/app-debug.apk
 superpi_install_apk "$serial" app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk

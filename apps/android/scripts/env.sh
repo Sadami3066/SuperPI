@@ -19,9 +19,15 @@ superpi_neighbor_dir() {
 }
 
 superpi_android_sdk() {
-  local repo local_sdk="" line sdk
+  local repo root_dir local_sdk="" line sdk prop_file=""
   repo="$(superpi_repo_root)"
-  if [[ -f "$repo/local.properties" ]]; then
+  root_dir="$(cd "$repo/../.." && pwd)"
+  if [[ -f "$root_dir/local.properties" ]]; then
+    prop_file="$root_dir/local.properties"
+  elif [[ -f "$repo/local.properties" ]]; then
+    prop_file="$repo/local.properties"
+  fi
+  if [[ -n "$prop_file" ]]; then
     while IFS= read -r line; do
       case "$line" in
         sdk.dir=*)
@@ -29,7 +35,7 @@ superpi_android_sdk() {
           break
           ;;
       esac
-    done < "$repo/local.properties"
+    done < "$prop_file"
   fi
   for sdk in \
     "${ANDROID_HOME:-}" \

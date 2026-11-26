@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+interface AndroidHostAccessController : HostAccessController {
+    fun openWirelessDebugging(context: Context)
+}
+
 class AppHostAccessController(
     private val scope: CoroutineScope,
     private val preferences: HostAccessStore,
@@ -24,7 +28,7 @@ class AppHostAccessController(
     private val openWirelessDebuggingAction: (Context) -> Unit,
     private val onChanged: suspend () -> Unit,
     private val onAdbDisabled: (suspend () -> Unit)? = null,
-) : HostAccessController {
+) : AndroidHostAccessController {
     private val selected = MutableStateFlow(HostAccess.LOCAL)
     private val rootReady = MutableStateFlow(false)
 

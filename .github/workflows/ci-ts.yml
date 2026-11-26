@@ -1,11 +1,10 @@
-name: CI · Desktop, Relay & Protocol
+name: CI · Relay & Protocol
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - "apps/desktop/**"
       - "apps/relay/**"
       - "packages/protocol/**"
       - "package.json"
@@ -14,7 +13,6 @@ on:
       - ".github/workflows/ci-ts.yml"
   pull_request:
     paths:
-      - "apps/desktop/**"
       - "apps/relay/**"
       - "packages/protocol/**"
       - "package.json"
@@ -51,6 +49,3 @@ jobs:
 
       - name: Test
         run: pnpm test
-
-      - name: Build Desktop
-        run: pnpm build:desktop

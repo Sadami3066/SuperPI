@@ -45,7 +45,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-root-directory: apps/android
+          gradle-root-directory: .
 
       - name: Verify release inputs
         env:
@@ -74,6 +74,7 @@ jobs:
           path: |
             apps/android/*/build/reports/tests
             apps/android/*/build/reports/lint-results-*
+            core/*/build/reports/tests
           if-no-files-found: ignore
 
       - name: Stage signing config
@@ -90,8 +91,7 @@ jobs:
             > apps/android/keystore.properties
 
       - name: Build signed APK
-        working-directory: apps/android
-        run: ./scripts/gradlew-locked :app:assembleRelease --no-daemon
+        run: ./scripts/gradlew-locked :apps:android:app:assembleRelease --no-daemon
 
       - name: Publish GitHub Release
         env:

@@ -17,7 +17,7 @@ import io.github.whywood.superpi.plugin.host.images.RemoteImageCache
 import io.github.whywood.superpi.plugin.host.interaction.PluginInteraction
 import io.github.whywood.superpi.vscreen.VirtualScreenFeature
 import io.github.whywood.superpi.runtime.ConversationQueries
-import io.github.whywood.superpi.runtime.EncryptedSecretStore
+import io.github.whywood.superpi.runtime.SecretStore
 import io.github.whywood.superpi.runtime.GoalService
 import io.github.whywood.superpi.runtime.JobRegistry
 import io.github.whywood.superpi.runtime.McpConfigStore
@@ -53,7 +53,7 @@ internal data class PluginServiceDependencies(
     val defaultWorkspace: () -> String = { pluginDataDir.absolutePath },
     val bashAvailable: () -> Boolean = { false },
     val files: () -> FileSystem = { FileSystem.SYSTEM },
-    val secrets: EncryptedSecretStore? = null,
+    val secrets: SecretStore? = null,
     val network: HttpTransport? = null,
     val imageCache: RemoteImageCache? = null,
     val sessions: ConversationQueries? = null,

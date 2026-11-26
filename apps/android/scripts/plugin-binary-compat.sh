@@ -54,7 +54,7 @@ for fixture in "${fixtures[@]}"; do
 done
 
 step "3/6 构建 debug 宿主与 androidTest APK"
-./scripts/gradlew-locked :app:assembleDebug :app:assembleDebugAndroidTest
+./scripts/gradlew-locked :apps:android:app:assembleDebug :apps:android:app:assembleDebugAndroidTest
 
 step "4/6 安装 APK"
 if [[ "${RESET_APP:-0}" == "1" ]]; then

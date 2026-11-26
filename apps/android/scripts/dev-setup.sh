@@ -14,7 +14,8 @@ EOF
   exit 1
 fi
 
-if [[ -f local.properties ]]; then
+ROOT_DIR="$(cd "$(superpi_repo_root)/../.." && pwd)"
+if [[ -f "$ROOT_DIR/local.properties" ]]; then
   configured=""
   while IFS= read -r line; do
     case "$line" in
@@ -23,13 +24,13 @@ if [[ -f local.properties ]]; then
         break
         ;;
     esac
-  done < local.properties
+  done < "$ROOT_DIR/local.properties"
   if [[ -n "$configured" && "$configured" != "$sdk" ]]; then
     echo "[setup] local.properties 已指向 $configured（探测到 $sdk），沿用现有配置" >&2
     sdk="$configured"
   fi
 else
-  printf 'sdk.dir=%s\n' "$sdk" > local.properties
+  printf 'sdk.dir=%s\n' "$sdk" > "$ROOT_DIR/local.properties"
 fi
 
 echo "[setup] Android SDK: $sdk"
@@ -42,5 +43,5 @@ cat <<'EOF'
 [setup] 建议内存 ≥ 8 GB、空闲磁盘 ≥ 10 GB。
 EOF
 
-./scripts/gradlew-locked :app:assembleDebug
+./scripts/gradlew-locked :apps:android:app:assembleDebug
 echo "APK: $(pwd)/app/build/outputs/apk/debug/app-debug.apk"

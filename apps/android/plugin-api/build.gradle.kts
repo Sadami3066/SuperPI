@@ -42,7 +42,7 @@ dependencies {
     api(libs.compose.material3)
     api(libs.coroutines.core)
     api(libs.kotlinx.serialization.json)
-    api(project(":design"))
+    api(project(":apps:android:design"))
 
     testImplementation(libs.junit)
 }

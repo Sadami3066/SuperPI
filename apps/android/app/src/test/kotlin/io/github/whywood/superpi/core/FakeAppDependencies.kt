@@ -21,7 +21,7 @@ import io.github.whywood.superpi.data.update.UpdateManager
 import io.github.whywood.superpi.market.MarketRepository
 import io.github.whywood.superpi.plugin.manager.PluginManagerFacade
 import io.github.whywood.superpi.runtime.AgentRuntimeHost
-import io.github.whywood.superpi.runtime.host.HostAccessController
+import io.github.whywood.superpi.host.AndroidHostAccessController
 import io.github.whywood.superpi.runtime.host.HostEnvironmentProvider
 import io.github.whywood.superpi.runtime.GoalService
 import io.github.whywood.superpi.runtime.JobRegistry
@@ -163,7 +163,7 @@ internal class FakeAppDependencies(
 
     override val processRuntime: ProcessRuntime get() = unavailable("processRuntime")
 
-    override val hostAccess: HostAccessController get() = unavailable("hostAccess")
+    override val hostAccess: AndroidHostAccessController get() = unavailable("hostAccess")
 
     override val hostEnvironmentProvider: HostEnvironmentProvider
         get() = unavailable("hostEnvironmentProvider")

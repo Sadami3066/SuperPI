@@ -1,4 +1,4 @@
-name: Release · Desktop
+name: Release Super PI Desktop (Windows / macOS / Linux)
 
 on:
   push:
@@ -6,71 +6,106 @@ on:
       - "desktop-v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: Desktop release tag (e.g. desktop-v0.2.0)
+      tag_name:
+        description: "Release tag name (e.g. desktop-v2.0.3) when manually publishing a draft release"
         required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  publish-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target_platform: linux-x64
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_args: "--bundles deb,appimage --config src-tauri/tauri.ci.conf.json"
+          - os: windows-latest
+            target_platform: windows-x64
+            rust_target: x86_64-pc-windows-msvc
+            tauri_args: "--bundles nsis,msi --config src-tauri/tauri.ci.conf.json"
+          - os: macos-latest
+            target_platform: macos-arm64
+            rust_target: aarch64-apple-darwin
+            tauri_args: "--target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.ci.conf.json"
+          - os: macos-15-intel
+            target_platform: macos-x64
+            rust_target: x86_64-apple-darwin
+            tauri_args: "--target x86_64-apple-darwin --bundles dmg --config src-tauri/tauri.ci.conf.json"
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Resolve tag
-        id: meta
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
         run: |
-          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
-          VERSION="${TAG#desktop-v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libfuse2
 
-      - uses: actions/checkout@v7
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
         with:
-          ref: ${{ steps.meta.outputs.tag }}
+          distribution: temurin
+          java-version: "21"
 
-      - uses: pnpm/action-setup@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: "24"
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
-      - name: Typecheck & test
+      - name: Install JS workspace & build @superpi/web
+        shell: bash
         run: |
-          pnpm typecheck
-          pnpm --filter @superpi/protocol test
-          pnpm --filter @superpi/desktop test
+          pnpm install --frozen-lockfile
+          pnpm --filter @superpi/web build
 
-      - name: Build desktop bundle
-        run: pnpm --filter @superpi/desktop build
+      - name: Package self-contained Host sidecar (jlink)
+        shell: bash
+        run: ./gradlew -Psuperpi.hostOnly=true -Psuperpi.strictBoundaries=true -PsuperpiTargetPlatform=${{ matrix.target_platform }} :apps:host:packageHostDist --no-daemon
 
-      - name: Package archive & checksums
+      - name: Stage sidecar into Tauri resources
+        shell: bash
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/stage/superpi-desktop-${VERSION}-linux-x64" "$RUNNER_TEMP/dist"
-          STAGE="$RUNNER_TEMP/stage/superpi-desktop-${VERSION}-linux-x64"
-          cp -r apps/desktop/dist apps/desktop/extensions apps/desktop/assets apps/desktop/package.json "$STAGE/"
-          cp LICENSE "$STAGE/"
-          tar -C "$RUNNER_TEMP/stage" -czf "$RUNNER_TEMP/dist/superpi-desktop-${VERSION}-linux-x64.tar.gz" "superpi-desktop-${VERSION}-linux-x64"
-          (cd "$RUNNER_TEMP/dist" && sha256sum *.tar.gz > SHA256SUMS.txt)
+          SUPERPI_TARGET_PLATFORM: ${{ matrix.target_platform }}
+        run: pnpm --filter @superpi/desktop stage:sidecar
 
-      - name: Publish GitHub Release (never override Android latest)
+      - name: Build and upload Tauri v2 release bundles
+        uses: tauri-apps/tauri-action@v0
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ steps.meta.outputs.tag }}
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          gh release create "$TAG_NAME" \
-            "$RUNNER_TEMP/dist/superpi-desktop-${VERSION}-linux-x64.tar.gz" \
-            "$RUNNER_TEMP/dist/SHA256SUMS.txt" \
-            --latest=false \
-            --title "SuperPI Desktop ${VERSION}" \
-            --generate-notes
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          tagName: ${{ inputs.tag_name || github.ref_name }}
+          releaseName: "Super PI Desktop ${{ inputs.tag_name || github.ref_name }}"
+          releaseBody: "Cross-platform Super PI Desktop installers for Windows (NSIS/MSI), macOS (Apple Silicon & Intel DMG), and Linux (DEB/AppImage)."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.tauri_args }}

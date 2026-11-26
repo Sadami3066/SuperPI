@@ -32,7 +32,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-root-directory: apps/android
+          gradle-root-directory: .
 
       - name: Ensure Android SDK 36
         run: |
@@ -51,16 +51,15 @@ jobs:
           echo "design_version=${INPUT_DESIGN_VER}" >> "$GITHUB_OUTPUT"
 
       - name: Verify API compatibility & build Maven staging repo
-        working-directory: apps/android
         env:
           API_VER: ${{ steps.meta.outputs.api_version }}
           DESIGN_VER: ${{ steps.meta.outputs.design_version }}
         run: |
-          ./scripts/api-compat.sh
-          ./scripts/gradlew-locked :plugin-api:publishPluginApiPublicationToPagesRepository \
+          ./apps/android/scripts/api-compat.sh
+          ./scripts/gradlew-locked :apps:android:plugin-api:publishPluginApiPublicationToPagesRepository \
             "-PpluginApiVersion=${API_VER}" --no-daemon
           if [ -n "$DESIGN_VER" ]; then
-            ./scripts/gradlew-locked :design:publishDesignPublicationToPagesRepository \
+            ./scripts/gradlew-locked :apps:android:design:publishDesignPublicationToPagesRepository \
               "-PdesignVersion=${DESIGN_VER}" --no-daemon
           fi
 
@@ -77,7 +76,7 @@ jobs:
           API_VER: ${{ steps.meta.outputs.api_version }}
           DESIGN_VER: ${{ steps.meta.outputs.design_version }}
         run: |
-          cp -r apps/android/build/maven-repo/io/. maven-repo/io/
+          cp -r build/maven-repo/io/. maven-repo/io/
           cd maven-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -10,6 +10,7 @@ val secretsDir = File(
     System.getenv("SUPERPI_SECRETS_DIR") ?: "${System.getProperty("user.home")}/.config/superpi/secrets",
 )
 val keystorePropertiesFile = listOfNotNull(
+    rootProject.file("apps/android/keystore.properties").takeIf { it.isFile },
     rootProject.file("keystore.properties").takeIf { it.isFile },
     System.getenv("SUPERPI_KEYSTORE_PROPERTIES")?.let(::File)?.takeIf { it.isFile },
     File(secretsDir, "keystore.properties").takeIf { it.isFile },
@@ -104,10 +105,11 @@ composeCompiler {
 }
 
 dependencies {
-    implementation(project(":runtime"))
-    implementation(project(":shell"))
-    implementation(project(":design"))
-    implementation(project(":plugin-api"))
+    implementation(project(":core:runtime"))
+    implementation(project(":core:relay"))
+    implementation(project(":apps:android:shell"))
+    implementation(project(":apps:android:design"))
+    implementation(project(":apps:android:plugin-api"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

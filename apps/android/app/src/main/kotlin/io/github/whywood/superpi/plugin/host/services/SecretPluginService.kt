@@ -1,11 +1,11 @@
 package io.github.whywood.superpi.plugin.host.services
 
 import io.github.whywood.superpi.plugin.api.SecretService
-import io.github.whywood.superpi.runtime.EncryptedSecretStore
+import io.github.whywood.superpi.runtime.SecretStore
 import kotlinx.coroutines.flow.first
 
 internal class SecretPluginService(
-    private val store: EncryptedSecretStore,
+    private val store: SecretStore,
     pluginId: String,
 ) : SecretService {
     private val prefix = "plugin.${pluginId}."

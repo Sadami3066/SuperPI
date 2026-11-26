@@ -6,11 +6,21 @@ on:
     branches: [main]
     paths:
       - "apps/android/**"
+      - "core/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
       - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/ci-android.yml"
   pull_request:
     paths:
       - "apps/android/**"
+      - "core/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
       - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/ci-android.yml"
 
@@ -35,7 +45,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-root-directory: apps/android
+          gradle-root-directory: .
 
       - name: Ensure Android SDK 36
         run: |
@@ -54,5 +64,6 @@ jobs:
           path: |
             apps/android/*/build/reports/tests
             apps/android/*/build/reports/lint-results-*
-            apps/android/build/reports/problems
+            core/*/build/reports/tests
+            build/reports/problems
           if-no-files-found: ignore

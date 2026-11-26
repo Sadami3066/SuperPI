@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export LC_ALL=C
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ANDROID_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$ANDROID_DIR/../.." && pwd)"
+cd "$ROOT_DIR"
 
 UPDATE=0
 if [[ "${1:-}" == "--update" ]]; then
@@ -65,7 +68,7 @@ check_module() {
   fi
 
   if [[ ! -f "$baseline" ]]; then
-    echo "[api] missing $name baseline: $baseline（先执行 ./scripts/api-compat.sh --update）" >&2
+    echo "[api] missing $name baseline: $baseline（先执行 ./apps/android/scripts/api-compat.sh --update）" >&2
     rm -f "$current"
     return 1
   fi
@@ -89,16 +92,16 @@ check_module() {
   rm -f "$current"
 }
 
-./scripts/gradlew-locked :plugin-api:assembleRelease :design:assembleRelease
+./scripts/gradlew-locked :apps:android:plugin-api:assembleRelease :apps:android:design:assembleRelease
 
 check_module \
   "plugin-api" \
-  "plugin-api/build/outputs/aar/plugin-api-release.aar" \
-  "plugin-api/compat/level-7.api" \
-  "plugin-api/compat/level-7.allowlist"
+  "$ANDROID_DIR/plugin-api/build/outputs/aar/plugin-api-release.aar" \
+  "$ANDROID_DIR/plugin-api/compat/level-7.api" \
+  "$ANDROID_DIR/plugin-api/compat/level-7.allowlist"
 
 check_module \
   "design" \
-  "design/build/outputs/aar/design-release.aar" \
-  "design/compat/design.api" \
-  "design/compat/design.allowlist"
+  "$ANDROID_DIR/design/build/outputs/aar/design-release.aar" \
+  "$ANDROID_DIR/design/compat/design.api" \
+  "$ANDROID_DIR/design/compat/design.allowlist"
