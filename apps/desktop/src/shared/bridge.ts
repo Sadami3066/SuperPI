@@ -61,6 +61,51 @@ export interface BrowserStorageSummary {
   sites: BrowserSiteStorageItem[];
 }
 
+export type DesktopFeatureView = "timers" | "inbox" | "memory" | "skills" | "mcp";
+
+export type DesktopNavigateCommand =
+  | { kind: "chat"; sessionId: string }
+  | { kind: "super" }
+  | { kind: "new_chat" }
+  | { kind: "settings"; tab: string; autoCheckUpdate?: boolean }
+  | { kind: "feature"; view: DesktopFeatureView };
+
+export interface DesktopNotificationPayload {
+  tag: string;
+  title: string;
+  body: string;
+  command?: DesktopNavigateCommand;
+}
+
+export interface DesktopTraySessionItem {
+  id: string;
+  title: string;
+}
+
+export interface DesktopTrayStatePayload {
+  activeRunsCount: number;
+  recentSessions: DesktopTraySessionItem[];
+}
+
+export interface DesktopUpdateCheckResult {
+  status: "up_to_date" | "update_available" | "error";
+  currentVersion: string;
+  latestVersion?: string;
+  releaseNotes?: string;
+  downloadUrl?: string;
+  releaseUrl?: string;
+  checkedAt: number;
+  error?: string;
+}
+
+export interface DesktopCrashRecord {
+  id: string;
+  timestamp: number;
+  processType: string;
+  reason: string;
+  exitCode?: number;
+}
+
 export interface DesktopBridge {
   getEnv(): Promise<DesktopEnvInfo>;
   getHostConnection(): Promise<HostConnectionInfo>;
@@ -76,6 +121,15 @@ export interface DesktopBridge {
   windowIsMaximized(): Promise<boolean>;
   getCloseToTray(): Promise<boolean>;
   setCloseToTray(enabled: boolean): Promise<boolean>;
+  getNotificationsEnabled(): Promise<boolean>;
+  setNotificationsEnabled(enabled: boolean): Promise<boolean>;
+  showNotification(payload: DesktopNotificationPayload): Promise<void>;
+  updateTrayState(payload: DesktopTrayStatePayload): Promise<void>;
+  consumePendingNavigateCommand(): Promise<DesktopNavigateCommand | null>;
+  onNavigateCommand(cb: (cmd: DesktopNavigateCommand) => void): () => void;
+  checkForUpdates(): Promise<DesktopUpdateCheckResult>;
+  listCrashLogs(): Promise<DesktopCrashRecord[]>;
+  clearCrashLogs(): Promise<void>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
   browserMount(bounds: BrowserBounds, url?: string, tabId?: string): Promise<BrowserNavState>;
   browserSetBounds(bounds: BrowserBounds, tabId?: string): Promise<void>;
@@ -114,6 +168,15 @@ export const DESKTOP_IPC_CHANNELS = {
   windowIsMaximized: "superpi:window-is-maximized",
   getCloseToTray: "superpi:get-close-to-tray",
   setCloseToTray: "superpi:set-close-to-tray",
+  getNotificationsEnabled: "superpi:get-notifications-enabled",
+  setNotificationsEnabled: "superpi:set-notifications-enabled",
+  showNotification: "superpi:show-notification",
+  updateTrayState: "superpi:update-tray-state",
+  consumePendingNavigateCommand: "superpi:consume-pending-navigate",
+  navigateCommand: "superpi:navigate-command",
+  checkForUpdates: "superpi:check-for-updates",
+  listCrashLogs: "superpi:list-crash-logs",
+  clearCrashLogs: "superpi:clear-crash-logs",
   windowMaximizedChanged: "superpi:window-maximized-changed",
   browserMount: "superpi:browser-mount",
   browserSetBounds: "superpi:browser-set-bounds",

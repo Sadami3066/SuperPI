@@ -9,6 +9,7 @@ import {
   type MenuItemConstructorOptions,
   nativeImage,
   nativeTheme,
+  Notification,
   protocol,
   shell,
   Tray,
@@ -18,14 +19,22 @@ import {
   type BrowserBounds,
   type DesktopBridge,
   type DesktopEnvInfo,
+  type DesktopNavigateCommand,
+  type DesktopNotificationPayload,
+  type DesktopTrayStatePayload,
 } from "../shared/bridge.js";
 import { EmbeddedBrowserManager } from "./browser-view.js";
+import { clearDesktopCrashes, listDesktopCrashes, recordDesktopCrash } from "./crash-log.js";
+import { extractDeepLinkFromArgv, parseDeepLinkUrl } from "./deeplink.js";
 import { HostManager } from "./host-manager.js";
 import { APP_CSP_HEADER, isAllowedAppNavigation } from "./security.js";
+import { checkGitHubUpdate } from "./updater.js";
 import {
   loadCloseToTray,
+  loadNotificationsEnabled,
   loadWindowState,
   saveCloseToTray,
+  saveNotificationsEnabled,
   saveWindowBackgroundColor,
   saveWindowState,
 } from "./window-state.js";
@@ -137,12 +146,17 @@ function registerAppProtocol(webDistDir: string): void {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let rendererReady = false;
 let tray: Tray | null = null;
 let allowWindowClose = false;
 let shutdownStarted = false;
 let quitConfirmationInFlight = false;
 let quitConfirmed = false;
 let currentLocale: "zh-CN" | "en" = "zh-CN";
+let pendingNavigateCommand: DesktopNavigateCommand | null = null;
+let trayState: DesktopTrayStatePayload = { activeRunsCount: 0, recentSessions: [] };
+const activeNotifications = new Map<string, Notification>();
+const recentCrashTimes: number[] = [];
 
 const repoRoot = resolveRepoRoot();
 const hostManager = new HostManager({
@@ -150,13 +164,35 @@ const hostManager = new HostManager({
   repoRoot,
 });
 let closeToTrayEnabled = loadCloseToTray(hostManager.homeDir);
+let notificationsEnabled = loadNotificationsEnabled(hostManager.homeDir);
 const browserManager = new EmbeddedBrowserManager();
 
 function focusMainWindow(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (app.isReady()) {
+      createMainWindow();
+    }
+    return;
+  }
   if (!mainWindow.isVisible()) mainWindow.show();
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
+}
+
+function dispatchNavigateCommand(cmd: DesktopNavigateCommand): void {
+  focusMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
+    mainWindow.webContents.send(DESKTOP_IPC_CHANNELS.navigateCommand, cmd);
+    return;
+  }
+  pendingNavigateCommand = cmd;
+}
+
+function handleDeepLinkUrl(rawUrl: string): void {
+  const cmd = parseDeepLinkUrl(rawUrl);
+  if (cmd) {
+    dispatchNavigateCommand(cmd);
+  }
 }
 
 async function requestGracefulQuit(): Promise<void> {
@@ -196,21 +232,83 @@ async function requestGracefulQuit(): Promise<void> {
   }
 }
 
+function formatTraySessionLabel(title: string, isEn: boolean): string {
+  const clean = title.trim() || (isEn ? "Untitled Chat" : "未命名对话");
+  return clean.length > 26 ? `${clean.slice(0, 25)}…` : clean;
+}
+
+function refreshTrayUi(): void {
+  if (!tray) return;
+  const isEn = currentLocale === "en";
+  tray.setContextMenu(buildTrayMenu());
+  if (trayState.activeRunsCount > 0) {
+    tray.setToolTip(
+      isEn
+        ? `Super PI — ${trayState.activeRunsCount} active task${trayState.activeRunsCount > 1 ? "s" : ""}`
+        : `Super PI — 正在运行 ${trayState.activeRunsCount} 个任务`,
+    );
+  } else {
+    tray.setToolTip("Super PI");
+  }
+}
+
 function buildTrayMenu(): Menu {
   const isEn = currentLocale === "en";
-  return Menu.buildFromTemplate([
+  const template: MenuItemConstructorOptions[] = [];
+
+  if (trayState.activeRunsCount > 0) {
+    template.push(
+      {
+        label: isEn
+          ? `Running: ${trayState.activeRunsCount} active task${trayState.activeRunsCount > 1 ? "s" : ""}`
+          : `运行中：${trayState.activeRunsCount} 个任务`,
+        enabled: false,
+      },
+      { type: "separator" },
+    );
+  }
+
+  template.push(
     {
       label: isEn ? "Show Super PI" : "显示 Super PI",
       click: () => focusMainWindow(),
     },
+    {
+      label: isEn ? "New Chat" : "新对话",
+      click: () => dispatchNavigateCommand({ kind: "new_chat" }),
+    },
+  );
+
+  if (trayState.recentSessions.length > 0) {
+    template.push({ type: "separator" });
+    for (const sess of trayState.recentSessions.slice(0, 5)) {
+      template.push({
+        label: formatTraySessionLabel(sess.title, isEn),
+        click: () => dispatchNavigateCommand({ kind: "chat", sessionId: sess.id }),
+      });
+    }
+  }
+
+  template.push(
     { type: "separator" },
+    {
+      label: isEn ? "Check for Updates…" : "检查更新…",
+      click: () =>
+        dispatchNavigateCommand({
+          kind: "settings",
+          tab: "diagnostics",
+          autoCheckUpdate: true,
+        }),
+    },
     {
       label: isEn ? "Quit Super PI" : "退出 Super PI",
       click: () => {
         void requestGracefulQuit();
       },
     },
-  ]);
+  );
+
+  return Menu.buildFromTemplate(template);
 }
 
 function createTray(): void {
@@ -335,7 +433,41 @@ function createMainWindow(): void {
   });
   win.on("closed", () => {
     browserManager.destroy();
-    if (mainWindow === win) mainWindow = null;
+    if (mainWindow === win) {
+      mainWindow = null;
+      rendererReady = false;
+    }
+  });
+
+  win.webContents.on("did-start-loading", () => {
+    rendererReady = false;
+  });
+
+  win.webContents.on("did-finish-load", () => {
+    rendererReady = true;
+  });
+
+  win.webContents.on("render-process-gone", (_event, details) => {
+    if (details.reason === "clean-exit") return;
+    rendererReady = false;
+    const now = Date.now();
+    recordDesktopCrash(hostManager.homeDir, {
+      processType: "renderer",
+      reason: details.reason,
+      exitCode: details.exitCode,
+      timestamp: now,
+    });
+    while (recentCrashTimes.length > 0 && now - recentCrashTimes[0]! > 60_000) {
+      recentCrashTimes.shift();
+    }
+    if (recentCrashTimes.length < 3) {
+      recentCrashTimes.push(now);
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          win.reload();
+        }
+      }, 600);
+    }
   });
 
   win.once("ready-to-show", () => {
@@ -462,9 +594,7 @@ function registerIpcHandlers(): void {
     DESKTOP_IPC_CHANNELS.setLanguage,
     async (_event, locale: "zh-CN" | "en") => {
       currentLocale = locale === "en" ? "en" : "zh-CN";
-      if (tray) {
-        tray.setContextMenu(buildTrayMenu());
-      }
+      refreshTrayUi();
     },
   );
 
@@ -513,6 +643,95 @@ function registerIpcHandlers(): void {
   ipcMain.handle(DESKTOP_IPC_CHANNELS.setCloseToTray, async (_event, enabled: boolean) => {
     closeToTrayEnabled = saveCloseToTray(hostManager.homeDir, Boolean(enabled));
     return closeToTrayEnabled;
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.getNotificationsEnabled, async () => {
+    return notificationsEnabled;
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.setNotificationsEnabled, async (_event, enabled: boolean) => {
+    notificationsEnabled = saveNotificationsEnabled(hostManager.homeDir, Boolean(enabled));
+    return notificationsEnabled;
+  });
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.showNotification,
+    async (_event, payload: DesktopNotificationPayload) => {
+      if (!notificationsEnabled || !Notification.isSupported()) return;
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) {
+        return;
+      }
+      const tag = typeof payload?.tag === "string" && payload.tag ? payload.tag : "default";
+      const prev = activeNotifications.get(tag);
+      if (prev) {
+        prev.close();
+        activeNotifications.delete(tag);
+      }
+      const iconPath = resolveIconPath(repoRoot, "icon.png");
+      const notification = new Notification({
+        title: String(payload?.title || "Super PI"),
+        body: String(payload?.body || ""),
+        ...(iconPath ? { icon: iconPath } : {}),
+      });
+      activeNotifications.set(tag, notification);
+      notification.on("click", () => {
+        activeNotifications.delete(tag);
+        notification.close();
+        if (payload?.command) {
+          dispatchNavigateCommand(payload.command);
+        } else {
+          focusMainWindow();
+        }
+      });
+      notification.on("close", () => {
+        if (activeNotifications.get(tag) === notification) {
+          activeNotifications.delete(tag);
+        }
+      });
+      notification.show();
+    },
+  );
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.updateTrayState,
+    async (_event, payload: DesktopTrayStatePayload) => {
+      const count =
+        typeof payload?.activeRunsCount === "number" && Number.isFinite(payload.activeRunsCount)
+          ? Math.max(0, Math.round(payload.activeRunsCount))
+          : 0;
+      const sessions = Array.isArray(payload?.recentSessions)
+        ? payload.recentSessions
+            .filter(
+              (item) =>
+                Boolean(item) &&
+                typeof item.id === "string" &&
+                item.id.trim().length > 0 &&
+                typeof item.title === "string",
+            )
+            .slice(0, 5)
+        : [];
+      trayState = { activeRunsCount: count, recentSessions: sessions };
+      refreshTrayUi();
+    },
+  );
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.consumePendingNavigateCommand, async () => {
+    const cmd = pendingNavigateCommand;
+    pendingNavigateCommand = null;
+    rendererReady = true;
+    return cmd;
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.checkForUpdates, async () => {
+    return checkGitHubUpdate(app.getVersion(), process.platform, process.arch);
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.listCrashLogs, async () => {
+    return listDesktopCrashes(hostManager.homeDir);
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.clearCrashLogs, async () => {
+    clearDesktopCrashes(hostManager.homeDir);
   });
 
   ipcMain.handle(
@@ -591,15 +810,34 @@ function registerIpcHandlers(): void {
   );
 }
 
+const initialDeepLink = extractDeepLinkFromArgv(process.argv);
+if (initialDeepLink) {
+  const initialCmd = parseDeepLinkUrl(initialDeepLink);
+  if (initialCmd) pendingNavigateCommand = initialCmd;
+}
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    focusMainWindow();
+  app.on("second-instance", (_event, argv) => {
+    const url = extractDeepLinkFromArgv(argv);
+    if (url) {
+      handleDeepLinkUrl(url);
+    } else {
+      focusMainWindow();
+    }
+  });
+
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleDeepLinkUrl(url);
   });
 
   void app.whenReady().then(() => {
+    if (app.isPackaged) {
+      app.setAsDefaultProtocolClient(APP_SCHEME);
+    }
     configureApplicationMenu();
     if (!process.env.SUPERPI_DEV_URL) {
       registerAppProtocol(resolveWebDistDir(repoRoot));

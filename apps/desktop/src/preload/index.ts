@@ -4,6 +4,9 @@ import {
   type BrowserBounds,
   type BrowserNavState,
   type DesktopBridge,
+  type DesktopNavigateCommand,
+  type DesktopNotificationPayload,
+  type DesktopTrayStatePayload,
 } from "../shared/bridge.js";
 
 const bridge: DesktopBridge = {
@@ -25,6 +28,28 @@ const bridge: DesktopBridge = {
   getCloseToTray: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getCloseToTray),
   setCloseToTray: (enabled: boolean) =>
     ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setCloseToTray, Boolean(enabled)),
+  getNotificationsEnabled: () =>
+    ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getNotificationsEnabled),
+  setNotificationsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setNotificationsEnabled, Boolean(enabled)),
+  showNotification: (payload: DesktopNotificationPayload) =>
+    ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.showNotification, payload),
+  updateTrayState: (payload: DesktopTrayStatePayload) =>
+    ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.updateTrayState, payload),
+  consumePendingNavigateCommand: () =>
+    ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.consumePendingNavigateCommand),
+  onNavigateCommand: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, cmd: DesktopNavigateCommand) => {
+      if (cmd && typeof cmd === "object") cb(cmd);
+    };
+    ipcRenderer.on(DESKTOP_IPC_CHANNELS.navigateCommand, listener);
+    return () => {
+      ipcRenderer.removeListener(DESKTOP_IPC_CHANNELS.navigateCommand, listener);
+    };
+  },
+  checkForUpdates: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.checkForUpdates),
+  listCrashLogs: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listCrashLogs),
+  clearCrashLogs: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.clearCrashLogs),
   onWindowMaximizedChange: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => {
       cb(Boolean(maximized));

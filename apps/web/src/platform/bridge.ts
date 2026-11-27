@@ -62,6 +62,51 @@ export interface BrowserStorageSummary {
   sites: BrowserSiteStorageItem[];
 }
 
+export type DesktopFeatureView = "timers" | "inbox" | "memory" | "skills" | "mcp";
+
+export type DesktopNavigateCommand =
+  | { kind: "chat"; sessionId: string }
+  | { kind: "super" }
+  | { kind: "new_chat" }
+  | { kind: "settings"; tab: string; autoCheckUpdate?: boolean }
+  | { kind: "feature"; view: DesktopFeatureView };
+
+export interface DesktopNotificationPayload {
+  tag: string;
+  title: string;
+  body: string;
+  command?: DesktopNavigateCommand;
+}
+
+export interface DesktopTraySessionItem {
+  id: string;
+  title: string;
+}
+
+export interface DesktopTrayStatePayload {
+  activeRunsCount: number;
+  recentSessions: DesktopTraySessionItem[];
+}
+
+export interface DesktopUpdateCheckResult {
+  status: "up_to_date" | "update_available" | "error";
+  currentVersion: string;
+  latestVersion?: string;
+  releaseNotes?: string;
+  downloadUrl?: string;
+  releaseUrl?: string;
+  checkedAt: number;
+  error?: string;
+}
+
+export interface DesktopCrashRecord {
+  id: string;
+  timestamp: number;
+  processType: string;
+  reason: string;
+  exitCode?: number;
+}
+
 interface ElectronPreloadBridge {
   getEnv(): Promise<Omit<DesktopEnv, "isElectron"> & { isElectron: true }>;
   getHostConnection(): Promise<{
@@ -91,6 +136,15 @@ interface ElectronPreloadBridge {
   windowIsMaximized(): Promise<boolean>;
   getCloseToTray(): Promise<boolean>;
   setCloseToTray(enabled: boolean): Promise<boolean>;
+  getNotificationsEnabled(): Promise<boolean>;
+  setNotificationsEnabled(enabled: boolean): Promise<boolean>;
+  showNotification(payload: DesktopNotificationPayload): Promise<void>;
+  updateTrayState(payload: DesktopTrayStatePayload): Promise<void>;
+  consumePendingNavigateCommand(): Promise<DesktopNavigateCommand | null>;
+  onNavigateCommand(cb: (cmd: DesktopNavigateCommand) => void): () => void;
+  checkForUpdates(): Promise<DesktopUpdateCheckResult>;
+  listCrashLogs(): Promise<DesktopCrashRecord[]>;
+  clearCrashLogs(): Promise<void>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
   browserMount(bounds: BrowserBounds, url?: string, tabId?: string): Promise<BrowserNavState>;
   browserSetBounds(bounds: BrowserBounds, tabId?: string): Promise<void>;
@@ -436,4 +490,60 @@ export function subscribeBrowserOpenTabRequest(cb: (url: string) => void): () =>
   const native = getElectronBridge();
   if (!native?.onBrowserOpenTabRequest) return () => {};
   return native.onBrowserOpenTabRequest(cb);
+}
+
+export async function getDesktopNotificationsEnabled(): Promise<boolean> {
+  const native = getElectronBridge();
+  if (!native?.getNotificationsEnabled) return true;
+  return native.getNotificationsEnabled();
+}
+
+export async function setDesktopNotificationsEnabled(enabled: boolean): Promise<boolean> {
+  const native = getElectronBridge();
+  if (!native?.setNotificationsEnabled) return Boolean(enabled);
+  return native.setNotificationsEnabled(enabled);
+}
+
+export async function showDesktopNotification(
+  payload: DesktopNotificationPayload,
+): Promise<void> {
+  const native = getElectronBridge();
+  if (!native?.showNotification) return;
+  await native.showNotification(payload);
+}
+
+export async function updateDesktopTrayState(payload: DesktopTrayStatePayload): Promise<void> {
+  const native = getElectronBridge();
+  if (!native?.updateTrayState) return;
+  await native.updateTrayState(payload);
+}
+
+export async function consumePendingDesktopNavigateCommand(): Promise<DesktopNavigateCommand | null> {
+  const native = getElectronBridge();
+  if (!native?.consumePendingNavigateCommand) return null;
+  return native.consumePendingNavigateCommand();
+}
+
+export function onDesktopNavigateCommand(cb: (cmd: DesktopNavigateCommand) => void): () => void {
+  const native = getElectronBridge();
+  if (!native?.onNavigateCommand) return () => {};
+  return native.onNavigateCommand(cb);
+}
+
+export async function checkDesktopUpdates(): Promise<DesktopUpdateCheckResult | null> {
+  const native = getElectronBridge();
+  if (!native?.checkForUpdates) return null;
+  return native.checkForUpdates();
+}
+
+export async function listDesktopCrashLogs(): Promise<DesktopCrashRecord[]> {
+  const native = getElectronBridge();
+  if (!native?.listCrashLogs) return [];
+  return native.listCrashLogs();
+}
+
+export async function clearDesktopCrashLogs(): Promise<void> {
+  const native = getElectronBridge();
+  if (!native?.clearCrashLogs) return;
+  await native.clearCrashLogs();
 }

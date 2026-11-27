@@ -10,6 +10,7 @@ export interface WindowBoundsState {
   maximized?: boolean;
   backgroundColor?: string;
   closeToTray?: boolean;
+  notificationsEnabled?: boolean;
 }
 
 const DEFAULT_WIDTH = 1280;
@@ -61,6 +62,8 @@ export function loadWindowState(homeDir: string): WindowBoundsState {
           ? parsed.backgroundColor
           : undefined,
       closeToTray: typeof parsed.closeToTray === "boolean" ? parsed.closeToTray : undefined,
+      notificationsEnabled:
+        typeof parsed.notificationsEnabled === "boolean" ? parsed.notificationsEnabled : undefined,
     };
   } catch {
     return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
@@ -75,12 +78,7 @@ function readRawWindowState(file: string): Partial<WindowBoundsState> {
   }
 }
 
-export function loadCloseToTray(homeDir: string): boolean {
-  const prev = readRawWindowState(statePath(homeDir));
-  return typeof prev.closeToTray === "boolean" ? prev.closeToTray : true;
-}
-
-export function saveCloseToTray(homeDir: string, enabled: boolean): boolean {
+function writeMergedWindowState(homeDir: string, patch: Partial<WindowBoundsState>): void {
   try {
     const file = statePath(homeDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -95,58 +93,52 @@ export function saveCloseToTray(homeDir: string, enabled: boolean): boolean {
         typeof prev.backgroundColor === "string" && prev.backgroundColor.startsWith("#")
           ? prev.backgroundColor
           : undefined,
-      closeToTray: Boolean(enabled),
-    };
-    fs.writeFileSync(file, JSON.stringify(next), "utf8");
-  } catch {
-    return Boolean(enabled);
-  }
-  return Boolean(enabled);
-}
-
-export function saveWindowState(homeDir: string, win: BrowserWindow): void {
-  try {
-    const file = statePath(homeDir);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const prev = readRawWindowState(file);
-    const existingBackground =
-      typeof prev.backgroundColor === "string" && prev.backgroundColor.startsWith("#")
-        ? prev.backgroundColor
-        : undefined;
-    const maximized = win.isMaximized();
-    const bounds = maximized ? win.getNormalBounds() : win.getBounds();
-    const next: WindowBoundsState = {
-      width: Math.max(MIN_WIDTH, bounds.width),
-      height: Math.max(MIN_HEIGHT, bounds.height),
-      x: bounds.x,
-      y: bounds.y,
-      maximized,
-      backgroundColor: existingBackground,
       closeToTray: typeof prev.closeToTray === "boolean" ? prev.closeToTray : undefined,
+      notificationsEnabled:
+        typeof prev.notificationsEnabled === "boolean" ? prev.notificationsEnabled : undefined,
+      ...patch,
     };
     fs.writeFileSync(file, JSON.stringify(next), "utf8");
   } catch {
     return;
   }
+}
+
+export function loadCloseToTray(homeDir: string): boolean {
+  const prev = readRawWindowState(statePath(homeDir));
+  return typeof prev.closeToTray === "boolean" ? prev.closeToTray : true;
+}
+
+export function saveCloseToTray(homeDir: string, enabled: boolean): boolean {
+  const next = Boolean(enabled);
+  writeMergedWindowState(homeDir, { closeToTray: next });
+  return next;
+}
+
+export function loadNotificationsEnabled(homeDir: string): boolean {
+  const prev = readRawWindowState(statePath(homeDir));
+  return typeof prev.notificationsEnabled === "boolean" ? prev.notificationsEnabled : true;
+}
+
+export function saveNotificationsEnabled(homeDir: string, enabled: boolean): boolean {
+  const next = Boolean(enabled);
+  writeMergedWindowState(homeDir, { notificationsEnabled: next });
+  return next;
+}
+
+export function saveWindowState(homeDir: string, win: BrowserWindow): void {
+  const maximized = win.isMaximized();
+  const bounds = maximized ? win.getNormalBounds() : win.getBounds();
+  writeMergedWindowState(homeDir, {
+    width: Math.max(MIN_WIDTH, bounds.width),
+    height: Math.max(MIN_HEIGHT, bounds.height),
+    x: bounds.x,
+    y: bounds.y,
+    maximized,
+  });
 }
 
 export function saveWindowBackgroundColor(homeDir: string, color: string): void {
   if (!color.startsWith("#")) return;
-  try {
-    const file = statePath(homeDir);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const prev = readRawWindowState(file);
-    const next: WindowBoundsState = {
-      width: typeof prev.width === "number" ? prev.width : DEFAULT_WIDTH,
-      height: typeof prev.height === "number" ? prev.height : DEFAULT_HEIGHT,
-      x: typeof prev.x === "number" ? prev.x : undefined,
-      y: typeof prev.y === "number" ? prev.y : undefined,
-      maximized: Boolean(prev.maximized),
-      backgroundColor: color,
-      closeToTray: typeof prev.closeToTray === "boolean" ? prev.closeToTray : undefined,
-    };
-    fs.writeFileSync(file, JSON.stringify(next), "utf8");
-  } catch {
-    return;
-  }
+  writeMergedWindowState(homeDir, { backgroundColor: color });
 }
