@@ -1373,12 +1373,18 @@ private suspend fun resolveAuthorizedArtifactFile(
     rawPath: String,
 ): File? {
     val candidateFile = File(rawPath)
+    val isSuperMain = sessionId == "super-main" ||
+        sessionId == "__super__" ||
+        sessionId == io.github.whywood.superpi.runtime.SuperRuntime.SUPER_THREAD_SESSION_ID
+    val resolvedWorkerId = when {
+        sessionId.startsWith("worker:") -> sessionId.removePrefix("worker:")
+        else -> io.github.whywood.superpi.runtime.SuperRuntime.parseWorkerSessionId(sessionId)
+    }
     val sessionCwd = when {
-        sessionId == "super-main" -> controller.botRegistry.homeBot().cwd
-        sessionId.startsWith("worker:") -> {
-            val workerId = sessionId.removePrefix("worker:")
+        isSuperMain -> controller.botRegistry.homeBot().cwd
+        resolvedWorkerId != null -> {
             val worker = if (controller.isSuperOrchestratorInitialized) {
-                controller.superOrchestrator.workers.value.firstOrNull { it.workerId == workerId }
+                controller.superOrchestrator.workers.value.firstOrNull { it.workerId == resolvedWorkerId }
             } else null
             worker?.let { controller.botRegistry.findBotById(it.botId)?.cwd }
         }
@@ -1416,12 +1422,10 @@ private suspend fun resolveAuthorizedArtifactFile(
 
     // 3. Explicitly referenced by a completed `present` tool result in this session/super/worker history
     val messages: List<AssistantMessage> = when {
-        sessionId == "super-main" && controller.isSuperOrchestratorInitialized ->
+        isSuperMain && controller.isSuperOrchestratorInitialized ->
             controller.superOrchestrator.threadState.value.messages
-        sessionId.startsWith("worker:") && controller.isSuperOrchestratorInitialized -> {
-            val workerId = sessionId.removePrefix("worker:")
-            controller.superOrchestrator.observeWorkerSession(workerId).value.messages
-        }
+        resolvedWorkerId != null && controller.isSuperOrchestratorInitialized ->
+            controller.superOrchestrator.observeWorkerSession(resolvedWorkerId).value.messages
         else -> runCatching { controller.runtimeHost.history(sessionId) }.getOrDefault(emptyList())
     }
     val presentedPaths = extractPresentedPaths(messages)

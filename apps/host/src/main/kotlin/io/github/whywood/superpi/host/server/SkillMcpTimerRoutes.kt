@@ -2,6 +2,7 @@ package io.github.whywood.superpi.host.server
 
 import io.github.whywood.superpi.data.SkillArchiveResult
 import io.github.whywood.superpi.host.core.SuperPiController
+import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.Timer
 import io.github.whywood.superpi.runtime.TimerPatch
 import io.github.whywood.superpi.runtime.TimerTrigger
@@ -687,7 +688,16 @@ internal fun Route.installSkillMcpTimerRoutes(
 
     // ── Timers ───────────────────────────────────────────────────────────────
     get("/v1/timers") {
-        val list = controller.timerService.list().map { it.toDto() }
+        val scopeParam = call.request.queryParameters["scope"]?.trim()?.lowercase()
+        val list = controller.timerService.list()
+            .filter { timer ->
+                when (scopeParam) {
+                    "super" -> SuperRuntime.isSuperManagedSessionId(timer.sessionId)
+                    "pi" -> !SuperRuntime.isSuperManagedSessionId(timer.sessionId)
+                    else -> true
+                }
+            }
+            .map { it.toDto() }
         call.respond(list)
     }
 
@@ -745,6 +755,15 @@ internal fun Route.installSkillMcpTimerRoutes(
                 return@put
             }
         }
+        val rebindRequested = !req.sessionId.isNullOrBlank() || !req.botId.isNullOrBlank()
+        val reboundTarget = if (rebindRequested) {
+            resolveTimerTargetSession(controller, req.botId, req.sessionId) ?: run {
+                call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Target bot or session not found"))
+                return@put
+            }
+        } else {
+            null
+        }
         try {
             val updated = controller.timerService.update(
                 id,
@@ -753,6 +772,9 @@ internal fun Route.installSkillMcpTimerRoutes(
                     prompt = req.prompt.trim().takeIf { it.isNotEmpty() },
                     trigger = trigger,
                     enabled = req.enabled,
+                    sessionId = reboundTarget?.first,
+                    sessionFile = reboundTarget?.second,
+                    cwd = reboundTarget?.third,
                 ),
             )
             if (updated == null) {
@@ -923,6 +945,9 @@ private suspend fun resolveTimerTargetSession(
 ): Triple<String, String, String>? {
     val cleanSessionId = sessionId?.trim()?.takeIf { it.isNotEmpty() }
     if (cleanSessionId != null) {
+        if (SuperRuntime.isSuperManagedSessionId(cleanSessionId)) {
+            return controller.resolveSuperTimerTarget(cleanSessionId)
+        }
         val existing = controller.runtimeHost.allSessions().firstOrNull { it.id == cleanSessionId }
             ?: return null
         if (controller.isRemoteCwd(existing.cwd)) return null

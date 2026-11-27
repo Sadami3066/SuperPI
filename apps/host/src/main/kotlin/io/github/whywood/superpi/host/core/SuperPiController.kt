@@ -1280,6 +1280,26 @@ class SuperPiController(
         }
     }
 
+    fun resolveSuperTimerTarget(rawSessionId: String): Triple<String, String, String>? {
+        val clean = rawSessionId.trim()
+        if (clean == SuperRuntime.SUPER_THREAD_SESSION_ID) {
+            val routerDir = File(paths.superDir, "router")
+            val workspaceDir = File(routerDir, "workspace").apply { mkdirs() }
+            val sessionFile = File(routerDir, "session.jsonl")
+            return Triple(SuperRuntime.SUPER_THREAD_SESSION_ID, sessionFile.absolutePath, workspaceDir.absolutePath)
+        }
+        val workerId = SuperRuntime.parseWorkerSessionId(clean) ?: return null
+        val rec = superTaskStore.currentWorker(workerId) ?: return null
+        val sessionFile = localWorkerPool.workerSessionFile(rec.botId, rec.workerId)
+        val workspaceDir = localWorkerPool.workerWorkspaceDirFor(rec.workerId)
+            ?: File(paths.superDir, "router/workspace").apply { mkdirs() }
+        return Triple(
+            SuperRuntime.workerSessionId(rec.workerId),
+            sessionFile.absolutePath,
+            workspaceDir.absolutePath,
+        )
+    }
+
     private suspend fun buildWorkerInspectExtras(workerId: String, sdkSessionId: String?): WorkerInspectExtras {
         val targetTimerSessionId = SuperRuntime.workerSessionId(workerId)
         val activeTimers = runCatching {

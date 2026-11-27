@@ -906,4 +906,63 @@ class LocalControlServerApiTest {
         assertEquals("0", page3["userTurnOffset"]!!.jsonPrimitive.content)
         assertEquals("u1", page3["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
     }
+
+    @Test
+    fun dualScopeTimersIsolatePiAndSuperAndAllowTargetUpdates(): Unit = runBlocking {
+        val port = server.start()
+
+        val createPiReq = authReq(port, "/api/v1/timers")
+            .post(
+                """{"name":"PI Daily","prompt":"Check notes","triggerType":"daily","time":"09:00","enabled":true,"botId":"home"}"""
+                    .toRequestBody("application/json".toMediaType()),
+            )
+            .build()
+        val piTimerId = http.newCall(createPiReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["id"]!!.jsonPrimitive.content
+        }
+
+        val createSuperReq = authReq(port, "/api/v1/timers")
+            .post(
+                """{"name":"Super Daily","prompt":"Coordinate team","triggerType":"daily","time":"10:00","enabled":true,"sessionId":"super:router"}"""
+                    .toRequestBody("application/json".toMediaType()),
+            )
+            .build()
+        val superTimerId = http.newCall(createSuperReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            val obj = json.parseToJsonElement(resp.body.string()).jsonObject
+            assertEquals("super:router", obj["sessionId"]!!.jsonPrimitive.content)
+            obj["id"]!!.jsonPrimitive.content
+        }
+
+        http.newCall(authReq(port, "/api/v1/timers?scope=pi").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
+                it.jsonObject["id"]!!.jsonPrimitive.content
+            }
+            assertTrue(piTimerId in ids)
+            assertTrue(superTimerId !in ids)
+        }
+
+        http.newCall(authReq(port, "/api/v1/timers?scope=super").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
+                it.jsonObject["id"]!!.jsonPrimitive.content
+            }
+            assertTrue(superTimerId in ids)
+            assertTrue(piTimerId !in ids)
+        }
+
+        val updateReq = authReq(port, "/api/v1/timers/$piTimerId")
+            .put(
+                """{"name":"PI Updated","prompt":"Check notes again","triggerType":"daily","time":"09:30","enabled":true,"sessionId":"super:router"}"""
+                    .toRequestBody("application/json".toMediaType()),
+            )
+            .build()
+        http.newCall(updateReq).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val obj = json.parseToJsonElement(resp.body.string()).jsonObject
+            assertEquals("super:router", obj["sessionId"]!!.jsonPrimitive.content)
+        }
+    }
 }
