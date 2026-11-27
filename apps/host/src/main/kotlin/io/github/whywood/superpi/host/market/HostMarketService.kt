@@ -100,7 +100,7 @@ class HostMarketService(
             val fresh = !forceRefresh && cached != null && (now - cached.fetchedAt) < HostMarketDefaults.CACHE_TTL_MS
             if (fresh) {
                 return@withContext LoadedRegistry(
-                    registry = cached!!.registry,
+                    registry = cached.registry,
                     source = "cache",
                     fetchedAt = cached.fetchedAt,
                     stale = false,

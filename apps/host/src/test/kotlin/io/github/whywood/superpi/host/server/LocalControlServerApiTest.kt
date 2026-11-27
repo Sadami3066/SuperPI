@@ -3,6 +3,13 @@ package io.github.whywood.superpi.host.server
 import io.github.whywood.superpi.host.core.SuperPiController
 import io.github.whywood.superpi.host.platform.LinuxHostPlatform
 import io.github.whywood.superpi.host.platform.PathLayout
+import io.github.whywood.superpi.sdk.ai.AssistantMessage as PiAssistantMessage
+import io.github.whywood.superpi.sdk.ai.PlainTextContent
+import io.github.whywood.superpi.sdk.ai.StopReason
+import io.github.whywood.superpi.sdk.ai.TextContent
+import io.github.whywood.superpi.sdk.ai.Usage
+import io.github.whywood.superpi.sdk.ai.UserMessage
+import io.github.whywood.superpi.sdk.coding.session.SessionManager
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
@@ -15,6 +22,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -848,19 +857,25 @@ class LocalControlServerApiTest {
         val cwd = created["cwd"]!!.jsonPrimitive.content.replace("\\", "\\\\")
         val sFile = File(created["filePath"]!!.jsonPrimitive.content)
         sFile.parentFile?.mkdirs()
-        val lines = buildString {
-            appendLine("""{"type":"session","version":3,"id":"$sid","timestamp":"2026-11-27T00:00:00Z","cwd":"$cwd"}""")
-            var prevId: String? = null
-            for (i in 1..3) {
-                val uParent = prevId?.let { "\"$it\"" } ?: "null"
-                val uId = "u$i"
-                appendLine("""{"type":"message","id":"$uId","parentId":$uParent,"timestamp":"2026-11-27T00:00:0${i}Z","message":{"role":"user","content":[{"type":"text","text":"u$i"}]}}""")
-                val aId = "a$i"
-                appendLine("""{"type":"message","id":"$aId","parentId":"$uId","timestamp":"2026-11-27T00:00:1${i}Z","message":{"role":"assistant","content":[{"type":"text","text":"a$i"}],"api":"openai-completions","provider":"openai","model":"gpt-4o","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":170000000000$i}}""")
-                prevId = aId
-            }
+        sFile.writeText(
+            """{"type":"session","version":3,"id":"$sid","timestamp":"2026-11-27T00:00:00Z","cwd":"$cwd"}""" + "\n",
+            Charsets.UTF_8,
+        )
+        val mgr = SessionManager.open(sFile.absolutePath.toPath(), FileSystem.SYSTEM)
+        for (i in 1..3) {
+            mgr.appendMessage(UserMessage(PlainTextContent("u$i"), i * 10L))
+            mgr.appendMessage(
+                PiAssistantMessage(
+                    content = mutableListOf(TextContent("a$i")),
+                    api = "openai-completions",
+                    provider = "openai",
+                    model = "gpt-4o",
+                    usage = Usage.empty(),
+                    stopReason = StopReason.Stop,
+                    timestamp = i * 10L + 1L,
+                ),
+            )
         }
-        sFile.writeText(lines, Charsets.UTF_8)
         controller.runtimeHost.closeSession(sid)
 
         val page1 = http.newCall(authReq(port, "/api/v1/sessions/$sid?limit=2").get().build()).execute().use { resp ->
