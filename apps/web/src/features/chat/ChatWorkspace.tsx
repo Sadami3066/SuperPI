@@ -23,6 +23,7 @@ import { WindowControls } from "../shell/WindowControls";
 import { Composer } from "./Composer";
 import { ContextMeter } from "./ContextMeter";
 import { GoalBar } from "./GoalBar";
+import { JobsBar } from "./JobsBar";
 import { MessageList } from "./MessageList";
 import { TodoPanel } from "./TodoPanel";
 import { UsageSheet } from "./UsageSheet";
@@ -562,6 +563,7 @@ export function ChatWorkspace({
           />
           <div className="shrink-0 px-4">
             <GoalBar sessionId={activeSessionId} />
+            <JobsBar sessionId={activeSessionId} />
             <TodoPanel todos={latestTodos} sessionKey={activeSessionId} />
           </div>
           {composerElement("docked")}

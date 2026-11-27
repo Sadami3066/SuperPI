@@ -12,6 +12,10 @@ export const zhCN = {
   "conn.invalidToken": "访问令牌无效或服务不可用。",
 
   "nav.searchPlaceholder": "搜索对话、助理或操作…",
+  "nav.searchShort": "搜索",
+  "nav.capabilities": "能力",
+  "nav.capabilitiesSkills": "技能",
+  "nav.capabilitiesConnectors": "外部连接",
   "nav.localBots": "我的助理",
   "nav.remoteBots": "其他设备",
   "nav.newChat": "新对话",
@@ -176,6 +180,8 @@ export const zhCN = {
 
   "wb.inspectorTitle": "概览",
   "wb.filesTitle": "文件",
+  "wb.backToFiles": "返回文件",
+  "wb.openTabsCount": "已打开 {count}",
   "wb.previewTitle": "查看与编辑",
   "wb.diffTitle": "变更",
   "wb.terminalTitle": "终端",
@@ -343,6 +349,7 @@ export const zhCN = {
   "common.edit": "编辑",
   "common.delete": "删除",
   "common.refresh": "刷新",
+  "common.back": "返回",
   "common.loading": "加载中…",
 
   "super.title": "Super PI",

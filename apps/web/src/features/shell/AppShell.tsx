@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HostBotDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { isShortcutBlockedByTarget } from "../../platform/shortcuts";
@@ -15,7 +15,10 @@ import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { SettingsModal, type SettingsTabId } from "../settings/SettingsModal";
 import { SuperWorkspace } from "../super/SuperWorkspace";
 import { CommandPalette } from "./CommandPalette";
+import { type FeatureViewKind, FeatureWorkspaceView } from "./FeatureWorkspaceView";
 import { Sidebar } from "./Sidebar";
+
+export type MainViewId = "chat" | "super" | FeatureViewKind;
 
 export function AppShell() {
   const { t } = useI18n();
@@ -37,7 +40,14 @@ export function AppShell() {
   const togglePanel = useWorkbenchStore((s) => s.togglePanel);
   const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
 
-  const [activeView, setActiveView] = useState<"chat" | "super">("chat");
+  const [activeView, setActiveView] = useState<MainViewId>("chat");
+  const lastChatViewRef = useRef<"chat" | "super">("chat");
+  const selectMainView = (next: MainViewId) => {
+    if (next === "chat" || next === "super") {
+      lastChatViewRef.current = next;
+    }
+    setActiveView(next);
+  };
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
@@ -54,6 +64,18 @@ export function AppShell() {
   useEffect(() => {
     if (activeView === "super") {
       document.title = `Super PI — ${t("app.name")}`;
+      return;
+    }
+    if (activeView === "automations") {
+      document.title = `${t("settings.navAutomations")} — Super PI`;
+      return;
+    }
+    if (activeView === "memory") {
+      document.title = `${t("settings.navMemory")} — Super PI`;
+      return;
+    }
+    if (activeView === "capabilities") {
+      document.title = `${t("nav.capabilities")} — Super PI`;
       return;
     }
     const activeBot = bots.find((b) => b.id === (activeSummary?.botId ?? bots[0]?.id));
@@ -169,7 +191,8 @@ export function AppShell() {
       <Sidebar
         open={sidebarOpen}
         activeView={activeView}
-        onSelectChat={() => setActiveView("chat")}
+        onSelectChat={() => selectMainView("chat")}
+        onSelectFeature={(view) => selectMainView(view)}
         onToggleCollapse={() => setSidebarOpen((v) => !v)}
         onOpenSearch={() => setPaletteOpen(true)}
         onOpenCreateBot={(target) => {
@@ -178,7 +201,6 @@ export function AppShell() {
         }}
         onOpenBotSettings={(bot) => setSettingsBot(bot)}
         onOpenSettings={() => openSettings("general")}
-        onOpenAutomations={() => openSettings("automations")}
         onOpenArchived={() => openSettings("archived")}
       />
 
@@ -215,14 +237,27 @@ export function AppShell() {
           {activeView === "super" ? (
             <SuperWorkspace
               activeView={activeView}
-              onChangeView={(view) => setActiveView(view)}
+              onChangeView={(view) => selectMainView(view)}
               showWindowControls={!workbenchOpen}
               onOpenProvidersSettings={() => openSettings("providers")}
             />
+          ) : activeView === "automations" ||
+            activeView === "memory" ||
+            activeView === "capabilities" ? (
+            <FeatureWorkspaceView
+              kind={activeView}
+              showWindowControls={!workbenchOpen}
+              onBack={() => selectMainView(lastChatViewRef.current)}
+              onOpenSession={(sid) => {
+                if (!client) return;
+                selectMainView("chat");
+                void selectSession(client, sid, locale);
+              }}
+            />
           ) : (
             <ChatWorkspace
-              activeView={activeView}
-              onChangeView={(view) => setActiveView(view)}
+              activeView="chat"
+              onChangeView={(view) => selectMainView(view)}
               showWindowControls={!workbenchOpen}
               onOpenBotSettings={(bot) => setSettingsBot(bot)}
               onOpenProvidersSettings={() => openSettings("providers")}
@@ -238,11 +273,9 @@ export function AppShell() {
         tab={settingsTab}
         onSelectTab={(tab) => openSettings(tab)}
         onOpenChange={setSettingsOpen}
-        onOpenSession={(sessionId) => {
-          if (!client) return;
-          setActiveView("chat");
+        onOpenSession={() => {
+          selectMainView("chat");
           setSettingsOpen(false);
-          void selectSession(client, sessionId, locale);
         }}
       />
 
@@ -256,11 +289,15 @@ export function AppShell() {
         }}
         onSelectChatView={() => {
           setSettingsOpen(false);
-          setActiveView("chat");
+          selectMainView("chat");
         }}
         onSelectSuperView={() => {
           setSettingsOpen(false);
-          setActiveView("super");
+          selectMainView("super");
+        }}
+        onSelectFeatureView={(view) => {
+          setSettingsOpen(false);
+          selectMainView(view);
         }}
       />
 

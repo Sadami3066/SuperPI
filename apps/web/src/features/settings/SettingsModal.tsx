@@ -1,26 +1,17 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useEffect } from "react";
 import { useI18n } from "../../i18n";
-import { useSuperStore } from "../../stores/superStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { BrandIcon } from "../shared/BrandAssets";
 import { ArchivedSettings } from "./ArchivedSettings";
-import { AutomationsSettings } from "./AutomationsSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { GeneralSettings } from "./GeneralSettings";
-import { McpSettings } from "./McpSettings";
-import { MemorySettings } from "./MemorySettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { RelaySettings } from "./RelaySettings";
-import { SkillsSettings } from "./SkillsSettings";
 
 export type SettingsTabId =
   | "general"
   | "providers"
-  | "memory"
-  | "automations"
-  | "skills"
-  | "mcp"
   | "relay"
   | "archived"
   | "diagnostics";
@@ -36,10 +27,9 @@ export function SettingsModal({
   tab: SettingsTabId;
   onSelectTab: (tab: SettingsTabId) => void;
   onOpenChange: (open: boolean) => void;
-  onOpenSession?: (sessionId: string) => void;
+  onOpenSession?: () => void;
 }) {
   const { t } = useI18n();
-  const unreadInboxCount = useSuperStore((s) => s.unreadInboxCount);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -56,28 +46,11 @@ export function SettingsModal({
     { id: "archived", label: t("settings.navArchived"), iconName: "action/archive" },
   ];
 
-  const capabilityNav: Array<{
-    id: SettingsTabId;
-    label: string;
-    iconName: string;
-    badge?: number;
-  }> = [
-    { id: "memory", label: t("settings.navMemory"), iconName: "ai/memory" },
-    {
-      id: "automations",
-      label: t("settings.navAutomations"),
-      iconName: "system/timer",
-      badge: unreadInboxCount > 0 ? unreadInboxCount : undefined,
-    },
-    { id: "skills", label: t("settings.navSkills"), iconName: "ai/skills" },
-    { id: "mcp", label: t("settings.navMcp"), iconName: "ai/connectors" },
-  ];
-
   const footerNav: Array<{ id: SettingsTabId; label: string; iconName: string }> = [
     { id: "diagnostics", label: t("settings.aboutDiagnostics"), iconName: "status/info" },
   ];
 
-  const navItems = [...primaryNav, ...capabilityNav, ...footerNav];
+  const navItems = [...primaryNav, ...footerNav];
   const activeNav = navItems.find((n) => n.id === tab) ?? navItems[0];
 
   return (
@@ -89,10 +62,10 @@ export function SettingsModal({
         />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="pi-popover fixed top-1/2 left-1/2 z-50 flex h-[min(680px,88vh)] w-[min(960px,94vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[16px] p-0 outline-none"
+          className="pi-popover fixed top-1/2 left-1/2 z-50 flex h-[min(680px,88vh)] w-[min(920px,94vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[16px] p-0 outline-none"
         >
           <aside
-            className="hidden w-[212px] shrink-0 flex-col justify-between overflow-y-auto p-3 sm:flex"
+            className="hidden w-[204px] shrink-0 flex-col justify-between overflow-y-auto p-3 sm:flex"
             style={{
               background: "var(--pi-paper)",
               borderRight: "0.5px solid var(--pi-hairline)",
@@ -123,35 +96,6 @@ export function SettingsModal({
                   >
                     <BrandIcon name={item.iconName} size={15} />
                     <span className="truncate">{item.label}</span>
-                  </button>
-                );
-              })}
-
-              <div className="my-2 h-[0.5px]" style={{ background: "var(--pi-hairline)" }} />
-
-              {capabilityNav.map((item) => {
-                const active = item.id === tab;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSelectTab(item.id)}
-                    className="flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{
-                      background: active ? "var(--pi-wash)" : "transparent",
-                      color: active ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-                    }}
-                  >
-                    <BrandIcon name={item.iconName} size={15} />
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {item.badge && (
-                      <span
-                        className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
-                        style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -225,15 +169,14 @@ export function SettingsModal({
               <div className="mx-auto w-full max-w-[700px]">
                 {tab === "general" && <GeneralSettings />}
                 {tab === "providers" && <ProvidersSettings />}
-                {tab === "memory" && <MemorySettings />}
-                {tab === "automations" && (
-                  <AutomationsSettings onOpenSession={onOpenSession} />
-                )}
-                {tab === "skills" && <SkillsSettings />}
-                {tab === "mcp" && <McpSettings />}
                 {tab === "relay" && <RelaySettings />}
                 {tab === "archived" && (
-                  <ArchivedSettings onOpenSession={() => onOpenChange(false)} />
+                  <ArchivedSettings
+                    onOpenSession={() => {
+                      onOpenChange(false);
+                      onOpenSession?.();
+                    }}
+                  />
                 )}
                 {tab === "diagnostics" && <DiagnosticsSettings />}
               </div>

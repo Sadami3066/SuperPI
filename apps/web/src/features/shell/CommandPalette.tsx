@@ -10,6 +10,7 @@ import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Dialog, Input } from "../../ui";
 import { type SettingsTabId } from "../settings/SettingsModal";
 import { BrandIcon } from "../shared/BrandAssets";
+import type { FeatureViewKind } from "./FeatureWorkspaceView";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface CommandPaletteProps {
   onOpenCreateBot: () => void;
   onSelectChatView: () => void;
   onSelectSuperView: () => void;
+  onSelectFeatureView: (view: FeatureViewKind) => void;
 }
 
 interface PaletteEntry {
@@ -41,6 +43,7 @@ function CommandPaletteBody({
   onOpenCreateBot,
   onSelectChatView,
   onSelectSuperView,
+  onSelectFeatureView,
 }: CommandPaletteProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
@@ -111,7 +114,7 @@ function CommandPaletteBody({
         icon: <BrandIcon name="ai/memory" size={15} />,
         run: () => {
           onOpenChange(false);
-          onOpenSettings("memory");
+          onSelectFeatureView("memory");
         },
       },
       {
@@ -120,25 +123,16 @@ function CommandPaletteBody({
         icon: <BrandIcon name="system/timer" size={15} />,
         run: () => {
           onOpenChange(false);
-          onOpenSettings("automations");
+          onSelectFeatureView("automations");
         },
       },
       {
-        id: "act-skills",
-        label: t("settings.navSkills"),
+        id: "act-capabilities",
+        label: t("nav.capabilities"),
         icon: <BrandIcon name="ai/skills" size={15} />,
         run: () => {
           onOpenChange(false);
-          onOpenSettings("skills");
-        },
-      },
-      {
-        id: "act-mcp",
-        label: t("settings.navMcp"),
-        icon: <BrandIcon name="ai/connectors" size={15} />,
-        run: () => {
-          onOpenChange(false);
-          onOpenSettings("mcp");
+          onSelectFeatureView("capabilities");
         },
       },
       {
@@ -233,6 +227,7 @@ function CommandPaletteBody({
     onOpenCreateBot,
     onOpenSettings,
     onSelectChatView,
+    onSelectFeatureView,
     onSelectSuperView,
     openPanel,
     platform,

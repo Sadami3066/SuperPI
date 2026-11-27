@@ -10,6 +10,12 @@ import { BrandIcon } from "../features/shared/BrandAssets";
 import { WindowControls } from "../features/shell/WindowControls";
 import { getAvailableWorkbenchPanels, getWorkbenchPanel } from "./registry";
 
+const TAB_BRAND_ICONS: Record<string, string> = {
+  files: "file/folder_closed",
+  diff: "system/git_branch",
+  terminal: "system/terminal",
+};
+
 export function WorkbenchDock({
   showWindowControls = false,
 }: {
@@ -53,6 +59,8 @@ export function WorkbenchDock({
     const maxW = typeof window !== "undefined" ? Math.min(720, Math.max(360, window.innerWidth - 420)) : 720;
     return Math.min(maxW, Math.max(360, Math.round(raw)));
   };
+  const effectiveWidth = clampDynamicWidth(width);
+  const compactTabs = effectiveWidth < 440;
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -92,7 +100,7 @@ export function WorkbenchDock({
         className="relative h-full shrink-0 flex-col"
         style={{
           display: open ? "flex" : "none",
-          width: clampDynamicWidth(width),
+          width: effectiveWidth,
           background: "var(--pi-paper)",
           borderLeft: "0.5px solid var(--pi-hairline)",
         }}
@@ -115,23 +123,34 @@ export function WorkbenchDock({
           if (isFrameless) void windowToggleMaximize();
         }}
       >
-        <div className="pi-no-drag flex min-w-0 items-center gap-1 overflow-x-auto">
+        <div
+          className="pi-no-drag flex min-w-0 items-center gap-0.5 rounded-[9px] p-0.5"
+          style={{ background: "var(--pi-wash)" }}
+        >
           {available.map((panel) => {
             const Icon = panel.icon;
+            const brandIcon = TAB_BRAND_ICONS[panel.id];
             const active = resolvedPanel?.id === panel.id;
+            const label = t(panel.labelKey);
             return (
               <button
                 key={panel.id}
                 type="button"
+                title={label}
+                aria-label={label}
                 onClick={() => openPanel(panel.id)}
                 className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium transition-colors"
                 style={{
-                  background: active ? "var(--pi-wash)" : "transparent",
+                  background: active ? "var(--pi-surface)" : "transparent",
                   color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
                 }}
               >
-                <Icon size={13.5} stroke={1.7} />
-                <span>{t(panel.labelKey)}</span>
+                {brandIcon ? (
+                  <BrandIcon name={brandIcon} size={13.5} />
+                ) : (
+                  <Icon size={13.5} stroke={1.7} />
+                )}
+                {!compactTabs && <span>{label}</span>}
               </button>
             );
           })}

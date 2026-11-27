@@ -7,6 +7,7 @@ import {
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostBotDto, SessionSummary } from "../../api/types";
 import { useI18n } from "../../i18n";
+import type { FeatureViewKind } from "./FeatureWorkspaceView";
 import { revealInFileManager, windowToggleMaximize } from "../../platform/bridge";
 import { formatShortcut } from "../../platform/shortcuts";
 import { useBotStore } from "../../stores/botStore";
@@ -32,7 +33,7 @@ const DEFAULT_SIDEBAR_WIDTH = 256;
 const MIN_SIDEBAR_WIDTH = 210;
 const MAX_SIDEBAR_WIDTH = 380;
 const SNAP_COLLAPSE_PX = 150;
-const VISIBLE_SESSIONS_LIMIT = 5;
+const VISIBLE_SESSIONS_LIMIT = 20;
 
 function readStoredSidebarWidth(): number {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
@@ -72,23 +73,23 @@ export function Sidebar({
   open,
   activeView,
   onSelectChat,
+  onSelectFeature,
   onToggleCollapse,
   onOpenSearch,
   onOpenCreateBot,
   onOpenBotSettings,
   onOpenSettings,
-  onOpenAutomations,
   onOpenArchived,
 }: {
   open: boolean;
-  activeView: "chat" | "super";
+  activeView: "chat" | "super" | FeatureViewKind;
   onSelectChat: () => void;
+  onSelectFeature: (view: FeatureViewKind) => void;
   onToggleCollapse: () => void;
   onOpenSearch: () => void;
   onOpenCreateBot: (target?: { deviceId: string; deviceName: string }) => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenSettings: () => void;
-  onOpenAutomations: () => void;
   onOpenArchived: () => void;
 }) {
   const { t } = useI18n();
@@ -374,11 +375,14 @@ export function Sidebar({
           <button
             type="button"
             title={t("settings.navAutomations")}
-            onClick={onOpenAutomations}
+            onClick={() => onSelectFeature("automations")}
             className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-secondary)" }}
+            style={{
+              background: activeView === "automations" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "automations" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
           >
-            <BrandIcon name="status/notifications" size={15.5} />
+            <BrandIcon name="system/timer" size={15.5} />
             {unreadInboxCount > 0 && (
               <span
                 className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
@@ -386,6 +390,31 @@ export function Sidebar({
               />
             )}
           </button>
+          <button
+            type="button"
+            title={t("settings.navMemory")}
+            onClick={() => onSelectFeature("memory")}
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/memory" size={15.5} />
+          </button>
+          <button
+            type="button"
+            title={t("nav.capabilities")}
+            onClick={() => onSelectFeature("capabilities")}
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "capabilities" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "capabilities" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/skills" size={15.5} />
+          </button>
+          <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
           <IconButton size="md" label={t("nav.archived")} onClick={onOpenArchived}>
             <BrandIcon name="action/archive" size={15} />
           </IconButton>
@@ -838,7 +867,7 @@ export function Sidebar({
             style={{ color: "var(--pi-ink-secondary)" }}
           >
             <BrandIcon name="action/search" size={14} />
-            <span className="flex-1 truncate text-left">{t("nav.searchPlaceholder").replace(/…$/, "")}</span>
+            <span className="flex-1 truncate text-left">{t("nav.searchShort")}</span>
             <kbd
               className="rounded px-1.5 py-0.5 text-[10px]"
               style={{
@@ -922,36 +951,68 @@ export function Sidebar({
         </div>
 
         <div
-          className="flex shrink-0 items-center justify-between gap-1 px-2.5 py-2"
+          className="shrink-0 space-y-0.5 px-2.5 py-2"
           style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
         >
           <button
             type="button"
-            onClick={onOpenSettings}
-            className="flex h-8 flex-1 items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-secondary)" }}
+            onClick={() => onSelectFeature("automations")}
+            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "automations" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "automations" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
           >
-            <BrandIcon name="system/settings" size={15} />
-            <span>{t("nav.settings")}</span>
-          </button>
-          <button
-            type="button"
-            title={t("settings.navAutomations")}
-            onClick={onOpenAutomations}
-            className="relative flex h-8 w-8 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-secondary)" }}
-          >
-            <BrandIcon name="status/notifications" size={14.5} />
+            <BrandIcon name="system/timer" size={14.5} />
+            <span className="min-w-0 flex-1 truncate text-left">{t("settings.navAutomations")}</span>
             {unreadInboxCount > 0 && (
               <span
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
                 style={{ background: "var(--pi-accent)" }}
               />
             )}
           </button>
-          <IconButton size="sm" label={t("nav.archived")} onClick={onOpenArchived}>
-            <BrandIcon name="action/archive" size={14.5} />
-          </IconButton>
+          <button
+            type="button"
+            onClick={() => onSelectFeature("memory")}
+            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/memory" size={14.5} />
+            <span className="truncate">{t("settings.navMemory")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectFeature("capabilities")}
+            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "capabilities" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "capabilities" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/skills" size={14.5} />
+            <span className="truncate">{t("nav.capabilities")}</span>
+          </button>
+
+          <div className="my-1.5 h-[0.5px]" style={{ background: "var(--pi-hairline)" }} />
+
+          <div className="flex items-center justify-between gap-1">
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="flex h-8 flex-1 items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+              style={{ color: "var(--pi-ink-secondary)" }}
+            >
+              <BrandIcon name="system/settings" size={15} />
+              <span>{t("nav.settings")}</span>
+            </button>
+            <IconButton size="sm" label={t("nav.archived")} onClick={onOpenArchived}>
+              <BrandIcon name="action/archive" size={14.5} />
+            </IconButton>
+          </div>
         </div>
       </aside>
 

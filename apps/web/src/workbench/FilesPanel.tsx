@@ -39,7 +39,15 @@ function EntryIcon({ entry }: { entry: HostWorkspaceFileEntryDto }) {
   return <BrandIcon name="file/plain" size={15} style={{ color: "var(--pi-ink-tertiary)" }} />;
 }
 
-export default function FilesPanel({ context }: { context: WorkbenchPanelContext }) {
+export default function FilesPanel({
+  context,
+  openFilesCount = 0,
+  onOpenEditor,
+}: {
+  context: WorkbenchPanelContext;
+  openFilesCount?: number;
+  onOpenEditor?: () => void;
+}) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
   const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
@@ -218,35 +226,53 @@ export default function FilesPanel({ context }: { context: WorkbenchPanelContext
           }}
         />
 
-        <div className="flex items-center gap-1 overflow-x-auto text-[11.5px]">
-          <button
-            type="button"
-            onClick={() => void loadDir("")}
-            className="shrink-0 rounded px-1.5 py-0.5 font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: segments.length === 0 ? "var(--pi-ink)" : "var(--pi-ink-tertiary)" }}
-          >
-            {t("files.root")}
-          </button>
-          {segments.map((seg, i) => {
-            const targetPath = segments.slice(0, i + 1).join("/");
-            const isLast = i === segments.length - 1;
-            return (
-              <div key={targetPath} className="flex shrink-0 items-center gap-1">
-                <BrandIcon name="navigation/chevron_right" size={11} style={{ color: "var(--pi-ink-tertiary)" }} />
-                <button
-                  type="button"
-                  onClick={() => void loadDir(targetPath)}
-                  className="rounded px-1.5 py-0.5 transition-colors hover:bg-[var(--pi-hover)]"
-                  style={{
-                    color: isLast ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
-                    fontWeight: isLast ? 550 : 400,
-                  }}
-                >
-                  {seg}
-                </button>
-              </div>
-            );
-          })}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-[11.5px]">
+            <button
+              type="button"
+              onClick={() => void loadDir("")}
+              className="shrink-0 rounded px-1.5 py-0.5 font-medium transition-colors hover:bg-[var(--pi-hover)]"
+              style={{ color: segments.length === 0 ? "var(--pi-ink)" : "var(--pi-ink-tertiary)" }}
+            >
+              {t("files.root")}
+            </button>
+            {segments.map((seg, i) => {
+              const targetPath = segments.slice(0, i + 1).join("/");
+              const isLast = i === segments.length - 1;
+              return (
+                <div key={targetPath} className="flex shrink-0 items-center gap-1">
+                  <BrandIcon name="navigation/chevron_right" size={11} style={{ color: "var(--pi-ink-tertiary)" }} />
+                  <button
+                    type="button"
+                    onClick={() => void loadDir(targetPath)}
+                    className="rounded px-1.5 py-0.5 transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      color: isLast ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+                      fontWeight: isLast ? 550 : 400,
+                    }}
+                  >
+                    {seg}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {openFilesCount > 0 && onOpenEditor && (
+            <button
+              type="button"
+              onClick={onOpenEditor}
+              className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: "var(--pi-surface)",
+                color: "var(--pi-accent)",
+                border: "0.5px solid var(--pi-hairline)",
+              }}
+            >
+              <span>{t("wb.openTabsCount", { count: openFilesCount })}</span>
+              <BrandIcon name="navigation/chevron_right" size={10} />
+            </button>
+          )}
         </div>
       </div>
 

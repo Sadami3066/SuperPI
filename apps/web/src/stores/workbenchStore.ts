@@ -27,9 +27,12 @@ export function previewTargetKey(target: OpenPreviewTarget): string {
     : `art:${target.sessionId}:${target.path}`;
 }
 
+export type FilesViewMode = "tree" | "editor";
+
 export interface WorkbenchStoreState {
   open: boolean;
   activePanelId: string;
+  filesViewMode: FilesViewMode;
   width: number;
   contextPayload: Record<string, unknown> | null;
   openFiles: OpenPreviewTarget[];
@@ -40,6 +43,7 @@ export interface WorkbenchStoreState {
   togglePanel: (panelId: string) => void;
   close: () => void;
   setWidth: (width: number, persist?: boolean) => void;
+  setFilesViewMode: (mode: FilesViewMode) => void;
   openFileInPreview: (target: OpenPreviewTarget) => void;
   closePreviewFile: (key: string) => void;
   setActivePreviewFile: (key: string) => void;
@@ -51,6 +55,7 @@ export interface WorkbenchStoreState {
 export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
   open: false,
   activePanelId: "files",
+  filesViewMode: "tree",
   width: readInitialWidth(),
   contextPayload: null,
   openFiles: [],
@@ -59,18 +64,31 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
   activeWorktreeByBot: {},
 
   openPanel: (panelId, payload) =>
-    set({
-      open: true,
-      activePanelId: panelId,
-      contextPayload: payload ?? null,
+    set((s) => {
+      if (panelId === "preview") {
+        return {
+          open: true,
+          activePanelId: "files",
+          filesViewMode: s.openFiles.length > 0 ? "editor" : "tree",
+          contextPayload: payload ?? null,
+        };
+      }
+      const resolvedId = panelId === "session-inspector" ? "files" : panelId;
+      return {
+        open: true,
+        activePanelId: resolvedId,
+        contextPayload: payload ?? null,
+      };
     }),
 
   togglePanel: (panelId) =>
     set((s) => {
-      if (s.open && s.activePanelId === panelId) {
+      const resolvedId =
+        panelId === "preview" || panelId === "session-inspector" ? "files" : panelId;
+      if (s.open && s.activePanelId === resolvedId) {
         return { open: false };
       }
-      return { open: true, activePanelId: panelId };
+      return { open: true, activePanelId: resolvedId };
     }),
 
   close: () => set({ open: false }),
@@ -87,13 +105,16 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
     set({ width: clamped });
   },
 
+  setFilesViewMode: (mode) => set({ filesViewMode: mode }),
+
   openFileInPreview: (target) =>
     set((s) => {
       const key = previewTargetKey(target);
       const exists = s.openFiles.some((f) => previewTargetKey(f) === key);
       return {
         open: true,
-        activePanelId: "preview",
+        activePanelId: "files",
+        filesViewMode: "editor",
         openFiles: exists ? s.openFiles : [...s.openFiles.slice(-11), target],
         activeFileKey: key,
       };
@@ -109,10 +130,14 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
         const neighbor = nextFiles[idx] ?? nextFiles[idx - 1] ?? null;
         nextActive = neighbor ? previewTargetKey(neighbor) : null;
       }
-      return { openFiles: nextFiles, activeFileKey: nextActive };
+      return {
+        openFiles: nextFiles,
+        activeFileKey: nextActive,
+        filesViewMode: nextFiles.length === 0 ? "tree" : s.filesViewMode,
+      };
     }),
 
-  setActivePreviewFile: (key) => set({ activeFileKey: key }),
+  setActivePreviewFile: (key) => set({ activeFileKey: key, filesViewMode: "editor" }),
 
   pushOverlay: () => set((s) => ({ overlayCount: s.overlayCount + 1 })),
   popOverlay: () => set((s) => ({ overlayCount: Math.max(0, s.overlayCount - 1) })),

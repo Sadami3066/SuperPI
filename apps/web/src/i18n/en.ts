@@ -14,6 +14,10 @@ export const en: Record<I18nKey, string> = {
   "conn.invalidToken": "Invalid access token or host unavailable.",
 
   "nav.searchPlaceholder": "Search chats, assistants, or actions…",
+  "nav.searchShort": "Search",
+  "nav.capabilities": "Capabilities",
+  "nav.capabilitiesSkills": "Skills",
+  "nav.capabilitiesConnectors": "Connectors",
   "nav.localBots": "Assistants",
   "nav.remoteBots": "Other Devices",
   "nav.newChat": "New chat",
@@ -178,6 +182,8 @@ export const en: Record<I18nKey, string> = {
 
   "wb.inspectorTitle": "Overview",
   "wb.filesTitle": "Files",
+  "wb.backToFiles": "Files",
+  "wb.openTabsCount": "{count} open",
   "wb.previewTitle": "Preview",
   "wb.diffTitle": "Changes",
   "wb.terminalTitle": "Terminal",
@@ -345,6 +351,7 @@ export const en: Record<I18nKey, string> = {
   "common.edit": "Edit",
   "common.delete": "Delete",
   "common.refresh": "Refresh",
+  "common.back": "Back",
   "common.loading": "Loading…",
 
   "super.title": "Super PI",

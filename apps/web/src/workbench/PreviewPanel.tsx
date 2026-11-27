@@ -15,7 +15,7 @@ import {
 } from "@tabler/icons-react";
 import type { OpenPreviewTarget } from "../api/types";
 import { MarkdownView } from "../features/chat/MarkdownView";
-import { PiMascot } from "../features/shared/BrandAssets";
+import { BrandIcon, PiMascot } from "../features/shared/BrandAssets";
 import { useI18n } from "../i18n";
 import { revealInFileManager } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
@@ -78,7 +78,13 @@ function initialLoaded(kind: PreviewKind): LoadedContent {
   };
 }
 
-export default function PreviewPanel({ context }: { context: WorkbenchPanelContext }) {
+export default function PreviewPanel({
+  context,
+  onBackToFiles,
+}: {
+  context: WorkbenchPanelContext;
+  onBackToFiles?: () => void;
+}) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
   const dark = useSettingsStore((s) => s.dark);
@@ -318,7 +324,12 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
         <p className="mt-1.5 max-w-[320px] text-[12.5px] leading-[1.55]" style={{ color: "var(--pi-ink-tertiary)" }}>
           {t("preview.emptyDesc")}
         </p>
-        <Button variant="secondary" size="sm" className="mt-4" onClick={() => openPanel("files")}>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-4"
+          onClick={() => (onBackToFiles ? onBackToFiles() : openPanel("files"))}
+        >
           <IconFolder size={14} />
           <span>{t("preview.goFiles")}</span>
         </Button>
@@ -349,6 +360,18 @@ export default function PreviewPanel({ context }: { context: WorkbenchPanelConte
           borderBottom: "0.5px solid var(--pi-hairline)",
         }}
       >
+        {onBackToFiles && (
+          <button
+            type="button"
+            title={t("wb.backToFiles")}
+            onClick={onBackToFiles}
+            className="flex h-7 shrink-0 items-center gap-1 rounded-[7px] px-2 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{ color: "var(--pi-ink-secondary)" }}
+          >
+            <BrandIcon name="navigation/back" size={13} />
+            <span>{t("wb.backToFiles")}</span>
+          </button>
+        )}
         {openFiles.map((file) => {
           const key = previewTargetKey(file);
           const isCur = key === activeKey;

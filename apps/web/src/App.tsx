@@ -1,9 +1,7 @@
 import { Component, lazy, type ReactNode, useEffect, useMemo } from "react";
 import {
-  IconFileCode,
   IconFolder,
   IconGitBranch,
-  IconInfoCircle,
   IconTerminal2,
   IconWorld,
 } from "@tabler/icons-react";
@@ -20,22 +18,14 @@ registerWorkbenchPanel({
   labelKey: "wb.filesTitle",
   icon: IconFolder,
   order: 10,
-  Component: lazy(() => import("./workbench/FilesPanel")),
-});
-
-registerWorkbenchPanel({
-  id: "preview",
-  labelKey: "wb.previewTitle",
-  icon: IconFileCode,
-  order: 20,
-  Component: lazy(() => import("./workbench/PreviewPanel")),
+  Component: lazy(() => import("./workbench/FilesWorkspacePanel")),
 });
 
 registerWorkbenchPanel({
   id: "diff",
   labelKey: "wb.diffTitle",
   icon: IconGitBranch,
-  order: 30,
+  order: 20,
   Component: lazy(() => import("./workbench/DiffWorktreePanel")),
 });
 
@@ -43,7 +33,7 @@ registerWorkbenchPanel({
   id: "terminal",
   labelKey: "wb.terminalTitle",
   icon: IconTerminal2,
-  order: 40,
+  order: 30,
   Component: lazy(() => import("./workbench/TerminalPanel")),
 });
 
@@ -51,17 +41,9 @@ registerWorkbenchPanel({
   id: "browser",
   labelKey: "wb.browserTitle",
   icon: IconWorld,
-  order: 50,
+  order: 40,
   requiresElectron: true,
   Component: lazy(() => import("./workbench/BrowserPanel")),
-});
-
-registerWorkbenchPanel({
-  id: "session-inspector",
-  labelKey: "wb.inspectorTitle",
-  icon: IconInfoCircle,
-  order: 60,
-  Component: lazy(() => import("./workbench/SessionInspectorPanel")),
 });
 
 class AppErrorBoundary extends Component<
