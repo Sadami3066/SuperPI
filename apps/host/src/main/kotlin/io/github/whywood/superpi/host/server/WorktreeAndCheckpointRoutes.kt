@@ -728,13 +728,15 @@ private fun isUserMessageEntry(line: String): Boolean {
 private fun hasUserTurnAtIndex(file: File, targetTurnIndex: Int): Boolean {
     if (!file.isFile || targetTurnIndex < 0) return false
     var seenUsers = 0
-    file.forEachLine(Charsets.UTF_8) { line ->
-        if (line.isNotBlank() && isUserMessageEntry(line)) {
-            if (seenUsers == targetTurnIndex) return true
-            seenUsers++
+    return file.useLines(Charsets.UTF_8) { lines ->
+        for (line in lines) {
+            if (line.isNotBlank() && isUserMessageEntry(line)) {
+                if (seenUsers == targetTurnIndex) return@useLines true
+                seenUsers++
+            }
         }
+        false
     }
-    return false
 }
 
 private fun truncateSessionJsonlBeforeUserTurn(file: File, targetTurnIndex: Int): Boolean {
