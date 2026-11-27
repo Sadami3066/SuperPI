@@ -53,11 +53,11 @@ export function ToolApprovalCard({
 
   return (
     <div
-      className="my-3 rounded-[14px] p-3.5"
+      className="my-3 rounded-[14px] p-4"
       style={{
-        background: "var(--pi-surface)",
-        border: "0.5px solid var(--pi-hairline)",
-        borderLeft: `2.5px solid ${accentColor}`,
+        background: "var(--pi-chrome)",
+        border: "1px solid var(--pi-canvas-border)",
+        borderLeft: `3px solid ${accentColor}`,
       }}
     >
       <div className="flex items-start justify-between gap-2.5">

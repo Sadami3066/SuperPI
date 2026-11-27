@@ -92,8 +92,8 @@ function ImageArtifactCard({
     <div
       className="overflow-hidden rounded-[14px]"
       style={{
-        background: "var(--pi-surface)",
-        border: "0.5px solid var(--pi-hairline)",
+        background: "var(--pi-canvas)",
+        border: "1px solid var(--pi-canvas-border)",
       }}
     >
       {srcUrl ? (
@@ -182,10 +182,10 @@ export function PresentCard({
         return (
           <div
             key={`${item.path || item.id || item.name}-${idx}`}
-            className="flex items-center justify-between gap-3 rounded-[14px] px-3.5 py-2.5"
+            className="flex items-center justify-between gap-3 rounded-[14px] px-3.5 py-2.5 transition-[background-color,border-color] duration-150"
             style={{
-              background: "var(--pi-surface)",
-              border: "0.5px solid var(--pi-hairline)",
+              background: "var(--pi-chrome)",
+              border: "1px solid var(--pi-canvas-border)",
             }}
           >
             <button

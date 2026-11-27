@@ -159,8 +159,11 @@ export function AskQuestionCard({
 
   return (
     <div
-      className="my-3 pt-3"
-      style={{ borderTop: "1px solid var(--pi-hairline)" }}
+      className="my-3 rounded-[16px] p-4"
+      style={{
+        background: "var(--pi-chrome)",
+        border: "1px solid var(--pi-canvas-border)",
+      }}
     >
       <div className="flex items-center justify-between gap-2 pb-2">
         <button
@@ -185,9 +188,9 @@ export function AskQuestionCard({
       </div>
 
       {total > 1 && !collapsed && (
-        <div className="mb-3 h-[1px] w-full overflow-hidden" style={{ background: "var(--pi-hairline)" }}>
+        <div className="mb-3 h-[2px] w-full overflow-hidden rounded-full" style={{ background: "var(--pi-hairline)" }}>
           <div
-            className="h-full transition-all duration-200"
+            className="h-full rounded-full transition-all duration-200"
             style={{ width: `${pct}%`, background: "var(--pi-accent)" }}
           />
         </div>
@@ -200,7 +203,7 @@ export function AskQuestionCard({
           </div>
 
           {currentQ.options.length > 0 && (
-            <div className="divide-y" style={{ borderColor: "var(--pi-hairline)" }}>
+            <div className="space-y-2">
               {currentQ.options.map((opt, idx) => {
                 const active = chosen.includes(opt.label);
                 const { clean, recommended } = splitRecommendedLabel(opt.label);
@@ -210,13 +213,16 @@ export function AskQuestionCard({
                     type="button"
                     disabled={busy}
                     onClick={() => selectOption(currentQ.id, opt.label, currentQ.multiSelect)}
-                    className="flex w-full items-start gap-2.5 rounded-[9px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--pi-hover)]"
+                    className="flex w-full items-start gap-2.5 rounded-[12px] px-3.5 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--pi-hover)] motion-safe:active:scale-[0.99]"
                     style={{
-                      background: active ? "var(--pi-accent-soft)" : "transparent",
+                      background: active ? "var(--pi-accent-soft)" : "var(--pi-canvas)",
+                      border: active
+                        ? "1px solid var(--pi-accent)"
+                        : "1px solid var(--pi-canvas-border)",
                     }}
                   >
                     <span
-                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[11px] font-medium tabular-nums"
+                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium tabular-nums"
                       style={{
                         background: active ? "var(--pi-accent)" : "var(--pi-wash)",
                         color: active ? "var(--pi-on-accent)" : "var(--pi-ink-secondary)",

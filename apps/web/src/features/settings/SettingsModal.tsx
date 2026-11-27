@@ -183,8 +183,8 @@ export function SettingsModal({
           <aside
             className="hidden w-[232px] shrink-0 flex-col overflow-y-auto p-3 sm:flex"
             style={{
-              background: "var(--pi-paper)",
-              borderRight: "0.5px solid var(--pi-hairline)",
+              background: "var(--pi-chrome)",
+              borderRight: "1px solid var(--pi-canvas-border)",
             }}
           >
             <div className="px-2 pt-1 pb-2.5">
@@ -235,9 +235,13 @@ export function SettingsModal({
                             key={item.id}
                             type="button"
                             onClick={() => onSelectTab(item.id)}
-                            className="flex h-8.5 w-full items-center gap-2.5 rounded-[9px] px-2.5 text-left text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                            className="flex h-8.5 w-full items-center gap-2.5 rounded-[9px] px-2.5 text-left text-[13px] font-medium transition-[background-color,border-color,box-shadow] duration-150 hover:bg-[var(--pi-hover)]"
                             style={{
-                              background: active ? "var(--pi-wash)" : "transparent",
+                              background: active ? "var(--pi-canvas)" : "transparent",
+                              border: active
+                                ? "1px solid var(--pi-canvas-border)"
+                                : "1px solid transparent",
+                              boxShadow: active ? "0 1px 2px rgba(0, 0, 0, 0.04)" : "none",
                               color: active ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
                             }}
                           >
@@ -257,9 +261,12 @@ export function SettingsModal({
 
           <div
             className="flex min-w-0 flex-1 flex-col"
-            style={{ background: "var(--pi-surface)" }}
+            style={{ background: "var(--pi-canvas)" }}
           >
-            <div className="flex shrink-0 items-start justify-between gap-3 px-7 pt-6 pb-4">
+            <div
+              className="flex shrink-0 items-start justify-between gap-3 px-7 pt-5 pb-4"
+              style={{ borderBottom: "1px solid var(--pi-canvas-border)" }}
+            >
               <div className="min-w-0">
                 <h2
                   className="text-[20px] leading-tight font-semibold tracking-[-0.02em]"
@@ -298,7 +305,7 @@ export function SettingsModal({
               </DialogPrimitive.Close>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8">
+            <div className="pi-scroll-shadow min-h-0 flex-1 px-7 pt-5 pb-8">
               <div className="mx-auto w-full max-w-[680px]">
                 {settingsError && (
                   <div className="mb-4">

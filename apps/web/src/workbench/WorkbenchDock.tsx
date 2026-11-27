@@ -120,9 +120,11 @@ function NewTabLauncher({
 export function WorkbenchDock({
   showWindowControls = false,
   activeView = "chat",
+  sidebarOpen = true,
 }: {
   showWindowControls?: boolean;
   activeView?: string;
+  sidebarOpen?: boolean;
 }) {
   const { t } = useI18n();
   const open = useWorkbenchStore((s) => s.open);
@@ -145,8 +147,18 @@ export function WorkbenchDock({
   const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
 
   const [resizing, setResizing] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1360,
+  );
   const hasOpenedRef = useRef(open);
   if (open) hasOpenedRef.current = true;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const dragCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -182,9 +194,12 @@ export function WorkbenchDock({
     visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0] ?? null;
 
   const clampDynamicWidth = (raw: number) => {
-    const maxW =
-      typeof window !== "undefined" ? Math.min(720, Math.max(360, window.innerWidth - 420)) : 720;
-    return Math.min(maxW, Math.max(360, Math.round(raw)));
+    const curViewport = typeof window !== "undefined" ? window.innerWidth : viewportWidth;
+    const sidebarReserve = sidebarOpen ? 268 : 64;
+    const available = Math.max(320, curViewport - sidebarReserve - 400);
+    const maxW = Math.min(720, available);
+    const minW = Math.min(360, maxW);
+    return Math.min(maxW, Math.max(minW, Math.round(raw)));
   };
   const effectiveWidth = clampDynamicWidth(width);
 

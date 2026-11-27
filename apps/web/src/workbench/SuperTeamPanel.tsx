@@ -52,7 +52,7 @@ export default function SuperTeamPanel(_props: { context: WorkbenchPanelContext 
 
   const workers = useMemo(() => {
     const list = rawWorkers ?? [];
-    return [...list].sort((a, b) => {
+    return list.toSorted((a, b) => {
       const pa = workerPriority(a);
       const pb = workerPriority(b);
       if (pa !== pb) return pa - pb;

@@ -216,11 +216,14 @@ export const Composer = memo(function Composer({
   }, []);
 
   useEffect(() => {
+    if (typeof CSS !== "undefined" && CSS.supports("field-sizing", "content")) {
+      return undefined;
+    }
     const el = textareaRef.current;
     if (!el) return undefined;
     const raf = requestAnimationFrame(() => {
       el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+      el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
     });
     return () => cancelAnimationFrame(raf);
   }, [composerText]);
@@ -684,8 +687,8 @@ export const Composer = memo(function Composer({
                   ? t("chat.placeholderModEnter")
                   : t("chat.placeholder"))
             }
-            className={`max-h-[160px] w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-[1.55] outline-none placeholder:opacity-55 disabled:opacity-45 ${
-              isHero ? "min-h-[54px]" : "min-h-[34px]"
+            className={`pi-composer-textarea pi-field-auto max-h-[168px] w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-[1.55] placeholder:opacity-55 disabled:opacity-45 ${
+              isHero ? "min-h-[58px]" : "min-h-[36px]"
             }`}
             style={{
               color: composerText.trimStart().startsWith("/") ? "var(--pi-accent)" : "var(--pi-ink)",
@@ -762,7 +765,7 @@ export const Composer = memo(function Composer({
                   onClick={onStop}
                   aria-label={t("chat.stop")}
                   title={t("chat.stop")}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-[opacity,transform] duration-150 hover:opacity-90 motion-safe:active:scale-[0.94]"
                   style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
                 >
                   <BrandIcon name="action/stop" size={15} />
@@ -774,7 +777,7 @@ export const Composer = memo(function Composer({
                   disabled={!canSend}
                   aria-label={t("chat.send")}
                   title={t("chat.send")}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity disabled:opacity-35"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-[opacity,transform] duration-150 hover:opacity-90 motion-safe:active:scale-[0.94] disabled:opacity-35"
                   style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
                 >
                   <BrandIcon name="navigation/arrow_up" size={16} />

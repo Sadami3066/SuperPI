@@ -42,12 +42,12 @@ export function TodoPanel({
   const inProgressItem = visibleTodos.find((item) => item.status === "in_progress");
 
   return (
-    <div className={inline ? "mx-auto mb-2 w-full max-w-[820px]" : "w-full"}>
+    <div className={inline ? "mx-auto mb-2 w-full max-w-[760px]" : "w-full"}>
       <div
-        className="overflow-hidden rounded-[12px]"
+        className="overflow-hidden rounded-[13px]"
         style={{
-          background: "var(--pi-surface)",
-          border: "0.5px solid var(--pi-hairline)",
+          background: "var(--pi-canvas)",
+          border: "1px solid var(--pi-canvas-border)",
         }}
       >
         <button
@@ -127,7 +127,7 @@ export function TodoPanel({
                     <IconButton
                       size="sm"
                       label={t("todo.hideItem")}
-                      className="opacity-0 group-hover:opacity-100"
+                      className="pi-hover-reveal"
                       onClick={() =>
                         setHiddenContents((prev) =>
                           prev.includes(item.content) ? prev : [...prev, item.content],

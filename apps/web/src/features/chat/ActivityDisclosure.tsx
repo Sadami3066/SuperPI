@@ -137,7 +137,7 @@ function ReasoningRow({
     ? "var(--pi-danger)"
     : active
       ? "var(--pi-ink-secondary)"
-      : "color-mix(in srgb, var(--pi-ink-tertiary) 62%, transparent)";
+      : "color-mix(in oklab, var(--pi-ink-tertiary) 62%, transparent)";
 
   return (
     <TimelineRailNode
@@ -369,7 +369,7 @@ function ToolGroupNode({
     ? "var(--pi-danger)"
     : running
       ? "var(--pi-warning)"
-      : "color-mix(in srgb, var(--pi-ink-tertiary) 62%, transparent)";
+      : "color-mix(in oklab, var(--pi-ink-tertiary) 62%, transparent)";
 
   return (
     <TimelineRailNode

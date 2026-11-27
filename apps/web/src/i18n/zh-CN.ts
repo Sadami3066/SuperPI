@@ -49,6 +49,12 @@ export const zhCN = {
 
   "chat.emptyTitle": "准备就绪",
   "chat.emptySubtitle": "输入想法或拖入文件即可开始对话。",
+  "chat.starterExploreLabel": "了解当前目录",
+  "chat.starterExplorePrompt": "帮我快速梳理当前工作目录的结构和主要文件。",
+  "chat.starterWriteLabel": "起草一份文档",
+  "chat.starterWritePrompt": "帮我起草一份结构清晰的说明文档，先跟我确认主题和读者。",
+  "chat.starterReviewLabel": "总结最近进度",
+  "chat.starterReviewPrompt": "查看当前目录最近的改动内容，并整理出要点和建议。",
   "chat.greetingMorning": "早上好，准备开始吧。",
   "chat.greetingAfternoon": "下午好，需要推进什么？",
   "chat.greetingEvening": "傍晚好，随时切入。",
@@ -652,6 +658,7 @@ export const zhCN = {
   "preview.closeTab": "关闭标签页",
   "preview.closeOthers": "关闭其他标签页",
   "code.runInTerminal": "在终端运行",
+  "code.runShort": "运行",
   "code.collapse": "折叠代码块",
   "code.expand": "展开代码块",
 

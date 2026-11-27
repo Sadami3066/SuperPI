@@ -160,13 +160,18 @@ const CodeBlock = memo(function CodeBlock({
   }, [code]);
   const collapsible = !streaming && lineCount > COLLAPSE_LINE_THRESHOLD;
   const isShellCode = /^(bash|sh|shell|zsh)$/i.test(language);
+  const summaryBotId = useSessionStore((s) => s.summariesById[s.activeSessionId]?.botId);
+  const draftBotId = useSessionStore((s) => s.draftBotId);
+  const bots = useBotStore((s) => s.bots);
+  const canRunShell =
+    isShellCode && !bots.find((b) => b.id === (summaryBotId || draftBotId))?.isRemote;
 
   const runInTerminal = () => {
     const client = useConnectionStore.getState().client;
     const activeSessionId = useSessionStore.getState().activeSessionId;
     const summary = useSessionStore.getState().summariesById[activeSessionId];
-    const bots = useBotStore.getState().bots;
-    const bot = bots.find((b) => b.id === summary?.botId) ?? bots[0];
+    const currentBots = useBotStore.getState().bots;
+    const bot = currentBots.find((b) => b.id === summary?.botId) ?? currentBots[0];
     if (!client || !bot || bot.isRemote) return;
     const workbench = useWorkbenchStore.getState();
     const worktreeId = workbench.activeWorktreeByBot[bot.id] ?? summary?.worktreeId ?? null;
@@ -189,12 +194,12 @@ const CodeBlock = memo(function CodeBlock({
           className="my-3 overflow-hidden rounded-[12px]"
           style={{
             background: "var(--pi-code-bg)",
-            border: "0.5px solid var(--pi-surface-rim)",
+            border: "1px solid var(--pi-canvas-border)",
           }}
         >
           <div
             className="flex items-center justify-between px-3.5 py-1.5"
-            style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
+            style={{ borderBottom: "1px solid var(--pi-canvas-border)" }}
           >
             <div className="flex items-center gap-2">
               <span
@@ -210,6 +215,18 @@ const CodeBlock = memo(function CodeBlock({
               )}
             </div>
             <div className="flex items-center gap-1">
+              {canRunShell && (
+                <button
+                  type="button"
+                  onClick={runInTerminal}
+                  title={t("code.runInTerminal")}
+                  className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--pi-hover)] hover:text-[var(--pi-ink)]"
+                  style={{ color: "var(--pi-ink-tertiary)" }}
+                >
+                  <BrandIcon name="system/terminal" size={12.5} />
+                  <span>{t("code.runShort")}</span>
+                </button>
+              )}
               {collapsible && (
                 <button
                   type="button"
@@ -243,10 +260,11 @@ const CodeBlock = memo(function CodeBlock({
                   timerRef.current = setTimeout(() => setCopied(false), 1200);
                 }}
                 aria-label={t("chat.copy")}
-                className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
-                style={{ color: "var(--pi-ink-tertiary)" }}
+                className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--pi-hover)] hover:text-[var(--pi-ink)]"
+                style={{ color: copied ? "var(--pi-success)" : "var(--pi-ink-tertiary)" }}
               >
-                {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
+                {copied ? <BrandIcon name="status/confirm" size={13.5} /> : <BrandIcon name="action/copy" size={13.5} />}
+                {copied && <span>{t("chat.copied")}</span>}
               </button>
             </div>
           </div>

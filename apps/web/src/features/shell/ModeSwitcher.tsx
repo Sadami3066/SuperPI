@@ -34,7 +34,7 @@ export function ModeSwitcher({
     <div
       role="tablist"
       aria-label="Workspace mode"
-      className="pi-no-drag relative grid h-[30px] w-[184px] shrink-0 grid-cols-2 items-center rounded-full p-[2px] select-none"
+      className="pi-no-drag relative grid h-[30px] w-[168px] shrink-0 grid-cols-2 items-center rounded-full p-[2px] select-none"
       style={{
         background: "var(--pi-wash)",
         border: "1px solid var(--pi-canvas-border)",

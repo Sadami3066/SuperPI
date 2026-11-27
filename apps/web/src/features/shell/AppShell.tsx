@@ -378,7 +378,11 @@ export function AppShell() {
           </div>
         </main>
 
-        <WorkbenchDock showWindowControls={workbenchOpen} activeView={activeView} />
+        <WorkbenchDock
+          showWindowControls={workbenchOpen}
+          activeView={activeView}
+          sidebarOpen={sidebarOpen}
+        />
       </div>
 
       <SettingsModal

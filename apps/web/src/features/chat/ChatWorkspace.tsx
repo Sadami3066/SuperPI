@@ -19,7 +19,7 @@ import { draftComposerKey, useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
-import { Button, Dialog, IconButton, NoticeBar, Popover } from "../../ui";
+import { Button, ChatLoadingSkeleton, Dialog, IconButton, NoticeBar, Popover } from "../../ui";
 import { BotAvatar, BrandIcon, PiMascot } from "../shared/BrandAssets";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { WindowControls } from "../shell/WindowControls";
@@ -127,6 +127,8 @@ export function ChatWorkspace({
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
   const pendingApprovals = useSessionStore((s) => s.pendingApprovals);
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
+  const setComposerText = useSessionStore((s) => s.setComposerText);
+  const requestComposerFocus = useSessionStore((s) => s.requestComposerFocus);
   const loadSession = useSessionStore((s) => s.loadSession);
   const selectSession = useSessionStore((s) => s.selectSession);
   const setDraftModel = useSessionStore((s) => s.setDraftModel);
@@ -309,7 +311,7 @@ export function ChatWorkspace({
           .then((list) => {
             const matched =
               list.find((c) => c.turnIndex === turnIndex) ??
-              [...list].reverse().find((c) => c.turnIndex <= turnIndex) ??
+              list.findLast((c) => c.turnIndex <= turnIndex) ??
               null;
             setRewindCheckpoint(matched);
           })
@@ -361,6 +363,23 @@ export function ChatWorkspace({
   );
 
   const turns = useMemo(() => transcript?.turns ?? [], [transcript?.turns]);
+
+  const workspaceShortName = useMemo(() => {
+    const raw = activeBot?.cwd?.trim();
+    if (!raw) return "";
+    const clean = raw.replace(/[\\/]+$/, "");
+    const parts = clean.split(/[\\/]/);
+    return parts[parts.length - 1] || clean;
+  }, [activeBot?.cwd]);
+
+  const starterChips = useMemo(
+    () => [
+      { label: t("chat.starterExploreLabel"), prompt: t("chat.starterExplorePrompt") },
+      { label: t("chat.starterWriteLabel"), prompt: t("chat.starterWritePrompt") },
+      { label: t("chat.starterReviewLabel"), prompt: t("chat.starterReviewPrompt") },
+    ],
+    [t],
+  );
 
   if (!activeBot) {
     return null;
@@ -519,16 +538,16 @@ export function ChatWorkspace({
       }}
     >
       <header
-        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-4"
+        className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-4"
         style={{
           paddingRight: showWindowControls && isFrameless ? 0 : 12,
-          borderBottom: "0.5px solid var(--pi-hairline)",
+          borderBottom: "1px solid var(--pi-canvas-border)",
         }}
         onDoubleClick={() => {
           if (isFrameless) void windowToggleMaximize();
         }}
       >
-        <div className="pi-no-drag flex min-w-0 items-center gap-2">
+        <div className="pi-no-drag flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <ModeSwitcher activeView={activeView} onChange={onChangeView} />
 
           <button
@@ -562,6 +581,7 @@ export function ChatWorkspace({
                 setEditingTitle(false);
               }}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter") {
                   if (client && titleDraft.trim() && titleDraft.trim() !== summary.title) {
                     void renameSession(client, summary.id, titleDraft);
@@ -692,9 +712,57 @@ export function ChatWorkspace({
       {isHeroEmpty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10">
           <div className="flex w-full max-w-[680px] flex-col items-center">
-            <PiMascot mood="wave" size={64} dark={dark} className="mb-3" />
+            <PiMascot mood="wave" size={62} dark={dark} className="mb-3" />
+            <div
+              className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full px-3 py-1 text-[12px]"
+              style={{
+                background: "var(--pi-chrome)",
+                border: "1px solid var(--pi-canvas-border)",
+                color: "var(--pi-ink-secondary)",
+              }}
+            >
+              <BotAvatar
+                avatar={activeBot.avatar}
+                name={activeBot.name}
+                isHome={activeBot.isHome}
+                isRemote={activeBot.isRemote}
+                dark={dark}
+                size={16}
+              />
+              <span className="truncate font-medium" style={{ color: "var(--pi-ink)" }}>
+                {activeBot.name}
+              </span>
+              {activeBot.isRemote && activeBot.deviceName ? (
+                <>
+                  <span style={{ color: "var(--pi-ink-tertiary)" }}>·</span>
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{
+                      background: activeBot.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                    }}
+                  />
+                  <span className="truncate" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {activeBot.deviceName}
+                  </span>
+                </>
+              ) : (
+                workspaceShortName && (
+                  <>
+                    <span style={{ color: "var(--pi-ink-tertiary)" }}>·</span>
+                    <BrandIcon
+                      name="file/folder_closed"
+                      size={12.5}
+                      style={{ color: "var(--pi-ink-tertiary)" }}
+                    />
+                    <span className="truncate" style={{ color: "var(--pi-ink-tertiary)" }}>
+                      {workspaceShortName}
+                    </span>
+                  </>
+                )
+              )}
+            </div>
             <h1
-              className="mb-5 text-center text-[24px] font-semibold tracking-[-0.02em]"
+              className="mb-5 text-center text-[25px] font-semibold tracking-[-0.025em]"
               style={{ color: "var(--pi-ink)" }}
             >
               {userNickname
@@ -703,6 +771,29 @@ export function ChatWorkspace({
             </h1>
             {slashStatusBar}
             {composerElement("hero")}
+            {!remoteOffline && (
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                {starterChips.map((chip) => (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    onClick={() => {
+                      if (!composerKey) return;
+                      setComposerText(composerKey, chip.prompt);
+                      requestComposerFocus();
+                    }}
+                    className="rounded-full px-3.5 py-1.5 text-[12px] font-medium transition-[background-color,border-color,color,transform] duration-150 hover:bg-[var(--pi-hover)] hover:text-[var(--pi-ink)] motion-safe:active:scale-[0.97]"
+                    style={{
+                      background: "var(--pi-chrome)",
+                      border: "1px solid var(--pi-canvas-border)",
+                      color: "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       ) : !transcript && sessionLoadError ? (
@@ -730,14 +821,8 @@ export function ChatWorkspace({
         </>
       ) : !transcript && isLoadingSession ? (
         <>
-          <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-            <div
-              className="flex items-center gap-2 text-[13px]"
-              style={{ color: "var(--pi-ink-tertiary)" }}
-            >
-              <IconLoader2 size={15} className="animate-spin" style={{ color: "var(--pi-accent)" }} />
-              <span>{t("common.loading")}</span>
-            </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ChatLoadingSkeleton />
           </div>
           {composerElement("docked")}
         </>

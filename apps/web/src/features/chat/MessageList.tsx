@@ -164,8 +164,8 @@ export function MessageList({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} className="pi-chat-gutter min-h-0 flex-1 overflow-y-auto">
-        <div ref={contentRef} className="mx-auto w-full max-w-[740px] pt-4 pb-16">
+      <div ref={scrollRef} className="pi-chat-gutter pi-scroll-shadow min-h-0 flex-1">
+        <div ref={contentRef} className="mx-auto w-full max-w-[760px] pt-4 pb-16">
           {(hasMoreEarlier || Boolean(earlierError)) && onLoadEarlier && (
             <div className="mb-3 flex flex-col items-center gap-1.5">
               {hasMoreEarlier && (
@@ -272,16 +272,16 @@ export function MessageList({
       </div>
 
       <div
-        className="pointer-events-none absolute top-0 right-0 left-0 z-10 h-3.5"
+        className="pointer-events-none absolute top-0 right-0 left-0 z-10 h-3"
         style={{
-          background: "linear-gradient(to bottom, var(--pi-surface), transparent)",
+          background: "linear-gradient(to bottom, var(--pi-canvas), transparent)",
         }}
       />
 
       <div
-        className="pointer-events-none absolute right-0 bottom-0 left-0 z-10 h-6"
+        className="pointer-events-none absolute right-0 bottom-0 left-0 z-10 h-5"
         style={{
-          background: "linear-gradient(to top, var(--pi-surface), transparent)",
+          background: "linear-gradient(to top, var(--pi-canvas), transparent)",
         }}
       />
 
@@ -291,11 +291,11 @@ export function MessageList({
           onClick={snapToBottom}
           aria-label={t("chat.jumpBottom")}
           title={t("chat.jumpBottom")}
-          className="absolute bottom-3 left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full transition-transform duration-150 hover:scale-105"
+          className="absolute bottom-3 left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full transition-transform duration-150 hover:scale-105 motion-safe:active:scale-[0.95]"
           style={{
-            background: "var(--pi-surface)",
+            background: "var(--pi-canvas)",
             color: "var(--pi-ink)",
-            border: "0.5px solid var(--pi-surface-rim)",
+            border: "1px solid var(--pi-canvas-border)",
             boxShadow: "var(--pi-composer-shadow)",
           }}
         >

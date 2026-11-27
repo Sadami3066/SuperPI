@@ -51,6 +51,12 @@ export const en: Record<I18nKey, string> = {
 
   "chat.emptyTitle": "Ready when you are",
   "chat.emptySubtitle": "Share an idea or drop files to get started.",
+  "chat.starterExploreLabel": "Explore workspace",
+  "chat.starterExplorePrompt": "Give me a clear overview of the files and structure in this workspace.",
+  "chat.starterWriteLabel": "Draft a document",
+  "chat.starterWritePrompt": "Help me draft a clear, structured document—ask me who it's for and the key points first.",
+  "chat.starterReviewLabel": "Summarize recent work",
+  "chat.starterReviewPrompt": "Review recent changes in this workspace and summarize key takeaways.",
   "chat.greetingMorning": "Good morning. Ready when you are.",
   "chat.greetingAfternoon": "Good afternoon. What are we working on?",
   "chat.greetingEvening": "Good evening. Ready to dive in.",
@@ -654,6 +660,7 @@ export const en: Record<I18nKey, string> = {
   "preview.closeTab": "Close tab",
   "preview.closeOthers": "Close other tabs",
   "code.runInTerminal": "Run in Terminal",
+  "code.runShort": "Run",
   "code.collapse": "Collapse code",
   "code.expand": "Expand code",
 

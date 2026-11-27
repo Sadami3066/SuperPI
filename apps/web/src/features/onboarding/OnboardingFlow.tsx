@@ -75,7 +75,7 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
 
   const visibleProviders = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const sorted = [...providers].sort((a, b) => {
+    const sorted = providers.toSorted((a, b) => {
       if (a.configured !== b.configured) return a.configured ? -1 : 1;
       const aRank = FEATURED_PROVIDER_IDS.indexOf(a.id);
       const bRank = FEATURED_PROVIDER_IDS.indexOf(b.id);

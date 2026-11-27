@@ -159,7 +159,7 @@ export function SuperWorkspace({
 
   const workers = useMemo(() => {
     const list = state?.workers ?? [];
-    return [...list].sort((a, b) => {
+    return list.toSorted((a, b) => {
       const pa = workerPriority(a);
       const pb = workerPriority(b);
       if (pa !== pb) return pa - pb;
@@ -348,16 +348,16 @@ export function SuperWorkspace({
       }}
     >
       <header
-        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-4"
+        className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-4"
         style={{
           paddingRight: showWindowControls && isFrameless ? 0 : 12,
-          borderBottom: "0.5px solid var(--pi-hairline)",
+          borderBottom: "1px solid var(--pi-canvas-border)",
         }}
         onDoubleClick={() => {
           if (isFrameless) void windowToggleMaximize();
         }}
       >
-        <div className="pi-no-drag flex min-w-0 items-center gap-2 whitespace-nowrap">
+        <div className="pi-no-drag flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap">
           <ModeSwitcher activeView={activeView} onChange={onChangeView} />
           {runningWorkersCount > 0 && (
             <Badge tone="accent">
@@ -426,8 +426,8 @@ export function SuperWorkspace({
         <div
           className="flex shrink-0 items-center justify-between gap-2 px-4 py-1.5"
           style={{
-            background: "var(--pi-paper)",
-            borderBottom: "0.5px solid var(--pi-hairline)",
+            background: "var(--pi-chrome)",
+            borderBottom: "1px solid var(--pi-canvas-border)",
           }}
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">

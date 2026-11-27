@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { IconCheck } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import {
   FONT_STYLES,
+  resolveThemePalette,
   THEME_PRESETS,
   type AppearanceMode,
   type FontStyleId,
-  type ThemePresetId,
+  type ThemePresetDefinition,
 } from "../../platform/theme";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -94,6 +96,88 @@ function ModePreviewCard({
   );
 }
 
+function ThemePresetCard({
+  preset,
+  appearance,
+  systemDark,
+  selected,
+  locale,
+  onClick,
+}: {
+  preset: ThemePresetDefinition;
+  appearance: AppearanceMode;
+  systemDark: boolean;
+  selected: boolean;
+  locale: "zh-CN" | "en";
+  onClick: () => void;
+}) {
+  const previewDark = preset.fixedMode
+    ? preset.fixedMode === "dark"
+    : appearance === "dark" || (appearance === "system" && systemDark);
+  const p = previewDark ? preset.dark : preset.light;
+  const title = locale === "en" ? preset.nameEn : preset.nameZh;
+  const cardBorder = previewDark ? "rgba(255,255,255,0.12)" : "rgba(17,17,19,0.09)";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className="group flex flex-col gap-2 rounded-[12px] p-2 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 hover:bg-[var(--pi-hover)] motion-safe:active:scale-[0.985]"
+      style={{
+        background: selected ? "var(--pi-chrome)" : "transparent",
+        border: selected ? "1.5px solid var(--pi-accent)" : "1px solid var(--pi-canvas-border)",
+        boxShadow: selected ? "0 0 0 2px var(--pi-accent-soft)" : "none",
+      }}
+    >
+      <div
+        className="flex h-[58px] w-full overflow-hidden rounded-[8px] p-1.5"
+        style={{ background: p.paper, border: `1px solid ${cardBorder}` }}
+      >
+        <div className="flex w-7 shrink-0 flex-col justify-between pr-1.5">
+          <div className="space-y-1">
+            <div className="h-1.5 w-4 rounded-full" style={{ background: p.inkTertiary, opacity: 0.55 }} />
+            <div className="h-1 w-5 rounded-full" style={{ background: p.inkTertiary, opacity: 0.3 }} />
+            <div className="h-1 w-3.5 rounded-full" style={{ background: p.inkTertiary, opacity: 0.3 }} />
+          </div>
+          <div className="h-1.5 w-3 rounded-full" style={{ background: p.accent, opacity: 0.7 }} />
+        </div>
+        <div
+          className="flex min-w-0 flex-1 flex-col justify-between rounded-[6px] p-1.5"
+          style={{ background: p.surface, border: `1px solid ${cardBorder}` }}
+        >
+          <div className="ml-auto h-2 w-8 rounded-full" style={{ background: p.wash }} />
+          <div className="space-y-1">
+            <div className="h-1 w-10 rounded-full" style={{ background: p.ink, opacity: 0.65 }} />
+            <div className="h-1 w-7 rounded-full" style={{ background: p.inkTertiary, opacity: 0.45 }} />
+          </div>
+          <div className="flex items-center justify-between pt-0.5">
+            <div className="h-1.5 w-6 rounded-full" style={{ background: p.wash }} />
+            <div className="h-2.5 w-5 rounded-full" style={{ background: p.accent }} />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-1 px-0.5">
+        <span
+          className="truncate text-[12px] font-medium"
+          style={{ color: selected ? "var(--pi-ink)" : "var(--pi-ink-secondary)" }}
+        >
+          {title}
+        </span>
+        {selected && (
+          <span
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+            style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
+          >
+            <IconCheck size={10.5} stroke={2.5} />
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
 export function AppearanceSettings() {
   const { t, locale } = useI18n();
   const client = useConnectionStore((s) => s.client);
@@ -119,16 +203,14 @@ export function AppearanceSettings() {
     }
   }, [hostSettings]);
 
+  const systemDark =
+    typeof window !== "undefined" &&
+    Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+
   const activePreset = THEME_PRESETS[themePreset];
-  const presetOptions = useMemo(
-    () =>
-      (Object.values(THEME_PRESETS) as Array<(typeof THEME_PRESETS)[ThemePresetId]>).map(
-        (preset) => ({
-          value: preset.id,
-          label: locale === "en" ? preset.nameEn : preset.nameZh,
-        }),
-      ),
-    [locale],
+  const presetDefinitions = useMemo(
+    () => Object.values(THEME_PRESETS) as ThemePresetDefinition[],
+    [],
   );
 
   const fontOptions = useMemo(
@@ -140,8 +222,8 @@ export function AppearanceSettings() {
     [locale],
   );
 
-  const effectiveHex =
-    customAccent ?? (activePreset?.light.accent ?? "#141416");
+  const activePalette = resolveThemePalette(themePreset, appearance);
+  const effectiveHex = customAccent ?? activePalette.accent;
 
   return (
     <div className="space-y-8">
@@ -185,7 +267,7 @@ export function AppearanceSettings() {
             </div>
           )}
 
-          <div className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
+          <div className="space-y-3 py-4">
             <div className="min-w-0">
               <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
                 {t("settings.themePreset")}
@@ -195,28 +277,18 @@ export function AppearanceSettings() {
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              <div className="flex items-center -space-x-1">
-                <span
-                  className="h-4 w-4 rounded-full border border-black/15"
-                  style={{
-                    background:
-                      activePreset?.fixedMode === "dark"
-                        ? activePreset.dark.paper
-                        : activePreset?.light.paper,
-                  }}
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {presetDefinitions.map((preset) => (
+                <ThemePresetCard
+                  key={preset.id}
+                  preset={preset}
+                  appearance={appearance}
+                  systemDark={systemDark}
+                  selected={themePreset === preset.id}
+                  locale={locale}
+                  onClick={() => setThemePreset(preset.id)}
                 />
-                <span
-                  className="h-4 w-4 rounded-full border border-black/15"
-                  style={{ background: "var(--pi-accent)" }}
-                />
-              </div>
-              <Select
-                value={themePreset}
-                onValueChange={(v) => setThemePreset(v as ThemePresetId)}
-                options={presetOptions}
-                className="w-[176px]"
-              />
+              ))}
             </div>
           </div>
 
@@ -269,15 +341,18 @@ export function AppearanceSettings() {
               <label
                 className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-[8px] px-2 text-[11.5px]"
                 style={{
-                  background: "var(--pi-paper)",
-                  border: "0.5px solid var(--pi-hairline)",
+                  background: "var(--pi-chrome)",
+                  border: "1px solid var(--pi-canvas-border)",
                   color: "var(--pi-ink-secondary)",
                   fontFamily: "var(--pi-font-mono)",
                 }}
               >
                 <span
-                  className="h-3.5 w-3.5 rounded-full border border-black/15"
-                  style={{ background: effectiveHex }}
+                  className="h-3.5 w-3.5 rounded-full"
+                  style={{
+                    background: effectiveHex,
+                    border: "1px solid var(--pi-canvas-border)",
+                  }}
                 />
                 <input
                   type="color"
