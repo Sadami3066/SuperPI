@@ -217,6 +217,8 @@ data class ChatScreenActions(
     val onToggleMemoryExcluded: () -> Unit = {},
     val onDismissError: () -> Unit = {},
     val onRetryLoad: () -> Unit = {},
+    val onRewindMessage: ((Long) -> Unit)? = null,
+    val onForkMessage: ((Long) -> Unit)? = null,
 )
 
 data class ChatScreenOverlay(
@@ -633,6 +635,10 @@ fun ChatScreen(
                                 contentAlignment = Alignment.TopCenter,
                             ) {
                                 Box(Modifier.widthIn(max = 780.dp).fillMaxWidth()) {
+                                    val localHistoryActionsAllowed = remoteBot == null &&
+                                        !state.sending &&
+                                        !state.reloading &&
+                                        !state.switchingConversation
                                     ChatTurn(
                                         message = message,
                                         onToggleStep = { stepId -> onToggleStep(message.id, stepId) },
@@ -655,6 +661,8 @@ fun ChatScreen(
                                         } else {
                                             null
                                         },
+                                        onRewind = actions.onRewindMessage?.takeIf { localHistoryActionsAllowed },
+                                        onFork = actions.onForkMessage?.takeIf { localHistoryActionsAllowed },
                                     )
                                 }
                             }

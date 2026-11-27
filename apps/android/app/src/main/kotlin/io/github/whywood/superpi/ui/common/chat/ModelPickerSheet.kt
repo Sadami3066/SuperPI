@@ -68,7 +68,6 @@ internal fun ModelPickerSheet(
 ) {
     val colors = superPiColors()
     var showProviders by remember { mutableStateOf(false) }
-    var showThinking by remember { mutableStateOf(false) }
     val showThinkingRow = !loading && configured && thinkingLevels.any { it != ThinkingLevel.OFF }
     DdSheet(onDismiss = onDismiss) {
         DdSheetHeader(
@@ -137,39 +136,11 @@ internal fun ModelPickerSheet(
                             DdRowDivider(leadingInset = DdSpacing.Lg)
                         }
                         if (showThinkingRow) {
-                            DdDropdown(
-                                expanded = showThinking,
-                                onDismissRequest = { showThinking = false },
-                                anchor = {
-                                    PickerHeaderRow(
-                                        title = stringResource(R.string.assistant_thinking_sheet),
-                                        value = thinkingLabel(thinkingLevel),
-                                        valueMaxWidth = 140.dp,
-                                        onClick = { showThinking = true },
-                                        modifier = Modifier.testTag("assistant_thinking_row"),
-                                    )
-                                },
-                            ) {
-                                thinkingLevels.forEach { level ->
-                                    DdMenuItem(
-                                        text = thinkingLabel(level),
-                                        onClick = {
-                                            showThinking = false
-                                            onDismiss()
-                                            onThinkingLevelChange(level)
-                                        },
-                                        selected = level == thinkingLevel,
-                                        trailing = if (level == thinkingLevel) {
-                                            {
-                                                DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp)
-                                            }
-                                        } else {
-                                            null
-                                        },
-                                        testTag = "assistant_thinking_${level.name.lowercase()}",
-                                    )
-                                }
-                            }
+                            ThinkingEffortSlider(
+                                levels = thinkingLevels,
+                                value = thinkingLevel,
+                                onChange = onThinkingLevelChange,
+                            )
                         }
                     }
                     Spacer(Modifier.height(DdSpacing.Md))

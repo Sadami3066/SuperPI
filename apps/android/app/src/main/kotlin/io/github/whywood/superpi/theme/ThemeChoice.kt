@@ -1,5 +1,7 @@
 package io.github.whywood.superpi.theme
 
+import io.github.whywood.superpi.design.DdThemeVisualFamily
+
 enum class ThemeAppearanceMode(val key: String) {
     SYSTEM("system"),
     LIGHT("light"),
@@ -24,22 +26,64 @@ sealed interface ThemeChoice {
         override val key: String = "pi"
     }
 
-    data object Paper : ThemeChoice {
-        override val key: String = "paper"
+    data object TokyoNight : ThemeChoice {
+        override val key: String = "tokyo-night"
     }
 
-    data object Slate : ThemeChoice {
-        override val key: String = "slate"
+    data object NightOwl : ThemeChoice {
+        override val key: String = "night-owl"
+    }
+
+    data object Catppuccin : ThemeChoice {
+        override val key: String = "catppuccin"
+    }
+
+    data object Nord : ThemeChoice {
+        override val key: String = "nord"
+    }
+
+    data object RosePine : ThemeChoice {
+        override val key: String = "rose-pine"
+    }
+
+    data object Gruvbox : ThemeChoice {
+        override val key: String = "gruvbox"
+    }
+
+    data object Dracula : ThemeChoice {
+        override val key: String = "dracula"
+    }
+
+    data object Solarized : ThemeChoice {
+        override val key: String = "solarized"
     }
 
     data class Pack(val pluginId: String, val themeId: String) : ThemeChoice {
         override val key: String = "$PACK_PREFIX$pluginId/$themeId"
     }
 
+    fun visualFamily(): DdThemeVisualFamily = when (this) {
+        Pi -> DdThemeVisualFamily.MONO
+        TokyoNight, Catppuccin, Dracula -> DdThemeVisualFamily.VIOLET
+        NightOwl, Nord, Solarized -> DdThemeVisualFamily.OCEAN
+        Gruvbox, RosePine -> DdThemeVisualFamily.WARM
+        is Pack -> DdThemeVisualFamily.CUSTOM
+    }
+
     companion object {
         const val PACK_PREFIX: String = "pack:"
 
-        val builtIn: List<ThemeChoice> = listOf(Pi, Paper, Slate)
+        val builtIn: List<ThemeChoice> = listOf(
+            Pi,
+            TokyoNight,
+            NightOwl,
+            Catppuccin,
+            Nord,
+            RosePine,
+            Gruvbox,
+            Dracula,
+            Solarized,
+        )
 
         fun parse(raw: String?): ThemeChoice = fromKey(raw) ?: Pi
 
@@ -47,8 +91,14 @@ sealed interface ThemeChoice {
             if (raw.isNullOrBlank()) return null
             return when (raw) {
                 Pi.key -> Pi
-                Paper.key -> Paper
-                Slate.key, "classic", "santorini", "oceanic" -> Slate
+                TokyoNight.key, "classic", "classic-blue" -> TokyoNight
+                NightOwl.key, "oceanic" -> NightOwl
+                Catppuccin.key -> Catppuccin
+                Nord.key, "slate" -> Nord
+                RosePine.key -> RosePine
+                Gruvbox.key, "paper" -> Gruvbox
+                Dracula.key -> Dracula
+                Solarized.key, "santorini" -> Solarized
                 else -> pack(raw)
             }
         }

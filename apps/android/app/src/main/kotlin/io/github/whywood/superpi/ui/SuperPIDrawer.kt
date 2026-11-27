@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -87,7 +88,10 @@ import io.github.whywood.superpi.design.DdText
 import io.github.whywood.superpi.design.DdTextAction
 import io.github.whywood.superpi.design.DdType
 import io.github.whywood.superpi.design.LocalDdMotionEnabled
+import io.github.whywood.superpi.design.LocalDdThemeVisualFamily
 import io.github.whywood.superpi.design.superPiColors
+import io.github.whywood.superpi.ui.common.resolveSuperModePillStyle
+import io.github.whywood.superpi.ui.common.superModeShimmer
 import io.github.whywood.superpi.runtime.BotBlueprint
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
@@ -1897,16 +1901,21 @@ private fun DrawerModeSegmentedSwitcher(
     modifier: Modifier = Modifier,
 ) {
     val colors = superPiColors()
+    val family = LocalDdThemeVisualFamily.current
     val motionEnabled = LocalDdMotionEnabled.current
     val options = remember { listOf(AppMode.NORMAL, AppMode.SUPER) }
-    val selectedIndex = if (appMode == AppMode.SUPER) 1 else 0
+    val isSuper = appMode == AppMode.SUPER
+    val selectedIndex = if (isSuper) 1 else 0
     val animatedIndex by animateFloatAsState(
         targetValue = selectedIndex.toFloat(),
         animationSpec = if (motionEnabled) DdMotion.SegmentedSpring else snap(),
         label = "drawer-mode-segment",
     )
+    val superPillStyle = remember(family, colors) {
+        resolveSuperModePillStyle(family, colors)
+    }
     val contentDesc = stringResource(
-        if (appMode == AppMode.SUPER) {
+        if (isSuper) {
             R.string.super_mode_switch_to_normal
         } else {
             R.string.super_mode_switch_to_super
@@ -1930,14 +1939,32 @@ private fun DrawerModeSegmentedSwitcher(
                 .graphicsLayer { translationX = size.width * animatedIndex * directionSign }
                 .padding(3.dp)
                 .then(
-                    if (colors.dark) {
-                        Modifier.border(0.75.dp, colors.surfaceRim, CircleShape)
+                    if (isSuper) {
+                        Modifier
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = CircleShape,
+                                ambientColor = superPillStyle.glow,
+                                spotColor = superPillStyle.glow,
+                                clip = false,
+                            )
+                            .clip(CircleShape)
+                            .background(Brush.horizontalGradient(superPillStyle.gradient))
+                            .border(0.75.dp, Color.White.copy(alpha = 0.24f), CircleShape)
+                            .superModeShimmer(active = true, motionEnabled = motionEnabled)
                     } else {
-                        Modifier.shadow(2.dp, CircleShape, clip = false)
+                        Modifier
+                            .then(
+                                if (colors.dark) {
+                                    Modifier.border(0.75.dp, colors.surfaceRim, CircleShape)
+                                } else {
+                                    Modifier.shadow(2.dp, CircleShape, clip = false)
+                                },
+                            )
+                            .clip(CircleShape)
+                            .background(thumbColor)
                     },
-                )
-                .clip(CircleShape)
-                .background(thumbColor),
+                ),
         )
         Row(
             Modifier
@@ -1947,8 +1974,13 @@ private fun DrawerModeSegmentedSwitcher(
         ) {
             options.forEachIndexed { index, option ->
                 val isSelected = index == selectedIndex
+                val targetTextColor = when {
+                    isSelected && option == AppMode.SUPER -> Color(0xFFFAFAFC)
+                    isSelected -> colors.ink
+                    else -> colors.inkTertiary
+                }
                 val textColor by animateColorAsState(
-                    targetValue = if (isSelected) colors.ink else colors.inkTertiary,
+                    targetValue = targetTextColor,
                     animationSpec = if (motionEnabled) tween(DdMotion.FAST, easing = DdMotion.EaseOut) else snap(),
                     label = "drawer-mode-text-$index",
                 )
@@ -1967,17 +1999,27 @@ private fun DrawerModeSegmentedSwitcher(
                     contentAlignment = Alignment.Center,
                 ) {
                     if (option == AppMode.SUPER) {
-                        Text(
-                            text = "Super PI",
-                            style = DdType.chip.copy(
-                                fontSize = 12.5.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            ),
-                            color = textColor,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            DdIcon(
+                                icon = DdIcons.Sparkles,
+                                tint = textColor,
+                                size = 13.dp,
+                            )
+                            Text(
+                                text = "Super PI",
+                                style = DdType.chip.copy(
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                ),
+                                color = textColor,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     } else {
                         Text(
                             text = "PI",

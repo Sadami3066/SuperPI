@@ -20,7 +20,9 @@ object ThemePaletteCodec {
         val values = raw.substringAfter(';', "").split(',').map { value ->
             value.toULongOrNull(16) ?: return null
         }
-        if (values.size != 25) return null
+        if (values.size != 25 && values.size != 27) return null
+        val accentSoft = Color(values[9].toLong())
+        val hairline = Color(values[13].toLong())
         return SuperPIColors(
             dark = dark,
             paper = Color(values[0].toLong()),
@@ -32,11 +34,11 @@ object ThemePaletteCodec {
             accent = Color(values[6].toLong()),
             accentPressed = Color(values[7].toLong()),
             onAccent = Color(values[8].toLong()),
-            accentSoft = Color(values[9].toLong()),
+            accentSoft = accentSoft,
             danger = Color(values[10].toLong()),
             success = Color(values[11].toLong()),
             warning = Color(values[12].toLong()),
-            hairline = Color(values[13].toLong()),
+            hairline = hairline,
             wash = Color(values[14].toLong()),
             composer = Color(values[15].toLong()),
             scrim = Color(values[16].toLong()),
@@ -48,6 +50,8 @@ object ThemePaletteCodec {
             codeNumber = Color(values[22].toLong()),
             codeFunction = Color(values[23].toLong()),
             codeType = Color(values[24].toLong()),
+            userBubble = if (values.size >= 27) Color(values[25].toLong()) else accentSoft,
+            userBubbleBorder = if (values.size >= 27) Color(values[26].toLong()) else hairline,
         )
     }
 
@@ -77,5 +81,7 @@ object ThemePaletteCodec {
         codeNumber,
         codeFunction,
         codeType,
+        userBubble,
+        userBubbleBorder,
     )
 }

@@ -1476,6 +1476,33 @@ internal fun AppShell(
                                 }
                             }
                         },
+                        onRewindMessage = if (remoteWs == null) {
+                            { messageId ->
+                                chatViewModel.rewindToUserMessage(messageId) { ok ->
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) R.string.chat_rewind_done else R.string.chat_rewind_failed,
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                        onForkMessage = if (remoteWs == null) {
+                            { messageId ->
+                                val suffix = context.getString(R.string.chat_fork_suffix)
+                                chatViewModel.forkFromMessage(messageId, suffix) { ok ->
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) R.string.chat_fork_done else R.string.chat_fork_failed,
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        } else {
+                            null
+                        },
                     ),
                     overlay = ChatScreenOverlay(
                         reminderCount = reminderCount,

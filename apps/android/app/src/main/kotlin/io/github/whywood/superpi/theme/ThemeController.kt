@@ -36,8 +36,14 @@ data class ThemeOption(
 object ThemePalettes {
     fun of(choice: ThemeChoice, dark: Boolean): SuperPIColors = when (choice) {
         ThemeChoice.Pi -> if (dark) DdTheme.darkPi() else DdTheme.lightPi()
-        ThemeChoice.Paper -> if (dark) DdTheme.darkPaper() else DdTheme.lightPaper()
-        ThemeChoice.Slate -> if (dark) DdTheme.darkSlate() else DdTheme.lightSlate()
+        ThemeChoice.TokyoNight -> if (dark) DdTheme.darkTokyoNight() else DdTheme.lightTokyoNight()
+        ThemeChoice.NightOwl -> if (dark) DdTheme.darkNightOwl() else DdTheme.lightNightOwl()
+        ThemeChoice.Catppuccin -> if (dark) DdTheme.darkCatppuccin() else DdTheme.lightCatppuccin()
+        ThemeChoice.Nord -> if (dark) DdTheme.darkNord() else DdTheme.lightNord()
+        ThemeChoice.RosePine -> if (dark) DdTheme.darkRosePine() else DdTheme.lightRosePine()
+        ThemeChoice.Gruvbox -> if (dark) DdTheme.darkGruvbox() else DdTheme.lightGruvbox()
+        ThemeChoice.Dracula -> if (dark) DdTheme.darkDracula() else DdTheme.lightDracula()
+        ThemeChoice.Solarized -> if (dark) DdTheme.darkSolarized() else DdTheme.lightSolarized()
         is ThemeChoice.Pack -> if (dark) DdTheme.darkPi() else DdTheme.lightPi()
     }
 }
@@ -141,8 +147,14 @@ class ThemeController(
     private fun builtInLabel(choice: ThemeChoice): String = context.getString(
         when (choice) {
             ThemeChoice.Pi -> R.string.settings_theme_preset_pi
-            ThemeChoice.Paper -> R.string.settings_theme_preset_paper
-            ThemeChoice.Slate -> R.string.settings_theme_preset_slate
+            ThemeChoice.TokyoNight -> R.string.settings_theme_preset_tokyo_night
+            ThemeChoice.NightOwl -> R.string.settings_theme_preset_night_owl
+            ThemeChoice.Catppuccin -> R.string.settings_theme_preset_catppuccin
+            ThemeChoice.Nord -> R.string.settings_theme_preset_nord
+            ThemeChoice.RosePine -> R.string.settings_theme_preset_rose_pine
+            ThemeChoice.Gruvbox -> R.string.settings_theme_preset_gruvbox
+            ThemeChoice.Dracula -> R.string.settings_theme_preset_dracula
+            ThemeChoice.Solarized -> R.string.settings_theme_preset_solarized
             is ThemeChoice.Pack -> R.string.settings_theme
         },
     )

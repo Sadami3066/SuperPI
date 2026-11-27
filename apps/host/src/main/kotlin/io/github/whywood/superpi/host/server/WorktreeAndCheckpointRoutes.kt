@@ -3,6 +3,7 @@ package io.github.whywood.superpi.host.server
 import io.github.whywood.superpi.host.core.CheckpointRecord
 import io.github.whywood.superpi.host.core.SuperPiController
 import io.github.whywood.superpi.host.core.WorktreeRecord
+import io.github.whywood.superpi.runtime.SessionJsonlHistoryOps
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -16,13 +17,6 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
 
 @Serializable
 data class WorktreeDto(
@@ -156,8 +150,6 @@ data class RewindSessionRequest(
     val mode: String = "chat_only", // "chat_only" | "files_only" | "files_and_chat"
     val checkpointId: String? = null,
 )
-
-private val sessionLineJson = Json { ignoreUnknownKeys = true }
 
 internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiController) {
     // ── Git Review Queue Operations (Stage / Unstage / Revert / Commit / Summary) ──
@@ -506,7 +498,7 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
                     runCatching { controller.runtimeHost.stop(sessionId) }
                     runCatching { controller.runtimeHost.closeSession(sessionId) }
                     withContext(Dispatchers.IO) {
-                        truncateSessionJsonlBeforeUserTurn(file, cp.turnIndex)
+                        SessionJsonlHistoryOps.truncateBeforeUserTurn(file, cp.turnIndex)
                     }
                     runCatching { controller.runtimeHost.openSession(file.absolutePath, summary.cwd) }
                 }
@@ -572,7 +564,7 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
                 call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Remote sessions cannot be rewound locally"))
                 return@post
             }
-            val turnExists = withContext(Dispatchers.IO) { hasUserTurnAtIndex(file, req.turnIndex) }
+            val turnExists = withContext(Dispatchers.IO) { SessionJsonlHistoryOps.hasUserTurnAtIndex(file, req.turnIndex) }
             if (!turnExists) {
                 call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Rewind target turn index not found: ${req.turnIndex}"))
                 return@post
@@ -580,7 +572,7 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
             runCatching { controller.runtimeHost.stop(sessionId) }
             runCatching { controller.runtimeHost.closeSession(sessionId) }
             val truncated = withContext(Dispatchers.IO) {
-                truncateSessionJsonlBeforeUserTurn(file, req.turnIndex)
+                SessionJsonlHistoryOps.truncateBeforeUserTurn(file, req.turnIndex)
             }
             runCatching { controller.runtimeHost.openSession(file.absolutePath, summary.cwd) }
             if (!truncated) {
@@ -617,9 +609,7 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
         val forkId = UUID.randomUUID().toString()
         val forkFile = File(sourceFile.parentFile, "$forkId.jsonl")
         withContext(Dispatchers.IO) {
-            val sourceLines = sourceFile.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
-            val kept = sliceSessionJsonlLines(sourceLines, req.upToUserTurn, forkId, summary.cwd)
-            forkFile.writeText(kept.joinToString("\n") + "\n", Charsets.UTF_8)
+            SessionJsonlHistoryOps.forkSessionFile(sourceFile, forkFile, req.upToUserTurn, forkId, summary.cwd)
         }
         val opened = controller.runtimeHost.openSession(forkFile.absolutePath, summary.cwd)
         val forkTitle = req.title?.trim()?.takeIf { it.isNotEmpty() }
@@ -719,110 +709,6 @@ private fun buildGitSummary(rootDir: File, worktreeId: String?): GitSummaryRespo
         totalDeletions = files.sumOf { it.deletions },
         files = files,
     )
-}
-
-private fun isUserMessageEntry(line: String): Boolean {
-    val obj = runCatching { sessionLineJson.parseToJsonElement(line).jsonObject }.getOrNull() ?: return false
-    if ((obj["type"] as? JsonPrimitive)?.contentOrNull != "message") return false
-    val msg = obj["message"] as? JsonObject ?: return false
-    return (msg["role"] as? JsonPrimitive)?.contentOrNull == "user"
-}
-
-private fun hasUserTurnAtIndex(file: File, targetTurnIndex: Int): Boolean {
-    if (!file.isFile || targetTurnIndex < 0) return false
-    var seenUsers = 0
-    return file.useLines(Charsets.UTF_8) { lines ->
-        for (line in lines) {
-            if (line.isNotBlank() && isUserMessageEntry(line)) {
-                if (seenUsers == targetTurnIndex) return@useLines true
-                seenUsers++
-            }
-        }
-        false
-    }
-}
-
-private fun truncateSessionJsonlBeforeUserTurn(file: File, targetTurnIndex: Int): Boolean {
-    val lines = file.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
-    if (lines.isEmpty()) return false
-    var seenUsers = 0
-    var foundTarget = false
-    val kept = ArrayList<String>(lines.size)
-    for (line in lines) {
-        if (isUserMessageEntry(line)) {
-            if (seenUsers >= targetTurnIndex) {
-                foundTarget = true
-                break
-            }
-            seenUsers++
-        }
-        kept.add(line)
-    }
-    if (!foundTarget) return false
-    if (kept.isNotEmpty()) {
-        // Save a reversible pre-truncate backup alongside the session file and swap atomically.
-        runCatching {
-            val bak = File(file.parentFile, "${file.name}.pre-rewind.bak")
-            Files.copy(file.toPath(), bak.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        }
-        val tmp = Files.createTempFile(file.parentFile.toPath(), ".truncate.", ".tmp")
-        try {
-            tmp.toFile().writeText(kept.joinToString("\n") + "\n", Charsets.UTF_8)
-            try {
-                Files.move(
-                    tmp,
-                    file.toPath(),
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                )
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-                Files.move(tmp, file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            }
-        } finally {
-            runCatching { Files.deleteIfExists(tmp) }
-        }
-    }
-    return true
-}
-
-private fun sliceSessionJsonlLines(
-    lines: List<String>,
-    upToUserTurn: Int?,
-    newSessionId: String,
-    cwd: String,
-): List<String> {
-    val out = ArrayList<String>(lines.size + 1)
-    var seenUsers = 0
-    var wroteHeader = false
-    for (line in lines) {
-        val obj = runCatching { sessionLineJson.parseToJsonElement(line).jsonObject }.getOrNull()
-        if (obj != null && (obj["type"] as? JsonPrimitive)?.contentOrNull == "session") {
-            val rewritten = buildJsonObject {
-                for ((k, v) in obj) {
-                    if (k == "id") put("id", newSessionId) else put(k, v)
-                }
-            }
-            out.add(rewritten.toString())
-            wroteHeader = true
-            continue
-        }
-        if (upToUserTurn != null && isUserMessageEntry(line)) {
-            if (seenUsers > upToUserTurn) break
-            seenUsers++
-        }
-        out.add(line)
-    }
-    if (!wroteHeader) {
-        val headerObj = buildJsonObject {
-            put("type", "session")
-            put("version", 3)
-            put("id", newSessionId)
-            put("timestamp", java.time.Instant.now().toString())
-            put("cwd", cwd)
-        }
-        out.add(0, headerObj.toString())
-    }
-    return out
 }
 
 private fun WorktreeRecord.toDto() = WorktreeDto(

@@ -27,6 +27,14 @@ import androidx.compose.ui.unit.sp
 
 enum class ThemePreset { SYSTEM, CLASSIC_BLUE, SANTORINI, OCEANIC, PI }
 
+enum class DdThemeVisualFamily {
+    MONO,
+    VIOLET,
+    OCEAN,
+    WARM,
+    CUSTOM,
+}
+
 @Immutable
 data class SuperPIColors(
     val dark: Boolean,
@@ -55,15 +63,17 @@ data class SuperPIColors(
     val codeNumber: Color,
     val codeFunction: Color,
     val codeType: Color,
+    val userBubble: Color = accentSoft,
+    val userBubbleBorder: Color = hairline,
 ) {
-    val userBubble: Color get() = accentSoft
     val onUserBubble: Color get() = ink
     val signal: Color get() = if (dark) Color(0xFFFF5A4F) else Color(0xFFE5483F)
     val surfaceRim: Color get() = if (dark) Color(0x14FFFFFF) else hairline.copy(alpha = 0.55f)
     val composerShadow: Color get() = if (dark) Color(0xFF000000) else Color(0xFF0B1220)
 }
 
-val LocalSuperPIColors = staticCompositionLocalOf { DdTheme.lightClassicBlue() }
+val LocalSuperPIColors = staticCompositionLocalOf { DdTheme.lightPi() }
+val LocalDdThemeVisualFamily = staticCompositionLocalOf { DdThemeVisualFamily.MONO }
 
 enum class DdFontStyle(val id: String, val displayName: String) {
     FREDOKA("fredoka", "Fredoka"),
@@ -331,6 +341,7 @@ private val LocalDdBaseFontScaled = staticCompositionLocalOf { false }
 public fun SuperPITheme(
     colors: SuperPIColors,
     fontStyle: DdFontStyle = DdFonts.style,
+    visualFamily: DdThemeVisualFamily = DdThemeVisualFamily.MONO,
     content: @Composable () -> Unit,
 ) {
     if (DdFonts.style != fontStyle) {
@@ -350,6 +361,7 @@ public fun SuperPITheme(
     }
     CompositionLocalProvider(
         LocalSuperPIColors provides colors,
+        LocalDdThemeVisualFamily provides visualFamily,
         LocalDdMotionEnabled provides motionEnabled,
         LocalDensity provides scaledDensity,
         LocalDdBaseFontScaled provides true,

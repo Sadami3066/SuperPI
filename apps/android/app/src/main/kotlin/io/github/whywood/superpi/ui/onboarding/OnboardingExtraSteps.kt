@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,8 +15,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -214,43 +218,49 @@ internal fun AppearanceStep(
         Spacer(Modifier.height(DdSpacing.Xl))
         FieldLabel(text = stringResource(R.string.settings_theme_builtin))
         Spacer(Modifier.height(DdSpacing.Sm))
-        OnboardingCard {
-            builtInThemes.forEachIndexed { index, option ->
-                if (index > 0) DdHairline()
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 2.dp),
+        ) {
+            items(builtInThemes, key = { it.id.key }) { option ->
                 val selected = option.id == selectedTheme
+                val cardShape = RoundedCornerShape(14.dp)
                 DdPressable(
                     onClick = { onSelectTheme(option.id) },
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .width(106.dp)
                         .testTag("onboarding_theme_${option.id.key}")
                         .semantics { this.selected = selected },
-                    shape = RectangleShape,
+                    shape = cardShape,
                     contentDescription = option.label,
                 ) {
-                    Row(
-                        Modifier
+                    Column(
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 60.dp)
-                            .padding(horizontal = DdSpacing.Lg, vertical = DdSpacing.Md),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .clip(cardShape)
+                            .background(colors.surface)
+                            .border(
+                                width = if (selected) 1.5.dp else 0.75.dp,
+                                color = if (selected) colors.accent else colors.hairline,
+                                shape = cardShape,
+                            )
+                            .padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         ThemeMiniPreview(
                             preview = option.colors,
                             selected = selected,
                             selectedBorder = colors.accent,
                         )
-                        Spacer(Modifier.width(DdSpacing.Md))
+                        Spacer(Modifier.height(7.dp))
                         Text(
                             text = option.label,
-                            modifier = Modifier.weight(1f),
-                            style = DdType.body,
-                            color = colors.ink,
+                            style = DdType.chip,
+                            color = if (selected) colors.ink else colors.inkSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (selected) {
-                            DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 18.dp)
-                        }
                     }
                 }
             }

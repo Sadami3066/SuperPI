@@ -1782,6 +1782,104 @@ class ChatViewModelTest {
         }
     }
 
+    @Test
+    fun rewindToUserMessageTruncatesJsonlAndRestoresPromptToComposer() = runTest(dispatcher) {
+        val dir = java.nio.file.Files.createTempDirectory("chat-vm-rewind").toFile()
+        try {
+            val sessionFile = java.io.File(dir, "s1.jsonl").apply {
+                writeText(
+                    listOf(
+                        """{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00Z","cwd":"$HOME_CWD"}""",
+                        """{"type":"message","message":{"role":"user","content":"first prompt"}}""",
+                        """{"type":"message","message":{"role":"assistant","content":"first reply"}}""",
+                        """{"type":"message","message":{"role":"user","content":"second prompt"}}""",
+                        """{"type":"message","message":{"role":"assistant","content":"second reply"}}""",
+                    ).joinToString("\n") + "\n",
+                )
+            }
+            val runtime = FakeAgentRuntime().apply {
+                sessions = listOf(ConversationSummary("s1", "Demo", 100L, sessionFile.absolutePath, HOME_CWD))
+                histories = mapOf(
+                    "s1" to listOf(
+                        AssistantMessage(id = 1L, role = AssistantRole.USER, text = "first prompt", status = MessageStatus.DONE),
+                        AssistantMessage(id = 2L, role = AssistantRole.ASSISTANT, text = "first reply", status = MessageStatus.DONE),
+                        AssistantMessage(id = 3L, role = AssistantRole.USER, text = "second prompt", status = MessageStatus.DONE),
+                        AssistantMessage(id = 4L, role = AssistantRole.ASSISTANT, text = "second reply", status = MessageStatus.DONE),
+                    ),
+                )
+            }
+            val vm = viewModel(runtime)
+            settle()
+            assertEquals(4, vm.state.value.messages.size)
+
+            // Simulate runtime reloading truncated history on reopen
+            runtime.histories = mapOf(
+                "s1" to listOf(
+                    AssistantMessage(id = 1L, role = AssistantRole.USER, text = "first prompt", status = MessageStatus.DONE),
+                    AssistantMessage(id = 2L, role = AssistantRole.ASSISTANT, text = "first reply", status = MessageStatus.DONE),
+                ),
+            )
+            var result: Boolean? = null
+            vm.rewindToUserMessage(3L) { ok -> result = ok }
+            settle()
+
+            assertEquals(true, result)
+            assertEquals("second prompt", vm.state.value.input)
+            assertEquals(2, vm.state.value.messages.size)
+            val remainingLines = sessionFile.readLines().filter { it.isNotBlank() }
+            assertEquals(3, remainingLines.size)
+            assertTrue(java.io.File(dir, "s1.jsonl.pre-rewind.bak").isFile)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun forkFromMessageCreatesSlicedSessionAndSwitchesToIt() = runTest(dispatcher) {
+        val dir = java.nio.file.Files.createTempDirectory("chat-vm-fork").toFile()
+        try {
+            val sessionFile = java.io.File(dir, "s1.jsonl").apply {
+                writeText(
+                    listOf(
+                        """{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00Z","cwd":"$HOME_CWD"}""",
+                        """{"type":"message","message":{"role":"user","content":"first prompt"}}""",
+                        """{"type":"message","message":{"role":"assistant","content":"first reply"}}""",
+                        """{"type":"message","message":{"role":"user","content":"second prompt"}}""",
+                        """{"type":"message","message":{"role":"assistant","content":"second reply"}}""",
+                    ).joinToString("\n") + "\n",
+                )
+            }
+            val runtime = FakeAgentRuntime().apply {
+                sessions = listOf(ConversationSummary("s1", "Demo", 100L, sessionFile.absolutePath, HOME_CWD))
+                histories = mapOf(
+                    "s1" to listOf(
+                        AssistantMessage(id = 1L, role = AssistantRole.USER, text = "first prompt", status = MessageStatus.DONE),
+                        AssistantMessage(id = 2L, role = AssistantRole.ASSISTANT, text = "first reply", status = MessageStatus.DONE),
+                        AssistantMessage(id = 3L, role = AssistantRole.USER, text = "second prompt", status = MessageStatus.DONE),
+                        AssistantMessage(id = 4L, role = AssistantRole.ASSISTANT, text = "second reply", status = MessageStatus.DONE),
+                    ),
+                )
+            }
+            val vm = viewModel(runtime)
+            settle()
+
+            var result: Boolean? = null
+            vm.forkFromMessage(2L, "Branch") { ok -> result = ok }
+            settle()
+
+            assertEquals(true, result)
+            val createdFiles = dir.listFiles()?.filter { it.name != "s1.jsonl" && it.name.endsWith(".jsonl") }.orEmpty()
+            assertEquals(1, createdFiles.size)
+            val forkedLines = createdFiles.single().readLines().filter { it.isNotBlank() }
+            assertEquals(3, forkedLines.size)
+            assertTrue(forkedLines[1].contains("first prompt"))
+            assertTrue(forkedLines[2].contains("first reply"))
+            assertTrue(vm.state.value.conversationId != "s1")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     private companion object {
         const val SKILL_PROMPT =
             "<skill name=\"miniapp\" location=\"/home/skills/miniapp/SKILL.md\">\n# Miniapp\n</skill>\n\nbuild a todo app"

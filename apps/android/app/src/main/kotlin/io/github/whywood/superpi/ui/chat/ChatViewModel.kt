@@ -21,7 +21,9 @@ import io.github.whywood.superpi.data.AttachmentStore
 import io.github.whywood.superpi.data.ImageNormalizer
 import io.github.whywood.superpi.data.NormalizedImage
 import io.github.whywood.superpi.data.SendWhileRunning
+import io.github.whywood.superpi.data.parseAttachmentBlock
 import io.github.whywood.superpi.runtime.AgentRuntime
+import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.CompactionOutcome
 import io.github.whywood.superpi.runtime.ConversationSummary
 import io.github.whywood.superpi.runtime.InputQueueKind
@@ -33,6 +35,7 @@ import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.remote.RemoteSessionBrowser
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.RuntimeWorkspace
+import io.github.whywood.superpi.runtime.SessionJsonlHistoryOps
 import io.github.whywood.superpi.runtime.SessionModelSnapshot
 import io.github.whywood.superpi.runtime.SessionUsage
 import io.github.whywood.superpi.runtime.SkillExpander
@@ -49,6 +52,7 @@ import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import io.github.whywood.superpi.ui.common.chat.ScrollAnchor
 import io.github.whywood.superpi.ui.common.chat.state.SessionDraftStore
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -620,6 +624,139 @@ class ChatViewModel(
     }
 
     suspend fun reloadSession(): Result<Unit> = sessionOpener.reloadSession()
+
+    fun rewindToUserMessage(messageId: Long, onResult: ((Boolean) -> Unit)? = null) {
+        val current = mutableState.value
+        val sessionId = current.conversationId ?: run {
+            onResult?.invoke(false)
+            return
+        }
+        val workspace = current.workspaces.firstOrNull { it.id == current.currentWorkspaceId }
+        if (workspace?.remote != null || current.sending || current.reloading || current.switchingConversation) {
+            onResult?.invoke(false)
+            return
+        }
+        val userMessages = current.messages.filter {
+            it.role == AssistantRole.USER && it.notice == null && it.summary == null && it.customType == null
+        }
+        val targetUserTurnIndex = userMessages.indexOfFirst { it.id == messageId }
+        if (targetUserTurnIndex < 0) {
+            onResult?.invoke(false)
+            return
+        }
+        val restoredText = extractEditablePrompt(userMessages[targetUserTurnIndex].text)
+        viewModelScope.launch {
+            val outcome = runCatching {
+                val summary = withContext(ioDispatcher) {
+                    (current.conversations + current.archivedConversations).firstOrNull { it.id == sessionId }
+                        ?: runtime.allSessions().firstOrNull { it.id == sessionId }
+                        ?: runtime.archivedSessions().firstOrNull { it.id == sessionId }
+                } ?: return@runCatching false
+                if (summary.filePath.isBlank()) return@runCatching false
+                val file = File(summary.filePath)
+                val truncated = withContext(ioDispatcher) {
+                    if (!SessionJsonlHistoryOps.hasUserTurnAtIndex(file, targetUserTurnIndex)) {
+                        return@withContext false
+                    }
+                    runCatching { runtime.stop(sessionId) }
+                    runCatching { runtime.closeSession(sessionId) }
+                    val ok = SessionJsonlHistoryOps.truncateBeforeUserTurn(file, targetUserTurnIndex)
+                    runtime.openSession(file.absolutePath, summary.cwd)
+                    ok
+                }
+                if (!truncated) return@runCatching false
+                val resolved = store.reopen(sessionId, sessionList.localizedTitle(summary.title))
+                if (mutableState.value.conversationId == sessionId) {
+                    mutableState.update {
+                        it.copy(
+                            conversation = resolved,
+                            input = restoredText,
+                            quote = null,
+                            attachments = emptyList(),
+                            error = null,
+                        )
+                    }
+                    modelController.applySessionModel(resolved.sessionModel)
+                }
+                refreshSessions()
+                true
+            }.getOrDefault(false)
+            onResult?.invoke(outcome)
+        }
+    }
+
+    fun forkFromMessage(messageId: Long, forkSuffix: String, onResult: ((Boolean) -> Unit)? = null) {
+        val current = mutableState.value
+        val sessionId = current.conversationId ?: run {
+            onResult?.invoke(false)
+            return
+        }
+        val workspace = current.workspaces.firstOrNull { it.id == current.currentWorkspaceId }
+        if (workspace?.remote != null || current.sending || current.reloading || current.switchingConversation) {
+            onResult?.invoke(false)
+            return
+        }
+        val targetPosition = current.messages.indexOfFirst { it.id == messageId }
+        if (targetPosition < 0) {
+            onResult?.invoke(false)
+            return
+        }
+        val userTurnsUpToTarget = current.messages
+            .take(targetPosition + 1)
+            .count { it.role == AssistantRole.USER && it.notice == null && it.summary == null && it.customType == null }
+        val upToUserTurn = (userTurnsUpToTarget - 1).coerceAtLeast(0)
+        viewModelScope.launch {
+            val outcome = runCatching {
+                val summary = withContext(ioDispatcher) {
+                    (current.conversations + current.archivedConversations).firstOrNull { it.id == sessionId }
+                        ?: runtime.allSessions().firstOrNull { it.id == sessionId }
+                        ?: runtime.archivedSessions().firstOrNull { it.id == sessionId }
+                } ?: return@runCatching false
+                if (summary.filePath.isBlank()) return@runCatching false
+                val sourceFile = File(summary.filePath)
+                if (!sourceFile.isFile || sourceFile.parentFile == null) return@runCatching false
+                val forkId = UUID.randomUUID().toString()
+                val forkFile = File(sourceFile.parentFile, "$forkId.jsonl")
+                val baseTitle = sessionList.localizedTitle(summary.title).ifBlank { uiStrings.newChatTitle }
+                val cleanSuffix = forkSuffix.trim().ifEmpty { "Fork" }
+                val forkTitle = "$baseTitle ($cleanSuffix)"
+                val opened = withContext(ioDispatcher) {
+                    val created = SessionJsonlHistoryOps.forkSessionFile(
+                        sourceFile = sourceFile,
+                        targetFile = forkFile,
+                        upToUserTurn = upToUserTurn,
+                        newSessionId = forkId,
+                        cwd = summary.cwd,
+                    )
+                    if (!created) return@withContext null
+                    val session = runtime.openSession(forkFile.absolutePath, summary.cwd)
+                    runCatching { runtime.renameSession(session.sessionId, forkTitle) }
+                    session
+                } ?: return@runCatching false
+                refreshSessions()
+                val forkSummary = (mutableState.value.conversations + mutableState.value.archivedConversations)
+                    .firstOrNull { it.id == opened.sessionId }
+                    ?: ConversationSummary(
+                        id = opened.sessionId,
+                        title = forkTitle,
+                        updatedAt = System.currentTimeMillis(),
+                        filePath = opened.filePath ?: forkFile.absolutePath,
+                        cwd = opened.cwd,
+                    )
+                rememberDraft()
+                sessionOpener.switchToSummary(forkSummary)
+                true
+            }.getOrDefault(false)
+            onResult?.invoke(outcome)
+        }
+    }
+
+    private fun extractEditablePrompt(rawText: String): String {
+        val withoutAttachments = parseAttachmentBlock(rawText).text.trim()
+        if (!withoutAttachments.startsWith("> ")) return withoutAttachments
+        val splitAt = withoutAttachments.indexOf("\n\n")
+        return if (splitAt >= 0) withoutAttachments.substring(splitAt + 2).trim() else withoutAttachments
+    }
 
     fun newSession(workspaceId: String, initialInput: String = "") {
         cancelRemoteSessionSync()

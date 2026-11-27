@@ -204,4 +204,11 @@
     <string name="assistant_todo_title">Tasks</string>
     <string name="assistant_todo_progress">%1$d/%2$d</string>
     <string name="assistant_todo_delete">Delete</string>
+    <string name="chat_message_rewind">Rewind and edit</string>
+    <string name="chat_message_fork">Branch from here</string>
+    <string name="chat_rewind_done">Rewound to composer</string>
+    <string name="chat_rewind_failed">Couldn\'t rewind message</string>
+    <string name="chat_fork_suffix">Branch</string>
+    <string name="chat_fork_done">Branched into new chat</string>
+    <string name="chat_fork_failed">Couldn\'t branch chat</string>
 </resources>

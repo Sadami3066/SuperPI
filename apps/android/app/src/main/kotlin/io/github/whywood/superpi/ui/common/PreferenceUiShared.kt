@@ -30,56 +30,57 @@ internal fun ThemeMiniPreview(
     preview: SuperPIColors,
     selected: Boolean,
     selectedBorder: Color,
+    modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(9.dp)
+    val shape = RoundedCornerShape(10.dp)
     val borderWidth = if (selected) 1.5.dp else 0.75.dp
     val borderColor = if (selected) selectedBorder else preview.surfaceRim
     Column(
-        modifier = Modifier
-            .size(width = 52.dp, height = 38.dp)
+        modifier = modifier
+            .size(width = 56.dp, height = 40.dp)
             .clip(shape)
             .background(preview.paper)
             .border(borderWidth, borderColor, shape)
-            .padding(4.dp),
+            .padding(4.5.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 1.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(4.dp).clip(CircleShape).background(preview.codeKeyword))
+                Box(Modifier.size(4.dp).clip(CircleShape).background(preview.codeString))
+                Box(Modifier.size(4.dp).clip(CircleShape).background(preview.codeFunction))
+            }
             Box(
                 Modifier
-                    .size(4.dp)
-                    .clip(CircleShape)
-                    .background(preview.signal),
-            )
-            Box(
-                Modifier
-                    .width(12.dp)
+                    .width(10.dp)
                     .height(2.5.dp)
                     .clip(CircleShape)
-                    .background(preview.ink.copy(alpha = 0.8f)),
+                    .background(preview.ink.copy(alpha = 0.75f)),
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 1.dp),
             horizontalArrangement = Arrangement.End,
         ) {
             Box(
                 Modifier
-                    .size(width = 18.dp, height = 6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(preview.accentSoft),
+                    .size(width = 22.dp, height = 7.dp)
+                    .clip(RoundedCornerShape(3.5.dp))
+                    .background(preview.userBubble)
+                    .border(0.6.dp, preview.userBubbleBorder, RoundedCornerShape(3.5.dp)),
             )
         }
         Box(
             Modifier
-                .fillMaxWidth(0.65f)
-                .padding(start = 2.dp)
+                .fillMaxWidth(0.62f)
+                .padding(start = 1.dp)
                 .height(3.dp)
                 .clip(CircleShape)
-                .background(preview.inkTertiary.copy(alpha = 0.55f)),
+                .background(preview.inkSecondary.copy(alpha = 0.6f)),
         )
         Row(
             modifier = Modifier
@@ -87,6 +88,7 @@ internal fun ThemeMiniPreview(
                 .height(8.dp)
                 .clip(CircleShape)
                 .background(preview.composer)
+                .border(0.5.dp, preview.hairline, CircleShape)
                 .padding(horizontal = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -100,7 +102,7 @@ internal fun ThemeMiniPreview(
             )
             Box(
                 Modifier
-                    .size(4.dp)
+                    .size(4.5.dp)
                     .clip(CircleShape)
                     .background(preview.accent),
             )

@@ -62,6 +62,7 @@ import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.resolveThinkingLevel
 import io.github.whywood.superpi.ui.common.AvatarCropDialog
 import io.github.whywood.superpi.ui.common.BotAvatar
+import io.github.whywood.superpi.ui.common.chat.ThinkingEffortSlider
 import io.github.whywood.superpi.ui.common.chat.thinkingLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -478,7 +479,6 @@ private fun BotDefaultModelSheet(
         mutableStateOf(thinkingLevels.resolveThinkingLevel(current?.thinkingLevel ?: globalDefault.thinkingLevel))
     }
     var showProviders by remember { mutableStateOf(false) }
-    var showThinking by remember { mutableStateOf(false) }
 
     DdSheet(onDismiss = onDismiss) {
         DdSheetHeader(
@@ -562,51 +562,16 @@ private fun BotDefaultModelSheet(
                 }
                 DdRowDivider()
                 if (thinkingLevels.any { it != ThinkingLevel.OFF }) {
-                    DdDropdown(
-                        expanded = showThinking,
-                        onDismissRequest = { showThinking = false },
-                        anchor = {
-                            DdListRow(
-                                title = stringResource(R.string.assistant_thinking_sheet),
-                                trailing = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = thinkingLabel(selectedThinking),
-                                            modifier = Modifier.widthIn(max = 140.dp),
-                                            style = DdType.bodySmall,
-                                            color = colors.inkTertiary,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        DdIcon(icon = DdIcons.ChevronDown, tint = colors.inkTertiary, size = 16.dp)
-                                    }
-                                },
-                                onClick = { showThinking = true },
-                            )
+                    ThinkingEffortSlider(
+                        levels = thinkingLevels,
+                        value = selectedThinking,
+                        onChange = { level ->
+                            selectedThinking = level
+                            if (current != null && current.providerId == selectedProviderId) {
+                                onSelect(current.copy(thinkingLevel = level))
+                            }
                         },
-                    ) {
-                        thinkingLevels.forEach { level ->
-                            DdMenuItem(
-                                text = thinkingLabel(level),
-                                onClick = {
-                                    showThinking = false
-                                    selectedThinking = level
-                                    if (current != null && current.providerId == selectedProviderId) {
-                                        onSelect(current.copy(thinkingLevel = level))
-                                        onDismiss()
-                                    }
-                                },
-                                selected = level == selectedThinking,
-                                trailing = if (level == selectedThinking) {
-                                    { DdIcon(icon = DdIcons.Check, tint = colors.accent, size = 16.dp) }
-                                } else {
-                                    null
-                                },
-                            )
-                        }
-                    }
+                    )
                     DdRowDivider()
                 }
                 if (models.isEmpty()) {

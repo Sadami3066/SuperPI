@@ -204,4 +204,11 @@
     <string name="assistant_todo_title">任务清单</string>
     <string name="assistant_todo_progress">%1$d/%2$d</string>
     <string name="assistant_todo_delete">删除</string>
+    <string name="chat_message_rewind">撤回此消息并重新编辑</string>
+    <string name="chat_message_fork">从此处创建分支对话</string>
+    <string name="chat_rewind_done">已撤回，原消息已放回输入框</string>
+    <string name="chat_rewind_failed">撤回失败</string>
+    <string name="chat_fork_suffix">分支</string>
+    <string name="chat_fork_done">已创建分支对话</string>
+    <string name="chat_fork_failed">创建分支失败</string>
 </resources>

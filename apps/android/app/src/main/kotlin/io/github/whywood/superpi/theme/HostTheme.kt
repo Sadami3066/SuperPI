@@ -29,7 +29,12 @@ fun HostTheme(
         HostThemeRuntime.dark = colors.dark
     }
     SystemBarIcons(dark = colors.dark)
-    SuperPITheme(colors = colors, fontStyle = DdFonts.style, content = content)
+    SuperPITheme(
+        colors = colors,
+        fontStyle = DdFonts.style,
+        visualFamily = state.choice.visualFamily(),
+        content = content,
+    )
 }
 
 @Composable

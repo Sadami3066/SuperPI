@@ -11,6 +11,22 @@ class DdThemeContrastTest {
         val palettes = listOf(
             "lightPi" to DdTheme.lightPi(),
             "darkPi" to DdTheme.darkPi(),
+            "lightTokyoNight" to DdTheme.lightTokyoNight(),
+            "darkTokyoNight" to DdTheme.darkTokyoNight(),
+            "lightNightOwl" to DdTheme.lightNightOwl(),
+            "darkNightOwl" to DdTheme.darkNightOwl(),
+            "lightCatppuccin" to DdTheme.lightCatppuccin(),
+            "darkCatppuccin" to DdTheme.darkCatppuccin(),
+            "lightNord" to DdTheme.lightNord(),
+            "darkNord" to DdTheme.darkNord(),
+            "lightRosePine" to DdTheme.lightRosePine(),
+            "darkRosePine" to DdTheme.darkRosePine(),
+            "lightGruvbox" to DdTheme.lightGruvbox(),
+            "darkGruvbox" to DdTheme.darkGruvbox(),
+            "lightDracula" to DdTheme.lightDracula(),
+            "darkDracula" to DdTheme.darkDracula(),
+            "lightSolarized" to DdTheme.lightSolarized(),
+            "darkSolarized" to DdTheme.darkSolarized(),
             "lightPaper" to DdTheme.lightPaper(),
             "darkPaper" to DdTheme.darkPaper(),
             "lightSlate" to DdTheme.lightSlate(),
@@ -22,6 +38,7 @@ class DdThemeContrastTest {
         palettes.forEach { (name, colors) ->
             assertContrast("$name ink/paper", colors.ink, colors.paper, 7f)
             assertContrast("$name ink/surface", colors.ink, colors.surface, 7f)
+            assertContrast("$name ink/userBubble", colors.ink, colors.userBubble, 7f)
             assertContrast("$name inkSecondary/paper", colors.inkSecondary, colors.paper, 4.5f)
             assertContrast("$name inkTertiary/paper", colors.inkTertiary, colors.paper, 4.5f)
             assertContrast("$name accent/surface", colors.accent, colors.surface, 4.5f)

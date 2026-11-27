@@ -60,6 +60,7 @@ object DdIcons {
     val RadioOff = DdIcon(R.drawable.ic_status_radio_off)
     val Raw = DdIcon(R.drawable.ic_file_code)
     val Refresh = DdIcon(R.drawable.ic_action_retry)
+    val Rewind = DdIcon(R.drawable.ic_action_rewind)
     val Scan = DdIcon(R.drawable.ic_action_scan)
     val Search = DdIcon(R.drawable.ic_action_search)
     val SelectAll = DdIcon(R.drawable.ic_action_select_all)

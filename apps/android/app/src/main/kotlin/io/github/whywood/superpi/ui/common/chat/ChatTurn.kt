@@ -126,6 +126,8 @@ internal fun ChatTurn(
     presentedCards: Map<String, PresentedCardRef> = emptyMap(),
     retryAttempt: Int? = null,
     remotePresentContext: RemotePresentContext? = null,
+    onRewind: ((Long) -> Unit)? = null,
+    onFork: ((Long) -> Unit)? = null,
 ) {
     val notice = message.notice
     if (notice != null) {
@@ -163,7 +165,9 @@ internal fun ChatTurn(
     if (message.role == AssistantRole.USER) {
         UserBubble(
             message = message,
+            onCopyOutput = onCopyOutput,
             onQuote = onQuote,
+            onRewind = onRewind,
             onOpenAttachment = onOpenAttachment,
             attachmentRoot = attachmentRoot,
         )
@@ -185,6 +189,7 @@ internal fun ChatTurn(
             presentedCards = presentedCards,
             retryAttempt = retryAttempt,
             remotePresentContext = remotePresentContext,
+            onFork = onFork,
         )
     }
 }
@@ -405,7 +410,9 @@ private fun GoalRoundNotice(notice: TurnNotice.GoalRound) {
 @Composable
 private fun UserBubble(
     message: AssistantMessage,
+    onCopyOutput: (String) -> Unit,
     onQuote: (Long, String) -> Unit,
+    onRewind: ((Long) -> Unit)?,
     onOpenAttachment: (AttachmentRef) -> Unit,
     attachmentRoot: File,
 ) {
@@ -417,7 +424,15 @@ private fun UserBubble(
     val content = remember(displayText) { splitQuoted(displayText) }
     val body = content.body.ifBlank { invocation?.let { "/skill:${it.name}" }.orEmpty() }
     val reminderStyle = message.reminder != null || message.injectedSource == TurnSource.REMINDER
+    val isStandardUserTurn = !reminderStyle && message.injectedSource != TurnSource.PLUGIN
     val time = rememberMessageTime(message.startedAt)
+    var copied by remember(message.id, body) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500L)
+            copied = false
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
@@ -425,7 +440,7 @@ private fun UserBubble(
         Column(
             modifier = Modifier.fillMaxWidth(0.7f),
             horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (message.injectedSource == TurnSource.PLUGIN) {
                 Text(
@@ -473,6 +488,11 @@ private fun UserBubble(
                                     Modifier
                                         .clip(UserBubbleShape)
                                         .background(colors.userBubble)
+                                        .border(
+                                            width = 0.75.dp,
+                                            color = colors.userBubbleBorder,
+                                            shape = UserBubbleShape,
+                                        )
                                 },
                             )
                             .padding(horizontal = 15.dp, vertical = 11.dp),
@@ -491,12 +511,45 @@ private fun UserBubble(
                     }
                 }
             }
-            if (time != null) {
-                Text(
-                    text = time,
-                    style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
-                    color = colors.inkTertiary,
-                )
+            val showActions = isStandardUserTurn && (body.isNotEmpty() || onRewind != null)
+            if (showActions || time != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (time != null) {
+                        Text(
+                            text = time,
+                            style = DdType.bodySmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
+                            color = colors.inkTertiary,
+                        )
+                        if (showActions) Spacer(Modifier.width(DdSpacing.Xxs))
+                    }
+                    if (isStandardUserTurn && body.isNotEmpty()) {
+                        DdIconButton(
+                            icon = if (copied) DdIcons.Check else DdIcons.Copy,
+                            onClick = {
+                                copied = true
+                                onCopyOutput(body)
+                            },
+                            contentDescription = stringResource(R.string.chat_message_copy),
+                            size = 44.dp,
+                            iconSize = 15.dp,
+                            tint = if (copied) colors.accent else colors.inkTertiary,
+                        )
+                    }
+                    if (isStandardUserTurn && onRewind != null) {
+                        DdIconButton(
+                            icon = DdIcons.Rewind,
+                            onClick = { onRewind(message.id) },
+                            contentDescription = stringResource(R.string.chat_message_rewind),
+                            size = 44.dp,
+                            iconSize = 15.dp,
+                            tint = colors.inkTertiary,
+                            modifier = Modifier.testTag("chat_rewind_${message.id}"),
+                        )
+                    }
+                }
             }
         }
     }
@@ -540,6 +593,7 @@ private fun AssistantTurn(
     presentedCards: Map<String, PresentedCardRef>,
     retryAttempt: Int?,
     remotePresentContext: RemotePresentContext?,
+    onFork: ((Long) -> Unit)? = null,
 ) {
     val colors = superPiColors()
     val startedStreaming = remember(message.id) { message.streaming }
@@ -612,6 +666,11 @@ private fun AssistantTurn(
                     answer = answer,
                     onCopyOutput = onCopyOutput,
                     onQuote = { onQuote(message.id, answer) },
+                    onFork = if (onFork != null && message.status != MessageStatus.FAILED) {
+                        { onFork(message.id) }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -740,6 +799,7 @@ private fun MessageFooter(
     answer: String,
     onCopyOutput: (String) -> Unit,
     onQuote: () -> Unit,
+    onFork: (() -> Unit)? = null,
 ) {
     val colors = superPiColors()
     val context = LocalContext.current
@@ -782,6 +842,17 @@ private fun MessageFooter(
             iconSize = 15.dp,
             tint = colors.inkTertiary,
         )
+        if (onFork != null) {
+            DdIconButton(
+                icon = DdIcons.GitFork,
+                onClick = onFork,
+                contentDescription = stringResource(R.string.chat_message_fork),
+                size = 44.dp,
+                iconSize = 15.dp,
+                tint = colors.inkTertiary,
+                modifier = Modifier.testTag("chat_fork_${message.id}"),
+            )
+        }
         if (time != null) {
             Spacer(Modifier.width(DdSpacing.Xs))
             Text(
