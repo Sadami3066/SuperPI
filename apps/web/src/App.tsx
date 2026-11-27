@@ -38,6 +38,7 @@ registerWorkbenchPanel({
   labelKey: "wb.diffTitle",
   icon: IconGitBranch,
   order: 20,
+  isAvailable: (ctx) => !ctx.isRemote,
   Component: lazy(() => import("./workbench/DiffWorktreePanel")),
 });
 
@@ -46,6 +47,7 @@ registerWorkbenchPanel({
   labelKey: "wb.terminalTitle",
   icon: IconTerminal2,
   order: 30,
+  isAvailable: (ctx) => !ctx.isRemote,
   Component: lazy(() => import("./workbench/TerminalPanel")),
 });
 

@@ -137,6 +137,13 @@ export function ChatWorkspace({
   const sessionLoadError = useSessionStore((s) =>
     s.activeSessionId ? s.sessionLoadErrors[s.activeSessionId] ?? "" : "",
   );
+  const loadingEarlier = useSessionStore((s) =>
+    Boolean(s.activeSessionId && s.loadingEarlierBySession[s.activeSessionId]),
+  );
+  const earlierError = useSessionStore((s) =>
+    s.activeSessionId ? s.loadEarlierErrorBySession[s.activeSessionId] ?? "" : "",
+  );
+  const loadEarlierMessages = useSessionStore((s) => s.loadEarlierMessages);
   const stopSession = useSessionStore((s) => s.stopSession);
   const retrySession = useSessionStore((s) => s.retrySession);
   const compactSession = useSessionStore((s) => s.compactSession);
@@ -744,6 +751,21 @@ export function ChatWorkspace({
             compactProcess={hostSettings?.processDetail === "compact"}
             dark={dark}
             canBranchOrRewind={!activeBot.isRemote && Boolean(activeSessionId)}
+            hasMoreEarlier={Boolean(transcript?.hasMore)}
+            earlierCount={
+              transcript?.nextBefore ??
+              Math.max(0, (transcript?.totalMessages ?? turns.length) - turns.length)
+            }
+            loadingEarlier={loadingEarlier}
+            earlierError={earlierError || null}
+            userTurnOffset={transcript?.userTurnOffset ?? 0}
+            onLoadEarlier={
+              client && activeSessionId
+                ? () => {
+                    void loadEarlierMessages(client, activeSessionId, locale);
+                  }
+                : undefined
+            }
             onQuote={handleQuote}
             onRetry={handleRetry}
             onForkFromTurn={handleForkFromTurn}

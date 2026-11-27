@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { IconBrowser, IconMovie } from "@tabler/icons-react";
 import type { PresentedItem } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -6,6 +7,19 @@ import { useSessionStore } from "../../stores/sessionStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
+
+const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v|mkv)$/i;
+const HTML_EXT_RE = /\.html?$/i;
+
+function isHtmlDeliverable(item: PresentedItem): boolean {
+  const mime = (item.mime ?? "").toLowerCase();
+  return item.type === "html" || mime === "text/html" || HTML_EXT_RE.test(item.name || item.path || "");
+}
+
+function isVideoDeliverable(item: PresentedItem): boolean {
+  const mime = (item.mime ?? "").toLowerCase();
+  return item.type === "video" || mime.startsWith("video/") || VIDEO_EXT_RE.test(item.name || item.path || "");
+}
 
 function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -163,6 +177,8 @@ export function PresentCard({
             />
           );
         }
+        const isHtml = Boolean(item.path) && isHtmlDeliverable(item);
+        const isVideo = Boolean(item.path) && !isHtml && isVideoDeliverable(item);
         return (
           <div
             key={`${item.path || item.id || item.name}-${idx}`}
@@ -180,29 +196,50 @@ export function PresentCard({
             >
               <div
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]"
-                style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
+                style={{
+                  background: isHtml || isVideo ? "var(--pi-accent-soft)" : "var(--pi-wash)",
+                  color: isHtml || isVideo ? "var(--pi-accent)" : "var(--pi-ink-secondary)",
+                }}
               >
-                <BrandIcon name="file/plain" size={16} />
+                {isHtml ? (
+                  <IconBrowser size={16} stroke={1.7} />
+                ) : isVideo ? (
+                  <IconMovie size={16} stroke={1.7} />
+                ) : (
+                  <BrandIcon name="file/plain" size={16} />
+                )}
               </div>
               <div className="min-w-0">
                 <div className="truncate text-[13px] font-medium" style={{ color: "var(--pi-ink)" }}>
                   {item.title || item.name}
                 </div>
-                {item.path && (
-                  <div
-                    className="truncate text-[11px]"
-                    style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
-                  >
-                    {item.path}
+                {(isHtml || isVideo) ? (
+                  <div className="truncate text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {isHtml ? t("present.htmlDesc") : t("present.videoDesc")}
                   </div>
+                ) : (
+                  item.path && (
+                    <div
+                      className="truncate text-[11px]"
+                      style={{ color: "var(--pi-ink-tertiary)", fontFamily: "var(--pi-font-mono)" }}
+                    >
+                      {item.path}
+                    </div>
+                  )
                 )}
               </div>
             </button>
             {item.path && (
               <div className="flex shrink-0 items-center gap-1">
-                <Button variant="secondary" size="sm" onClick={() => handleOpenPreview(item)}>
+                <Button variant={isHtml || isVideo ? "primary" : "secondary"} size="sm" onClick={() => handleOpenPreview(item)}>
                   <BrandIcon name="navigation/external_link" size={13.5} />
-                  <span>{t("present.open")}</span>
+                  <span>
+                    {isHtml
+                      ? t("present.previewInWorkbench")
+                      : isVideo
+                        ? t("present.playInWorkbench")
+                        : t("present.open")}
+                  </span>
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => void handleDownload(item)}>
                   <BrandIcon name="action/download" size={14} />

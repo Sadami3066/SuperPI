@@ -258,7 +258,9 @@ export function SuperWorkspace({
         return true;
       }
       const images = attachments
-        .filter((a) => a.isInlineImage && a.dataBase64)
+        .filter((a): a is ComposerAttachment & { dataBase64: string } =>
+          Boolean(a.isInlineImage && a.dataBase64),
+        )
         .map((a) => ({
           data: a.dataBase64,
           mimeType: a.mimeType,

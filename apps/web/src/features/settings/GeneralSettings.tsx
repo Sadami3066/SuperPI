@@ -17,6 +17,7 @@ export function GeneralSettings() {
 
   const languagePref = useSettingsStore((s) => s.languagePref);
   const hostSettings = useSettingsStore((s) => s.hostSettings);
+  const providers = useSettingsStore((s) => s.providers);
   const setLanguagePref = useSettingsStore((s) => s.setLanguagePref);
   const patchHostSettings = useSettingsStore((s) => s.patchHostSettings);
 
@@ -71,6 +72,20 @@ export function GeneralSettings() {
     ],
     [t],
   );
+
+  const titleModelOptions = useMemo(() => {
+    const opts = [{ value: "", label: t("settings.autoTitleModelAuto") }];
+    for (const p of providers) {
+      if (!p.configured) continue;
+      for (const m of p.models) {
+        opts.push({
+          value: `${p.id}/${m.id}`,
+          label: `${m.displayName} (${p.name})`,
+        });
+      }
+    }
+    return opts;
+  }, [providers, t]);
 
   return (
     <div className="space-y-8">
@@ -155,6 +170,45 @@ export function GeneralSettings() {
                   className="w-[190px]"
                 />
               </div>
+
+              <div className="flex items-center justify-between gap-3 py-4">
+                <div className="min-w-0">
+                  <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                    {t("settings.autoSessionTitle")}
+                  </div>
+                  <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {t("settings.autoSessionTitleDesc")}
+                  </div>
+                </div>
+                <Switch
+                  checked={hostSettings.autoSessionTitle ?? true}
+                  ariaLabel={t("settings.autoSessionTitle")}
+                  onCheckedChange={(checked) => {
+                    if (client) void patchHostSettings(client, { autoSessionTitle: checked });
+                  }}
+                />
+              </div>
+
+              {(hostSettings.autoSessionTitle ?? true) && (
+                <div className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                      {t("settings.sessionTitleModel")}
+                    </div>
+                    <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                      {t("settings.sessionTitleModelDesc")}
+                    </div>
+                  </div>
+                  <Select
+                    value={hostSettings.sessionTitleModel ?? ""}
+                    onValueChange={(v) => {
+                      if (client) void patchHostSettings(client, { sessionTitleModel: v });
+                    }}
+                    options={titleModelOptions}
+                    className="w-[220px]"
+                  />
+                </div>
+              )}
             </>
           )}
         </div>

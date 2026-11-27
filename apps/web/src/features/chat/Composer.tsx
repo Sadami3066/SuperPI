@@ -17,32 +17,59 @@ import { DropdownItem, DropdownMenu, IconButton, Select, type SelectOption } fro
 import { BrandIcon } from "../shared/BrandAssets";
 import { ModelPicker } from "./ModelPicker";
 
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_COUNT = 20;
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+const MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024;
 const INLINE_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
-function readFileAsComposerAttachment(file: File): Promise<ComposerAttachment | null> {
-  if (file.size > MAX_ATTACHMENT_BYTES) return Promise.resolve(null);
+type AttachmentReadResult =
+  | { attachment: ComposerAttachment }
+  | { error: "too_large" | "read_failed" };
+
+function readFileAsComposerAttachment(file: File): Promise<AttachmentReadResult> {
+  if (file.size > MAX_ATTACHMENT_BYTES) return Promise.resolve({ error: "too_large" });
+  const mimeType = file.type || "application/octet-stream";
+  const kind = classifyAttachmentKind(mimeType, file.name);
+  const isInlineImage =
+    INLINE_IMAGE_MIMES.has(mimeType.toLowerCase()) && file.size <= MAX_INLINE_IMAGE_BYTES;
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  if (!isInlineImage) {
+    return Promise.resolve({
+      attachment: {
+        id,
+        name: file.name || "attachment",
+        mimeType,
+        size: file.size,
+        kind,
+        isInlineImage: false,
+        file,
+        previewUrl: kind === "image" ? URL.createObjectURL(file) : undefined,
+      },
+    });
+  }
+
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = typeof reader.result === "string" ? reader.result : "";
       const comma = result.indexOf(",");
       const dataBase64 = comma >= 0 ? result.slice(comma + 1) : "";
-      const mimeType = file.type || "application/octet-stream";
-      const kind = classifyAttachmentKind(mimeType, file.name);
-      const isInlineImage = INLINE_IMAGE_MIMES.has(mimeType.toLowerCase());
       resolve({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name || "attachment",
-        mimeType,
-        size: file.size,
-        kind,
-        isInlineImage,
-        dataBase64,
-        previewUrl: kind === "image" ? result : undefined,
+        attachment: {
+          id,
+          name: file.name || "attachment",
+          mimeType,
+          size: file.size,
+          kind,
+          isInlineImage: true,
+          dataBase64,
+          file,
+          previewUrl: result,
+        },
       });
     };
-    reader.onerror = () => resolve(null);
+    reader.onerror = () => resolve({ error: "read_failed" });
     reader.readAsDataURL(file);
   });
 }
@@ -149,12 +176,30 @@ export const Composer = memo(function Composer({
   const sendingRef = useRef(false);
   const attachmentsCountRef = useRef(0);
   attachmentsCountRef.current = attachments.length;
+  const pendingObjectUrlsRef = useRef<Set<string>>(new Set());
+
+  const revokePendingObjectUrl = (url?: string) => {
+    if (!url || !pendingObjectUrlsRef.current.has(url)) return;
+    pendingObjectUrlsRef.current.delete(url);
+    URL.revokeObjectURL(url);
+  };
+
+  const revokeAllPendingObjectUrls = () => {
+    for (const url of pendingObjectUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    pendingObjectUrlsRef.current.clear();
+  };
 
   useEffect(() => {
+    revokeAllPendingObjectUrls();
     setAttachments([]);
     setWarning(null);
     historyIdxRef.current = -1;
     historyDraftRef.current = "";
+    return () => {
+      revokeAllPendingObjectUrls();
+    };
   }, [sessionId]);
 
   useEffect(() => {
@@ -217,18 +262,48 @@ export const Composer = memo(function Composer({
     warningTimerRef.current = setTimeout(() => setWarning(null), 3200);
   };
 
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((x) => x.id === id);
+      if (target?.previewUrl) revokePendingObjectUrl(target.previewUrl);
+      return prev.filter((x) => x.id !== id);
+    });
+  };
+
   const appendFiles = async (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
-    const remaining = Math.max(0, 8 - attachmentsCountRef.current);
-    if (remaining === 0) return;
+    if (files.length === 0) return;
+    const remaining = Math.max(0, MAX_ATTACHMENT_COUNT - attachmentsCountRef.current);
+    if (remaining === 0) {
+      showWarning(t("chat.attachmentTooMany", { max: MAX_ATTACHMENT_COUNT }));
+      return;
+    }
+    const overflowCount = files.length > remaining;
     const slice = files.slice(0, remaining);
     const results = await Promise.all(slice.map(readFileAsComposerAttachment));
-    const loaded = results.filter((x): x is ComposerAttachment => x !== null);
-    if (loaded.length < slice.length) {
+    const loaded: ComposerAttachment[] = [];
+    let hasTooLarge = false;
+    for (const res of results) {
+      if ("attachment" in res) {
+        if (res.attachment.previewUrl?.startsWith("blob:")) {
+          pendingObjectUrlsRef.current.add(res.attachment.previewUrl);
+        }
+        loaded.push(res.attachment);
+      } else if (res.error === "too_large") {
+        hasTooLarge = true;
+      }
+    }
+    if (hasTooLarge && overflowCount) {
+      showWarning(
+        `${t("chat.attachmentTooMany", { max: MAX_ATTACHMENT_COUNT })} · ${t("chat.attachmentTooLarge")}`,
+      );
+    } else if (hasTooLarge) {
       showWarning(t("chat.attachmentTooLarge"));
+    } else if (overflowCount) {
+      showWarning(t("chat.attachmentTooMany", { max: MAX_ATTACHMENT_COUNT }));
     }
     if (loaded.length > 0) {
-      setAttachments((prev) => [...prev, ...loaded].slice(0, 8));
+      setAttachments((prev) => [...prev, ...loaded].slice(0, MAX_ATTACHMENT_COUNT));
     }
   };
 
@@ -236,6 +311,10 @@ export const Composer = memo(function Composer({
     if (isElectron) {
       const picked = await pickWorkspaceDirectory();
       if (!picked) return;
+      if (attachmentsCountRef.current >= MAX_ATTACHMENT_COUNT) {
+        showWarning(t("chat.attachmentTooMany", { max: MAX_ATTACHMENT_COUNT }));
+        return;
+      }
       setAttachments((prev) => {
         if (prev.some((x) => x.kind === "folder" && x.folderPath === picked)) return prev;
         const folderAtt: ComposerAttachment = {
@@ -245,10 +324,9 @@ export const Composer = memo(function Composer({
           size: 0,
           kind: "folder",
           isInlineImage: false,
-          dataBase64: "",
           folderPath: picked,
         };
-        return [...prev, folderAtt].slice(0, 8);
+        return [...prev, folderAtt].slice(0, MAX_ATTACHMENT_COUNT);
       });
       return;
     }
@@ -285,7 +363,12 @@ export const Composer = memo(function Composer({
     sendingRef.current = true;
     try {
       const ok = await onSend(overrideText, files);
-      if (ok !== false && !overrideText) setAttachments([]);
+      if (ok !== false && !overrideText) {
+        for (const f of files) {
+          if (f.previewUrl) pendingObjectUrlsRef.current.delete(f.previewUrl);
+        }
+        setAttachments([]);
+      }
     } finally {
       sendingRef.current = false;
     }
@@ -411,7 +494,7 @@ export const Composer = memo(function Composer({
                     <img src={att.previewUrl} alt={att.name} className="h-full w-full object-cover" />
                     <button
                       type="button"
-                      onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== att.id))}
+                      onClick={() => removeAttachment(att.id)}
                       aria-label={t("chat.removeAttachment")}
                       className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/65 text-white"
                     >
@@ -450,7 +533,7 @@ export const Composer = memo(function Composer({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== att.id))}
+                      onClick={() => removeAttachment(att.id)}
                       aria-label={t("chat.removeAttachment")}
                       className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-[var(--pi-hover)]"
                     >

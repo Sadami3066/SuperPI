@@ -1,6 +1,6 @@
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { IconArrowDown } from "@tabler/icons-react";
+import { IconArrowDown, IconLoader2 } from "@tabler/icons-react";
 import type {
   ChatTurn,
   HostPendingQuestionDto,
@@ -27,6 +27,12 @@ export function MessageList({
   dark,
   canRetry = true,
   canBranchOrRewind = false,
+  hasMoreEarlier = false,
+  earlierCount = 0,
+  loadingEarlier = false,
+  earlierError,
+  userTurnOffset = 0,
+  onLoadEarlier,
   onQuote,
   onRetry,
   onForkFromTurn,
@@ -45,6 +51,12 @@ export function MessageList({
   dark: boolean;
   canRetry?: boolean;
   canBranchOrRewind?: boolean;
+  hasMoreEarlier?: boolean;
+  earlierCount?: number;
+  loadingEarlier?: boolean;
+  earlierError?: string | null;
+  userTurnOffset?: number;
+  onLoadEarlier?: () => Promise<void> | void;
   onQuote: (text: string) => void;
   onRetry: () => void;
   onForkFromTurn?: (upToUserTurn: number) => void;
@@ -59,15 +71,55 @@ export function MessageList({
   const hasLiveRun = useStreamStore((s) => Boolean(s.activeBySession[sessionId]));
   const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[sessionId]?.streaming));
   const approvalTrigger = (pendingApprovals ?? []).map((a) => a.id).join(",");
+  const tailTurnId = turns[turns.length - 1]?.id ?? "";
+  const headTurnId = turns[0]?.id ?? "";
 
-  const { scrollRef, contentRef, showJumpToBottom, snapToBottom, scheduleStickToBottom } =
-    useChatScroll(sessionId, `${turns.length}:${pendingQuestion?.requestId ?? ""}:${approvalTrigger}`, {
-      isStreaming,
-    });
+  const {
+    scrollRef,
+    contentRef,
+    showJumpToBottom,
+    snapToBottom,
+    disengageFollowing,
+    scheduleStickToBottom,
+  } = useChatScroll(sessionId, `${tailTurnId}:${pendingQuestion?.requestId ?? ""}:${approvalTrigger}`, {
+    isStreaming,
+  });
 
   if (scrollRefOut) {
     scrollRefOut.current = snapToBottom;
   }
+
+  const prependAnchorRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+    prevHeadId: string;
+  } | null>(null);
+
+  const handleLoadEarlierClick = useCallback(() => {
+    if (!onLoadEarlier || loadingEarlier) return;
+    const el = scrollRef.current;
+    disengageFollowing();
+    if (el) {
+      prependAnchorRef.current = {
+        scrollHeight: el.scrollHeight,
+        scrollTop: el.scrollTop,
+        prevHeadId: headTurnId,
+      };
+    }
+    void onLoadEarlier();
+  }, [disengageFollowing, headTurnId, loadingEarlier, onLoadEarlier, scrollRef]);
+
+  useLayoutEffect(() => {
+    const anchor = prependAnchorRef.current;
+    if (!anchor || headTurnId === anchor.prevHeadId) return;
+    prependAnchorRef.current = null;
+    const el = scrollRef.current;
+    if (!el) return;
+    const delta = el.scrollHeight - anchor.scrollHeight;
+    if (delta > 0) {
+      el.scrollTop = anchor.scrollTop + delta;
+    }
+  }, [headTurnId, scrollRef, turns.length]);
 
   const virtualizer = useVirtualizer({
     count: turns.length,
@@ -95,7 +147,7 @@ export function MessageList({
 
   const userTurnIndices = useMemo(() => {
     const out: Array<number | undefined> = new Array(turns.length);
-    let userCount = -1;
+    let userCount = userTurnOffset - 1;
     for (let i = 0; i < turns.length; i++) {
       const turn = turns[i];
       if (turn.summary) {
@@ -108,12 +160,50 @@ export function MessageList({
       }
     }
     return out;
-  }, [turns]);
+  }, [turns, userTurnOffset]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} className="pi-chat-gutter min-h-0 flex-1 overflow-y-auto">
         <div ref={contentRef} className="mx-auto w-full max-w-[740px] pt-4 pb-16">
+          {(hasMoreEarlier || Boolean(earlierError)) && onLoadEarlier && (
+            <div className="mb-3 flex flex-col items-center gap-1.5">
+              {hasMoreEarlier && (
+                <button
+                  type="button"
+                  disabled={loadingEarlier}
+                  onClick={handleLoadEarlierClick}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)] disabled:opacity-60"
+                  style={{
+                    background: "var(--pi-paper)",
+                    color: "var(--pi-ink-secondary)",
+                    border: "0.5px solid var(--pi-hairline)",
+                  }}
+                >
+                  {loadingEarlier && (
+                    <IconLoader2 size={13} className="animate-spin" style={{ color: "var(--pi-accent)" }} />
+                  )}
+                  <span>
+                    {loadingEarlier
+                      ? t("common.loading")
+                      : t("chat.loadEarlier", { count: Math.max(1, earlierCount) })}
+                  </span>
+                </button>
+              )}
+              {earlierError && (
+                <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--pi-danger)" }}>
+                  <span>{earlierError}</span>
+                  <button
+                    type="button"
+                    onClick={handleLoadEarlierClick}
+                    className="underline hover:opacity-80"
+                  >
+                    {t("chat.retry")}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div
             className="relative w-full"
             style={{ height: `${virtualizer.getTotalSize()}px` }}

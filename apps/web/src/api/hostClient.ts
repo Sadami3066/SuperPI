@@ -17,6 +17,8 @@ import type {
   HostInstalledSkillDto,
   HostJobOutputDto,
   HostJobSnapshotDto,
+  HostMarketCatalogResponse,
+  HostMarketInstallResponse,
   HostMcpServerDto,
   HostMemoryBlockDto,
   HostMemoryEntityDetailDto,
@@ -269,8 +271,15 @@ export class HostClient {
     });
   }
 
-  getSession(sessionId: string): Promise<HostSessionDetailDto> {
-    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}`);
+  getSession(
+    sessionId: string,
+    opts?: { limit?: number; before?: number },
+  ): Promise<HostSessionDetailDto> {
+    const params = new URLSearchParams();
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts?.before !== undefined) params.set("before", String(opts.before));
+    const suffix = params.toString();
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}${suffix ? `?${suffix}` : ""}`);
   }
 
   updateSession(
@@ -380,6 +389,26 @@ export class HostClient {
       method: "POST",
       body: JSON.stringify(body),
     });
+  }
+
+  stageAttachmentStream(
+    botId: string,
+    file: File,
+    name: string,
+    mimeType: string,
+  ): Promise<HostStagedAttachmentDto> {
+    const query = `name=${encodeURIComponent(name)}&mime=${encodeURIComponent(mimeType)}`;
+    return this.request(
+      `/api/v1/bots/${encodeURIComponent(botId)}/attachments/stream?${query}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+        },
+        body: file,
+      },
+      120_000,
+    );
   }
 
   stageFolderAttachment(botId: string, path: string): Promise<HostStagedAttachmentDto> {
@@ -1827,5 +1856,26 @@ export class HostClient {
       throw new HostApiError(resp.status, `HTTP ${resp.status}`);
     }
     return resp.text();
+  }
+
+  listMarketEntries(type?: "skill" | "mcp"): Promise<HostMarketCatalogResponse> {
+    const query = type ? `?type=${encodeURIComponent(type)}` : "";
+    return this.request(`/api/v1/market/entries${query}`);
+  }
+
+  refreshMarketEntries(type?: "skill" | "mcp"): Promise<HostMarketCatalogResponse> {
+    const query = type ? `?type=${encodeURIComponent(type)}` : "";
+    return this.request(`/api/v1/market/refresh${query}`, { method: "POST" }, 30_000);
+  }
+
+  installMarketEntry(entryId: string, apiKey?: string): Promise<HostMarketInstallResponse> {
+    return this.request(
+      "/api/v1/market/install",
+      {
+        method: "POST",
+        body: JSON.stringify({ entryId, apiKey }),
+      },
+      60_000,
+    );
   }
 }

@@ -190,6 +190,11 @@ export function useChatScroll(
     lastScrollTopRef.current = el.scrollTop;
   }, [cancelSpring]);
 
+  const disengageFollowing = useCallback(() => {
+    cancelSpring();
+    followingRef.current = false;
+  }, [cancelSpring]);
+
   const scheduleStickToBottom = useCallback(() => {
     if (!followingRef.current) return;
     kickSpring();
@@ -352,6 +357,7 @@ export function useChatScroll(
     contentRef,
     showJumpToBottom,
     snapToBottom,
+    disengageFollowing,
     scheduleStickToBottom,
   };
 }

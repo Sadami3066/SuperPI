@@ -165,7 +165,13 @@ export function WorkbenchDock({
   if (!hasOpenedRef.current) return null;
 
   const botId = activeSummary?.botId ?? draftBotId ?? bots[0]?.id ?? "home";
-  const baseCtx = { botId, sessionId: activeSessionId || null, activeView };
+  const activeBot = bots.find((b) => b.id === botId);
+  const baseCtx = {
+    botId,
+    sessionId: activeSessionId || null,
+    isRemote: Boolean(activeBot?.isRemote),
+    activeView,
+  };
   const available = getAvailableWorkbenchPanels(baseCtx, isElectron);
   const availableIds = new Set(available.map((p) => p.id));
 

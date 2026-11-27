@@ -4,6 +4,7 @@ import type { I18nKey } from "../i18n";
 export interface WorkbenchPanelContext {
   botId: string;
   sessionId: string | null;
+  isRemote?: boolean;
   activeView?: string;
   tabId?: string;
   isActiveTab?: boolean;

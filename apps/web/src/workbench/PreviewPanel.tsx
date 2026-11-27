@@ -57,6 +57,23 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1200);
 }
 
+function guessVideoMime(name: string, currentMime?: string): string {
+  if (currentMime && currentMime.startsWith("video/")) return currentMime;
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  switch (ext) {
+    case "webm":
+      return "video/webm";
+    case "mov":
+      return "video/quicktime";
+    case "m4v":
+      return "video/x-m4v";
+    case "mkv":
+      return "video/x-matroska";
+    default:
+      return "video/mp4";
+  }
+}
+
 interface LoadedContent {
   kind: PreviewKind;
   text: string;
@@ -152,14 +169,18 @@ export default function PreviewPanel({
       setLoaded(initialLoaded(kind));
 
       try {
-        if (kind === "pdf" || kind === "image") {
+        if (kind === "pdf" || kind === "image" || kind === "video") {
           const rawBlob =
             target.source === "workspace"
               ? await client.fetchBotFileRaw(target.botId, target.path, false)
               : await client.fetchSessionArtifact(target.sessionId, target.path, false);
           if (cancelled) return;
           const typed =
-            kind === "pdf" ? new Blob([rawBlob], { type: "application/pdf" }) : rawBlob;
+            kind === "pdf"
+              ? new Blob([rawBlob], { type: "application/pdf" })
+              : kind === "video"
+                ? new Blob([rawBlob], { type: guessVideoMime(target.name, rawBlob.type) })
+                : rawBlob;
           activeBlobUrl = URL.createObjectURL(typed);
           setLoaded({ ...initialLoaded(kind), blobUrl: activeBlobUrl });
           return;
@@ -657,6 +678,16 @@ export default function PreviewPanel({
               alt={activeTarget.name}
               className="max-w-none rounded-[6px] transition-transform duration-150"
               style={{ transform: `scale(${zoomPct / 100})` }}
+            />
+          </div>
+        ) : loaded.kind === "video" && loaded.blobUrl ? (
+          <div className="flex h-full w-full items-center justify-center p-4" style={{ background: "var(--pi-code-bg)" }}>
+            <video
+              controls
+              playsInline
+              preload="metadata"
+              src={loaded.blobUrl}
+              className="max-h-full max-w-full rounded-[10px]"
             />
           </div>
         ) : loaded.kind === "docx" ? (

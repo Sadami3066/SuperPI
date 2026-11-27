@@ -5,6 +5,7 @@ export type PreviewKind =
   | "docx"
   | "csv"
   | "image"
+  | "video"
   | "code"
   | "binary";
 
@@ -55,6 +56,7 @@ const TEXT_CODE_EXTS = new Set([
 ]);
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "avif"]);
+const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v", "mkv"]);
 
 export function classifyPreviewKind(name: string, mime?: string): PreviewKind {
   const lowerName = name.toLowerCase();
@@ -73,6 +75,7 @@ export function classifyPreviewKind(name: string, mime?: string): PreviewKind {
   }
   if (ext === "csv" || ext === "tsv" || lowerMime === "text/csv") return "csv";
   if (IMAGE_EXTS.has(ext) || lowerMime.startsWith("image/")) return "image";
+  if (VIDEO_EXTS.has(ext) || lowerMime.startsWith("video/")) return "video";
   if (
     TEXT_CODE_EXTS.has(ext) ||
     lowerMime.startsWith("text/") ||

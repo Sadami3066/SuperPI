@@ -229,6 +229,10 @@ export interface HostSessionDetailDto {
   } | null;
   usage?: HostUsageDto | null;
   messages: HostMessageDto[];
+  totalMessages?: number;
+  hasMore?: boolean;
+  nextBefore?: number | null;
+  userTurnOffset?: number;
   queuedInputs: HostQueuedInputDto[];
   pendingQuestion?: HostPendingQuestionDto | null;
   pendingApprovals?: HostPendingToolApprovalDto[];
@@ -269,6 +273,8 @@ export interface HostSettingsDto {
   processDetail: string;
   autoRetry: boolean;
   backgroundJobWake: boolean;
+  autoSessionTitle?: boolean;
+  sessionTitleModel?: string;
   userNickname: string;
   userAvatar: string;
   customSystemInstruction: string;
@@ -418,7 +424,8 @@ export interface ComposerAttachment {
   size: number;
   kind: "image" | "text" | "folder" | "other";
   isInlineImage: boolean;
-  dataBase64: string;
+  dataBase64?: string;
+  file?: File;
   folderPath?: string;
   previewUrl?: string;
 }
@@ -468,6 +475,10 @@ export interface SessionTranscript {
   queuedInputs: HostQueuedInputDto[];
   pendingQuestion: HostPendingQuestionDto | null;
   pendingApprovals?: HostPendingToolApprovalDto[];
+  totalMessages?: number;
+  hasMore?: boolean;
+  nextBefore?: number | null;
+  userTurnOffset?: number;
   loadedAt: number;
 }
 
@@ -991,4 +1002,53 @@ export interface HostDoctorReportDto {
   homeDir: string;
   os: string;
   checks: HostDoctorCheckItemDto[];
+}
+
+export interface HostMarketMcpAuthDto {
+  type: "none" | "apiKey" | "oauth" | string;
+  header?: string | null;
+  prefix?: string | null;
+  placeholder?: Record<string, string>;
+  helpUrl?: string | null;
+}
+
+export interface HostMarketMcpMetaDto {
+  url: string;
+  transport: string;
+  authHint?: Record<string, string>;
+  auth?: HostMarketMcpAuthDto | null;
+}
+
+export interface HostMarketEntryDto {
+  id: string;
+  type: "skill" | "mcp" | string;
+  category?: string | null;
+  name: Record<string, string>;
+  summary: Record<string, string>;
+  description: Record<string, string>;
+  icon?: string | null;
+  tags?: Record<string, string[]>;
+  version: string;
+  license?: string | null;
+  sourceUrl?: string | null;
+  mcp?: HostMarketMcpMetaDto | null;
+  installState: "not_installed" | "installed" | "update_available" | string;
+  installedVersion?: string | null;
+  installedName?: string | null;
+}
+
+export interface HostMarketCatalogResponse {
+  entries: HostMarketEntryDto[];
+  source: string;
+  fetchedAt: number;
+  stale: boolean;
+  warning?: string | null;
+}
+
+export interface HostMarketInstallResponse {
+  ok: boolean;
+  entryId: string;
+  type: string;
+  installedName: string;
+  requiresOAuth: boolean;
 }

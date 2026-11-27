@@ -30,6 +30,7 @@ import { type LiveRunState, useStreamStore } from "./streamStore";
 import { useSuperStore } from "./superStore";
 
 export const MAX_CACHED_TRANSCRIPTS = 5;
+export const DEFAULT_SESSION_PAGE_SIZE = 40;
 
 export interface SlashCommandStatus {
   kind: "compact" | "goal";
@@ -196,6 +197,8 @@ export interface SessionStoreState {
   unreadSessionIds: Record<string, true>;
   loadingSessionIds: Record<string, true>;
   sessionLoadErrors: Record<string, string>;
+  loadingEarlierBySession: Record<string, true>;
+  loadEarlierErrorBySession: Record<string, string>;
   pendingDeletes: PendingDeleteItem[];
   composerFocusTick: number;
   actionError: string | null;
@@ -220,6 +223,11 @@ export interface SessionStoreState {
     locale: "zh-CN" | "en",
     reconcileRunId?: string,
   ) => Promise<void>;
+  loadEarlierMessages: (
+    client: HostClient,
+    sessionId: string,
+    locale: "zh-CN" | "en",
+  ) => Promise<number>;
   patchSessionUsage: (sessionId: string, usage: HostUsageDto) => void;
   loadArchivedSessions: (client: HostClient) => Promise<void>;
   refreshQuestions: (client: HostClient) => Promise<void>;
@@ -427,6 +435,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
   unreadSessionIds: {},
   loadingSessionIds: {},
   sessionLoadErrors: {},
+  loadingEarlierBySession: {},
+  loadEarlierErrorBySession: {},
   pendingDeletes: [],
   composerFocusTick: 0,
   actionError: null,
@@ -598,7 +608,12 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         };
       });
       try {
-        const detail = await client.getSession(sessionId);
+        const existingTranscript = get().transcriptsById[sessionId];
+        const limit =
+          existingTranscript && existingTranscript.turns.length > DEFAULT_SESSION_PAGE_SIZE
+            ? Math.min(500, existingTranscript.turns.length + 10)
+            : DEFAULT_SESSION_PAGE_SIZE;
+        const detail = await client.getSession(sessionId, { limit });
 
         const turns: ChatTurn[] = detail.messages
           .filter((m) => !m.streaming)
@@ -622,6 +637,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
           queuedInputs: detail.queuedInputs ?? [],
           pendingQuestion: detail.pendingQuestion ?? null,
           pendingApprovals: detail.pendingApprovals ?? [],
+          totalMessages: detail.totalMessages ?? turns.length,
+          hasMore: Boolean(detail.hasMore),
+          nextBefore: detail.nextBefore ?? null,
+          userTurnOffset: detail.userTurnOffset ?? 0,
           loadedAt: Date.now(),
         };
 
@@ -687,6 +706,73 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
     if (queued) {
       pendingLoads.delete(sessionId);
       await get().loadSession(client, sessionId, queued.locale, queued.reconcileRunId);
+    }
+  },
+
+  loadEarlierMessages: async (client, sessionId, locale) => {
+    const curState = get();
+    if (curState.loadingEarlierBySession[sessionId]) return 0;
+    const current = curState.transcriptsById[sessionId];
+    if (!current || !current.hasMore || current.nextBefore == null) return 0;
+
+    set((s) => {
+      const nextErr = { ...s.loadEarlierErrorBySession };
+      delete nextErr[sessionId];
+      return {
+        loadingEarlierBySession: { ...s.loadingEarlierBySession, [sessionId]: true },
+        loadEarlierErrorBySession: nextErr,
+      };
+    });
+
+    try {
+      const detail = await client.getSession(sessionId, {
+        limit: DEFAULT_SESSION_PAGE_SIZE,
+        before: current.nextBefore,
+      });
+      const olderTurns = detail.messages
+        .filter((m) => !m.streaming)
+        .map((m) => mapHostMessageToTurn(m, locale));
+
+      let addedCount = 0;
+      set((s) => {
+        const latest = s.transcriptsById[sessionId];
+        if (!latest) {
+          const nextLoad = { ...s.loadingEarlierBySession };
+          delete nextLoad[sessionId];
+          return { loadingEarlierBySession: nextLoad };
+        }
+        const existingIds = new Set(latest.turns.map((t) => t.id));
+        const uniqueOlder = olderTurns.filter((t) => !existingIds.has(t.id));
+        addedCount = uniqueOlder.length;
+        const nextLoad = { ...s.loadingEarlierBySession };
+        delete nextLoad[sessionId];
+        return {
+          loadingEarlierBySession: nextLoad,
+          transcriptsById: {
+            ...s.transcriptsById,
+            [sessionId]: {
+              ...latest,
+              turns: [...uniqueOlder, ...latest.turns],
+              totalMessages: detail.totalMessages ?? latest.totalMessages,
+              hasMore: Boolean(detail.hasMore),
+              nextBefore: detail.nextBefore ?? null,
+              userTurnOffset: detail.userTurnOffset ?? 0,
+            },
+          },
+        };
+      });
+      return addedCount;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load earlier messages";
+      set((s) => {
+        const nextLoad = { ...s.loadingEarlierBySession };
+        delete nextLoad[sessionId];
+        return {
+          loadingEarlierBySession: nextLoad,
+          loadEarlierErrorBySession: { ...s.loadEarlierErrorBySession, [sessionId]: msg },
+        };
+      });
+      return 0;
     }
   },
 
@@ -1399,7 +1485,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
           continue;
         }
 
-        if (att.isInlineImage) {
+        if (att.isInlineImage && att.dataBase64) {
           inlineImages.push({
             data: att.dataBase64,
             mimeType: att.mimeType,
@@ -1407,11 +1493,13 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
           });
         }
         try {
-          const staged = await c.stageAttachment(botId, {
-            name: att.name,
-            mimeType: att.mimeType,
-            dataBase64: att.dataBase64,
-          });
+          const staged = att.file
+            ? await c.stageAttachmentStream(botId, att.file, att.name, att.mimeType)
+            : await c.stageAttachment(botId, {
+                name: att.name,
+                mimeType: att.mimeType,
+                dataBase64: att.dataBase64 ?? "",
+              });
           stagedMeta.push({
             path: staged.path,
             name: staged.name,
@@ -1428,7 +1516,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
             previewUrl: att.previewUrl,
           });
         } catch (err) {
-          if (!att.isInlineImage) {
+          if (!att.isInlineImage || !att.dataBase64) {
             set({
               actionError: err instanceof Error ? err.message : "Failed to upload attachment",
             });
@@ -1699,6 +1787,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       unreadSessionIds: {},
       loadingSessionIds: {},
       sessionLoadErrors: {},
+      loadingEarlierBySession: {},
+      loadEarlierErrorBySession: {},
       pendingDeletes: [],
       draftBotId: null,
       draftModelByBot: {},
