@@ -14,6 +14,7 @@ import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.ThinkingLevel
+import io.github.whywood.superpi.runtime.ToolApprovalDecision
 import io.github.whywood.superpi.runtime.UsageChanged
 import io.github.whywood.superpi.runtime.WorkerProgressEvent
 import io.ktor.http.CacheControl
@@ -175,6 +176,17 @@ internal fun Route.installSseEventRoute(
                             )
                         }
                     }
+                    val approvalJob = launch(start = CoroutineStart.UNDISPATCHED) {
+                        controller.toolApprovalCenter.pending.drop(1).collect { list ->
+                            enqueue(
+                                "approvals_changed",
+                                SseEventPayload(
+                                    type = "approvals_changed",
+                                    status = list.size.toString(),
+                                ),
+                            )
+                        }
+                    }
                     val relayJob = launch(start = CoroutineStart.UNDISPATCHED) {
                         controller.relayDevicesChangedFlow.collect { tag ->
                             enqueue(
@@ -239,6 +251,7 @@ internal fun Route.installSseEventRoute(
                         superQuestionJob.cancel()
                         workerProgressJob.cancel()
                         questionJob.cancel()
+                        approvalJob.cancel()
                         relayJob.cancel()
                         goalJob.cancel()
                         jobsJob.cancel()
@@ -416,6 +429,9 @@ internal fun Route.installSessionRoutes(
         val pendingQuestion = controller.questionCenter.pending.value
             .firstOrNull { it.sessionId == sessionId }
             ?.toDto()
+        val pendingApprovals = controller.toolApprovalCenter.pending.value
+            .filter { it.sessionId == sessionId }
+            .map { it.toDto() }
         val boundWorktree = controller.worktreeManager.findBySessionId(sessionId)
         call.respond(
             SessionDetailDto(
@@ -430,6 +446,7 @@ internal fun Route.installSessionRoutes(
                 messages = history.map { it.toDto() },
                 queuedInputs = queued,
                 pendingQuestion = pendingQuestion,
+                pendingApprovals = pendingApprovals,
                 worktreeId = boundWorktree?.id,
                 worktreeBranch = boundWorktree?.branch,
                 worktreeBaseBranch = boundWorktree?.baseBranch,
@@ -452,6 +469,8 @@ internal fun Route.installSessionRoutes(
     delete("/v1/sessions/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
         controller.autoRetryController.cancel(sessionId)
+        controller.toolApprovalCenter.cancelForSession(sessionId)
+        controller.toolApprovalCenter.clearSessionGrants(sessionId)
         controller.planFirstSessions.remove(sessionId)
         controller.runtimeHost.deleteSession(sessionId)
         controller.scope.launch { runCatching { controller.checkpointStore.deleteSession(sessionId) } }
@@ -685,7 +704,39 @@ internal fun Route.installSessionRoutes(
     post("/v1/sessions/{sessionId}/abort") {
         val sessionId = call.parameters["sessionId"].orEmpty()
         controller.autoRetryController.cancel(sessionId)
+        controller.toolApprovalCenter.cancelForSession(sessionId)
         controller.runtimeHost.stop(sessionId)
+        call.respond(HealthResponse(ok = true))
+    }
+
+    // ── Tool Approvals ───────────────────────────────────────────────────────
+    get("/v1/approvals") {
+        val sessionFilter = call.request.queryParameters["sessionId"]?.trim()?.takeIf { it.isNotEmpty() }
+        val workerFilter = call.request.queryParameters["workerId"]?.trim()?.takeIf { it.isNotEmpty() }
+        val list = controller.toolApprovalCenter.pending.value.filter { item ->
+            (sessionFilter == null || item.sessionId == sessionFilter) &&
+                (workerFilter == null || item.workerId == workerFilter)
+        }
+        call.respond(list.map { it.toDto() })
+    }
+
+    post("/v1/approvals/{approvalId}/resolve") {
+        val approvalId = call.parameters["approvalId"].orEmpty().trim()
+        if (approvalId.isEmpty()) {
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Missing approvalId"))
+            return@post
+        }
+        val req = call.receive<ResolveToolApprovalRequest>()
+        val decision = ToolApprovalDecision.parseWireOrNull(req.decision)
+        if (decision == null) {
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Invalid decision: ${req.decision}"))
+            return@post
+        }
+        val resolved = controller.toolApprovalCenter.resolve(approvalId, decision, req.note)
+        if (!resolved) {
+            call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Pending tool approval not found: $approvalId"))
+            return@post
+        }
         call.respond(HealthResponse(ok = true))
     }
 

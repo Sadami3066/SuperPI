@@ -193,6 +193,30 @@ export interface HostPendingQuestionDto {
   questions: HostUserQuestionDto[];
 }
 
+export type ToolRiskLevel = "standard" | "outside_workspace" | "destructive";
+
+export type ToolApprovalReason =
+  | "command_execution"
+  | "outside_workspace_write"
+  | "destructive_command";
+
+export type ToolApprovalDecision = "allow_once" | "allow_session" | "deny";
+
+export interface HostPendingToolApprovalDto {
+  id: string;
+  sessionId: string;
+  workerId?: string | null;
+  toolCallId: string;
+  toolName: string;
+  riskLevel: ToolRiskLevel;
+  reason: ToolApprovalReason;
+  command?: string | null;
+  path?: string | null;
+  workspaceRoot?: string | null;
+  detail: string;
+  createdAt: number;
+}
+
 export interface HostSessionDetailDto {
   sessionId: string;
   title?: string | null;
@@ -207,6 +231,7 @@ export interface HostSessionDetailDto {
   messages: HostMessageDto[];
   queuedInputs: HostQueuedInputDto[];
   pendingQuestion?: HostPendingQuestionDto | null;
+  pendingApprovals?: HostPendingToolApprovalDto[];
   worktreeId?: string | null;
   worktreeBranch?: string | null;
   worktreeBaseBranch?: string | null;
@@ -441,6 +466,7 @@ export interface SessionTranscript {
   contextPercent: number;
   queuedInputs: HostQueuedInputDto[];
   pendingQuestion: HostPendingQuestionDto | null;
+  pendingApprovals?: HostPendingToolApprovalDto[];
   loadedAt: number;
 }
 
@@ -618,6 +644,7 @@ export interface HostWorkerDto {
   deviceName?: string | null;
   isRemote: boolean;
   pendingQuestion?: HostPendingQuestionDto | null;
+  pendingApproval?: HostPendingToolApprovalDto | null;
   steps: HostWorkerStepDto[];
 }
 

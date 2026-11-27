@@ -11,6 +11,7 @@ import { Badge, Button, ConfirmDialog, Dialog } from "../../ui";
 import { AskQuestionCard } from "../chat/AskQuestionCard";
 import { ModelPicker } from "../chat/ModelPicker";
 import { useChatScroll } from "../chat/scrollPolicy";
+import { ToolApprovalCard } from "../chat/ToolApprovalCard";
 import { TurnItem } from "../chat/TurnItem";
 import { BrandIcon, PiActivityIcon } from "../shared/BrandAssets";
 
@@ -88,7 +89,7 @@ export function WorkerDetailDialog({
 
   const { scrollRef, contentRef, showJumpToBottom, snapToBottom } = useChatScroll(
     selectedWorkerId || "",
-    `${turns.length}:${detail?.worker.pendingQuestion?.requestId ?? ""}:${detail?.messages[detail.messages.length - 1]?.text.length ?? 0}`,
+    `${turns.length}:${detail?.worker.pendingQuestion?.requestId ?? ""}:${detail?.worker.pendingApproval?.id ?? ""}:${detail?.messages[detail.messages.length - 1]?.text.length ?? 0}`,
     { isStreaming: Boolean(detail?.streaming) },
   );
 
@@ -225,6 +226,16 @@ export function WorkerDetailDialog({
                         <PiActivityIcon size={16} dark={dark} />
                         <span>{detail.activeToolText || t("activity.thinking")}</span>
                       </div>
+                    )}
+
+                    {detail.worker.pendingApproval && client && selectedWorkerId && (
+                      <ToolApprovalCard
+                        key={detail.worker.pendingApproval.id}
+                        approval={detail.worker.pendingApproval}
+                        onResolve={async (approvalId, decision) => {
+                          await client.resolveApproval(approvalId, decision);
+                        }}
+                      />
                     )}
 
                     {detail.worker.pendingQuestion && client && selectedWorkerId && (

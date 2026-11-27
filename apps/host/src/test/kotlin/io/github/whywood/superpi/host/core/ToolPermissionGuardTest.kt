@@ -1,8 +1,8 @@
 package io.github.whywood.superpi.host.core
 
 import io.github.whywood.superpi.runtime.BoundSession
-import io.github.whywood.superpi.runtime.QuestionCenter
 import io.github.whywood.superpi.runtime.SessionBinding
+import io.github.whywood.superpi.runtime.ToolApprovalCenter
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import io.github.whywood.superpi.sdk.coding.tools.textResult
 import java.io.File
@@ -94,7 +94,7 @@ class ToolPermissionGuardTest {
                 binding = binding,
                 workspaceRoot = workspace,
                 modeProvider = { mode },
-                questionCenter = QuestionCenter(),
+                toolApprovalCenter = ToolApprovalCenter(),
                 planFirstCheck = { planFirstActive },
             )
 
@@ -112,7 +112,7 @@ class ToolPermissionGuardTest {
                 binding = binding,
                 workspaceRoot = workspace,
                 modeProvider = { mode },
-                questionCenter = QuestionCenter(),
+                toolApprovalCenter = ToolApprovalCenter(),
                 planFirstCheck = { planFirstActive },
             )
 

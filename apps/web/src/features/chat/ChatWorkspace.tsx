@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconLayoutSidebarRight } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
 import { extractLatestTodosFromTurns } from "../../api/todo";
-import type { HostBotDto, PermissionMode, QuestionAnswerInput } from "../../api/types";
+import type {
+  HostBotDto,
+  PermissionMode,
+  QuestionAnswerInput,
+  ToolApprovalDecision,
+} from "../../api/types";
 import { useI18n } from "../../i18n";
 import { windowToggleMaximize } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
@@ -87,6 +92,7 @@ export function ChatWorkspace({
   const summary = summaryFromList ?? archivedMatch;
   const transcript = useSessionStore((s) => s.transcriptsById[s.activeSessionId]);
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
+  const pendingApprovals = useSessionStore((s) => s.pendingApprovals);
   const planFirst = useSessionStore((s) => Boolean(s.planFirstBySession[s.activeSessionId]));
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
   const setComposerText = useSessionStore((s) => s.setComposerText);
@@ -101,6 +107,7 @@ export function ChatWorkspace({
   const promoteQueuedInput = useSessionStore((s) => s.promoteQueuedInput);
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const dismissQuestion = useSessionStore((s) => s.dismissQuestion);
+  const resolveToolApproval = useSessionStore((s) => s.resolveToolApproval);
 
   const hasLiveRun = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]));
   const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]?.streaming));
@@ -182,9 +189,19 @@ export function ChatWorkspace({
     );
   }, [activeSessionId, pendingQuestions, transcript?.pendingQuestion]);
 
-  const foreignQuestion = useMemo(
-    () => pendingQuestions.find((q) => q.sessionId !== activeSessionId) ?? null,
-    [activeSessionId, pendingQuestions],
+  const activeApprovals = useMemo(() => {
+    if (!activeSessionId) return [];
+    const live = pendingApprovals.filter((a) => a.sessionId === activeSessionId);
+    if (live.length > 0) return live;
+    return transcript?.pendingApprovals ?? [];
+  }, [activeSessionId, pendingApprovals, transcript?.pendingApprovals]);
+
+  const foreignPendingSessionId = useMemo(
+    () =>
+      pendingQuestions.find((q) => q.sessionId !== activeSessionId)?.sessionId ??
+      pendingApprovals.find((a) => !a.workerId && a.sessionId !== activeSessionId)?.sessionId ??
+      null,
+    [activeSessionId, pendingApprovals, pendingQuestions],
   );
 
   const greetingKeys = useMemo(() => resolveGreetingKeys(), [activeSessionId]);
@@ -214,6 +231,13 @@ export function ChatWorkspace({
     [client, dismissQuestion],
   );
 
+  const handleResolveApproval = useCallback(
+    async (approvalId: string, decision: ToolApprovalDecision) => {
+      if (client) await resolveToolApproval(client, approvalId, decision);
+    },
+    [client, resolveToolApproval],
+  );
+
   const turns = transcript?.turns ?? [];
   const latestTodos = useMemo(
     () => extractLatestTodosFromTurns(turns, liveRunBlocks),
@@ -229,7 +253,7 @@ export function ChatWorkspace({
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
   const userNickname = hostSettings?.userNickname?.trim() || "";
-  const isHeroEmpty = turns.length === 0 && !hasLiveRun && !activeQuestion;
+  const isHeroEmpty = turns.length === 0 && !hasLiveRun && !activeQuestion && activeApprovals.length === 0;
   const starterPrompts = [t("chat.starter1"), t("chat.starter2"), t("chat.starter3")];
 
   const composerElement = (variant: "hero" | "docked") => (
@@ -463,19 +487,19 @@ export function ChatWorkspace({
         </div>
       )}
 
-      {foreignQuestion && (
+      {foreignPendingSessionId && (
         <div className="px-4 pt-2">
           <NoticeBar
             tone="warning"
             message={t("chat.foreignQuestionBanner", {
-              title: summariesById[foreignQuestion.sessionId]?.title || t("nav.untitledChat"),
+              title: summariesById[foreignPendingSessionId]?.title || t("nav.untitledChat"),
             })}
             action={
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  if (client) void selectSession(client, foreignQuestion.sessionId, locale);
+                  if (client) void selectSession(client, foreignPendingSessionId, locale);
                 }}
               >
                 {t("chat.foreignQuestionJump")}
@@ -526,12 +550,14 @@ export function ChatWorkspace({
             sessionId={activeSessionId}
             turns={turns}
             pendingQuestion={activeQuestion}
+            pendingApprovals={activeApprovals}
             compactProcess={hostSettings?.processDetail === "compact"}
             dark={dark}
             onQuote={handleQuote}
             onRetry={handleRetry}
             onAnswerQuestion={handleAnswerQuestion}
             onDismissQuestion={handleDismissQuestion}
+            onResolveApproval={handleResolveApproval}
             scrollRefOut={snapToBottomRef}
           />
           <div className="shrink-0 px-4">

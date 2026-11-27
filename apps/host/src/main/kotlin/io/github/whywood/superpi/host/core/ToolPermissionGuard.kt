@@ -1,10 +1,11 @@
 package io.github.whywood.superpi.host.core
 
-import io.github.whywood.superpi.runtime.QuestionCenter
-import io.github.whywood.superpi.runtime.QuestionOption
-import io.github.whywood.superpi.runtime.QuestionOutcome
 import io.github.whywood.superpi.runtime.SessionBinding
-import io.github.whywood.superpi.runtime.UserQuestion
+import io.github.whywood.superpi.runtime.ToolApprovalCenter
+import io.github.whywood.superpi.runtime.ToolApprovalOutcome
+import io.github.whywood.superpi.runtime.ToolApprovalReason
+import io.github.whywood.superpi.runtime.ToolRiskLevel
+import io.github.whywood.superpi.sdk.ai.RunSignal
 import io.github.whywood.superpi.sdk.coding.tools.CodingTool
 import java.io.File
 import java.nio.file.Files
@@ -35,7 +36,7 @@ enum class PermissionMode(val wire: String) {
 /**
  * Unified 4-tier tool permission enforcement across all local sessions & workers:
  * - `read_only`: denies mutating file tools and shell/job execution tools.
- * - `ask_commands`: allows in-workspace edits, prompts via QuestionCenter before shell/job/outside-workspace writes.
+ * - `ask_commands`: allows in-workspace edits, prompts via ToolApprovalCenter before shell/job/outside-workspace writes.
  * - `workspace_auto`: auto-runs in-workspace edits and normal commands; prompts for destructive commands or outside-workspace writes.
  * - `full_auto`: executes without interactive prompts.
  */
@@ -94,8 +95,9 @@ object ToolPermissionGuard {
         binding: SessionBinding,
         workspaceRoot: File,
         modeProvider: () -> PermissionMode,
-        questionCenter: QuestionCenter,
+        toolApprovalCenter: ToolApprovalCenter,
         planFirstCheck: (sessionId: String) -> Boolean = { false },
+        workerIdProvider: () -> String? = { null },
     ): CodingTool {
         if (tool.name !in GUARDED_TOOLS) return tool
         val original = tool
@@ -120,8 +122,10 @@ object ToolPermissionGuard {
                     mode = effectiveMode,
                     workspaceRoot = workspaceRoot,
                     sessionId = sessionId,
+                    workerId = workerIdProvider(),
                     callId = callId,
-                    questionCenter = questionCenter,
+                    signal = signal,
+                    toolApprovalCenter = toolApprovalCenter,
                 )
                 if (denial != null) {
                     throw IllegalStateException(denial)
@@ -137,8 +141,10 @@ object ToolPermissionGuard {
         mode: PermissionMode,
         workspaceRoot: File,
         sessionId: String,
+        workerId: String?,
         callId: String,
-        questionCenter: QuestionCenter,
+        signal: RunSignal?,
+        toolApprovalCenter: ToolApprovalCenter,
     ): String? {
         // For the unified `job` tool, read-only queries (list/status/output/read) are safe;
         // only `start` (or missing/unknown) executes shell commands and `kill` mutates processes.
@@ -174,39 +180,39 @@ object ToolPermissionGuard {
         }
 
         val detail = when {
-            !command.isNullOrEmpty() -> command.take(240)
-            !path.isNullOrEmpty() -> path.take(240)
+            !command.isNullOrEmpty() -> command.take(500)
+            !path.isNullOrEmpty() -> path.take(500)
             else -> toolName
         }
-        val header = if (destructive) "高风险命令确认" else if (outsideWs) "工作区外写入确认" else "命令执行确认"
-        val prompt = buildString {
-            append("工具 `").append(toolName).append("` 请求执行：\n`")
-            append(detail)
-            append("`")
+        val riskLevel = when {
+            destructive -> ToolRiskLevel.DESTRUCTIVE
+            outsideWs -> ToolRiskLevel.OUTSIDE_WORKSPACE
+            else -> ToolRiskLevel.STANDARD
         }
-        val outcome = questionCenter.ask(
+        val reason = when {
+            destructive -> ToolApprovalReason.DESTRUCTIVE_COMMAND
+            outsideWs -> ToolApprovalReason.OUTSIDE_WORKSPACE_WRITE
+            else -> ToolApprovalReason.COMMAND_EXECUTION
+        }
+        val outcome = toolApprovalCenter.requestApproval(
             sessionId = sessionId,
+            workerId = workerId,
             toolCallId = callId,
-            questions = listOf(
-                UserQuestion(
-                    id = "perm-approve",
-                    header = header,
-                    question = prompt,
-                    options = listOf(
-                        QuestionOption(label = "允许执行", description = "本次放行该操作"),
-                        QuestionOption(label = "拒绝", description = "取消该工具调用"),
-                    ),
-                    multiSelect = false,
-                ),
-            ),
+            toolName = toolName,
+            riskLevel = riskLevel,
+            reason = reason,
+            command = command?.take(500),
+            path = path?.take(500),
+            workspaceRoot = workspaceRoot.absolutePath,
+            detail = detail,
+            signal = signal,
         )
         return when (outcome) {
-            is QuestionOutcome.Answered -> {
-                val selected = outcome.answers.firstOrNull()?.selected?.firstOrNull()?.lowercase(Locale.US).orEmpty()
-                val approved = selected.contains("允许") || selected.contains("allow") || selected.contains("yes")
-                if (approved) null else "User denied permission for '$toolName'."
-            }
-            QuestionOutcome.Cancelled -> "Permission request was dismissed by the user."
+            ToolApprovalOutcome.Approved -> null
+            is ToolApprovalOutcome.Denied ->
+                outcome.reason?.let { "User denied permission for '$toolName': $it" }
+                    ?: "User denied permission for '$toolName'."
+            ToolApprovalOutcome.Cancelled -> "Permission request was cancelled."
         }
     }
 }

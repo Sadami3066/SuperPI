@@ -35,6 +35,12 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
     return;
   }
 
+  if (ev.type === "approvals_changed") {
+    void sessionStore.refreshApprovals(client);
+    useSuperStore.getState().scheduleRefreshState(client);
+    return;
+  }
+
   if (ev.type === "inbox_changed") {
     void useSuperStore.getState().refreshInbox(client);
     return;
@@ -322,6 +328,8 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
       await sessionStore.hydrateSessionLists(client, bots, useSettingsStore.getState().locale);
       if (gen !== connectGeneration) return;
 
+      void sessionStore.refreshQuestions(client);
+      void sessionStore.refreshApprovals(client);
       void useSuperStore.getState().refreshInbox(client);
 
       let hadSse = false;

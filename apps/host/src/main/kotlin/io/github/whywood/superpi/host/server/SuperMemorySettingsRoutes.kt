@@ -56,6 +56,9 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
         controller.superOrchestrator.ensureStarted()
         val state = controller.superOrchestrator.threadState.value
         val workers = controller.superOrchestrator.workers.value
+        val approvalsByWorker = controller.toolApprovalCenter.pending.value
+            .mapNotNull { approval -> approval.workerId?.let { it to approval } }
+            .toMap()
         val triggerPct = controller.settingsStore.current().compactionTriggerPercent
         call.respond(
             SuperStateResponse(
@@ -72,7 +75,7 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                 error = state.error,
                 pendingQuestion = state.pendingQuestion?.toDto(),
                 messages = state.messages.map { it.toDto() },
-                workers = workers.map { it.toDto() },
+                workers = workers.map { it.toDto(approvalsByWorker[it.workerId]) },
             ),
         )
     }
@@ -315,12 +318,16 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                             val workerFlow = controller.superOrchestrator.workers.map { list ->
                                 list.firstOrNull { it.workerId == workerId }
                             }
+                            val workerApprovalFlow = controller.toolApprovalCenter.pending.map { list ->
+                                list.firstOrNull { it.workerId == workerId }
+                            }
                             combine(
                                 controller.superOrchestrator.observeWorkerSession(workerId),
                                 workerFlow,
-                            ) { snapshot, currentWorker ->
-                                snapshot to currentWorker
-                            }.collect { (snapshot, currentWorker) ->
+                                workerApprovalFlow,
+                            ) { snapshot, currentWorker, pendingApproval ->
+                                Triple(snapshot, currentWorker, pendingApproval)
+                            }.collect { (snapshot, currentWorker, pendingApproval) ->
                                 if (currentWorker == null) {
                                     outbound.trySend("event: worker_deleted\ndata: {}\n\n")
                                     heartbeatJob.cancel()
@@ -332,7 +339,7 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                                     else it.compactionTriggerPercent
                                 }
                                 val dto = WorkerDetailDto(
-                                    worker = currentWorker.toDto(),
+                                    worker = currentWorker.toDto(pendingApproval),
                                     messages = snapshot.messages.map { it.toDto() },
                                     streaming = snapshot.streaming,
                                     activeToolText = snapshot.activeToolText,
@@ -387,9 +394,10 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
             if (it.superMode.workerCompactionOverrideEnabled) it.superMode.workerCompactionTriggerPercent
             else it.compactionTriggerPercent
         }
+        val pendingApproval = controller.toolApprovalCenter.pending.value.firstOrNull { it.workerId == workerId }
         call.respond(
             WorkerDetailDto(
-                worker = worker.toDto(),
+                worker = worker.toDto(pendingApproval),
                 messages = snapshot.messages.map { it.toDto() },
                 streaming = snapshot.streaming,
                 activeToolText = snapshot.activeToolText,

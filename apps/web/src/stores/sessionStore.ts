@@ -13,6 +13,7 @@ import type {
   ComposerAttachment,
   HostBotDto,
   HostPendingQuestionDto,
+  HostPendingToolApprovalDto,
   HostQueuedInputDto,
   HostSessionSummaryDto,
   HostUsageDto,
@@ -20,6 +21,7 @@ import type {
   SessionSummary,
   SessionTranscript,
   ThinkingLevel,
+  ToolApprovalDecision,
   TurnBlock,
 } from "../api/types";
 import { useBotStore } from "./botStore";
@@ -116,6 +118,7 @@ export interface SessionStoreState {
   lruOrder: string[];
   archivedSessions: SessionSummary[];
   pendingQuestions: HostPendingQuestionDto[];
+  pendingApprovals: HostPendingToolApprovalDto[];
   activeSessionId: string;
   unreadSessionIds: Record<string, true>;
   composerFocusTick: number;
@@ -141,6 +144,7 @@ export interface SessionStoreState {
   patchSessionUsage: (sessionId: string, usage: HostUsageDto) => void;
   loadArchivedSessions: (client: HostClient) => Promise<void>;
   refreshQuestions: (client: HostClient) => Promise<void>;
+  refreshApprovals: (client: HostClient) => Promise<void>;
   selectSession: (client: HostClient, sessionId: string, locale: "zh-CN" | "en") => Promise<void>;
   createSession: (
     client: HostClient,
@@ -201,6 +205,12 @@ export interface SessionStoreState {
     answers: QuestionAnswerInput[],
   ) => Promise<void>;
   dismissQuestion: (client: HostClient, requestId: string) => Promise<void>;
+  resolveToolApproval: (
+    client: HostClient,
+    approvalId: string,
+    decision: ToolApprovalDecision,
+    note?: string,
+  ) => Promise<void>;
   setComposerText: (sessionId: string, value: string) => void;
   setQuotedText: (sessionId: string, value: string | null) => void;
   togglePlanFirst: (sessionId: string) => void;
@@ -234,6 +244,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   lruOrder: [],
   archivedSessions: [],
   pendingQuestions: [],
+  pendingApprovals: [],
   activeSessionId: loadStoredSessionId(),
   unreadSessionIds: {},
   composerFocusTick: 0,
@@ -372,6 +383,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
           contextPercent: computeContextPercent(detail.usage),
           queuedInputs: detail.queuedInputs ?? [],
           pendingQuestion: detail.pendingQuestion ?? null,
+          pendingApprovals: detail.pendingApprovals ?? [],
           loadedAt: Date.now(),
         };
 
@@ -454,6 +466,11 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   refreshQuestions: async (client) => {
     const list = await client.listQuestions().catch(() => [] as HostPendingQuestionDto[]);
     set({ pendingQuestions: list });
+  },
+
+  refreshApprovals: async (client) => {
+    const list = await client.listApprovals().catch(() => [] as HostPendingToolApprovalDto[]);
+    set({ pendingApprovals: list });
   },
 
   selectSession: async (client, sessionId, locale) => {
@@ -899,6 +916,27 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     await get().refreshQuestions(client);
   },
 
+  resolveToolApproval: async (client, approvalId, decision, note) => {
+    await client.resolveApproval(approvalId, decision, note);
+    const activeId = get().activeSessionId;
+    await get().refreshApprovals(client);
+    if (activeId) {
+      set((s) => {
+        const tr = s.transcriptsById[activeId];
+        if (!tr?.pendingApprovals?.some((a) => a.id === approvalId)) return s;
+        return {
+          transcriptsById: {
+            ...s.transcriptsById,
+            [activeId]: {
+              ...tr,
+              pendingApprovals: tr.pendingApprovals.filter((a) => a.id !== approvalId),
+            },
+          },
+        };
+      });
+    }
+  },
+
   setComposerText: (sessionId, value) => {
     set((s) => ({
       composerTextBySession: { ...s.composerTextBySession, [sessionId]: value },
@@ -960,6 +998,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       lruOrder: [],
       archivedSessions: [],
       pendingQuestions: [],
+      pendingApprovals: [],
       unreadSessionIds: {},
     });
   },

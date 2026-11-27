@@ -1,7 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { IconArrowDown } from "@tabler/icons-react";
-import type { ChatTurn, HostPendingQuestionDto, QuestionAnswerInput } from "../../api/types";
+import type {
+  ChatTurn,
+  HostPendingQuestionDto,
+  HostPendingToolApprovalDto,
+  QuestionAnswerInput,
+  ToolApprovalDecision,
+} from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useStreamStore } from "../../stores/streamStore";
 import { AskQuestionCard } from "./AskQuestionCard";
@@ -9,12 +15,14 @@ import { MessageAnchorRail } from "./MessageAnchorRail";
 import { useChatScroll } from "./scrollPolicy";
 import { SelectionReplyBar } from "./SelectionReplyBar";
 import { StreamingTurnView } from "./StreamingTurnView";
+import { ToolApprovalCard } from "./ToolApprovalCard";
 import { TurnItem } from "./TurnItem";
 
 export function MessageList({
   sessionId,
   turns,
   pendingQuestion,
+  pendingApprovals,
   compactProcess,
   dark,
   canRetry = true,
@@ -22,11 +30,13 @@ export function MessageList({
   onRetry,
   onAnswerQuestion,
   onDismissQuestion,
+  onResolveApproval,
   scrollRefOut,
 }: {
   sessionId: string;
   turns: ChatTurn[];
   pendingQuestion: HostPendingQuestionDto | null;
+  pendingApprovals?: HostPendingToolApprovalDto[];
   compactProcess: boolean;
   dark: boolean;
   canRetry?: boolean;
@@ -34,14 +44,16 @@ export function MessageList({
   onRetry: () => void;
   onAnswerQuestion: (requestId: string, answers: QuestionAnswerInput[]) => Promise<void>;
   onDismissQuestion: (requestId: string) => Promise<void>;
+  onResolveApproval?: (approvalId: string, decision: ToolApprovalDecision) => Promise<void>;
   scrollRefOut?: React.MutableRefObject<(() => void) | null>;
 }) {
   const { t } = useI18n();
   const hasLiveRun = useStreamStore((s) => Boolean(s.activeBySession[sessionId]));
   const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[sessionId]?.streaming));
+  const approvalTrigger = (pendingApprovals ?? []).map((a) => a.id).join(",");
 
   const { scrollRef, contentRef, showJumpToBottom, snapToBottom, scheduleStickToBottom } =
-    useChatScroll(sessionId, `${turns.length}:${pendingQuestion?.requestId ?? ""}`, {
+    useChatScroll(sessionId, `${turns.length}:${pendingQuestion?.requestId ?? ""}:${approvalTrigger}`, {
       isStreaming,
     });
 
@@ -115,6 +127,17 @@ export function MessageList({
             onRetry={onRetry}
             onLayoutTick={scheduleStickToBottom}
           />
+
+          {pendingApprovals &&
+            pendingApprovals.length > 0 &&
+            onResolveApproval &&
+            pendingApprovals.map((approval) => (
+              <ToolApprovalCard
+                key={approval.id}
+                approval={approval}
+                onResolve={onResolveApproval}
+              />
+            ))}
 
           {pendingQuestion && (
             <AskQuestionCard

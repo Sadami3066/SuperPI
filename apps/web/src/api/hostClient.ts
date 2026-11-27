@@ -29,6 +29,7 @@ import type {
   HostOAuthStatusDto,
   HostOpenEditorResponse,
   HostPendingQuestionDto,
+  HostPendingToolApprovalDto,
   HostProviderDto,
   HostQueuedInputDto,
   HostRelayDeviceDto,
@@ -60,6 +61,7 @@ import type {
   HostWorktreeOpResponse,
   PermissionMode,
   QuestionAnswerInput,
+  ToolApprovalDecision,
 } from "./types";
 
 export class HostApiError extends Error {
@@ -376,6 +378,25 @@ export class HostClient {
   dismissQuestion(requestId: string): Promise<HostHealthDto> {
     return this.request(`/api/v1/questions/${encodeURIComponent(requestId)}/dismiss`, {
       method: "POST",
+    });
+  }
+
+  listApprovals(sessionId?: string, workerId?: string): Promise<HostPendingToolApprovalDto[]> {
+    const params = new URLSearchParams();
+    if (sessionId) params.set("sessionId", sessionId);
+    if (workerId) params.set("workerId", workerId);
+    const suffix = params.toString();
+    return this.request(`/api/v1/approvals${suffix ? `?${suffix}` : ""}`);
+  }
+
+  resolveApproval(
+    approvalId: string,
+    decision: ToolApprovalDecision,
+    note?: string,
+  ): Promise<HostHealthDto> {
+    return this.request(`/api/v1/approvals/${encodeURIComponent(approvalId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ decision, note }),
     });
   }
 

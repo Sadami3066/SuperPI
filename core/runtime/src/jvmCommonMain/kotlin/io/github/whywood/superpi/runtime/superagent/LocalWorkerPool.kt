@@ -8,6 +8,7 @@ import io.github.whywood.superpi.runtime.ImagePart
 import io.github.whywood.superpi.runtime.MessageStatus
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.PendingQuestion
+import io.github.whywood.superpi.runtime.PendingToolApproval
 import io.github.whywood.superpi.runtime.ProviderDirectory
 import io.github.whywood.superpi.runtime.QuestionAnswer
 import io.github.whywood.superpi.runtime.QuestionCenter
@@ -17,6 +18,7 @@ import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.SuperRuntimeSettings
 import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.ToolActivityStatus
+import io.github.whywood.superpi.runtime.ToolApprovalCenter
 import io.github.whywood.superpi.runtime.ToolResultDetails
 import io.github.whywood.superpi.runtime.ToolTrace
 import io.github.whywood.superpi.runtime.WorkerArtifactRef
@@ -156,6 +158,7 @@ class LocalWorkerPool(
     private val inspectExtrasProvider: suspend (workerId: String, sdkSessionId: String?) -> WorkerInspectExtras = { _, _ ->
         WorkerInspectExtras()
     },
+    private val toolApprovalCenter: ToolApprovalCenter = ToolApprovalCenter(),
 ) {
     val approvalCenter = QuestionCenter()
     val workers: StateFlow<List<WorkerRunRecord>> = taskStore.workers
@@ -177,6 +180,7 @@ class LocalWorkerPool(
     private val sessionFlows = ConcurrentHashMap<String, MutableStateFlow<WorkerSessionSnapshot>>()
     private val pendingQueue = ArrayDeque<QueuedExecution>()
     private var previousQuestions = emptyMap<String, PendingQuestion>()
+    private var previousToolApprovals = emptyMap<String, PendingToolApproval>()
 
     private data class QueuedExecution(
         val workerId: String,
@@ -245,6 +249,11 @@ class LocalWorkerPool(
             scope.launch {
                 approvalCenter.pending.collect { pending ->
                     onApprovalPendingChanged(pending)
+                }
+            }
+            scope.launch {
+                toolApprovalCenter.pending.collect { pending ->
+                    onToolApprovalPendingChanged(pending)
                 }
             }
             initialized.set(true)
@@ -654,6 +663,7 @@ class LocalWorkerPool(
 
         val sessionIdToClean = handleToAbort?.sessionId
         questionToCancel?.let { approvalCenter.cancel(it.requestId) }
+        toolApprovalCenter.cancelForWorker(workerId)
         handleToAbort?.abort()
         turnJobToCancel?.cancel()
         if (!sessionIdToClean.isNullOrBlank()) {
@@ -707,7 +717,12 @@ class LocalWorkerPool(
             current
         }
 
-        slot.handle?.sessionId?.let(onWorkerSessionCleanup)
+        slot.handle?.sessionId?.let { sid ->
+            toolApprovalCenter.cancelForSession(sid)
+            toolApprovalCenter.clearSessionGrants(sid)
+            onWorkerSessionCleanup(sid)
+        }
+        toolApprovalCenter.cancelForWorker(workerId)
         try {
             onWorkerDeleted(workerId)
         } catch (cancelled: CancellationException) {
@@ -1682,6 +1697,7 @@ class LocalWorkerPool(
     }
 
     private suspend fun finalizeTurnSuccess(slot: WorkerSlotRuntime, handle: SessionHandle) {
+        toolApprovalCenter.cancelForWorker(slot.workerId)
         val nowMs = clock()
         val finalText = handle.lastAssistantText()
             ?.takeIf { it.isNotBlank() }
@@ -1777,6 +1793,7 @@ class LocalWorkerPool(
     }
 
     private suspend fun finalizeTurnFailure(slot: WorkerSlotRuntime, errorMessage: String) {
+        toolApprovalCenter.cancelForWorker(slot.workerId)
         val nowMs = clock()
         val activeHandle = poolMutex.withLock { slot.handle }
         val committed = activeHandle?.let { readHistorySafely(it, slot.workerId) }
@@ -2158,7 +2175,9 @@ class LocalWorkerPool(
                 slot.questionEscalationJob?.cancel()
                 slot.questionEscalationJob = null
                 slot.questionEscalatedToSuper = false
-                val nextStatus = if (slot.turnJob?.isActive == true && !slot.abortedByUser) {
+                val nextStatus = if (hasActiveToolApprovalLocked(slot)) {
+                    WorkerStatus.WAITING_INPUT
+                } else if (slot.turnJob?.isActive == true && !slot.abortedByUser) {
                     WorkerStatus.RUNNING
                 } else {
                     slot.record.status
@@ -2247,6 +2266,91 @@ class LocalWorkerPool(
                         put("questions", encodeQuestions(pq))
                     },
                     terminal = false,
+                )
+            }
+        }
+    }
+
+    private fun hasActiveToolApprovalLocked(
+        slot: WorkerSlotRuntime,
+        current: List<PendingToolApproval> = toolApprovalCenter.pending.value,
+    ): Boolean {
+        val sid = slot.handle?.sessionId
+        return current.any { it.workerId == slot.workerId || (sid != null && it.sessionId == sid) }
+    }
+
+    private suspend fun onToolApprovalPendingChanged(current: List<PendingToolApproval>) {
+        val byId = current.associateBy { it.id }
+        val resolvedEntries = previousToolApprovals.filterKeys { it !in byId }
+        val added = byId.filterKeys { it !in previousToolApprovals }
+        previousToolApprovals = byId
+
+        for ((_, prev) in resolvedEntries) {
+            val mappedWorkerId = prev.workerId ?: sessionToWorker[prev.sessionId] ?: continue
+            val resolved = poolMutex.withLock {
+                val slot = slots[mappedWorkerId] ?: return@withLock null
+                if (slot.activeQuestion != null || hasActiveToolApprovalLocked(slot, current)) {
+                    return@withLock null
+                }
+                val nowMs = clock()
+                val nextStatus = if (slot.turnJob?.isActive == true && !slot.abortedByUser) {
+                    WorkerStatus.RUNNING
+                } else {
+                    slot.record.status
+                }
+                val updated = slot.record.copy(
+                    status = nextStatus,
+                    updatedAt = nowMs,
+                    lastProgressAt = nowMs,
+                )
+                slot.record = updated
+                writeMetaFile(updated)
+                val queuedFollowUps = if (nextStatus != WorkerStatus.WAITING_INPUT && slot.pendingFollowUps.isNotEmpty()) {
+                    slot.pendingFollowUps.toList().also { slot.pendingFollowUps.clear() }
+                } else {
+                    emptyList()
+                }
+                ResolvedApproval(slot.workerId, slot.botId, updated, queuedFollowUps)
+            }
+            if (resolved != null) {
+                taskStore.upsertWorker(resolved.updatedRecord)
+                if (resolved.updatedRecord.status == WorkerStatus.RUNNING) {
+                    resetStallWatchdog(resolved.workerId)
+                }
+                _progressEvents.tryEmit(
+                    WorkerProgressEvent.StatusChanged(
+                        resolved.workerId,
+                        resolved.updatedRecord.status,
+                        resolved.updatedRecord.activeStepText,
+                    ),
+                )
+                dispatchPendingFollowUps(resolved.workerId, resolved.queuedFollowUps)
+            }
+        }
+
+        for ((_, approval) in added) {
+            val mappedWorkerId = approval.workerId ?: sessionToWorker[approval.sessionId] ?: continue
+            val (botId, updatedRecord) = poolMutex.withLock {
+                val slot = slots[mappedWorkerId] ?: return@withLock null to null
+                val nowMs = clock()
+                slot.watchdogJob?.cancel()
+                slot.watchdogJob = null
+                slot.questionEscalationJob?.cancel()
+                slot.questionEscalationJob = null
+                slot.questionEscalatedToSuper = false
+                val updated = slot.record.copy(
+                    status = WorkerStatus.WAITING_INPUT,
+                    updatedAt = nowMs,
+                    lastProgressAt = nowMs,
+                )
+                slot.record = updated
+                writeMetaFile(updated)
+                slot.botId to updated
+            }
+            if (botId != null && updatedRecord != null) {
+                taskStore.upsertWorker(updatedRecord)
+                _progressEvents.tryEmit(
+                    WorkerProgressEvent.StatusChanged(mappedWorkerId, WorkerStatus.WAITING_INPUT, updatedRecord.activeStepText),
                 )
             }
         }

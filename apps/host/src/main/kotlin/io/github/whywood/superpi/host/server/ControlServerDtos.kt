@@ -15,6 +15,7 @@ import io.github.whywood.superpi.runtime.MemoryEvent
 import io.github.whywood.superpi.runtime.MemoryOverview
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.runtime.PendingQuestion
+import io.github.whywood.superpi.runtime.PendingToolApproval
 import io.github.whywood.superpi.runtime.QuestionAnswer
 import io.github.whywood.superpi.runtime.QueuedInput
 import io.github.whywood.superpi.runtime.SessionUsage
@@ -226,6 +227,28 @@ data class AnswerQuestionRequest(
 )
 
 @Serializable
+data class PendingToolApprovalDto(
+    val id: String,
+    val sessionId: String,
+    val workerId: String? = null,
+    val toolCallId: String,
+    val toolName: String,
+    val riskLevel: String,
+    val reason: String,
+    val command: String? = null,
+    val path: String? = null,
+    val workspaceRoot: String? = null,
+    val detail: String,
+    val createdAt: Long,
+)
+
+@Serializable
+data class ResolveToolApprovalRequest(
+    val decision: String,
+    val note: String? = null,
+)
+
+@Serializable
 data class PairCodeResponse(
     val link: String,
     val expiresAt: Long? = null,
@@ -409,6 +432,7 @@ data class SessionDetailDto(
     val messages: List<MessageDto> = emptyList(),
     val queuedInputs: List<QueuedInputDto> = emptyList(),
     val pendingQuestion: PendingQuestionDto? = null,
+    val pendingApprovals: List<PendingToolApprovalDto> = emptyList(),
     val worktreeId: String? = null,
     val worktreeBranch: String? = null,
     val worktreeBaseBranch: String? = null,
@@ -537,6 +561,7 @@ data class WorkerDto(
     val deviceName: String? = null,
     val isRemote: Boolean = false,
     val pendingQuestion: PendingQuestionDto? = null,
+    val pendingApproval: PendingToolApprovalDto? = null,
     val steps: List<WorkerStepDto> = emptyList(),
 )
 
@@ -985,7 +1010,7 @@ internal fun AssistantMessage.toDto(): MessageDto = MessageDto(
     },
 )
 
-internal fun WorkerRunRecord.toDto(): WorkerDto = WorkerDto(
+internal fun WorkerRunRecord.toDto(pendingApproval: PendingToolApproval? = null): WorkerDto = WorkerDto(
     workerId = workerId,
     botId = botId,
     botName = botName,
@@ -1002,6 +1027,7 @@ internal fun WorkerRunRecord.toDto(): WorkerDto = WorkerDto(
     deviceName = deviceName.takeIf { it.isNotBlank() },
     isRemote = isRemote,
     pendingQuestion = pendingQuestion?.toDto(),
+    pendingApproval = pendingApproval?.toDto(),
     steps = steps.map { s ->
         WorkerStepDto(
             label = s.toolName,
@@ -1011,6 +1037,21 @@ internal fun WorkerRunRecord.toDto(): WorkerDto = WorkerDto(
             updatedAt = s.updatedAt,
         )
     },
+)
+
+internal fun PendingToolApproval.toDto(): PendingToolApprovalDto = PendingToolApprovalDto(
+    id = id,
+    sessionId = sessionId,
+    workerId = workerId,
+    toolCallId = toolCallId,
+    toolName = toolName,
+    riskLevel = riskLevel.wire,
+    reason = reason.wire,
+    command = command,
+    path = path,
+    workspaceRoot = workspaceRoot,
+    detail = detail,
+    createdAt = createdAt,
 )
 
 internal fun PendingQuestion.toDto(): PendingQuestionDto = PendingQuestionDto(

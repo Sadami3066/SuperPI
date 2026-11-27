@@ -75,6 +75,7 @@ import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.TimerService
 import io.github.whywood.superpi.runtime.TimerStore
 import io.github.whywood.superpi.runtime.TimerToolScope
+import io.github.whywood.superpi.runtime.ToolApprovalCenter
 import io.github.whywood.superpi.runtime.TurnSource
 import io.github.whywood.superpi.runtime.WorkerJobSummary
 import io.github.whywood.superpi.runtime.WorkerTimerSummary
@@ -223,6 +224,7 @@ class SuperPiController(
     val sessionMetaStore = SessionMetaStore(sessionMetaKvStore)
     val sessionCatalog = SessionCatalog(paths.homeDir, sessionMetaStore)
     val questionCenter = QuestionCenter(QuestionPersistence(paths.homeDir))
+    val toolApprovalCenter = ToolApprovalCenter()
     val goalService = GoalService()
     val worktreeManager = WorktreeManager(File(paths.homeDir, "worktrees"))
     val checkpointStore = ShadowCheckpointStore(File(paths.homeDir, "checkpoints"))
@@ -444,10 +446,14 @@ class SuperPiController(
             goalDriver = goalService,
             titleNamer = PcSessionTitleNamer(providerCatalog, ::configuredProviderIds),
             sessionCleaner = { sessionId ->
+                toolApprovalCenter.cancelForSession(sessionId)
+                toolApprovalCenter.clearSessionGrants(sessionId)
                 if (jobRegistryLazy.isInitialized()) jobRegistry.clearSession(sessionId)
                 scope.launch { goalService.clearSession(sessionId) }
             },
             sessionArchived = { sessionId ->
+                toolApprovalCenter.cancelForSession(sessionId)
+                toolApprovalCenter.clearSessionGrants(sessionId)
                 if (jobRegistryLazy.isInitialized()) jobRegistry.clearSession(sessionId)
             },
             runLedger = RunLedger(paths.tasksDir),
@@ -456,6 +462,7 @@ class SuperPiController(
                     goalService.goals.value[sessionId]?.goal?.phase == GoalPhase.ACTIVE ||
                     (jobRegistryLazy.isInitialized() && jobRegistry.jobs.value.any { it.sessionId == sessionId && it.status == JobStatus.RUNNING }) ||
                     questionCenter.pending.value.any { it.sessionId == sessionId } ||
+                    toolApprovalCenter.pending.value.any { it.sessionId == sessionId } ||
                     io.github.whywood.superpi.remote.RemoteSessionRegistry.isWatching(sessionId)
             },
             remoteWorkspaces = {
@@ -573,7 +580,8 @@ class SuperPiController(
                             binding = binding,
                             workspaceRoot = workerWorkspaceDir,
                             modeProvider = { permissionModeForBot(spec.botId) },
-                            questionCenter = approvalCenter,
+                            toolApprovalCenter = toolApprovalCenter,
+                            workerIdProvider = { workerId },
                         )
                     },
                 )
@@ -605,6 +613,7 @@ class SuperPiController(
             inspectExtrasProvider = ::buildWorkerInspectExtras,
             scope = scope,
             deviceNameProvider = { settingsStore.current().deviceName },
+            toolApprovalCenter = toolApprovalCenter,
         )
     }
     val localWorkerPool: LocalWorkerPool by localWorkerPoolLazy
@@ -1038,7 +1047,7 @@ class SuperPiController(
                     binding = binding,
                     workspaceRoot = cwd,
                     modeProvider = { permissionModeForBot(botIdForPermission) },
-                    questionCenter = questionCenter,
+                    toolApprovalCenter = toolApprovalCenter,
                     planFirstCheck = { sid -> sid in planFirstSessions },
                 )
             },

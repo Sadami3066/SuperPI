@@ -190,7 +190,8 @@ export function SuperWorkspace({
           w.status === "waiting_input" ||
           w.status === "waiting_approval" ||
           w.status === "waiting" ||
-          Boolean(w.pendingQuestion),
+          Boolean(w.pendingQuestion) ||
+          Boolean(w.pendingApproval),
       ) ?? null,
     [workers],
   );
@@ -505,7 +506,8 @@ export function SuperWorkspace({
                 w.status === "waiting_input" ||
                 w.status === "waiting_approval" ||
                 w.status === "waiting" ||
-                Boolean(w.pendingQuestion);
+                Boolean(w.pendingQuestion) ||
+                Boolean(w.pendingApproval);
               return (
                 <button
                   key={w.workerId}

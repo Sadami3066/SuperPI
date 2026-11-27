@@ -106,6 +106,7 @@ export function Sidebar({
   const summariesById = useSessionStore((s) => s.summariesById);
   const sessionIdsByBot = useSessionStore((s) => s.sessionIdsByBot);
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
+  const pendingApprovals = useSessionStore((s) => s.pendingApprovals);
   const unreadSessionIds = useSessionStore((s) => s.unreadSessionIds);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const selectSession = useSessionStore((s) => s.selectSession);
@@ -141,10 +142,13 @@ export function Sidebar({
     return bots.find((b) => !b.isRemote || b.online)?.id ?? bots[0]?.id;
   }, [activeBotId, bots]);
 
-  const pendingSessionIds = useMemo(
-    () => new Set(pendingQuestions.map((q) => q.sessionId)),
-    [pendingQuestions],
-  );
+  const pendingSessionIds = useMemo(() => {
+    const ids = new Set(pendingQuestions.map((q) => q.sessionId));
+    for (const a of pendingApprovals) {
+      ids.add(a.sessionId);
+    }
+    return ids;
+  }, [pendingApprovals, pendingQuestions]);
 
   const localBots = useMemo(() => bots.filter((b) => !b.isRemote), [bots]);
   const remoteBots = useMemo(() => bots.filter((b) => b.isRemote), [bots]);

@@ -5,7 +5,7 @@ import type {
   QuestionAnswerInput,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
-import { Badge, Button, Card, Input } from "../../ui";
+import { Button, Input } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 
 function splitRecommendedLabel(raw: string): { clean: string; recommended: boolean } {
@@ -23,35 +23,34 @@ function splitRecommendedLabel(raw: string): { clean: string; recommended: boole
 export function AnsweredAskCard({ entries }: { entries: AnsweredQuestionEntry[] }) {
   const { t } = useI18n();
   return (
-    <Card className="my-2.5 space-y-2 p-3.5">
+    <div
+      className="my-2.5 space-y-2 pt-2.5"
+      style={{ borderTop: "1px solid var(--pi-hairline)" }}
+    >
       {entries.map((entry) => (
         <div key={entry.id} className="space-y-1">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[12.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-[12.5px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
               {entry.question}
             </span>
-            <Badge tone={entry.skipped ? "neutral" : "success"}>
+            <span className="shrink-0 text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
               {entry.skipped ? t("ask.skipped") : t("ask.answered")}
-            </Badge>
+            </span>
           </div>
           {!entry.skipped && (
-            <div className="flex flex-wrap gap-1.5 text-[12px]" style={{ color: "var(--pi-ink-secondary)" }}>
+            <div className="flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: "var(--pi-ink)" }}>
               {entry.selected.map((s) => (
-                <span
-                  key={s}
-                  className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5"
-                  style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
-                >
-                  <BrandIcon name="status/confirm" size={12} />
-                  {s}
+                <span key={s} className="inline-flex items-center gap-1 font-medium">
+                  <BrandIcon name="status/confirm" size={12} style={{ color: "var(--pi-accent)" }} />
+                  <span>{s}</span>
                 </span>
               ))}
-              {entry.custom && <span>{entry.custom}</span>}
+              {entry.custom && <span style={{ color: "var(--pi-ink-secondary)" }}>{entry.custom}</span>}
             </div>
           )}
         </div>
       ))}
-    </Card>
+    </div>
   );
 }
 
@@ -68,6 +67,7 @@ export function AskQuestionCard({
   const [selectedMap, setSelectedMap] = useState<Record<string, string[]>>({});
   const [customMap, setCustomMap] = useState<Record<string, string>>({});
   const [stepIdx, setStepIdx] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const questions = question.questions;
@@ -79,11 +79,10 @@ export function AskQuestionCard({
     setStepIdx(0);
     setSelectedMap({});
     setCustomMap({});
+    setCollapsed(false);
   }, [question.requestId]);
 
-  if (!currentQ) return null;
-
-  const toggleOption = (qId: string, label: string, multi: boolean) => {
+  const selectOption = (qId: string, label: string, multi: boolean) => {
     setSelectedMap((prev) => {
       const current = prev[qId] ?? [];
       if (!multi) {
@@ -98,6 +97,26 @@ export function AskQuestionCard({
       setStepIdx((i) => Math.min(total - 1, i + 1));
     }
   };
+
+  useEffect(() => {
+    if (!currentQ || collapsed || busy) return undefined;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const num = Number(e.key);
+      if (!Number.isInteger(num) || num < 1 || num > 9) return;
+      const opt = currentQ.options[num - 1];
+      if (!opt) return;
+      e.preventDefault();
+      selectOption(currentQ.id, opt.label, currentQ.multiSelect);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, collapsed, currentQ, customMap, safeIdx, total]);
+
+  if (!currentQ) return null;
 
   const handleSubmit = async () => {
     setBusy(true);
@@ -122,114 +141,148 @@ export function AskQuestionCard({
   const pct = total > 0 ? Math.round(((safeIdx + 1) / total) * 100) : 100;
 
   return (
-    <Card className="my-3 space-y-3.5 p-4">
-      {total > 1 && (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-            <span>{t("ask.stepProgress", { current: safeIdx + 1, total })}</span>
-            {currentQ.header && (
-              <span className="font-semibold uppercase tracking-wide">{currentQ.header}</span>
-            )}
-          </div>
-          <div className="h-1 w-full overflow-hidden rounded-full" style={{ background: "var(--pi-wash)" }}>
-            <div
-              className="h-full rounded-full transition-all duration-200"
-              style={{ width: `${pct}%`, background: "var(--pi-accent)" }}
-            />
-          </div>
+    <div
+      className="my-3 pt-3"
+      style={{ borderTop: "1px solid var(--pi-hairline)" }}
+    >
+      <div className="flex items-center justify-between gap-2 pb-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex min-w-0 items-center gap-1.5 text-left transition-opacity hover:opacity-80"
+          style={{ color: "var(--pi-ink-secondary)" }}
+        >
+          <BrandIcon
+            name={collapsed ? "navigation/chevron_right" : "navigation/chevron_down"}
+            size={13}
+          />
+          <span className="truncate text-[12px] font-medium">
+            {currentQ.header || t("ask.title")}
+          </span>
+        </button>
+        {total > 1 && (
+          <span className="shrink-0 text-[11.5px] tabular-nums" style={{ color: "var(--pi-ink-tertiary)" }}>
+            {t("ask.stepProgress", { current: safeIdx + 1, total })}
+          </span>
+        )}
+      </div>
+
+      {total > 1 && !collapsed && (
+        <div className="mb-3 h-[1px] w-full overflow-hidden" style={{ background: "var(--pi-hairline)" }}>
+          <div
+            className="h-full transition-all duration-200"
+            style={{ width: `${pct}%`, background: "var(--pi-accent)" }}
+          />
         </div>
       )}
 
-      <div className="space-y-2.5">
-        {total <= 1 && currentQ.header && (
-          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pi-ink-tertiary)" }}>
-            {currentQ.header}
+      {!collapsed && (
+        <div className="space-y-3">
+          <div className="text-[14px] font-semibold leading-[1.5]" style={{ color: "var(--pi-ink)" }}>
+            {currentQ.question}
           </div>
-        )}
-        <div className="text-[14px] font-medium leading-[1.45]" style={{ color: "var(--pi-ink)" }}>
-          {currentQ.question}
-        </div>
-        {currentQ.options.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-0.5">
-            {currentQ.options.map((opt) => {
-              const active = chosen.includes(opt.label);
-              const { clean, recommended } = splitRecommendedLabel(opt.label);
-              return (
-                <button
-                  key={opt.label}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => toggleOption(currentQ.id, opt.label, currentQ.multiSelect)}
-                  className="rounded-[10px] px-3 py-1.5 text-left text-[13px] transition-colors"
-                  style={{
-                    background: active ? "var(--pi-accent-soft)" : "var(--pi-paper)",
-                    color: active ? "var(--pi-accent)" : "var(--pi-ink)",
-                    border: active
-                      ? "0.5px solid var(--pi-accent)"
-                      : "0.5px solid var(--pi-hairline)",
-                  }}
-                >
-                  <div className="flex items-center gap-1.5 font-medium">
-                    <span>{clean || opt.label}</span>
-                    {recommended && <Badge tone="accent">{t("ask.recommended")}</Badge>}
-                  </div>
-                  {opt.description && (
-                    <div className="mt-0.5 text-[11.5px] opacity-75">{opt.description}</div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <Input
-          value={customMap[currentQ.id] ?? ""}
-          disabled={busy}
-          onChange={(e) => setCustomMap((prev) => ({ ...prev, [currentQ.id]: e.target.value }))}
-          placeholder={t("ask.customPlaceholder")}
-        />
-      </div>
 
-      <div className="flex items-center justify-between gap-2 pt-0.5">
-        <div>
-          {safeIdx > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => setStepIdx((i) => Math.max(0, i - 1))}
-            >
-              {t("ask.prev")}
-            </Button>
+          {currentQ.options.length > 0 && (
+            <div className="divide-y" style={{ borderColor: "var(--pi-hairline)" }}>
+              {currentQ.options.map((opt, idx) => {
+                const active = chosen.includes(opt.label);
+                const { clean, recommended } = splitRecommendedLabel(opt.label);
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => selectOption(currentQ.id, opt.label, currentQ.multiSelect)}
+                    className="flex w-full items-start gap-2.5 rounded-[9px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: active ? "var(--pi-accent-soft)" : "transparent",
+                    }}
+                  >
+                    <span
+                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[11px] font-medium tabular-nums"
+                      style={{
+                        background: active ? "var(--pi-accent)" : "var(--pi-wash)",
+                        color: active ? "var(--pi-on-accent)" : "var(--pi-ink-secondary)",
+                      }}
+                    >
+                      {active ? <BrandIcon name="status/confirm" size={11} /> : idx + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span
+                          className="text-[13.5px] font-medium leading-[1.45]"
+                          style={{ color: active ? "var(--pi-accent)" : "var(--pi-ink)" }}
+                        >
+                          {clean || opt.label}
+                        </span>
+                        {recommended && (
+                          <span className="text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                            {t("ask.recommended")}
+                          </span>
+                        )}
+                      </div>
+                      {opt.description && (
+                        <div className="mt-0.5 text-[12px] leading-[1.45]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                          {opt.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
+
+          <Input
+            value={customMap[currentQ.id] ?? ""}
             disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void onDismiss(question.requestId).finally(() => setBusy(false));
-            }}
-          >
-            {t("ask.dismiss")}
-          </Button>
-          {safeIdx < total - 1 ? (
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={busy}
-              onClick={() => setStepIdx((i) => Math.min(total - 1, i + 1))}
-            >
-              {t("ask.next")}
-            </Button>
-          ) : (
-            <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleSubmit()}>
-              {t("ask.submit")}
-            </Button>
-          )}
+            onChange={(e) => setCustomMap((prev) => ({ ...prev, [currentQ.id]: e.target.value }))}
+            placeholder={t("ask.customPlaceholder")}
+          />
+
+          <div className="flex items-center justify-between gap-2 pt-0.5">
+            <div>
+              {safeIdx > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setStepIdx((i) => Math.max(0, i - 1))}
+                >
+                  {t("ask.prev")}
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void onDismiss(question.requestId).finally(() => setBusy(false));
+                }}
+              >
+                {t("ask.dismiss")}
+              </Button>
+              {safeIdx < total - 1 ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setStepIdx((i) => Math.min(total - 1, i + 1))}
+                >
+                  {t("ask.next")}
+                </Button>
+              ) : (
+                <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleSubmit()}>
+                  {t("ask.submit")}
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-    </Card>
+      )}
+    </div>
   );
 }
