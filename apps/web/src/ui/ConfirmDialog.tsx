@@ -34,10 +34,10 @@ export function ConfirmDialog({
     <AlertDialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialogPrimitive.Portal>
         <AlertDialogPrimitive.Overlay
-          className="fixed inset-0 z-50"
+          className="pi-dialog-overlay fixed inset-0 z-50"
           style={{ background: "var(--pi-scrim)" }}
         />
-        <AlertDialogPrimitive.Content className="pi-popover fixed top-1/2 left-1/2 z-50 w-[calc(100vw-32px)] max-w-[400px] -translate-x-1/2 -translate-y-1/2 p-5 outline-none">
+        <AlertDialogPrimitive.Content className="pi-popover pi-dialog-content fixed top-1/2 left-1/2 z-50 w-[calc(100vw-32px)] max-w-[400px] -translate-x-1/2 -translate-y-1/2 p-5 outline-none">
           <AlertDialogPrimitive.Title
             className="text-[15.5px] font-semibold"
             style={{ color: "var(--pi-ink)" }}

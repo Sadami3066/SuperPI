@@ -17,6 +17,15 @@ export function Button({
 }) {
   const heightCls = size === "sm" ? "h-8 px-3 text-[12.5px]" : "h-9 px-4 text-[13.5px]";
 
+  const variantCls =
+    variant === "primary"
+      ? "hover:opacity-90"
+      : variant === "danger"
+        ? "hover:opacity-90"
+        : variant === "ghost"
+          ? "hover:bg-[var(--pi-hover)] hover:text-[var(--pi-ink)]"
+          : "hover:bg-[var(--pi-hover)]";
+
   const variantStyle =
     variant === "primary"
       ? {
@@ -34,15 +43,15 @@ export function Button({
               color: "var(--pi-ink-secondary)",
             }
           : {
-              background: "var(--pi-surface)",
+              background: "var(--pi-canvas)",
               color: "var(--pi-ink)",
-              border: "0.5px solid var(--pi-hairline)",
+              border: "1px solid var(--pi-canvas-border)",
             };
 
   return (
     <button
       type={rest.type ?? "button"}
-      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[10px] font-medium transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40 ${heightCls} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[10px] font-medium transition-[background-color,border-color,color,opacity,transform] duration-150 motion-safe:active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 ${heightCls} ${variantCls} ${className}`}
       style={{ ...variantStyle, ...style }}
       {...rest}
     >

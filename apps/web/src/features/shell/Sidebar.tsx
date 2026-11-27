@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconInbox,
+  IconLayoutGrid,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconPinnedOff,
@@ -30,11 +31,30 @@ import {
 import { BotAvatar, BrandIcon, PiBrandMark } from "../shared/BrandAssets";
 
 const SIDEBAR_WIDTH_KEY = "superpi:sidebarWidth";
+const SIDEBAR_TOOLS_OPEN_KEY = "superpi:sidebarToolsOpen";
 const DEFAULT_SIDEBAR_WIDTH = 256;
 const MIN_SIDEBAR_WIDTH = 210;
 const MAX_SIDEBAR_WIDTH = 380;
 const SNAP_COLLAPSE_PX = 150;
 const VISIBLE_SESSIONS_LIMIT = 20;
+
+function readStoredToolsOpen(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_TOOLS_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveStoredToolsOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SIDEBAR_TOOLS_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    return;
+  }
+}
 
 function readStoredSidebarWidth(): number {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
@@ -120,11 +140,20 @@ export function Sidebar({
   const scheduleDeleteSession = useSessionStore((s) => s.scheduleDeleteSession);
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
+  const [toolsOpen, setToolsOpen] = useState<boolean>(readStoredToolsOpen);
   const [resizing, setResizing] = useState(false);
   const [expandedBots, setExpandedBots] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  const toggleToolsOpen = () => {
+    setToolsOpen((prev) => {
+      const next = !prev;
+      saveStoredToolsOpen(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     return () => {
@@ -252,10 +281,10 @@ export function Sidebar({
   if (!open) {
     return (
       <aside
-        className="flex h-full w-[52px] shrink-0 flex-col items-center justify-between py-2 select-none"
+        className="flex h-full w-[52px] shrink-0 flex-col items-center justify-between py-2 select-none sm:border-r-0"
         style={{
-          background: "var(--pi-paper)",
-          borderRight: "0.5px solid var(--pi-hairline)",
+          background: "var(--pi-chrome)",
+          borderRight: "1px solid var(--pi-canvas-border)",
         }}
       >
         <div className="flex flex-col items-center gap-1.5">
@@ -469,6 +498,7 @@ export function Sidebar({
               setRenamingId(null);
             }}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter") {
                 if (client && renameDraft.trim()) {
                   void renameSession(client, session.id, renameDraft);
@@ -507,9 +537,11 @@ export function Sidebar({
         key={session.id}
         trigger={
           <div
-            className="group/row flex h-[30px] items-center gap-1 rounded-[8px] px-2 transition-colors hover:bg-[var(--pi-hover)]"
+            className="group/row flex h-[31px] items-center gap-1 rounded-[9px] px-2 transition-[background-color,border-color,box-shadow] duration-150 hover:bg-[var(--pi-hover)]"
             style={{
-              background: isCurrent ? "var(--pi-wash)" : "transparent",
+              background: isCurrent ? "var(--pi-canvas)" : "transparent",
+              border: isCurrent ? "1px solid var(--pi-canvas-border)" : "1px solid transparent",
+              boxShadow: isCurrent ? "0 1px 2px rgba(0, 0, 0, 0.04)" : "none",
             }}
             onDoubleClick={startRename}
           >
@@ -556,10 +588,10 @@ export function Sidebar({
               </span>
             </button>
 
-            <div className="relative flex w-6 shrink-0 items-center justify-end">
+            <div className="relative flex w-7 shrink-0 items-center justify-end">
               {relTime && (
                 <span
-                  className="text-[11px] tabular-nums transition-opacity group-hover/row:opacity-0"
+                  className="text-[11px] tabular-nums transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0"
                   style={{ color: "var(--pi-ink-tertiary)" }}
                 >
                   {relTime}
@@ -570,7 +602,7 @@ export function Sidebar({
                   <button
                     type="button"
                     aria-label={displayTitle}
-                    className="absolute right-0 flex h-5 w-5 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-[var(--pi-hover)]"
+                    className="pi-hover-reveal absolute right-0 flex h-5 w-5 items-center justify-center rounded-md hover:bg-[var(--pi-hover)]"
                     style={{ color: "var(--pi-ink-tertiary)" }}
                   >
                     <BrandIcon name="navigation/more" size={13.5} />
@@ -732,7 +764,7 @@ export function Sidebar({
                 </span>
               </button>
 
-              <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/bot:opacity-100">
+              <div className="pi-hover-reveal flex shrink-0 items-center gap-0.5">
                 <IconButton
                   size="sm"
                   label={t("nav.botSettings")}
@@ -828,11 +860,10 @@ export function Sidebar({
       {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
 
       <aside
-        className="relative flex h-full shrink-0 flex-col select-none"
+        className="relative flex h-full shrink-0 flex-col select-none border-r border-[var(--pi-canvas-border)] sm:border-r-0"
         style={{
           width: sidebarWidth,
-          background: "var(--pi-paper)",
-          borderRight: "0.5px solid var(--pi-hairline)",
+          background: "var(--pi-chrome)",
         }}
       >
         <div
@@ -847,7 +878,7 @@ export function Sidebar({
         />
 
         <div
-          className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between px-3"
+          className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between px-3"
           style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
           onDoubleClick={() => {
             if (isFrameless) void windowToggleMaximize();
@@ -867,15 +898,20 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="space-y-0.5 px-2.5 pt-1 pb-2">
+        <div className="space-y-1.5 px-2.5 pt-0.5 pb-2">
           <button
             type="button"
             onClick={() => {
               onSelectChat();
               if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
             }}
-            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink)" }}
+            className="flex h-[34px] w-full items-center gap-2 rounded-[10px] px-2.5 text-[13px] font-medium transition-[background-color,transform] duration-150 hover:bg-[var(--pi-hover)] motion-safe:active:scale-[0.985]"
+            style={{
+              background: "var(--pi-canvas)",
+              border: "1px solid var(--pi-canvas-border)",
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+              color: "var(--pi-ink)",
+            }}
           >
             <BrandIcon name="chat/new_chat" size={15} />
             <span className="flex-1 text-left">{t("nav.newChat")}</span>
@@ -894,7 +930,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={onOpenSearch}
-            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+            className="flex h-8 w-full items-center gap-2 rounded-[9px] px-2.5 text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
             style={{ color: "var(--pi-ink-secondary)" }}
           >
             <BrandIcon name="action/search" size={14} />
@@ -911,85 +947,143 @@ export function Sidebar({
             </kbd>
           </button>
 
-          <div className="my-1.5 h-[0.5px]" style={{ background: "var(--pi-hairline)" }} />
+          <div>
+            <button
+              type="button"
+              aria-expanded={toolsOpen}
+              onClick={toggleToolsOpen}
+              className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background:
+                  !toolsOpen &&
+                  (activeView === "timers" ||
+                    activeView === "inbox" ||
+                    activeView === "memory" ||
+                    activeView === "skills" ||
+                    activeView === "mcp")
+                    ? "var(--pi-wash)"
+                    : "transparent",
+                color:
+                  toolsOpen ||
+                  activeView === "timers" ||
+                  activeView === "inbox" ||
+                  activeView === "memory" ||
+                  activeView === "skills" ||
+                  activeView === "mcp"
+                    ? "var(--pi-ink)"
+                    : "var(--pi-ink-secondary)",
+              }}
+            >
+              <IconLayoutGrid size={14.5} stroke={1.65} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-left">{t("nav.tools")}</span>
+              {!toolsOpen && unreadInboxCount > 0 && (
+                <span
+                  className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
+                  style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
+                >
+                  {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
+                </span>
+              )}
+              <BrandIcon
+                name="navigation/chevron_down"
+                size={12}
+                className="shrink-0 transition-transform duration-150"
+                style={{
+                  color: "var(--pi-ink-tertiary)",
+                  transform: toolsOpen ? "rotate(0deg)" : "rotate(-90deg)",
+                }}
+              />
+            </button>
 
-          <button
-            type="button"
-            onClick={() => onSelectFeature("timers")}
-            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="system/timer" size={14.5} />
-            <span className="min-w-0 flex-1 truncate text-left">{t("nav.timers")}</span>
-          </button>
+            <div className="pi-collapse" data-open={toolsOpen ? "true" : "false"} aria-hidden={!toolsOpen}>
+              <div className="pi-collapse-inner">
+                <div className="mt-0.5 space-y-0.5 pl-2">
+                  <button
+                    type="button"
+                    tabIndex={toolsOpen ? 0 : -1}
+                    onClick={() => onSelectFeature("timers")}
+                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+                      color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    <BrandIcon name="system/timer" size={14} />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("nav.timers")}</span>
+                  </button>
 
-          <button
-            type="button"
-            onClick={() => onSelectFeature("inbox")}
-            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "inbox" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "inbox" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <IconInbox size={15} stroke={1.65} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-left">{t("nav.inbox")}</span>
-            {unreadInboxCount > 0 && (
-              <span
-                className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
-                style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-              >
-                {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
-              </span>
-            )}
-          </button>
+                  <button
+                    type="button"
+                    tabIndex={toolsOpen ? 0 : -1}
+                    onClick={() => onSelectFeature("inbox")}
+                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: activeView === "inbox" ? "var(--pi-wash)" : "transparent",
+                      color: activeView === "inbox" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    <IconInbox size={14.5} stroke={1.65} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("nav.inbox")}</span>
+                    {unreadInboxCount > 0 && (
+                      <span
+                        className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
+                        style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
+                      >
+                        {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
+                      </span>
+                    )}
+                  </button>
 
-          <button
-            type="button"
-            onClick={() => onSelectFeature("memory")}
-            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/memory" size={14.5} />
-            <span className="truncate">{t("settings.navMemory")}</span>
-          </button>
+                  <button
+                    type="button"
+                    tabIndex={toolsOpen ? 0 : -1}
+                    onClick={() => onSelectFeature("memory")}
+                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+                      color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    <BrandIcon name="ai/memory" size={14} />
+                    <span className="truncate">{t("settings.navMemory")}</span>
+                  </button>
 
-          <button
-            type="button"
-            onClick={() => onSelectFeature("skills")}
-            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/skills" size={14.5} />
-            <span className="truncate">{t("nav.skills")}</span>
-          </button>
+                  <button
+                    type="button"
+                    tabIndex={toolsOpen ? 0 : -1}
+                    onClick={() => onSelectFeature("skills")}
+                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
+                      color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    <BrandIcon name="ai/skills" size={14} />
+                    <span className="truncate">{t("nav.skills")}</span>
+                  </button>
 
-          <button
-            type="button"
-            onClick={() => onSelectFeature("mcp")}
-            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <IconPlugConnected size={15} stroke={1.65} className="shrink-0" />
-            <span className="truncate">{t("nav.mcp")}</span>
-          </button>
+                  <button
+                    type="button"
+                    tabIndex={toolsOpen ? 0 : -1}
+                    onClick={() => onSelectFeature("mcp")}
+                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{
+                      background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
+                      color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    <IconPlugConnected size={14.5} stroke={1.65} className="shrink-0" />
+                    <span className="truncate">{t("nav.mcp")}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 py-2"
-          style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+          className="pi-scroll-shadow min-h-0 flex-1 space-y-4 px-2.5 py-2"
+          style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
         >
           <div className="space-y-1">
             <div className="flex items-center justify-between px-1.5">

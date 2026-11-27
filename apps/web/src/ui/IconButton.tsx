@@ -20,7 +20,7 @@ export function IconButton({
       type={rest.type ?? "button"}
       title={label}
       aria-label={label}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--pi-hover)] disabled:pointer-events-none disabled:opacity-35 ${dim} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-[9px] transition-[background-color,color,transform] duration-150 hover:bg-[var(--pi-hover)] hover:text-[var(--pi-ink)] motion-safe:active:scale-[0.95] disabled:pointer-events-none disabled:opacity-35 ${dim} ${className}`}
       style={{
         background: active ? "var(--pi-wash)" : "transparent",
         color: active ? "var(--pi-ink)" : "var(--pi-ink-secondary)",

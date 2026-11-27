@@ -35,13 +35,13 @@ export function WindowControls() {
   if (!visible) return null;
 
   return (
-    <div className="pi-no-drag flex h-[40px] shrink-0 items-center">
+    <div className="pi-no-drag flex h-[44px] shrink-0 items-center">
       <button
         type="button"
         onClick={() => void windowMinimize()}
         aria-label={t("window.minimize")}
         title={t("window.minimize")}
-        className="flex h-[40px] w-[42px] items-center justify-center transition-colors hover:bg-[var(--pi-hover)]"
+        className="flex h-[44px] w-[40px] items-center justify-center transition-colors hover:bg-[var(--pi-hover)]"
         style={{ color: "var(--pi-ink-secondary)" }}
       >
         <IconMinus size={14} stroke={1.65} />
@@ -52,7 +52,7 @@ export function WindowControls() {
         onClick={() => void windowToggleMaximize().then(setMaximized)}
         aria-label={maximized ? t("window.restore") : t("window.maximize")}
         title={maximized ? t("window.restore") : t("window.maximize")}
-        className="flex h-[40px] w-[42px] items-center justify-center transition-colors hover:bg-[var(--pi-hover)]"
+        className="flex h-[44px] w-[40px] items-center justify-center transition-colors hover:bg-[var(--pi-hover)]"
         style={{ color: "var(--pi-ink-secondary)" }}
       >
         {maximized ? <IconCopy size={12.5} stroke={1.65} /> : <IconSquare size={12} stroke={1.65} />}
@@ -63,7 +63,7 @@ export function WindowControls() {
         onClick={() => void windowClose()}
         aria-label={t("window.close")}
         title={t("window.close")}
-        className="flex h-[40px] w-[44px] items-center justify-center transition-colors hover:bg-[#e81123] hover:text-white"
+        className="flex h-[44px] w-[42px] items-center justify-center transition-colors hover:bg-[#e81123] hover:text-white"
         style={{ color: "var(--pi-ink-secondary)" }}
       >
         <IconX size={14} stroke={1.7} />

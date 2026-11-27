@@ -50,30 +50,38 @@
 
 :root {
   color-scheme: light;
-  --pi-paper: #f4f4f2;
+  --pi-chrome: #f3f3f0;
+  --pi-canvas: #ffffff;
+  --pi-canvas-border: color-mix(in oklab, #141413 8%, transparent);
+  --pi-canvas-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -16px rgba(15, 23, 42, 0.1);
+  --pi-focus-ring: color-mix(in oklab, #141416 82%, transparent);
+  --pi-scrollbar-thumb: rgba(17, 17, 19, 0.22);
+  --pi-skeleton: rgba(17, 17, 19, 0.06);
+  --pi-skeleton-shine: rgba(17, 17, 19, 0.12);
+  --pi-paper: #f3f3f0;
   --pi-surface: #ffffff;
   --pi-raised: #ffffff;
-  --pi-ink: #111113;
-  --pi-ink-secondary: #3e3e44;
-  --pi-ink-tertiary: #5a5a62;
+  --pi-ink: #141413;
+  --pi-ink-secondary: #3f3f44;
+  --pi-ink-tertiary: #606068;
   --pi-accent: #141416;
   --pi-accent-pressed: #28282c;
   --pi-on-accent: #fafafa;
-  --pi-accent-soft: #e8e8e5;
+  --pi-accent-soft: #e8e8e4;
   --pi-danger: #c4251d;
   --pi-on-danger: #ffffff;
   --pi-success: #0e7342;
   --pi-warning: #a14b08;
-  --pi-hairline: #e0e0dc;
-  --pi-wash: #e9e9e5;
+  --pi-hairline: #e4e4df;
+  --pi-wash: #eaeae5;
   --pi-hover: rgba(0, 0, 0, 0.04);
   --pi-composer: #ffffff;
   --pi-scrim: rgba(9, 9, 11, 0.34);
-  --pi-surface-rim: rgba(224, 224, 220, 0.6);
-  --pi-composer-shadow: 0 10px 28px -10px rgba(11, 18, 32, 0.12), 0 2px 6px rgba(11, 18, 32, 0.04);
-  --pi-popover-shadow: 0 16px 40px -12px rgba(11, 18, 32, 0.18), 0 2px 8px rgba(11, 18, 32, 0.06);
-  --pi-code-bg: #efefed;
-  --pi-inline-code-bg: #e9e9e6;
+  --pi-surface-rim: rgba(228, 228, 223, 0.7);
+  --pi-composer-shadow: 0 10px 28px -12px rgba(11, 18, 32, 0.11), 0 2px 6px rgba(11, 18, 32, 0.04);
+  --pi-popover-shadow: 0 18px 42px -12px rgba(11, 18, 32, 0.16), 0 2px 8px rgba(11, 18, 32, 0.06);
+  --pi-code-bg: #f2f2ef;
+  --pi-inline-code-bg: #eaeae6;
   --pi-code-keyword: #6d28d9;
   --pi-code-string: #15803d;
   --pi-code-comment: #5a5a62;
@@ -85,6 +93,18 @@
   --pi-chat-scale: 1;
 }
 
+@property --fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 html,
 body,
 #root {
@@ -92,7 +112,7 @@ body,
   width: 100%;
   margin: 0;
   overflow: hidden;
-  background: var(--pi-paper);
+  background: var(--pi-chrome);
   color: var(--pi-ink);
   font-family: var(--pi-font-sans);
   -webkit-font-smoothing: antialiased;
@@ -102,28 +122,207 @@ body,
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pi-scrollbar-thumb) transparent;
+}
+
+@supports not (scrollbar-color: auto) {
+  * {
+    scrollbar-width: auto;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--pi-scrollbar-thumb);
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--pi-ink-tertiary) 42%, transparent);
+  }
 }
 
 .pi-dark {
   color-scheme: dark;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+:is(a, button, input, textarea, select, summary, [role="tab"], [role="slider"], [role="switch"], [tabindex]):focus-visible {
+  outline: 2px solid var(--pi-focus-ring);
+  outline-offset: 2px;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+.pi-composer-textarea:focus-visible {
+  outline: none;
 }
 
-::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--pi-ink-tertiary) 24%, transparent);
-  border-radius: 999px;
+.pi-inset-canvas {
+  background: var(--pi-canvas);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--pi-ink-tertiary) 42%, transparent);
+@media (min-width: 640px) {
+  .pi-inset-canvas {
+    border: 1px solid var(--pi-canvas-border);
+    box-shadow: var(--pi-canvas-shadow);
+  }
+}
+
+.pi-hover-reveal {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.group:hover .pi-hover-reveal,
+.group:focus-within .pi-hover-reveal,
+.group\/row:hover .pi-hover-reveal,
+.group\/row:focus-within .pi-hover-reveal,
+.group\/bot:hover .pi-hover-reveal,
+.group\/bot:focus-within .pi-hover-reveal,
+.pi-hover-reveal:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .pi-hover-reveal {
+    opacity: 1;
+  }
+}
+
+.pi-scroll-shadow {
+  overflow-y: auto;
+  container-type: scroll-state;
+}
+
+.pi-scroll-shadow::before,
+.pi-scroll-shadow::after {
+  content: "";
+  display: block;
+  position: sticky;
+  block-size: 0.75rem;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.pi-scroll-shadow::before {
+  inset-block-start: 0;
+  margin-block-end: -0.75rem;
+  background: radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.12), transparent);
+}
+
+.pi-scroll-shadow::after {
+  inset-block-end: 0;
+  margin-block-start: -0.75rem;
+  background: radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.12), transparent);
+}
+
+.pi-dark .pi-scroll-shadow::before {
+  background: radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.36), transparent);
+}
+
+.pi-dark .pi-scroll-shadow::after {
+  background: radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.36), transparent);
+}
+
+@container scroll-state(scrollable: block-start) {
+  .pi-scroll-shadow::before {
+    opacity: 1;
+  }
+}
+
+@container scroll-state(scrollable: block-end) {
+  .pi-scroll-shadow::after {
+    opacity: 1;
+  }
+}
+
+@supports not (container-type: scroll-state) {
+  @supports (animation-timeline: scroll()) {
+    .pi-scroll-shadow::before,
+    .pi-scroll-shadow::after {
+      animation: pi-show-scroll-shadow linear both;
+      animation-timeline: scroll();
+    }
+
+    .pi-scroll-shadow::before {
+      animation-range: 0 2rem;
+    }
+
+    .pi-scroll-shadow::after {
+      animation-direction: reverse;
+      animation-range: calc(100% - 2rem) 100%;
+    }
+  }
+}
+
+@keyframes pi-show-scroll-shadow {
+  to {
+    opacity: 1;
+  }
+}
+
+.pi-scroll-fade-x {
+  --fade-size: 1.5rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-padding-inline: var(--fade-size);
+  mask:
+    linear-gradient(black, black) no-clip subtract,
+    linear-gradient(to right, black, transparent) 0 0 / var(--fade-start) 100% no-repeat no-clip,
+    linear-gradient(to right, transparent, black) 100% 0 / var(--fade-end) 100% no-repeat no-clip;
+}
+
+@supports (animation-timeline: scroll(self inline)) {
+  .pi-scroll-fade-x {
+    animation: pi-reveal-fade-start linear both, pi-hide-fade-end linear both;
+    animation-timeline: scroll(self inline);
+    animation-range: 0 var(--fade-size), calc(100% - var(--fade-size)) 100%;
+  }
+}
+
+@keyframes pi-reveal-fade-start {
+  to {
+    --fade-start: var(--fade-size);
+  }
+}
+
+@keyframes pi-hide-fade-end {
+  from {
+    --fade-end: var(--fade-size);
+  }
+}
+
+.pi-field-auto {
+  field-sizing: content;
+  height: auto;
+}
+
+@keyframes pi-skeleton-kf {
+  0%,
+  100% {
+    background-color: var(--pi-skeleton);
+  }
+  50% {
+    background-color: var(--pi-skeleton-shine);
+  }
+}
+
+.pi-skeleton-pulse {
+  background-color: var(--pi-skeleton);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pi-skeleton-pulse {
+    animation: pi-skeleton-kf 1.6s ease-in-out infinite;
+  }
 }
 
 .pi-card {
@@ -142,9 +341,9 @@ body,
   container-name: composer;
   background: var(--pi-composer);
   border-radius: 16px;
-  border: 0.75px solid var(--pi-surface-rim);
+  border: 1px solid var(--pi-canvas-border);
   box-shadow: var(--pi-composer-shadow);
-  transition: border-color 180ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .pi-composer-perm {
@@ -164,11 +363,16 @@ body,
 }
 
 .pi-composer-shell:focus-within {
-  border-color: color-mix(in srgb, var(--pi-ink-tertiary) 45%, var(--pi-hairline));
+  border-color: color-mix(in oklab, var(--pi-ink-tertiary) 45%, var(--pi-hairline));
+}
+
+.pi-composer-shell:has(.pi-composer-textarea:focus-visible) {
+  outline: 2px solid var(--pi-focus-ring);
+  outline-offset: 2px;
 }
 
 .pi-dark .pi-composer-shell {
-  border: 0.75px solid rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .pi-dark .pi-composer-shell:focus-within {
@@ -186,14 +390,16 @@ body,
   }
 }
 
-.pi-thinking-line-enter {
-  animation: pi-thinking-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+@media (prefers-reduced-motion: no-preference) {
+  .pi-thinking-line-enter {
+    animation: pi-thinking-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 @keyframes pi-view-fade-in {
   from {
     opacity: 0;
-    transform: scale(0.994);
+    transform: scale(0.996);
   }
   to {
     opacity: 1;
@@ -202,7 +408,13 @@ body,
 }
 
 .pi-view-enter {
-  animation: pi-view-fade-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pi-fade-in 140ms ease-out both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pi-view-enter {
+    animation: pi-view-fade-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 .pi-chat-container {
@@ -224,9 +436,15 @@ body,
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition:
-    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 180ms ease;
+  transition: opacity 150ms ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pi-collapse {
+    transition:
+      grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 180ms ease;
+  }
 }
 
 .pi-collapse[data-open="true"] {
@@ -239,7 +457,7 @@ body,
   min-height: 0;
 }
 
-@keyframes pi-overlay-fade-in {
+@keyframes pi-fade-in {
   from {
     opacity: 0;
   }
@@ -251,7 +469,7 @@ body,
 @keyframes pi-dialog-enter {
   from {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(0.975);
   }
   to {
     opacity: 1;
@@ -259,27 +477,39 @@ body,
   }
 }
 
-@keyframes pi-popover-enter {
+@keyframes pi-popover-grow {
   from {
-    opacity: 0;
-    transform: scale(0.96);
+    scale: 0.94;
   }
   to {
-    opacity: 1;
-    transform: scale(1);
+    scale: 1;
   }
 }
 
 .pi-dialog-overlay {
-  animation: pi-overlay-fade-in 170ms ease-out both;
+  animation: pi-fade-in 150ms ease-out both;
 }
 
 .pi-dialog-content {
-  animation: pi-dialog-enter 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pi-fade-in 150ms ease-out both;
 }
 
 .pi-popover-anim {
-  animation: pi-popover-enter 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: var(--radix-popper-transform-origin, center);
+  animation: pi-fade-in 140ms ease-out both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pi-dialog-content {
+    animation: pi-dialog-enter 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .pi-popover-anim {
+    animation: pi-fade-in 140ms ease-out both;
+    animation:
+      pi-popover-grow 240ms linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1) both,
+      pi-fade-in 140ms ease-out both;
+  }
 }
 
 .pi-chat-gutter {
@@ -296,30 +526,36 @@ body,
 }
 
 .pi-text-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--pi-ink-tertiary) 0%,
-    var(--pi-ink-tertiary) 35%,
-    var(--pi-ink) 50%,
-    var(--pi-ink-tertiary) 65%,
-    var(--pi-ink-tertiary) 100%
-  );
-  background-size: 200% auto;
-  color: transparent !important;
-  background-clip: text;
-  -webkit-background-clip: text;
-  animation: pi-shimmer 2.2s linear infinite;
+  color: var(--pi-ink-secondary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pi-text-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--pi-ink-tertiary) 0%,
+      var(--pi-ink-tertiary) 35%,
+      var(--pi-ink) 50%,
+      var(--pi-ink-tertiary) 65%,
+      var(--pi-ink-tertiary) 100%
+    );
+    background-size: 200% auto;
+    color: transparent !important;
+    background-clip: text;
+    -webkit-background-clip: text;
+    animation: pi-shimmer 2.2s linear infinite;
+  }
 }
 
 .pi-popover {
   background: var(--pi-raised);
   border-radius: 14px;
-  border: 0.5px solid var(--pi-surface-rim);
+  border: 1px solid var(--pi-canvas-border);
   box-shadow: var(--pi-popover-shadow);
 }
 
 .pi-dark .pi-popover {
-  border: 0.75px solid rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.11);
 }
 
 .pi-drag-region {
@@ -456,22 +692,6 @@ body,
   text-underline-offset: 3px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
-
-  .pi-text-shimmer {
-    animation: none !important;
-    background: none !important;
-    color: var(--pi-ink-secondary) !important;
-  }
-}
-
 @keyframes pi-composer-ring-pulse {
   0%,
   100% {
@@ -493,8 +713,14 @@ body,
   border-radius: 17px;
   border: 1.5px solid var(--pi-accent);
   pointer-events: none;
-  will-change: opacity;
-  animation: pi-composer-ring-pulse 1.8s ease-in-out infinite;
+  opacity: 0.72;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pi-composer-shell[data-streaming="true"]::after {
+    will-change: opacity;
+    animation: pi-composer-ring-pulse 1.8s ease-in-out infinite;
+  }
 }
 
 @keyframes pi-effort-pulse-kf {
@@ -528,112 +754,69 @@ body,
   }
 }
 
-.pi-effort-minimal {
-  animation: pi-effort-pulse-kf 3.2s ease-in-out infinite;
-}
+@media (prefers-reduced-motion: no-preference) {
+  .pi-effort-minimal {
+    animation: pi-effort-pulse-kf 3.2s ease-in-out infinite;
+  }
 
-.pi-effort-low::after,
-.pi-effort-medium::after,
-.pi-effort-high::after,
-.pi-effort-ultra::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 55%;
-  pointer-events: none;
-  will-change: transform;
-}
+  .pi-effort-low::after,
+  .pi-effort-medium::after,
+  .pi-effort-high::after,
+  .pi-effort-ultra::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 55%;
+    pointer-events: none;
+    will-change: transform;
+  }
 
-.pi-effort-low::after {
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
-  animation: pi-effort-sweep-kf 2.8s ease-in-out infinite;
-}
+  .pi-effort-low::after {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+    animation: pi-effort-sweep-kf 2.8s ease-in-out infinite;
+  }
 
-.pi-effort-medium::after {
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-  animation: pi-effort-sweep-kf 2.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
+  .pi-effort-medium::after {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: pi-effort-sweep-kf 2.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
 
-.pi-effort-high::after {
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.16) 25%,
-    rgba(255, 255, 255, 0.38) 50%,
-    rgba(255, 255, 255, 0.16) 75%,
-    transparent
-  );
-  animation: pi-effort-sweep-kf 1.6s linear infinite;
-}
+  .pi-effort-high::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.16) 25%,
+      rgba(255, 255, 255, 0.38) 50%,
+      rgba(255, 255, 255, 0.16) 75%,
+      transparent
+    );
+    animation: pi-effort-sweep-kf 1.6s linear infinite;
+  }
 
-.pi-effort-ultra::after {
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(196, 181, 253, 0.28) 30%,
-    rgba(255, 255, 255, 0.44) 50%,
-    rgba(196, 181, 253, 0.28) 70%,
-    transparent
-  );
-  animation: pi-effort-sweep-kf 1.45s linear infinite;
+  .pi-effort-ultra::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(196, 181, 253, 0.28) 30%,
+      rgba(255, 255, 255, 0.44) 50%,
+      rgba(196, 181, 253, 0.28) 70%,
+      transparent
+    );
+    animation: pi-effort-sweep-kf 1.45s linear infinite;
+  }
+
+  .pi-effort-star {
+    position: absolute;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.85);
+    animation: pi-effort-twinkle-kf 1.9s ease-in-out infinite;
+  }
 }
 
 .pi-effort-star {
   position: absolute;
   border-radius: 999px;
   background: #ffffff;
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.85);
-  animation: pi-effort-twinkle-kf 1.9s ease-in-out infinite;
-}
-
-@keyframes pi-mode-sheen-once {
-  0% {
-    transform: translateX(-110%);
-    opacity: 0;
-  }
-  25% {
-    opacity: 0.9;
-  }
-  100% {
-    transform: translateX(210%);
-    opacity: 0;
-  }
-}
-
-.pi-mode-super-pill::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 60%;
-  background: linear-gradient(
-    105deg,
-    transparent 15%,
-    rgba(255, 255, 255, 0.42) 50%,
-    transparent 85%
-  );
-  pointer-events: none;
-  animation: pi-mode-sheen-once 680ms cubic-bezier(0.22, 1, 0.36, 1) 1 both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pi-composer-shell[data-streaming="true"]::after {
-    animation: none !important;
-    opacity: 0.75 !important;
-  }
-  .pi-effort-minimal,
-  .pi-effort-low::after,
-  .pi-effort-medium::after,
-  .pi-effort-high::after,
-  .pi-effort-ultra::after,
-  .pi-effort-star,
-  .pi-mode-super-pill::after {
-    animation: none !important;
-  }
-  .pi-effort-low::after,
-  .pi-effort-medium::after,
-  .pi-effort-high::after,
-  .pi-effort-ultra::after,
-  .pi-mode-super-pill::after {
-    display: none !important;
-  }
+  opacity: 0.72;
 }

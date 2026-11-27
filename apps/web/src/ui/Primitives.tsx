@@ -23,11 +23,11 @@ export function Badge({
     tone === "accent"
       ? { background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }
       : tone === "success"
-        ? { background: "color-mix(in srgb, var(--pi-success) 14%, transparent)", color: "var(--pi-success)" }
+        ? { background: "color-mix(in oklab, var(--pi-success) 14%, transparent)", color: "var(--pi-success)" }
         : tone === "warning"
-          ? { background: "color-mix(in srgb, var(--pi-warning) 14%, transparent)", color: "var(--pi-warning)" }
+          ? { background: "color-mix(in oklab, var(--pi-warning) 14%, transparent)", color: "var(--pi-warning)" }
           : tone === "danger"
-            ? { background: "color-mix(in srgb, var(--pi-danger) 14%, transparent)", color: "var(--pi-danger)" }
+            ? { background: "color-mix(in oklab, var(--pi-danger) 14%, transparent)", color: "var(--pi-danger)" }
             : { background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" };
 
   return (
@@ -106,6 +106,37 @@ export function EmptyState({
         </p>
       )}
       {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div aria-hidden="true" className={`pi-skeleton-pulse rounded-[8px] ${className}`} />;
+}
+
+export function ChatLoadingSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      className="mx-auto w-full max-w-[760px] space-y-6 px-4 py-6 sm:px-6"
+    >
+      <div className="flex justify-end">
+        <Skeleton className="h-10 w-[52%] max-w-[320px] rounded-[18px]" />
+      </div>
+      <div className="space-y-2.5">
+        <Skeleton className="h-4 w-32 rounded-full" />
+        <Skeleton className="h-4 w-[92%]" />
+        <Skeleton className="h-4 w-[78%]" />
+        <Skeleton className="h-4 w-[62%]" />
+      </div>
+      <div className="flex justify-end pt-2">
+        <Skeleton className="h-9 w-[38%] max-w-[240px] rounded-[18px]" />
+      </div>
+      <div className="space-y-2.5">
+        <Skeleton className="h-4 w-28 rounded-full" />
+        <Skeleton className="h-4 w-[86%]" />
+        <Skeleton className="h-4 w-[68%]" />
+      </div>
     </div>
   );
 }

@@ -51,26 +51,26 @@ export interface ThemePresetDefinition {
 
 const LIGHT_PI: SuperPIColorPalette = {
   dark: false,
-  paper: "#F4F4F2",
+  paper: "#F3F3F0",
   surface: "#FFFFFF",
   raised: "#FFFFFF",
-  ink: "#111113",
-  inkSecondary: "#3E3E44",
-  inkTertiary: "#5A5A62",
+  ink: "#141413",
+  inkSecondary: "#3F3F44",
+  inkTertiary: "#606068",
   accent: "#141416",
   accentPressed: "#28282C",
   onAccent: "#FAFAFA",
-  accentSoft: "#E8E8E5",
+  accentSoft: "#E8E8E4",
   danger: "#C4251D",
   onDanger: "#FFFFFF",
   success: "#0E7342",
   warning: "#A14B08",
-  hairline: "#E0E0DC",
-  wash: "#E9E9E5",
+  hairline: "#E4E4DF",
+  wash: "#EAEAE5",
   composer: "#FFFFFF",
   scrim: "rgba(9, 9, 11, 0.34)",
-  codeBackground: "#EFEFED",
-  inlineCodeBackground: "#E9E9E6",
+  codeBackground: "#F2F2EF",
+  inlineCodeBackground: "#EAEAE6",
   codeKeyword: "#6D28D9",
   codeString: "#15803D",
   codeComment: "#5A5A62",
@@ -81,12 +81,12 @@ const LIGHT_PI: SuperPIColorPalette = {
 
 const DARK_PI: SuperPIColorPalette = {
   dark: true,
-  paper: "#09090B",
-  surface: "#131316",
-  raised: "#1B1B20",
-  ink: "#F5F5F7",
+  paper: "#0D0D10",
+  surface: "#151519",
+  raised: "#1D1D23",
+  ink: "#F4F4F6",
   inkSecondary: "#C4C4CC",
-  inkTertiary: "#9494A0",
+  inkTertiary: "#9696A2",
   accent: "#F4F4F6",
   accentPressed: "#D4D4DC",
   onAccent: "#09090B",
@@ -96,14 +96,14 @@ const DARK_PI: SuperPIColorPalette = {
   success: "#5CE09B",
   warning: "#FBBF24",
   hairline: "#27272F",
-  wash: "#2A2A34",
-  composer: "#141418",
-  scrim: "rgba(0, 0, 0, 0.6)",
-  codeBackground: "#0E0E12",
-  inlineCodeBackground: "#202027",
+  wash: "#24242C",
+  composer: "#1A1A20",
+  scrim: "rgba(0, 0, 0, 0.62)",
+  codeBackground: "#101015",
+  inlineCodeBackground: "#22222A",
   codeKeyword: "#C4B5FD",
   codeString: "#86EFAC",
-  codeComment: "#9494A0",
+  codeComment: "#9696A2",
   codeNumber: "#FCD34D",
   codeFunction: "#93C5FD",
   codeType: "#67E8F9",
@@ -458,7 +458,7 @@ function deriveAccentTokens(hex: string, dark: boolean): {
     accent: hex.trim(),
     accentPressed: `#${adjustChannel(r, delta)}${adjustChannel(g, delta)}${adjustChannel(b, delta)}`,
     onAccent: lum > 0.42 ? "#111113" : "#FFFFFF",
-    accentSoft: `color-mix(in srgb, ${hex.trim()} ${dark ? 22 : 14}%, transparent)`,
+    accentSoft: `color-mix(in oklab, ${hex.trim()} ${dark ? 22 : 14}%, transparent)`,
   };
 }
 
@@ -473,18 +473,33 @@ export function applyThemeTokens(
   if (typeof document === "undefined") return dark;
 
   const accentOverride = customAccent ? deriveAccentTokens(customAccent, dark) : null;
+  const resolvedAccent = accentOverride?.accent ?? palette.accent;
   const root = document.documentElement;
   root.classList.toggle("pi-dark", dark);
   root.style.colorScheme = dark ? "dark" : "light";
 
   const vars: Record<string, string> = {
+    "--pi-chrome": palette.paper,
+    "--pi-canvas": palette.surface,
+    "--pi-canvas-border": dark
+      ? "rgba(255, 255, 255, 0.085)"
+      : `color-mix(in oklab, ${palette.ink} 8%, transparent)`,
+    "--pi-canvas-shadow": dark
+      ? "0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 28px -18px rgba(0, 0, 0, 0.6)"
+      : "0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -16px rgba(15, 23, 42, 0.1)",
+    "--pi-focus-ring": dark
+      ? `color-mix(in oklab, ${resolvedAccent} 78%, #ffffff)`
+      : `color-mix(in oklab, ${resolvedAccent} 82%, transparent)`,
+    "--pi-scrollbar-thumb": dark ? "rgba(255, 255, 255, 0.22)" : "rgba(17, 17, 19, 0.22)",
+    "--pi-skeleton": dark ? "rgba(255, 255, 255, 0.065)" : "rgba(17, 17, 19, 0.06)",
+    "--pi-skeleton-shine": dark ? "rgba(255, 255, 255, 0.13)" : "rgba(17, 17, 19, 0.12)",
     "--pi-paper": palette.paper,
     "--pi-surface": palette.surface,
     "--pi-raised": palette.raised,
     "--pi-ink": palette.ink,
     "--pi-ink-secondary": palette.inkSecondary,
     "--pi-ink-tertiary": palette.inkTertiary,
-    "--pi-accent": accentOverride?.accent ?? palette.accent,
+    "--pi-accent": resolvedAccent,
     "--pi-accent-pressed": accentOverride?.accentPressed ?? palette.accentPressed,
     "--pi-on-accent": accentOverride?.onAccent ?? palette.onAccent,
     "--pi-accent-soft": accentOverride?.accentSoft ?? palette.accentSoft,
@@ -494,16 +509,16 @@ export function applyThemeTokens(
     "--pi-warning": palette.warning,
     "--pi-hairline": palette.hairline,
     "--pi-wash": palette.wash,
-    "--pi-hover": dark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.04)",
+    "--pi-hover": dark ? "rgba(255,255,255,0.065)" : "rgba(0,0,0,0.04)",
     "--pi-composer": palette.composer,
     "--pi-scrim": palette.scrim,
-    "--pi-surface-rim": dark ? "rgba(255,255,255,0.09)" : `${palette.hairline}99`,
+    "--pi-surface-rim": dark ? "rgba(255,255,255,0.09)" : `${palette.hairline}B0`,
     "--pi-composer-shadow": dark
-      ? "0 12px 32px -12px rgba(0, 0, 0, 0.58), 0 2px 6px rgba(0, 0, 0, 0.28)"
-      : "0 10px 28px -10px rgba(11, 18, 32, 0.12), 0 2px 6px rgba(11, 18, 32, 0.04)",
+      ? "0 12px 32px -14px rgba(0, 0, 0, 0.62), 0 2px 6px rgba(0, 0, 0, 0.3)"
+      : "0 10px 28px -12px rgba(11, 18, 32, 0.11), 0 2px 6px rgba(11, 18, 32, 0.04)",
     "--pi-popover-shadow": dark
-      ? "0 18px 42px -12px rgba(0, 0, 0, 0.72), 0 2px 8px rgba(0, 0, 0, 0.4)"
-      : "0 16px 40px -12px rgba(11, 18, 32, 0.18), 0 2px 8px rgba(11, 18, 32, 0.06)",
+      ? "0 20px 48px -14px rgba(0, 0, 0, 0.74), 0 2px 8px rgba(0, 0, 0, 0.42)"
+      : "0 18px 42px -12px rgba(11, 18, 32, 0.16), 0 2px 8px rgba(11, 18, 32, 0.06)",
     "--pi-code-bg": palette.codeBackground,
     "--pi-inline-code-bg": palette.inlineCodeBackground,
     "--pi-code-keyword": palette.codeKeyword,

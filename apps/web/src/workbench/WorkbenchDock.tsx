@@ -86,17 +86,17 @@ function NewTabLauncher({
                   key={panel.id}
                   type="button"
                   onClick={() => onSelectPanel(panel.id)}
-                  className="flex flex-col items-start gap-2.5 rounded-[14px] p-4 text-left transition-colors hover:bg-[var(--pi-hover)]"
+                  className="flex flex-col items-start gap-2.5 rounded-[14px] p-4 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--pi-hover)] motion-safe:active:scale-[0.98]"
                   style={{
-                    background: "var(--pi-paper)",
-                    border: "0.5px solid var(--pi-hairline)",
+                    background: "var(--pi-chrome)",
+                    border: "1px solid var(--pi-canvas-border)",
                     color: "var(--pi-ink)",
                   }}
                 >
                   <span
                     className="flex h-7 w-7 items-center justify-center rounded-[8px]"
                     style={{
-                      background: "var(--pi-surface)",
+                      background: "var(--pi-canvas)",
                       color: "var(--pi-ink-secondary)",
                     }}
                   >
@@ -226,12 +226,10 @@ export function WorkbenchDock({
     <>
       {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
       <aside
-        className="relative h-full shrink-0 flex-col"
+        className="pi-inset-canvas relative h-full shrink-0 flex-col overflow-hidden sm:rounded-[14px]"
         style={{
           display: open ? "flex" : "none",
           width: effectiveWidth,
-          background: "var(--pi-paper)",
-          borderLeft: "0.5px solid var(--pi-hairline)",
         }}
       >
         <div
@@ -239,25 +237,94 @@ export function WorkbenchDock({
           onDoubleClick={() => setWidth(520, true)}
           role="separator"
           aria-orientation="vertical"
-          className="absolute top-0 bottom-0 left-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
+          className="absolute top-0 bottom-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
         />
 
         <div
-          className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-3"
+          className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-2"
           style={{
             paddingRight: showWindowControls && isFrameless ? 0 : 10,
-            borderBottom: "0.5px solid var(--pi-hairline)",
+            background: "var(--pi-chrome)",
+            borderBottom: "1px solid var(--pi-canvas-border)",
           }}
           onDoubleClick={() => {
             if (isFrameless) void windowToggleMaximize();
           }}
         >
-          <span
-            className="truncate text-[12px] font-medium select-none"
-            style={{ color: "var(--pi-ink-tertiary)" }}
-          >
-            {t("chat.workbenchToggle")}
-          </span>
+          <div className="pi-scroll-fade-x flex min-w-0 flex-1 items-center gap-1 py-1.5 pr-1">
+            {visibleTabs.map((tab) => {
+              const isNewTab = tab.panelId === "new-tab";
+              const panel = isNewTab ? null : getWorkbenchPanel(tab.panelId);
+              if (!isNewTab && !panel) return null;
+              const Icon = panel?.icon;
+              const brandIcon = panel ? TAB_BRAND_ICONS[panel.id] : undefined;
+              const active = resolvedActiveTab?.id === tab.id;
+              if (tab.panelId === "terminal") terminalIndex += 1;
+              const baseLabel = isNewTab ? t("wb.newTabTitle") : t(panel!.labelKey);
+              const label =
+                tab.title ||
+                (tab.panelId === "terminal" && terminalTotal > 1
+                  ? `${baseLabel} ${terminalIndex}`
+                  : baseLabel);
+
+              return (
+                <div
+                  key={tab.id}
+                  onMouseDown={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      closeTab(tab.id);
+                    }
+                  }}
+                  className="pi-no-drag group flex h-[28px] max-w-[172px] shrink-0 items-center gap-1.5 rounded-[9px] px-2 text-[12px] font-medium transition-[background-color,border-color,color,box-shadow] duration-150"
+                  style={{
+                    background: active ? "var(--pi-canvas)" : "transparent",
+                    color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+                    border: active ? "1px solid var(--pi-canvas-border)" : "1px solid transparent",
+                    boxShadow: active ? "0 1px 2px rgba(0, 0, 0, 0.04)" : "none",
+                  }}
+                >
+                  <button
+                    type="button"
+                    title={label}
+                    onClick={() => selectTab(tab.id)}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap"
+                  >
+                    {isNewTab ? (
+                      <IconPlus size={13} stroke={1.8} className="shrink-0 opacity-75" />
+                    ) : brandIcon ? (
+                      <BrandIcon name={brandIcon} size={13.5} className="shrink-0" />
+                    ) : (
+                      Icon && <Icon size={13.5} stroke={1.7} />
+                    )}
+                    <span className="truncate">{label}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("common.close")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tab.id);
+                    }}
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-[var(--pi-hover)] ${
+                      active ? "opacity-65 hover:opacity-100" : "pi-hover-reveal"
+                    }`}
+                  >
+                    <IconX size={11} stroke={1.8} />
+                  </button>
+                </div>
+              );
+            })}
+
+            <IconButton
+              size="sm"
+              label={t("wb.addTab")}
+              className="pi-no-drag shrink-0"
+              onClick={() => addTab("new-tab")}
+            >
+              <IconPlus size={14} stroke={1.8} />
+            </IconButton>
+          </div>
 
           <div className="pi-no-drag flex shrink-0 items-center gap-0.5">
             <IconButton label={t("common.close")} size="sm" onClick={close}>
@@ -265,81 +332,6 @@ export function WorkbenchDock({
             </IconButton>
             {showWindowControls && <WindowControls />}
           </div>
-        </div>
-
-        <div
-          className="flex h-[36px] shrink-0 items-center gap-1 overflow-x-auto px-2"
-          style={{
-            background: "var(--pi-paper)",
-            borderBottom: "0.5px solid var(--pi-hairline)",
-          }}
-        >
-          {visibleTabs.map((tab) => {
-            const isNewTab = tab.panelId === "new-tab";
-            const panel = isNewTab ? null : getWorkbenchPanel(tab.panelId);
-            if (!isNewTab && !panel) return null;
-            const Icon = panel?.icon;
-            const brandIcon = panel ? TAB_BRAND_ICONS[panel.id] : undefined;
-            const active = resolvedActiveTab?.id === tab.id;
-            if (tab.panelId === "terminal") terminalIndex += 1;
-            const baseLabel = isNewTab ? t("wb.newTabTitle") : t(panel!.labelKey);
-            const label =
-              tab.title ||
-              (tab.panelId === "terminal" && terminalTotal > 1
-                ? `${baseLabel} ${terminalIndex}`
-                : baseLabel);
-
-            return (
-              <div
-                key={tab.id}
-                onMouseDown={(e) => {
-                  if (e.button === 1) {
-                    e.preventDefault();
-                    closeTab(tab.id);
-                  }
-                }}
-                className="group flex h-[27px] max-w-[176px] shrink-0 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium transition-colors"
-                style={{
-                  background: active ? "var(--pi-surface)" : "transparent",
-                  color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
-                  border: active ? "0.5px solid var(--pi-hairline)" : "0.5px solid transparent",
-                }}
-              >
-                <button
-                  type="button"
-                  title={label}
-                  onClick={() => selectTab(tab.id)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap outline-none"
-                >
-                  {isNewTab ? (
-                    <IconPlus size={13} stroke={1.8} className="shrink-0 opacity-75" />
-                  ) : brandIcon ? (
-                    <BrandIcon name={brandIcon} size={13.5} className="shrink-0" />
-                  ) : (
-                    Icon && <Icon size={13.5} stroke={1.7} />
-                  )}
-                  <span className="truncate">{label}</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={t("common.close")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(tab.id);
-                  }}
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-[var(--pi-hover)] ${
-                    active ? "opacity-65 hover:opacity-100" : "opacity-0 group-hover:opacity-75"
-                  }`}
-                >
-                  <IconX size={11} stroke={1.8} />
-                </button>
-              </div>
-            );
-          })}
-
-          <IconButton size="sm" label={t("wb.addTab")} onClick={() => addTab("new-tab")}>
-            <IconPlus size={14} stroke={1.8} />
-          </IconButton>
         </div>
 
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">

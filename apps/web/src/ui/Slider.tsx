@@ -42,9 +42,9 @@ export function Slider({
         />
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb
-        className="block h-4 w-4 rounded-full shadow-sm transition-transform outline-none hover:scale-110"
+        className="block h-4 w-4 rounded-full shadow-sm transition-transform hover:scale-110"
         style={{
-          background: "var(--pi-surface)",
+          background: "var(--pi-canvas)",
           border: "1.5px solid var(--pi-accent)",
         }}
       />

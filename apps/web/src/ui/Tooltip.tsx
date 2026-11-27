@@ -24,7 +24,7 @@ export function Tooltip({
         <TooltipPrimitive.Content
           side={side}
           sideOffset={6}
-          className="pi-popover z-50 px-2.5 py-1 text-[12px]"
+          className="pi-popover pi-popover-anim z-50 px-2.5 py-1 text-[12px]"
           style={{ color: "var(--pi-ink)" }}
         >
           {content}

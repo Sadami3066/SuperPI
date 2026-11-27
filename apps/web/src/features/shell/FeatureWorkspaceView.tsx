@@ -38,12 +38,12 @@ export function FeatureWorkspaceView({
             : t("nav.mcp");
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--pi-surface)" }}>
+    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--pi-canvas)" }}>
       <header
-        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-4"
+        className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-4"
         style={{
           paddingRight: showWindowControls && isFrameless ? 0 : 12,
-          borderBottom: "0.5px solid var(--pi-hairline)",
+          borderBottom: "1px solid var(--pi-canvas-border)",
         }}
         onDoubleClick={() => {
           if (isFrameless) void windowToggleMaximize();
@@ -64,7 +64,7 @@ export function FeatureWorkspaceView({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+      <div className="pi-scroll-shadow min-h-0 flex-1 px-6 py-6">
         <div className="mx-auto w-full max-w-[820px]">
           {kind === "timers" && <AutomationsSettings mode="timers" onOpenSession={onOpenSession} />}
           {kind === "inbox" && <AutomationsSettings mode="inbox" onOpenSession={onOpenSession} />}

@@ -6,7 +6,7 @@ export { DropdownItem, DropdownMenu, DropdownSeparator } from "./DropdownMenu";
 export { IconButton } from "./IconButton";
 export { Input, Textarea } from "./Input";
 export { Popover } from "./Popover";
-export { Badge, Card, EmptyState, NoticeBar } from "./Primitives";
+export { Badge, Card, ChatLoadingSkeleton, EmptyState, NoticeBar, Skeleton } from "./Primitives";
 export { Select, type SelectOption } from "./Select";
 export { Slider } from "./Slider";
 export { Switch } from "./Switch";

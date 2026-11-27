@@ -36,7 +36,7 @@ export function ContextMenu({
       <ContextMenuPrimitive.Portal>
         <ContextMenuPrimitive.Content
           collisionPadding={8}
-          className="pi-popover z-50 min-w-[180px] p-1 outline-none"
+          className="pi-popover pi-popover-anim z-50 min-w-[180px] p-1 outline-none"
         >
           {children}
         </ContextMenuPrimitive.Content>

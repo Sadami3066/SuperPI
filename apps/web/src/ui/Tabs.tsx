@@ -48,7 +48,7 @@ export function TabsTrigger({
   return (
     <TabsPrimitive.Trigger
       value={value}
-      className={`rounded-[8px] px-3 py-1.5 text-[12.5px] font-medium transition-colors outline-none data-[state=active]:bg-[var(--pi-surface)] data-[state=active]:text-[var(--pi-ink)] data-[state=inactive]:text-[var(--pi-ink-tertiary)] ${className}`}
+      className={`rounded-[8px] px-3 py-1.5 text-[12.5px] font-medium transition-[background-color,color,box-shadow] duration-150 data-[state=active]:bg-[var(--pi-canvas)] data-[state=active]:text-[var(--pi-ink)] data-[state=active]:shadow-2xs data-[state=inactive]:text-[var(--pi-ink-tertiary)] ${className}`}
     >
       {children}
     </TabsPrimitive.Trigger>

@@ -17,7 +17,7 @@ export function Switch({
       onCheckedChange={onCheckedChange}
       disabled={disabled}
       aria-label={ariaLabel}
-      className="relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors outline-none disabled:cursor-not-allowed disabled:opacity-45"
+      className="relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-45"
       style={{
         background: checked ? "var(--pi-accent)" : "var(--pi-wash)",
         border: "0.5px solid var(--pi-hairline)",

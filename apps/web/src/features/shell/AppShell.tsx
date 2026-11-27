@@ -296,7 +296,7 @@ export function AppShell() {
   return (
     <div
       className="flex h-screen w-screen overflow-hidden"
-      style={{ background: "var(--pi-surface)", color: "var(--pi-ink)" }}
+      style={{ background: "var(--pi-chrome)", color: "var(--pi-ink)" }}
     >
       <Sidebar
         open={sidebarOpen}
@@ -313,71 +313,73 @@ export function AppShell() {
         onOpenSettings={() => openSettings("general")}
       />
 
-      <main className="pi-chat-container flex min-h-0 min-w-0 flex-1 flex-col">
-        {(sseLost || error) && (
-          <div className="px-4 pt-2">
-            <NoticeBar
-              tone="warning"
-              message={error || t("conn.bannerOffline")}
-              action={
-                <Button variant="primary" size="sm" onClick={() => void reconnect()}>
-                  {t("conn.retry")}
-                </Button>
-              }
-            />
-          </div>
-        )}
-
-        {actionError && (
-          <div className="px-4 pt-2">
-            <NoticeBar
-              tone="danger"
-              message={actionError}
-              action={
-                <Button variant="ghost" size="sm" onClick={clearActionError}>
-                  {t("common.close")}
-                </Button>
-              }
-            />
-          </div>
-        )}
-
-        <div key={activeView} className="pi-view-enter flex min-h-0 min-w-0 flex-1 flex-col">
-          {activeView === "super" ? (
-            <SuperWorkspace
-              activeView={activeView}
-              onChangeView={(view) => selectMainView(view)}
-              showWindowControls={!workbenchOpen}
-              onOpenProvidersSettings={() => openSettings("providers")}
-            />
-          ) : activeView === "timers" ||
-            activeView === "inbox" ||
-            activeView === "memory" ||
-            activeView === "skills" ||
-            activeView === "mcp" ? (
-            <FeatureWorkspaceView
-              kind={activeView}
-              showWindowControls={!workbenchOpen}
-              onBack={() => selectMainView(lastChatViewRef.current)}
-              onOpenSession={(sid) => {
-                if (!client) return;
-                selectMainView("chat");
-                void selectSession(client, sid, locale);
-              }}
-            />
-          ) : (
-            <ChatWorkspace
-              activeView="chat"
-              onChangeView={(view) => selectMainView(view)}
-              showWindowControls={!workbenchOpen}
-              onOpenBotSettings={(bot) => setSettingsBot(bot)}
-              onOpenProvidersSettings={() => openSettings("providers")}
-            />
+      <div className="flex min-h-0 min-w-0 flex-1 sm:gap-2 sm:py-2 sm:pr-2 sm:pl-1">
+        <main className="pi-chat-container pi-inset-canvas flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden sm:rounded-[14px]">
+          {(sseLost || error) && (
+            <div className="px-4 pt-2.5">
+              <NoticeBar
+                tone="warning"
+                message={error || t("conn.bannerOffline")}
+                action={
+                  <Button variant="primary" size="sm" onClick={() => void reconnect()}>
+                    {t("conn.retry")}
+                  </Button>
+                }
+              />
+            </div>
           )}
-        </div>
-      </main>
 
-      <WorkbenchDock showWindowControls={workbenchOpen} activeView={activeView} />
+          {actionError && (
+            <div className="px-4 pt-2.5">
+              <NoticeBar
+                tone="danger"
+                message={actionError}
+                action={
+                  <Button variant="ghost" size="sm" onClick={clearActionError}>
+                    {t("common.close")}
+                  </Button>
+                }
+              />
+            </div>
+          )}
+
+          <div key={activeView} className="pi-view-enter flex min-h-0 min-w-0 flex-1 flex-col">
+            {activeView === "super" ? (
+              <SuperWorkspace
+                activeView={activeView}
+                onChangeView={(view) => selectMainView(view)}
+                showWindowControls={!workbenchOpen}
+                onOpenProvidersSettings={() => openSettings("providers")}
+              />
+            ) : activeView === "timers" ||
+              activeView === "inbox" ||
+              activeView === "memory" ||
+              activeView === "skills" ||
+              activeView === "mcp" ? (
+              <FeatureWorkspaceView
+                kind={activeView}
+                showWindowControls={!workbenchOpen}
+                onBack={() => selectMainView(lastChatViewRef.current)}
+                onOpenSession={(sid) => {
+                  if (!client) return;
+                  selectMainView("chat");
+                  void selectSession(client, sid, locale);
+                }}
+              />
+            ) : (
+              <ChatWorkspace
+                activeView="chat"
+                onChangeView={(view) => selectMainView(view)}
+                showWindowControls={!workbenchOpen}
+                onOpenBotSettings={(bot) => setSettingsBot(bot)}
+                onOpenProvidersSettings={() => openSettings("providers")}
+              />
+            )}
+          </div>
+        </main>
+
+        <WorkbenchDock showWindowControls={workbenchOpen} activeView={activeView} />
+      </div>
 
       <SettingsModal
         open={settingsOpen}

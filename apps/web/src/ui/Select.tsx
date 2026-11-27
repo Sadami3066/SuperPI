@@ -54,10 +54,10 @@ export function Select({
     <SelectPrimitive.Root value={value} onValueChange={onValueChange} onOpenChange={handleOpenChange}>
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
-        className={`inline-flex items-center justify-between gap-2 whitespace-nowrap outline-none transition-colors hover:bg-[var(--pi-hover)] ${triggerSize} ${className}`}
+        className={`inline-flex items-center justify-between gap-2 whitespace-nowrap transition-[background-color,border-color] duration-150 hover:bg-[var(--pi-hover)] ${triggerSize} ${className}`}
         style={{
-          background: size === "sm" ? "transparent" : "var(--pi-paper)",
-          border: size === "sm" ? "0.5px solid transparent" : "0.5px solid var(--pi-hairline)",
+          background: size === "sm" ? "transparent" : "var(--pi-chrome)",
+          border: size === "sm" ? "1px solid transparent" : "1px solid var(--pi-canvas-border)",
           color: "var(--pi-ink)",
         }}
       >
