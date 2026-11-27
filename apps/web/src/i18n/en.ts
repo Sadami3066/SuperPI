@@ -103,6 +103,7 @@ export const en: Record<I18nKey, string> = {
   "activity.toolOutput": "Output",
   "activity.stepCount": "{count} steps",
   "activity.copyOutput": "Copy output",
+  "activity.retrying": "Connection interrupted, retrying…",
 
   "model.select": "Select model",
   "model.search": "Search models or providers…",
@@ -115,6 +116,7 @@ export const en: Record<I18nKey, string> = {
   "model.thinkingMedium": "Medium",
   "model.thinkingHigh": "High",
   "model.thinkingXhigh": "XHigh",
+  "model.thinkingMax": "Max",
 
   "usage.title": "Context & Usage",
   "usage.context": "Context window",

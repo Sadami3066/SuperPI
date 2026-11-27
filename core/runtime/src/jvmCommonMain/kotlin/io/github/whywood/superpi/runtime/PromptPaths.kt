@@ -12,6 +12,7 @@ internal fun buildPathsSection(
     sharedStorage: Boolean,
     mounts: List<StorageMountInfo>,
     readOnly: Boolean = false,
+    sharedStorageRoot: String? = PUBLIC_STORAGE_ROOT,
 ): String = buildString {
     if (!readOnly) {
         appendLine("Skills: $skillsDir.")
@@ -19,12 +20,12 @@ internal fun buildPathsSection(
     } else {
         appendLine("App data: $appDataDir. Read-only query tools (read, ls, grep, find) use explicit absolute paths.")
     }
-    if (sharedStorage) {
+    if (sharedStorage && !sharedStorageRoot.isNullOrBlank()) {
         if (readOnly) {
-            appendLine("Shared storage: $PUBLIC_STORAGE_ROOT — user files are readable.")
+            appendLine("Shared storage: $sharedStorageRoot — user files are readable.")
         } else {
             appendLine(
-                "Shared storage: $PUBLIC_STORAGE_ROOT — all user files are readable and writable. " +
+                "Shared storage: $sharedStorageRoot — all user files are readable and writable. " +
                     "Do not delete or overwrite user files unless the user asks.",
             )
         }

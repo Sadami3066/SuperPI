@@ -15,7 +15,13 @@ export function ModeSwitcher({
     if (!workers || workers.length === 0) return 0;
     let count = 0;
     for (const w of workers) {
-      if (w.status === "running" || w.status === "working" || w.status === "waiting_approval") {
+      if (
+        w.status === "running" ||
+        w.status === "working" ||
+        w.status === "waiting_input" ||
+        w.status === "waiting_approval" ||
+        w.status === "waiting"
+      ) {
         count++;
       }
     }

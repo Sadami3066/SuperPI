@@ -79,7 +79,7 @@ private val presentParameters: JsonObject = buildJsonObject {
                         put("type", "string")
                         put(
                             "description",
-                            "For file, image, video and html: explicit absolute path in the Android filesystem",
+                            "For file, image, video and html: explicit absolute filesystem path",
                         )
                     }
                     putJsonObject("id") {

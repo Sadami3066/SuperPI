@@ -1,4 +1,4 @@
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type PermissionMode = "read_only" | "ask_commands" | "workspace_auto" | "full_auto";
 
 export interface HostHealthDto {
@@ -370,7 +370,7 @@ export interface CustomCardItem {
 }
 
 export type TurnBlock =
-  | { key: string; kind: "activity"; steps: ActivityStep[] }
+  | { key: string; kind: "activity"; steps: ActivityStep[]; durationMs?: number }
   | { key: string; kind: "text"; text: string }
   | { key: string; kind: "present"; items: PresentedItem[] }
   | { key: string; kind: "answered_ask"; entries: AnsweredQuestionEntry[] }

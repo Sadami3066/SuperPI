@@ -6,7 +6,7 @@ import { useI18n, type I18nKey } from "../../i18n";
 import { Button, Input, Popover } from "../../ui";
 import { BrandIcon, ProviderIcon } from "../shared/BrandAssets";
 
-const THINKING_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 const THINKING_KEY_MAP: Record<ThinkingLevel, I18nKey> = {
   off: "model.thinkingOff",
@@ -15,6 +15,7 @@ const THINKING_KEY_MAP: Record<ThinkingLevel, I18nKey> = {
   medium: "model.thinkingMedium",
   high: "model.thinkingHigh",
   xhigh: "model.thinkingXhigh",
+  max: "model.thinkingMax",
 };
 
 export function ModelPicker({

@@ -596,7 +596,7 @@ abstract class BaseHostPlatform(
                 hasScreenControl = false,
                 rootLinuxReady = false,
             )
-            override val sharedStorageEnabled: Boolean = true
+            override val sharedStorageEnabled: Boolean = false
             override fun bash(cwd: String): DetailedShellExecutor = shell.executor(cwd)
             override fun bashStreaming(cwd: String): StreamingShellExecutor = shell.streamingExecutor(cwd)
             override val shellToolProfile = currentProfile.shellToolProfile

@@ -5,7 +5,10 @@ type Translate = (key: I18nKey) => string;
 const WORKER_STATUS_MAP: Record<string, I18nKey> = {
   queued: "enum.worker.queued",
   running: "enum.worker.running",
+  working: "enum.worker.running",
   waiting: "enum.worker.waiting",
+  waiting_input: "enum.worker.waiting",
+  waiting_approval: "enum.worker.waiting",
   stalled: "enum.worker.stalled",
   idle: "enum.worker.idle",
   done: "enum.worker.done",

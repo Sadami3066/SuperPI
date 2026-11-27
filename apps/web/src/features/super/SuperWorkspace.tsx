@@ -37,14 +37,14 @@ interface StagedImage {
 
 function workerTone(status: string): "accent" | "warning" | "success" | "danger" | "neutral" {
   if (status === "running" || status === "working") return "accent";
-  if (status === "waiting_approval") return "warning";
+  if (status === "waiting_input" || status === "waiting_approval" || status === "waiting") return "warning";
   if (status === "failed" || status === "error") return "danger";
-  if (status === "done" || status === "completed") return "success";
+  if (status === "done" || status === "completed" || status === "idle") return "success";
   return "neutral";
 }
 
 function workerPriority(w: HostWorkerDto): number {
-  if (w.status === "waiting_approval") return 0;
+  if (w.status === "waiting_input" || w.status === "waiting_approval" || w.status === "waiting") return 0;
   if (w.status === "running" || w.status === "working") return 1;
   if (w.status === "idle") return 2;
   return 3;
@@ -54,7 +54,9 @@ function isWorkerActiveStatus(status: string): boolean {
   return (
     status === "running" ||
     status === "working" ||
+    status === "waiting_input" ||
     status === "waiting_approval" ||
+    status === "waiting" ||
     status === "queued" ||
     status === "stalled"
   );
@@ -161,7 +163,12 @@ export function SuperWorkspace({
   const runningWorkersCount = useMemo(
     () =>
       workers.filter(
-        (w) => w.status === "running" || w.status === "working" || w.status === "waiting_approval",
+        (w) =>
+          w.status === "running" ||
+          w.status === "working" ||
+          w.status === "waiting_input" ||
+          w.status === "waiting_approval" ||
+          w.status === "waiting",
       ).length,
     [workers],
   );
@@ -177,7 +184,14 @@ export function SuperWorkspace({
   );
 
   const waitingWorker = useMemo(
-    () => workers.find((w) => w.status === "waiting_approval" || Boolean(w.pendingQuestion)) ?? null,
+    () =>
+      workers.find(
+        (w) =>
+          w.status === "waiting_input" ||
+          w.status === "waiting_approval" ||
+          w.status === "waiting" ||
+          Boolean(w.pendingQuestion),
+      ) ?? null,
     [workers],
   );
 
@@ -292,7 +306,9 @@ export function SuperWorkspace({
     const isActive =
       w.status === "running" ||
       w.status === "working" ||
-      w.status === "waiting_approval";
+      w.status === "waiting_input" ||
+      w.status === "waiting_approval" ||
+      w.status === "waiting";
     return (
       <div
         key={w.workerId}
@@ -485,7 +501,11 @@ export function SuperWorkspace({
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
             {activeWorkers.map((w) => {
-              const needsApproval = w.status === "waiting_approval" || Boolean(w.pendingQuestion);
+              const needsApproval =
+                w.status === "waiting_input" ||
+                w.status === "waiting_approval" ||
+                w.status === "waiting" ||
+                Boolean(w.pendingQuestion);
               return (
                 <button
                   key={w.workerId}
@@ -602,6 +622,7 @@ export function SuperWorkspace({
               pendingQuestion={state?.pendingQuestion ?? null}
               compactProcess={compactProcess}
               dark={dark}
+              canRetry={false}
               onQuote={handleQuote}
               onRetry={handleRetry}
               onAnswerQuestion={handleAnswerQuestion}

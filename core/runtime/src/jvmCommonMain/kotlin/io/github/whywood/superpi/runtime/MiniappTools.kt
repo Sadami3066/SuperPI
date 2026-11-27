@@ -73,7 +73,7 @@ fun miniappTools(store: MiniappStore, supportsChatDelivery: Boolean = true): Lis
 
 private fun miniappCreateTool(store: MiniappStore): CodingTool = CodingTool(
     name = "miniapp_create",
-    description = "Create a miniapp draft: a self-contained HTML/CSS/JS folder the user can open on the phone. Returns the draft folder where you write the app files; call miniapp_load afterwards to install it.",
+    description = "Create a miniapp draft: a self-contained HTML/CSS/JS folder the user can open in Super PI. Returns the draft folder where you write the app files; call miniapp_load afterwards to install it.",
     parameters = miniappCreateParameters,
     label = "miniapp_create",
     execute = { _, args, signal, _ ->

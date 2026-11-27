@@ -1,5 +1,6 @@
 package io.github.whywood.superpi.runtime
 
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -16,19 +17,55 @@ internal class RuntimeSessions(
     private val sessionCleaner: ((String) -> Unit)?,
     private val sessionArchived: ((String) -> Unit)?,
 ) {
-    suspend fun all(): List<ConversationSummary> =
-        catalog.listAll(visibleCwds()).filterNot { it.archived }
+    private fun normalizeCwd(raw: String): String =
+        runCatching { File(raw).canonicalPath }.getOrDefault(File(raw).absolutePath)
 
-    suspend fun workspaceCount(workspaceId: String): Int =
-        catalog.list(workspaceFor(workspaceId).cwd).size
+    private suspend fun handleToSummary(handle: RuntimeHandle): ConversationSummary {
+        val sid = handle.session.sessionId
+        return ConversationSummary(
+            id = sid,
+            title = handle.session.sessionName()?.takeIf { it.isNotBlank() } ?: "",
+            updatedAt = handle.lastActiveAt,
+            filePath = handle.session.sessionFile.orEmpty(),
+            cwd = handle.cwd,
+            memoryExcluded = catalog.isMemoryExcluded(sid),
+        )
+    }
+
+    suspend fun all(): List<ConversationSummary> {
+        val cwds = visibleCwds()
+        val persistedAll = catalog.listAll(cwds)
+        val knownIds = persistedAll.mapTo(HashSet()) { it.id }
+        val normalizedVisible = cwds.mapTo(HashSet()) { normalizeCwd(it) }
+        val inMemory = handles.values
+            .filter { h ->
+                val sid = h.session.sessionId
+                sid !in knownIds && normalizeCwd(h.cwd) in normalizedVisible
+            }
+            .map { handleToSummary(it) }
+        return (inMemory + persistedAll.filterNot { it.archived }).sortedByDescending { it.updatedAt }
+    }
+
+    suspend fun workspaceCount(workspaceId: String): Int = list(workspaceId).size
 
     suspend fun title(sessionId: String): String? = mutex.withLock {
         handles[sessionId]?.session?.sessionName()
             ?: catalog.find(visibleCwds(), sessionId)?.title
     }
 
-    suspend fun list(workspaceId: String): List<ConversationSummary> =
-        catalog.list(workspaceFor(workspaceId).cwd).filterNot { it.archived }
+    suspend fun list(workspaceId: String): List<ConversationSummary> {
+        val targetCwd = workspaceFor(workspaceId).cwd
+        val normalizedTarget = normalizeCwd(targetCwd)
+        val persistedAll = catalog.list(targetCwd)
+        val knownIds = persistedAll.mapTo(HashSet()) { it.id }
+        val inMemory = handles.values
+            .filter { h ->
+                val sid = h.session.sessionId
+                sid !in knownIds && normalizeCwd(h.cwd) == normalizedTarget
+            }
+            .map { handleToSummary(it) }
+        return (inMemory + persistedAll.filterNot { it.archived }).sortedByDescending { it.updatedAt }
+    }
 
     suspend fun archived(): List<ConversationSummary> =
         catalog.listAll(visibleCwds()).filter { it.archived }
@@ -57,9 +94,13 @@ internal class RuntimeSessions(
 
     suspend fun isMemoryExcluded(id: String): Boolean = catalog.isMemoryExcluded(id)
 
-    suspend fun filePath(sessionId: String): String? = catalog.find(visibleCwds(), sessionId)?.filePath
+    suspend fun filePath(sessionId: String): String? =
+        handles[sessionId]?.session?.sessionFile
+            ?: catalog.find(visibleCwds(), sessionId)?.filePath
 
-    suspend fun cwd(sessionId: String): String? = catalog.find(visibleCwds(), sessionId)?.cwd
+    suspend fun cwd(sessionId: String): String? =
+        handles[sessionId]?.cwd
+            ?: catalog.find(visibleCwds(), sessionId)?.cwd
 
     suspend fun delete(id: String) {
         val summary = catalog.find(visibleCwds(), id)

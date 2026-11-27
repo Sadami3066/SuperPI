@@ -70,6 +70,7 @@ import io.github.whywood.superpi.runtime.SessionMetaStore
 import io.github.whywood.superpi.runtime.SkillCatalog
 import io.github.whywood.superpi.runtime.SkillSourceDir
 import io.github.whywood.superpi.runtime.SuperRuntime
+import io.github.whywood.superpi.runtime.superagent.SuperPlatformProfile
 import io.github.whywood.superpi.runtime.ThinkingLevel
 import io.github.whywood.superpi.runtime.TimerService
 import io.github.whywood.superpi.runtime.TimerStore
@@ -555,7 +556,7 @@ class SuperPiController(
                     hostEnvironment = hostEnvironmentProvider,
                     providers = providerCatalog,
                     personalization = { currentPersonalization() },
-                    sharedStorage = { true },
+                    sharedStorage = { false },
                     excludedSkills = exclusions.skills,
                     excludedMcpServers = exclusions.mcpServers,
                     toolContext = toolContext,
@@ -642,7 +643,7 @@ class SuperPiController(
                         artifactResolver = artifactResolver,
                         compactionSettingsProvider = { currentWorkerCompactionSettings() },
                         hostEnvironment = hostEnvironmentProvider,
-                        sharedStorage = { true },
+                        sharedStorage = { false },
                         timerFactory = { service, binding ->
                             val disabled = settingsStore.current().disabledExtensions.toSet()
                             if ("builtin:planning" in disabled) {
@@ -652,6 +653,7 @@ class SuperPiController(
                                     service = service,
                                     binding = binding,
                                     scope = TimerToolScope.SUPER_AND_WORKERS,
+                                    hasCalendarTool = false,
                                     targetResolver = { targetWorkerId ->
                                         val rec = superTaskStore.currentWorker(targetWorkerId) ?: return@timerTools null
                                         val file = localWorkerPool.workerSessionFile(rec.botId, rec.workerId)
@@ -668,6 +670,7 @@ class SuperPiController(
                         },
                         memoryAgent = memoryAgentService,
                         hostPlatformLabel = "${platform.profile.osName} Host",
+                        platformProfile = DESKTOP_SUPER_PLATFORM_PROFILE,
                     ),
                     memoryStore = memoryStore,
                     memoryAgent = memoryAgentService,
@@ -677,6 +680,7 @@ class SuperPiController(
                     },
                     maxSlotsProvider = { settingsStore.current().superMode.workerMaxSlotsPerBot.coerceIn(1, 16) },
                     localDeviceLabel = settingsStore.current().deviceName,
+                    platformProfile = DESKTOP_SUPER_PLATFORM_PROFILE,
                 )
             },
         ).also { orch ->
@@ -1010,7 +1014,7 @@ class SuperPiController(
             hostEnvironment = hostEnvironmentProvider,
             providers = providerCatalog,
             personalization = { currentPersonalization() },
-            sharedStorage = { true },
+            sharedStorage = { false },
             excludedSkills = exclusions.skills,
             excludedMcpServers = exclusions.mcpServers,
             toolContext = appToolContext,
@@ -1064,7 +1068,7 @@ class SuperPiController(
         if ("builtin:planning" !in disabled) {
             addAll(goalTools(binding, goalService))
             addAll(jobTools(binding, jobRegistry))
-            addAll(timerTools(timerService, binding))
+            addAll(timerTools(timerService, binding, hasCalendarTool = false))
         }
         if ("builtin:memory" !in disabled) {
             addAll(
@@ -1124,7 +1128,7 @@ class SuperPiController(
                             ),
                         )
                         if ("builtin:planning" !in disabledExtensions) {
-                            addAll(timerTools(timerService, workerTimerBinding))
+                            addAll(timerTools(timerService, workerTimerBinding, hasCalendarTool = false))
                             addAll(jobTools(binding, workerJobRegistry))
                         }
                         if ("builtin:web" !in disabledExtensions) {
@@ -1155,8 +1159,9 @@ class SuperPiController(
         botRegistry.listAllBots() + RemoteWorkspaces.workspaces(remoteWorkspaceRoot, _remoteBots.value)
 
     private fun remoteTargetFor(cwd: String): RemoteSessionTarget? {
+        val normCwd = paths.normalizePath(cwd)
         val bot = _remoteBots.value.firstOrNull { candidate ->
-            RemoteWorkspaces.directory(remoteWorkspaceRoot, candidate).absolutePath == cwd
+            paths.normalizePath(RemoteWorkspaces.directory(remoteWorkspaceRoot, candidate).absolutePath) == normCwd
         } ?: return null
         return RemoteSessionTarget(
             deviceId = bot.deviceId,
@@ -1389,5 +1394,16 @@ class SuperPiController(
         override suspend fun onConsolidationFinished(leaseId: String?) {
             delegate().onConsolidationFinished(leaseId)
         }
+    }
+
+    private companion object {
+        val DESKTOP_SUPER_PLATFORM_PROFILE = SuperPlatformProfile(
+            deviceNoun = "this computer",
+            hasCalendar = false,
+            hasScreenAutomation = false,
+            hasMiniapps = false,
+            hasPlugins = false,
+            isDesktop = true,
+        )
     }
 }

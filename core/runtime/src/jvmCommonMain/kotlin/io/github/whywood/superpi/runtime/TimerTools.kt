@@ -94,18 +94,24 @@ fun timerTools(
     binding: SessionBinding,
     scope: TimerToolScope = TimerToolScope.SESSION_ONLY,
     targetResolver: (suspend (String) -> BoundSession?)? = null,
-): List<CodingTool> = listOf(timerTool(service, binding, scope, targetResolver))
+    hasCalendarTool: Boolean = true,
+): List<CodingTool> = listOf(timerTool(service, binding, scope, targetResolver, hasCalendarTool))
 
 private fun timerTool(
     service: TimerService,
     binding: SessionBinding,
     scope: TimerToolScope,
     targetResolver: (suspend (String) -> BoundSession?)?,
+    hasCalendarTool: Boolean,
 ): CodingTool {
     val parameters = buildTimerParameters(scope)
     val boundSession = binding.current()
     val isWorker = boundSession != null && SuperRuntime.parseWorkerSessionId(boundSession.sessionId) != null
-    val baseDescription = "Create, list, update or delete timers bound to this conversation. A timer triggers an automated conversation prompt on a schedule (unlike calendar, which manages events in the phone's Calendar app). frequency=once needs date/time; frequency=cron needs a five-field expression."
+    val baseDescription = if (hasCalendarTool) {
+        "Create, list, update or delete timers bound to this conversation. A timer triggers an automated conversation prompt on a schedule (unlike calendar, which manages events in the phone's Calendar app). frequency=once needs date/time; frequency=cron needs a five-field expression."
+    } else {
+        "Create, list, update or delete timers bound to this conversation. A timer triggers an automated conversation prompt on a schedule. frequency=once needs date/time; frequency=cron needs a five-field expression."
+    }
     val fullDescription = buildString {
         append(baseDescription)
         if (scope == TimerToolScope.SUPER_AND_WORKERS) {

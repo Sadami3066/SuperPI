@@ -17,9 +17,13 @@ private val FILE_TOOL_NAMES = setOf("read", "write", "edit")
 internal const val ABSOLUTE_PATH_GUIDELINE =
     "File tool arguments need explicit absolute paths; the workspace is only a suggested location, not an access boundary."
 
+private val WINDOWS_DRIVE_REGEX = Regex("^[A-Za-z]:[/\\\\].*")
+
 internal fun requireAbsolutePath(path: String): String {
-    require(path.startsWith("/")) { "path must be an explicit absolute path: $path" }
-    return path.toPath(normalize = true).toString()
+    val trimmed = path.trim()
+    val isAbsolute = trimmed.startsWith("/") || WINDOWS_DRIVE_REGEX.matches(trimmed) || trimmed.startsWith("\\\\")
+    require(isAbsolute) { "path must be an explicit absolute path: $path" }
+    return trimmed.toPath(normalize = true).toString()
 }
 
 internal fun CodingTool.withAbsolutePaths(fs: FileSystem? = null): CodingTool {
@@ -28,7 +32,7 @@ internal fun CodingTool.withAbsolutePaths(fs: FileSystem? = null): CodingTool {
     val properties = parameters.getValue("properties").jsonObject.toMutableMap()
     properties["path"] = buildJsonObject {
         put("type", "string")
-        put("description", "Absolute path in the Android filesystem.")
+        put("description", "Absolute path in the local filesystem.")
     }
     val required = (parameters["required"] as? JsonArray).orEmpty().toMutableList()
     if (JsonPrimitive("path") !in required) required += JsonPrimitive("path")

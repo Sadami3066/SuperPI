@@ -101,6 +101,7 @@ export const zhCN = {
   "activity.toolOutput": "输出",
   "activity.stepCount": "{count} 个步骤",
   "activity.copyOutput": "复制输出",
+  "activity.retrying": "连接中断，正在重试…",
 
   "model.select": "选择模型",
   "model.search": "搜索模型或厂商…",
@@ -113,6 +114,7 @@ export const zhCN = {
   "model.thinkingMedium": "中",
   "model.thinkingHigh": "高",
   "model.thinkingXhigh": "极高",
+  "model.thinkingMax": "最大",
 
   "usage.title": "上下文与用量",
   "usage.context": "上下文窗口",

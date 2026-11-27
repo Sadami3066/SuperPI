@@ -22,7 +22,8 @@ export function normalizeThinkingLevel(raw?: string | null): ThinkingLevel {
     lower === "low" ||
     lower === "medium" ||
     lower === "high" ||
-    lower === "xhigh"
+    lower === "xhigh" ||
+    lower === "max"
   ) {
     return lower;
   }
@@ -378,6 +379,30 @@ export function mapHostMessageToTurn(
     dto.startedAt > 0 && dto.finishedAt && dto.finishedAt >= dto.startedAt
       ? dto.finishedAt - dto.startedAt
       : undefined;
+
+  let activityCount = 0;
+  for (const b of blocks) {
+    if (b.kind === "activity") activityCount += 1;
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (b.kind !== "activity") continue;
+    let toolSum = 0;
+    for (const s of b.steps) {
+      if (s.kind === "tool" && s.tool.durationMs > 0) {
+        toolSum += s.tool.durationMs;
+      }
+    }
+    const blockDurationMs =
+      toolSum > 0
+        ? toolSum
+        : activityCount === 1 && durationMs && durationMs > 0
+          ? durationMs
+          : undefined;
+    if (blockDurationMs !== undefined) {
+      blocks[i] = { ...b, durationMs: blockDurationMs };
+    }
+  }
 
   return {
     id: `m-${dto.id}-${dto.runId || "hist"}`,

@@ -199,7 +199,7 @@ function ToolTimelineRow({
   connectTop: boolean;
   connectBottom: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -268,6 +268,16 @@ function ToolTimelineRow({
             }}
           >
             {preview}
+          </span>
+        )}
+        {!preview && <span className="flex-1" />}
+
+        {!isRunning && tool.durationMs > 0 && (
+          <span
+            className="shrink-0 text-[11px] tabular-nums"
+            style={{ color: "var(--pi-ink-tertiary)" }}
+          >
+            {tool.durationMs < 1000 ? `${tool.durationMs}ms` : formatElapsed(tool.durationMs, locale)}
           </span>
         )}
 

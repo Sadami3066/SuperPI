@@ -106,6 +106,8 @@ function materializeFinishedLiveRun(
 const inFlightLoads = new Map<string, Promise<void>>();
 const pendingLoads = new Map<string, { locale: "zh-CN" | "en"; reconcileRunId?: string }>();
 let localSeq = 0;
+let refreshSeq = 0;
+let createInFlight = false;
 
 export interface SessionStoreState {
   summariesById: Record<string, SessionSummary>;
@@ -117,9 +119,12 @@ export interface SessionStoreState {
   activeSessionId: string;
   unreadSessionIds: Record<string, true>;
   composerFocusTick: number;
+  actionError: string | null;
   composerTextBySession: Record<string, string>;
   quotedTextBySession: Record<string, string | null>;
   planFirstBySession: Record<string, boolean>;
+
+  clearActionError: () => void;
 
   hydrateSessionLists: (
     client: HostClient,
@@ -232,9 +237,12 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   activeSessionId: loadStoredSessionId(),
   unreadSessionIds: {},
   composerFocusTick: 0,
+  actionError: null,
   composerTextBySession: {},
   quotedTextBySession: {},
   planFirstBySession: {},
+
+  clearActionError: () => set({ actionError: null }),
 
   hydrateSessionLists: async (client, bots, locale) => {
     const results = await Promise.all(
@@ -286,27 +294,46 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   },
 
   refreshSessionLists: async (client, bots) => {
+    const seq = ++refreshSeq;
     const results = await Promise.all(
       bots.map(async (b) => {
         const list = await client.listSessions(b.id).catch(() => [] as HostSessionSummaryDto[]);
         return { botId: b.id, list: list.filter((x) => !x.archived) };
       }),
     );
-    const summariesById: Record<string, SessionSummary> = {};
-    const sessionIdsByBot: Record<string, string[]> = {};
-    for (const { botId, list } of results) {
-      sessionIdsByBot[botId] = list.map((s) => s.id);
-      for (const dto of list) {
-        summariesById[dto.id] = mapSummary(dto, botId);
+    if (seq !== refreshSeq) return;
+    set((s) => {
+      const summariesById: Record<string, SessionSummary> = {};
+      const sessionIdsByBot: Record<string, string[]> = {};
+      for (const { botId, list } of results) {
+        sessionIdsByBot[botId] = list.map((item) => item.id);
+        for (const dto of list) {
+          summariesById[dto.id] = mapSummary(dto, botId);
+        }
       }
-    }
-    const curActive = get().activeSessionId;
-    const allIds = Object.keys(summariesById);
-    const nextActive = curActive && summariesById[curActive] ? curActive : allIds[0] ?? curActive;
-    if (nextActive && nextActive !== curActive) {
-      saveStoredSessionId(nextActive);
-    }
-    set({ summariesById, sessionIdsByBot, activeSessionId: nextActive });
+      const curActive = s.activeSessionId;
+      const prevActiveSummary = curActive ? s.summariesById[curActive] : undefined;
+      const prevActiveTranscript = curActive ? s.transcriptsById[curActive] : undefined;
+      if (
+        curActive &&
+        !summariesById[curActive] &&
+        prevActiveSummary &&
+        prevActiveTranscript &&
+        prevActiveTranscript.turns.length === 0
+      ) {
+        summariesById[curActive] = prevActiveSummary;
+        const botIds = sessionIdsByBot[prevActiveSummary.botId] ?? [];
+        if (!botIds.includes(curActive)) {
+          sessionIdsByBot[prevActiveSummary.botId] = [curActive, ...botIds];
+        }
+      }
+      const allIds = Object.keys(summariesById);
+      const nextActive = curActive && summariesById[curActive] ? curActive : allIds[0] ?? curActive;
+      if (nextActive && nextActive !== curActive) {
+        saveStoredSessionId(nextActive);
+      }
+      return { summariesById, sessionIdsByBot, activeSessionId: nextActive };
+    });
   },
 
   loadSession: async (client, sessionId, locale, reconcileRunId) => {
@@ -446,72 +473,97 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   },
 
   createSession: async (client, botId, locale) => {
-    const created = await client.createSession(botId);
-    const id = created.sessionId;
-    const summary: SessionSummary = {
-      id,
-      botId,
-      title: "",
-      updatedAtMs: Date.now(),
-      cwd: created.cwd,
-      pinned: false,
-      archived: false,
-      memoryExcluded: false,
-      busy: false,
-    };
-    const transcript: SessionTranscript = {
-      sessionId: id,
-      turns: [],
-      usage: null,
-      contextPercent: 0,
-      queuedInputs: [],
-      pendingQuestion: null,
-      loadedAt: Date.now(),
-    };
-    saveStoredSessionId(id);
-    set((s) => {
-      const existingIds = s.sessionIdsByBot[botId] ?? [];
-      const evicted = evictTranscriptLru(
-        { ...s.transcriptsById, [id]: transcript },
-        touchLru(s.lruOrder, id),
+    if (createInFlight) return null;
+    createInFlight = true;
+    set({ actionError: null });
+    useBotStore.getState().setBotCollapsed(botId, false);
+    try {
+      const created = await client.createSession(botId);
+      const id = created.sessionId;
+      const summary: SessionSummary = {
         id,
-      );
-      return {
-        ...evicted,
-        activeSessionId: id,
-        composerFocusTick: s.composerFocusTick + 1,
-        summariesById: { ...s.summariesById, [id]: summary },
-        sessionIdsByBot: { ...s.sessionIdsByBot, [botId]: [id, ...existingIds] },
+        botId,
+        title: "",
+        updatedAtMs: Date.now(),
+        cwd: created.cwd,
+        pinned: false,
+        archived: false,
+        memoryExcluded: false,
+        busy: false,
       };
-    });
-    void get().loadSession(client, id, locale);
-    return id;
+      const transcript: SessionTranscript = {
+        sessionId: id,
+        turns: [],
+        usage: null,
+        contextPercent: 0,
+        queuedInputs: [],
+        pendingQuestion: null,
+        loadedAt: Date.now(),
+      };
+      saveStoredSessionId(id);
+      set((s) => {
+        const existingIds = s.sessionIdsByBot[botId] ?? [];
+        const nextBotIds = existingIds.includes(id) ? existingIds : [id, ...existingIds];
+        const evicted = evictTranscriptLru(
+          { ...s.transcriptsById, [id]: transcript },
+          touchLru(s.lruOrder, id),
+          id,
+        );
+        return {
+          ...evicted,
+          activeSessionId: id,
+          composerFocusTick: s.composerFocusTick + 1,
+          summariesById: { ...s.summariesById, [id]: summary },
+          sessionIdsByBot: { ...s.sessionIdsByBot, [botId]: nextBotIds },
+        };
+      });
+      void get().loadSession(client, id, locale);
+      return id;
+    } catch (err) {
+      set({
+        actionError: err instanceof Error ? err.message : "Failed to create session",
+      });
+      return null;
+    } finally {
+      createInFlight = false;
+    }
   },
 
   forkSession: async (client, sessionId, locale) => {
-    const src = get().summariesById[sessionId];
-    const forkTitle = src?.title ? `${src.title} (branch)` : undefined;
-    const res = await client.forkSession(sessionId, forkTitle ? { title: forkTitle } : undefined);
-    const bots = useBotStore.getState().bots;
-    await get().refreshSessionLists(client, bots);
-    if (res.sessionId) {
-      await get().selectSession(client, res.sessionId, locale);
-      return res.sessionId;
+    set({ actionError: null });
+    try {
+      const src = get().summariesById[sessionId];
+      const forkTitle = src?.title ? `${src.title} (branch)` : undefined;
+      const res = await client.forkSession(sessionId, forkTitle ? { title: forkTitle } : undefined);
+      const bots = useBotStore.getState().bots;
+      await get().refreshSessionLists(client, bots);
+      if (res.sessionId) {
+        await get().selectSession(client, res.sessionId, locale);
+        return res.sessionId;
+      }
+      return null;
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to branch session" });
+      return null;
     }
-    return null;
   },
 
   renameSession: async (client, sessionId, title) => {
     const clean = title.trim();
     if (!clean) return;
-    await client.updateSession(sessionId, { title: clean });
-    set((s) => {
-      const cur = s.summariesById[sessionId];
-      if (!cur) return s;
-      return {
-        summariesById: { ...s.summariesById, [sessionId]: { ...cur, title: clean } },
-      };
-    });
+    set({ actionError: null });
+    try {
+      await client.updateSession(sessionId, { title: clean });
+      set((s) => {
+        const cur = s.summariesById[sessionId];
+        if (!cur) return s;
+        return {
+          summariesById: { ...s.summariesById, [sessionId]: { ...cur, title: clean } },
+        };
+      });
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to rename session" });
+    }
   },
 
   togglePinSession: async (client, sessionId, pinned) => {

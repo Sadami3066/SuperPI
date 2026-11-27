@@ -10,12 +10,14 @@ export function StreamingTurnView({
   sessionId,
   compactProcess,
   dark,
+  canRetry = true,
   onRetry,
   onLayoutTick,
 }: {
   sessionId: string;
   compactProcess: boolean;
   dark: boolean;
+  canRetry?: boolean;
   onRetry: () => void;
   onLayoutTick: () => void;
 }) {
@@ -43,6 +45,15 @@ export function StreamingTurnView({
       ? liveRun.finishedAt - liveRun.startedAt
       : undefined;
 
+  let activityCount = 0;
+  let lastActivityIdx = -1;
+  for (let i = 0; i < liveRun.blocks.length; i++) {
+    if (liveRun.blocks[i].kind === "activity") {
+      activityCount += 1;
+      lastActivityIdx = i;
+    }
+  }
+
   return (
     <div className="py-2">
       {liveRun.retrying && (
@@ -51,7 +62,7 @@ export function StreamingTurnView({
           style={{ background: "var(--pi-wash)", color: "var(--pi-accent)" }}
         >
           <IconLoader2 size={13} stroke={1.85} className="animate-spin" />
-          <span>{t("activity.thinking")}</span>
+          <span>{t("activity.retrying")}</span>
         </div>
       )}
 
@@ -65,20 +76,42 @@ export function StreamingTurnView({
         </div>
       )}
 
-      {liveRun.blocks.map((block, idx) =>
-        renderTurnBlock(
+      {liveRun.blocks.map((block, idx) => {
+        let blockDuration: number | undefined;
+        let blockStatus: "done" | "stopped" | "failed" | undefined;
+        if (block.kind === "activity") {
+          let toolSum = 0;
+          for (const st of block.steps) {
+            if (st.kind === "tool" && st.tool.durationMs > 0) toolSum += st.tool.durationMs;
+          }
+          blockDuration =
+            block.durationMs !== undefined
+              ? block.durationMs
+              : toolSum > 0
+                ? toolSum
+                : activityCount === 1
+                  ? liveDurationMs
+                  : undefined;
+          blockStatus =
+            idx === lastActivityIdx
+              ? liveRun.status
+              : block.steps.some((s) => s.kind === "tool" && s.tool.status === "failed")
+                ? "failed"
+                : "done";
+        }
+        return renderTurnBlock(
           block,
           sessionId,
           compactProcess,
           Boolean(liveRun.streaming && idx === liveRun.blocks.length - 1),
           {
-            status: liveRun.status,
-            durationMs: liveDurationMs,
+            status: blockStatus,
+            durationMs: blockDuration,
             dark,
             persistPrefix: `${sessionId}:${liveRun.runId}:b${idx}`,
           },
-        ),
-      )}
+        );
+      })}
 
       {liveRun.failed && (
         <div
@@ -101,12 +134,14 @@ export function StreamingTurnView({
               <div className="text-[13px] leading-[1.5]" style={{ color: "var(--pi-ink)" }}>
                 {liveRun.error || t("chat.failedGeneric")}
               </div>
-              <div className="mt-2">
-                <Button variant="primary" size="sm" onClick={onRetry}>
-                  <BrandIcon name="action/retry" size={13} />
-                  <span>{t("chat.retry")}</span>
-                </Button>
-              </div>
+              {canRetry && (
+                <div className="mt-2">
+                  <Button variant="primary" size="sm" onClick={onRetry}>
+                    <BrandIcon name="action/retry" size={13} />
+                    <span>{t("chat.retry")}</span>
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>

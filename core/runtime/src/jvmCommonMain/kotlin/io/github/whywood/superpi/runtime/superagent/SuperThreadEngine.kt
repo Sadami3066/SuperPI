@@ -96,6 +96,15 @@ fun interface SuperEngineFactory {
     ): SessionHandle
 }
 
+data class SuperPlatformProfile(
+    val deviceNoun: String = "this phone",
+    val hasCalendar: Boolean = true,
+    val hasScreenAutomation: Boolean = true,
+    val hasMiniapps: Boolean = true,
+    val hasPlugins: Boolean = true,
+    val isDesktop: Boolean = false,
+)
+
 class SuperThreadEngine(
     private val superDir: File,
     private val providers: ProviderDirectory,
@@ -110,6 +119,7 @@ class SuperThreadEngine(
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val localDeviceLabel: String = "This phone",
+    private val platformProfile: SuperPlatformProfile = SuperPlatformProfile(),
 ) {
     val questionCenter = QuestionCenter()
     val routerDir: File = File(superDir, "router")
@@ -941,7 +951,13 @@ class SuperThreadEngine(
     }
 
     private fun buildSystemSections(): Map<String, String> = buildMap {
-        put("super_role", wrapPromptSection("super_role", superRoleInstructions(maxSlotsProvider().coerceAtLeast(1))))
+        put(
+            "super_role",
+            wrapPromptSection(
+                "super_role",
+                superRoleInstructions(maxSlotsProvider().coerceAtLeast(1), platformProfile),
+            ),
+        )
         put("available_bots", wrapPromptSection("available_bots", formatAvailableBots(currentBlueprints)))
         readSuperInstructions()?.let { instructions ->
             put("super_instructions", wrapPromptSection("super_instructions", instructions))
@@ -974,7 +990,14 @@ class SuperThreadEngine(
     private fun formatAvailableBots(blueprints: List<BotBlueprint>): String {
         val enabled = blueprints.filter { it.enabledInSuper }
         if (enabled.isEmpty()) {
-            return "No bots are enabled for worker delegation. Handle light conversation, memory, timers, calendar and web queries directly, or let the user enable bots in Super Team."
+            val directList = buildList {
+                add("light conversation")
+                add("memory")
+                add("timers")
+                if (platformProfile.hasCalendar) add("calendar")
+                add("web queries")
+            }.joinToString(", ")
+            return "No assistants are enabled in the team yet. Handle $directList directly, or ask the user to enable team assistants."
         }
         return enabled.joinToString("\n\n") { bot ->
             val deviceLabel = if (bot.isRemote) "${bot.deviceName} (${bot.deviceId})" else localDeviceLabel
@@ -1059,10 +1082,30 @@ class SuperThreadEngine(
             "worker",
         )
 
-        private fun superRoleInstructions(maxSlotsPerBot: Int): String = """
-            You are Super PI, the user's single persistent Personal Agent & Task Router on this phone.
-            - Respond quickly and naturally. Handle light conversation, personal memory (search/inspect/read archive and async memory_dispatch), timers (including Super and Worker timers), calendar events, and quick web lookups directly without delegating.
-            - You also have read-only local query tools (read, ls, grep, find) with explicit absolute paths to inspect the phone's files and environment before answering or delegating. Do not fabricate file edits or shell outputs—delegate file writes/edits, shell execution, screen automation, miniapp authoring, plugins, MCP, or tasks targeting another device to a suitable whitelisted bot from <available_bots> using the worker tool.
+        private fun superRoleInstructions(
+            maxSlotsPerBot: Int,
+            profile: SuperPlatformProfile = SuperPlatformProfile(),
+        ): String {
+            val directCapabilities = buildList {
+                add("personal memory (search/inspect/read archive and async memory_dispatch)")
+                add("timers (including Super and Worker timers)")
+                if (profile.hasCalendar) add("calendar events")
+                add("quick web lookups")
+            }.joinToString(", ")
+            val delegateCapabilities = buildList {
+                add("file writes/edits")
+                add("shell execution")
+                if (profile.hasScreenAutomation) add("screen automation")
+                if (profile.hasMiniapps) add("miniapp authoring")
+                if (profile.hasPlugins) add("plugins")
+                add("MCP")
+                add("tasks targeting another device")
+            }.joinToString(", ")
+            val deviceLocation = if (profile.isDesktop) "the local computer's" else "the phone's"
+            return """
+            You are Super PI, the user's single persistent Personal Agent & Task Router on ${profile.deviceNoun}.
+            - Respond quickly and naturally. Handle light conversation, $directCapabilities directly without delegating.
+            - You also have read-only local query tools (read, ls, grep, find) with explicit absolute paths to inspect $deviceLocation files and environment before answering or delegating. Do not fabricate file edits or shell outputs—delegate $delegateCapabilities to a suitable whitelisted bot from <available_bots> using the worker tool.
             - Use worker(action=list) whenever you need to discover existing persistent worker slots and their ids after conversation resets, compaction, or between tasks.
             - When calling worker(action=start), always set a short descriptive `name` so the user and worker lists clearly show what each worker owns.
             - Forward user-provided images, local file paths, or worker:// artifact URIs via worker(action=start|continue, attachments=[...]) when a worker needs them.
@@ -1071,6 +1114,7 @@ class SuperThreadEngine(
             - When a worker asks the user a question (ask_user_question), the user answers directly in the UI. Do not call worker(action=answer|dismiss) unless you receive a [Worker waiting-input timeout] notice handing the decision to you; whenever you decide after a timeout, report your decision clearly to the user.
             - When a worker produces files, images, videos, or html reports (returned as worker://<workerId>/<artifactId> URIs), call present(items=[...]) with those worker:// paths so the user gets native rich preview cards. Do not fabricate local file paths for remote artifacts.
         """.trimIndent()
+        }
 
         fun defaultFactory(
             agentDir: File,
@@ -1094,6 +1138,7 @@ class SuperThreadEngine(
             },
             memoryAgent: MemoryAgentService? = null,
             hostPlatformLabel: String = "Android",
+            platformProfile: SuperPlatformProfile = SuperPlatformProfile(),
         ): SuperEngineFactory = SuperEngineFactory { workspaceDir, sessionFile, config, questionCenter, extraSectionsProvider ->
             val superTimerBinding = SessionBinding(supportsChatDelivery = true)
             superTimerBinding.bind(
@@ -1159,10 +1204,15 @@ class SuperThreadEngine(
                 memoryScope = { MemoryAccessScope.PERSONAL },
                 awaitMemoryReady = { memoryAgent?.awaitHighPriority(1_500L) },
                 environmentLinesOverride = {
-                    val access = hostEnvironment?.current()?.access?.name?.lowercase() ?: "local"
-                    listOf(
-                        "Env: $hostPlatformLabel Super PI orchestrator (read-only local inspection via read/ls/grep/find; host access: $access; delegate file writes, bash, screen, miniapp, plugins and MCP to workers).",
-                    )
+                    if (platformProfile.isDesktop) {
+                        val envLines = hostEnvironment?.current()?.promptLines.orEmpty()
+                        envLines + "Role: Super PI desktop orchestrator (read-only local inspection via read/ls/grep/find; delegate file edits, bash execution, and MCP tasks to workers)."
+                    } else {
+                        val access = hostEnvironment?.current()?.access?.name?.lowercase() ?: "local"
+                        listOf(
+                            "Env: $hostPlatformLabel Super PI orchestrator (read-only local inspection via read/ls/grep/find; host access: $access; delegate file writes, bash, screen, miniapp, plugins and MCP to workers).",
+                        )
+                    }
                 },
             )
             engine.create(file = sessionFile.absolutePath, config = config)

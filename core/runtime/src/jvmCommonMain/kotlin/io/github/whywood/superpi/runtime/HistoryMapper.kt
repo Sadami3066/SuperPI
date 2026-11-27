@@ -140,6 +140,7 @@ object HistoryMapper {
                                         id = stepId++,
                                         name = content.name,
                                         arguments = content.arguments.toDisplayArguments(),
+                                        startedAt = message.timestamp,
                                         toolCallId = content.id,
                                         rawArguments = content.arguments,
                                     )
@@ -279,12 +280,12 @@ object HistoryMapper {
                 step
             }
         },
-        finishedAt = finishedAt ?: timestamp,
+        finishedAt = maxOf(finishedAt ?: 0L, timestamp).takeIf { it > 0L },
     )
 
     private fun AssistantMessage.appendTool(trace: ToolTrace, timestamp: Long): AssistantMessage = copy(
         steps = steps + AssistantStep.Tool(trace),
-        finishedAt = finishedAt ?: timestamp,
+        finishedAt = maxOf(finishedAt ?: 0L, timestamp).takeIf { it > 0L },
     )
 
     private data class ReminderMessage(

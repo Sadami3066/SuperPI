@@ -127,9 +127,16 @@ private val findParameters: JsonObject = buildJsonObject {
     })
 }
 
-internal fun superPiLsTool(fs: FileSystem): CodingTool = CodingTool(
+internal fun superPiLsTool(
+    fs: FileSystem,
+    supportsRootAccess: Boolean = false,
+): CodingTool = CodingTool(
     name = "ls",
-    description = "List entries in an explicit absolute Android directory path (supports Root access when enabled). Returns sorted absolute paths with '/' suffix for directories.",
+    description = if (supportsRootAccess) {
+        "List entries in an explicit absolute directory path (supports Root access when enabled). Returns sorted absolute paths with '/' suffix for directories."
+    } else {
+        "List entries in an explicit absolute directory path. Returns sorted absolute paths with '/' suffix for directories."
+    },
     parameters = lsParameters,
     label = "ls",
     promptSnippet = "List directory contents",
@@ -191,9 +198,14 @@ internal fun superPiLsTool(fs: FileSystem): CodingTool = CodingTool(
 internal fun superPiGrepTool(
     fs: FileSystem,
     maxScanFileBytes: Long = MAX_SCAN_FILE_BYTES,
+    supportsRootAccess: Boolean = false,
 ): CodingTool = CodingTool(
     name = "grep",
-    description = "Search file contents in an explicit absolute path (supports Root access when enabled). Returns <absolute_path>:<line>: <text>. Respects .gitignore and skips binaries and kernel virtual filesystems.",
+    description = if (supportsRootAccess) {
+        "Search file contents in an explicit absolute path (supports Root access when enabled). Returns <absolute_path>:<line>: <text>. Respects .gitignore and skips binaries and kernel virtual filesystems."
+    } else {
+        "Search file contents in an explicit absolute path. Returns <absolute_path>:<line>: <text>. Respects .gitignore and skips binaries and kernel virtual filesystems."
+    },
     parameters = grepParameters,
     label = "grep",
     promptSnippet = "Search file contents",
@@ -306,9 +318,16 @@ internal fun superPiGrepTool(
     },
 )
 
-internal fun superPiFindTool(fs: FileSystem): CodingTool = CodingTool(
+internal fun superPiFindTool(
+    fs: FileSystem,
+    supportsRootAccess: Boolean = false,
+): CodingTool = CodingTool(
     name = "find",
-    description = "Find files by glob pattern under an explicit absolute Android directory path (supports Root access when enabled). Respects .gitignore and skips kernel virtual filesystems.",
+    description = if (supportsRootAccess) {
+        "Find files by glob pattern under an explicit absolute directory path (supports Root access when enabled). Respects .gitignore and skips kernel virtual filesystems."
+    } else {
+        "Find files by glob pattern under an explicit absolute directory path. Respects .gitignore and skips kernel virtual filesystems."
+    },
     parameters = findParameters,
     label = "find",
     promptSnippet = "Find files by pattern",

@@ -101,13 +101,14 @@ export function renderTurnBlock(
   },
 ) {
   if (block.kind === "activity") {
+    const resolvedDuration = block.durationMs !== undefined ? block.durationMs : turnMeta?.durationMs;
     return (
       <ActivityDisclosure
         key={block.key}
         steps={block.steps}
         streaming={streaming}
         status={turnMeta?.status}
-        durationMs={turnMeta?.durationMs}
+        durationMs={resolvedDuration}
         compact={compactProcess}
         dark={turnMeta?.dark}
         persistKey={turnMeta?.persistPrefix ? `${turnMeta.persistPrefix}:${block.key}` : undefined}
@@ -135,6 +136,7 @@ export const TurnItem = memo(function TurnItem({
   isLastAssistant,
   compactProcess,
   dark,
+  canRetry = true,
   onQuote,
   onRetry,
 }: {
@@ -143,6 +145,7 @@ export const TurnItem = memo(function TurnItem({
   isLastAssistant: boolean;
   compactProcess: boolean;
   dark: boolean;
+  canRetry?: boolean;
   onQuote: (text: string) => void;
   onRetry: () => void;
 }) {
@@ -164,6 +167,13 @@ export const TurnItem = memo(function TurnItem({
       .filter(Boolean);
     return parts.length > 0 ? parts.join("\n\n") : turn.rawText;
   }, [turn.blocks, turn.rawText]);
+
+  const lastActivityIdx = useMemo(() => {
+    for (let i = turn.blocks.length - 1; i >= 0; i--) {
+      if (turn.blocks[i].kind === "activity") return i;
+    }
+    return -1;
+  }, [turn.blocks]);
 
   if (turn.summary) {
     return <SummaryCard summary={turn.summary} />;
@@ -303,14 +313,21 @@ export const TurnItem = memo(function TurnItem({
         </div>
       )}
 
-      {turn.blocks.map((block, idx) =>
-        renderTurnBlock(block, sessionId, compactProcess, false, {
-          status: turn.status,
-          durationMs: turn.durationMs,
+      {turn.blocks.map((block, idx) => {
+        const blockStatus =
+          block.kind === "activity"
+            ? idx === lastActivityIdx
+              ? turn.status
+              : block.steps.some((s) => s.kind === "tool" && s.tool.status === "failed")
+                ? "failed"
+                : "done"
+            : undefined;
+        return renderTurnBlock(block, sessionId, compactProcess, false, {
+          status: blockStatus,
           dark,
           persistPrefix: turn.runId ? `${sessionId}:${turn.runId}:b${idx}` : undefined,
-        }),
-      )}
+        });
+      })}
 
       {turn.failed && (
         <div
@@ -351,7 +368,7 @@ export const TurnItem = memo(function TurnItem({
                 </pre>
               )}
               <div className="mt-2 flex items-center gap-2">
-                {isLastAssistant && (
+                {canRetry && isLastAssistant && (
                   <Button variant="primary" size="sm" onClick={onRetry}>
                     <BrandIcon name="action/retry" size={13} />
                     <span>{t("chat.retry")}</span>

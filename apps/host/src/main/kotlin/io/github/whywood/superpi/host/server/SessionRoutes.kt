@@ -306,24 +306,7 @@ internal fun Route.installSessionRoutes(
                     worktreeBranch = wt?.branch,
                 )
             }
-        val listedIds = list.mapTo(HashSet()) { it.id }
-        val inMemoryWorktreeSessions = botWorktrees.mapNotNull { wt ->
-            val sid = wt.sessionId?.takeIf { it.isNotBlank() && it !in listedIds } ?: return@mapNotNull null
-            SessionSummaryDto(
-                id = sid,
-                title = wt.label.ifBlank { wt.branch },
-                updatedAt = wt.createdAt,
-                filePath = "",
-                cwd = wt.worktreePath,
-                pinned = false,
-                archived = false,
-                memoryExcluded = false,
-                busy = sid in busyIds,
-                worktreeId = wt.id,
-                worktreeBranch = wt.branch,
-            )
-        }
-        call.respond((inMemoryWorktreeSessions + list).sortedByDescending { it.updatedAt })
+        call.respond(list)
     }
 
     post("/v1/bots/{id}/sessions") {

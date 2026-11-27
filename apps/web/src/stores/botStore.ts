@@ -30,6 +30,7 @@ export interface BotStoreState {
   setBots: (bots: HostBotDto[]) => void;
   refreshBots: (client: HostClient) => Promise<HostBotDto[]>;
   toggleBotCollapse: (botId: string) => void;
+  setBotCollapsed: (botId: string, collapsed: boolean) => void;
   loadBotCommands: (client: HostClient, botId: string) => Promise<void>;
   loadRemoteBotModels: (client: HostClient, botId: string, sessionId?: string) => Promise<void>;
   createBot: (
@@ -89,6 +90,21 @@ export const useBotStore = create<BotStoreState>((set, get) => ({
   toggleBotCollapse: (botId) => {
     set((s) => {
       const next = { ...s.collapsedBotIds, [botId]: !s.collapsedBotIds[botId] };
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(COLLAPSED_BOTS_KEY, JSON.stringify(next));
+        } catch {
+          return { collapsedBotIds: next };
+        }
+      }
+      return { collapsedBotIds: next };
+    });
+  },
+
+  setBotCollapsed: (botId, collapsed) => {
+    set((s) => {
+      if (Boolean(s.collapsedBotIds[botId]) === collapsed) return s;
+      const next = { ...s.collapsedBotIds, [botId]: collapsed };
       if (typeof window !== "undefined") {
         try {
           window.localStorage.setItem(COLLAPSED_BOTS_KEY, JSON.stringify(next));

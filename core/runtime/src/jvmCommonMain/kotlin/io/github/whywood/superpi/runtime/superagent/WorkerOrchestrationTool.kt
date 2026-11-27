@@ -215,7 +215,7 @@ internal val WORKER_TOOL_GUIDELINES: List<String> = listOf(
 
 fun workerOrchestrationTool(gateway: WorkerOrchestrationGateway): CodingTool = CodingTool(
     name = "worker",
-    description = "List, dispatch, continue, steer, inspect, compact, change model, answer timed-out approvals, stop or delete isolated persistent bot workers across this phone and connected remote devices. Only bots listed in <available_bots> can be used.",
+    description = "List, dispatch, continue, steer, inspect, compact, change model, answer timed-out approvals, stop or delete isolated persistent bot workers across this device and connected remote devices. Only bots listed in <available_bots> can be used.",
     parameters = workerToolParameters,
     label = "worker",
     promptGuidelines = WORKER_TOOL_GUIDELINES,

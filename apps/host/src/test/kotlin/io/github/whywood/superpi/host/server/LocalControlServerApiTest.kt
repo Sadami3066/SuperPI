@@ -694,4 +694,49 @@ class LocalControlServerApiTest {
         assertFalse("GET /sessions/{id} and UI settings patch must not emit SSE events", hasBufferedReaderData)
         assertEquals("GET /sessions/{id} and UI settings patch must not emit SSE events", 0, extraBytes)
     }
+
+    @Test
+    fun `newly created sessions appear immediately in bot session listing before first message`() = runBlocking {
+        val port = server.start()
+
+        val createHomeReq = authReq(port, "/api/v1/bots/home/sessions")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        val homeSessionId = http.newCall(createHomeReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["sessionId"]!!.jsonPrimitive.content
+        }
+
+        http.newCall(authReq(port, "/api/v1/bots/home/sessions").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
+                it.jsonObject["id"]!!.jsonPrimitive.content
+            }
+            assertTrue("Expected home session $homeSessionId in $ids", homeSessionId in ids)
+        }
+
+        val createBotReq = authReq(port, "/api/v1/bots")
+            .post("""{"name":"WorkBot"}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        val bot2Id = http.newCall(createBotReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["id"]!!.jsonPrimitive.content
+        }
+
+        val createBot2SessReq = authReq(port, "/api/v1/bots/$bot2Id/sessions")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        val bot2SessionId = http.newCall(createBot2SessReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["sessionId"]!!.jsonPrimitive.content
+        }
+
+        http.newCall(authReq(port, "/api/v1/bots/$bot2Id/sessions").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
+                it.jsonObject["id"]!!.jsonPrimitive.content
+            }
+            assertTrue("Expected second bot session $bot2SessionId in $ids", bot2SessionId in ids)
+        }
+    }
 }

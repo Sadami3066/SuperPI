@@ -214,6 +214,12 @@ export function ChatWorkspace({
     [client, dismissQuestion],
   );
 
+  const turns = transcript?.turns ?? [];
+  const latestTodos = useMemo(
+    () => extractLatestTodosFromTurns(turns, liveRunBlocks),
+    [turns, liveRunBlocks],
+  );
+
   if (!activeBot || !activeSessionId) {
     return null;
   }
@@ -222,11 +228,6 @@ export function ChatWorkspace({
   const remoteOffline = Boolean(activeBot.isRemote && !activeBot.online);
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
-  const turns = transcript?.turns ?? [];
-  const latestTodos = useMemo(
-    () => extractLatestTodosFromTurns(turns, liveRunBlocks),
-    [turns, liveRunBlocks],
-  );
   const userNickname = hostSettings?.userNickname?.trim() || "";
   const isHeroEmpty = turns.length === 0 && !hasLiveRun && !activeQuestion;
   const starterPrompts = [t("chat.starter1"), t("chat.starter2"), t("chat.starter3")];

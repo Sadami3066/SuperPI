@@ -28,6 +28,8 @@ export function AppShell() {
   const createSession = useSessionStore((s) => s.createSession);
   const selectSession = useSessionStore((s) => s.selectSession);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const actionError = useSessionStore((s) => s.actionError);
+  const clearActionError = useSessionStore((s) => s.clearActionError);
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
   const locale = useSettingsStore((s) => s.locale);
   const refreshSettingsData = useSettingsStore((s) => s.refreshSettingsData);
@@ -110,11 +112,16 @@ export function AppShell() {
         setPaletteOpen((v) => !v);
       } else if (key === "n") {
         e.preventDefault();
-        const botId = useSessionStore.getState().summariesById[activeSessionId]?.botId ?? bots[0]?.id;
-        if (client && botId) {
+        const curBotId = useSessionStore.getState().summariesById[activeSessionId]?.botId;
+        const curBot = bots.find((b) => b.id === curBotId);
+        const targetBotId =
+          curBot && (!curBot.isRemote || curBot.online)
+            ? curBot.id
+            : bots.find((b) => !b.isRemote || b.online)?.id ?? bots[0]?.id;
+        if (client && targetBotId) {
           setSettingsOpen(false);
           setActiveView("chat");
-          void createSession(client, botId, locale);
+          void createSession(client, targetBotId, locale);
         }
       } else if (key === ",") {
         e.preventDefault();
@@ -184,6 +191,20 @@ export function AppShell() {
               action={
                 <Button variant="primary" size="sm" onClick={() => void reconnect()}>
                   {t("conn.retry")}
+                </Button>
+              }
+            />
+          </div>
+        )}
+
+        {actionError && (
+          <div className="px-4 pt-2">
+            <NoticeBar
+              tone="danger"
+              message={actionError}
+              action={
+                <Button variant="ghost" size="sm" onClick={clearActionError}>
+                  {t("common.close")}
                 </Button>
               }
             />

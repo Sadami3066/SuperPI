@@ -135,6 +135,11 @@ export function Sidebar({
   const isMacOverlay = Boolean(isElectron && desktopEnv?.platform === "darwin");
   const isFrameless = Boolean(isElectron && desktopEnv?.platform !== "darwin");
   const activeBotId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
+  const newChatTargetBotId = useMemo(() => {
+    const current = bots.find((b) => b.id === activeBotId);
+    if (current && (!current.isRemote || current.online)) return current.id;
+    return bots.find((b) => !b.isRemote || b.online)?.id ?? bots[0]?.id;
+  }, [activeBotId, bots]);
 
   const pendingSessionIds = useMemo(
     () => new Set(pendingQuestions.map((q) => q.sessionId)),
@@ -273,7 +278,7 @@ export function Sidebar({
             label={t("nav.newChat")}
             onClick={() => {
               onSelectChat();
-              if (client && activeBotId) void createSession(client, activeBotId, locale);
+              if (client && newChatTargetBotId) void createSession(client, newChatTargetBotId, locale);
             }}
           >
             <BrandIcon name="chat/new_chat" size={16} />
@@ -803,7 +808,7 @@ export function Sidebar({
             type="button"
             onClick={() => {
               onSelectChat();
-              if (client && activeBotId) void createSession(client, activeBotId, locale);
+              if (client && newChatTargetBotId) void createSession(client, newChatTargetBotId, locale);
             }}
             className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
             style={{ color: "var(--pi-ink)" }}

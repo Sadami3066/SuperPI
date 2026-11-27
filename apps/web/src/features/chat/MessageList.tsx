@@ -17,6 +17,7 @@ export function MessageList({
   pendingQuestion,
   compactProcess,
   dark,
+  canRetry = true,
   onQuote,
   onRetry,
   onAnswerQuestion,
@@ -28,6 +29,7 @@ export function MessageList({
   pendingQuestion: HostPendingQuestionDto | null;
   compactProcess: boolean;
   dark: boolean;
+  canRetry?: boolean;
   onQuote: (text: string) => void;
   onRetry: () => void;
   onAnswerQuestion: (requestId: string, answers: QuestionAnswerInput[]) => Promise<void>;
@@ -96,6 +98,7 @@ export function MessageList({
                     isLastAssistant={turn.id === lastAssistantId && !hasLiveRun}
                     compactProcess={compactProcess}
                     dark={dark}
+                    canRetry={canRetry}
                     onQuote={onQuote}
                     onRetry={onRetry}
                   />
@@ -108,6 +111,7 @@ export function MessageList({
             sessionId={sessionId}
             compactProcess={compactProcess}
             dark={dark}
+            canRetry={canRetry}
             onRetry={onRetry}
             onLayoutTick={scheduleStickToBottom}
           />

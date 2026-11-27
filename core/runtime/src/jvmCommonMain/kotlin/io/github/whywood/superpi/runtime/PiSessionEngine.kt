@@ -280,6 +280,7 @@ class PiSessionEngine(
                             sharedStorage = sharedStorageValue,
                             mounts = mounts,
                             readOnly = readOnlyPathsPrompt,
+                            sharedStorageRoot = if (sharedStorageValue) PUBLIC_STORAGE_ROOT else null,
                         ),
                     ),
                 ) + suppressedPromptSections + promptResources?.current().orEmpty() + deferredSection +
@@ -452,14 +453,15 @@ class PiSessionEngine(
                 mutationQueue = FileMutationQueue(),
                 shellExecutor = null,
             )
+            val supportsRootAccess = environmentProvider?.current()?.capabilities?.isRoot == true
             defaults.forEach { tool ->
                 when (tool.name) {
                     "bash" -> activeShell?.let {
                         add(superPiBashTool(it, environmentProvider?.current()?.shellToolProfile))
                     }
-                    "ls" -> if (enableReadOnlyQueryTools) add(superPiLsTool(fileSystem))
-                    "grep" -> if (enableReadOnlyQueryTools) add(superPiGrepTool(fileSystem))
-                    "find" -> if (enableReadOnlyQueryTools) add(superPiFindTool(fileSystem))
+                    "ls" -> if (enableReadOnlyQueryTools) add(superPiLsTool(fileSystem, supportsRootAccess))
+                    "grep" -> if (enableReadOnlyQueryTools) add(superPiGrepTool(fileSystem, supportsRootAccess = supportsRootAccess))
+                    "find" -> if (enableReadOnlyQueryTools) add(superPiFindTool(fileSystem, supportsRootAccess))
                     else -> add(tool.withAbsolutePaths(fileSystem))
                 }
             }
