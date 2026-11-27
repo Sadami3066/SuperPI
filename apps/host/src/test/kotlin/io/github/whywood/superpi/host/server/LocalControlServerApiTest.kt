@@ -741,7 +741,7 @@ class LocalControlServerApiTest {
     }
 
     @Test
-    fun `workspace upload detects external modification conflict via expectedMtimeMs`() = runBlocking {
+    fun workspaceUploadDetectsExternalModificationConflictViaExpectedMtimeMs(): Unit = runBlocking {
         val port = server.start()
         val encoded = java.util.Base64.getEncoder().encodeToString("v1".toByteArray())
         val createReq = authReq(port, "/api/v1/bots/home/files/upload")
@@ -771,7 +771,7 @@ class LocalControlServerApiTest {
     }
 
     @Test
-    fun `terminal resize returns 404 for missing terminal and 200 for live terminal`() = runBlocking {
+    fun terminalResizeReturns404ForMissingTerminalAnd200ForLiveTerminal(): Unit = runBlocking {
         val port = server.start()
         val missingReq = authReq(port, "/api/v1/terminals/term-missing/resize")
             .post("""{"cols":80,"rows":24}""".toRequestBody("application/json".toMediaType()))
@@ -793,6 +793,6 @@ class LocalControlServerApiTest {
         http.newCall(resizeReq).execute().use { resp ->
             assertEquals(200, resp.code)
         }
-        controller.ptySessionManager.kill(termId)
+        assertTrue(controller.ptySessionManager.kill(termId))
     }
 }
