@@ -6,7 +6,7 @@ import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Badge, Button, Card, ConfirmDialog, Dialog, Input, NoticeBar, Switch } from "../../ui";
-import { BrandIcon } from "../shared/BrandAssets";
+import { BrandIcon, DevicePlatformIcon } from "../shared/BrandAssets";
 
 type RenameTarget = {
   deviceId: string;
@@ -328,8 +328,9 @@ export function RelaySettings() {
                 style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <BrandIcon
-                    name={dev.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
+                  <DevicePlatformIcon
+                    platform={dev.platform}
+                    capabilities={dev.capabilities}
                     size={16}
                     style={{ color: "var(--pi-ink-secondary)" }}
                   />
@@ -345,7 +346,7 @@ export function RelaySettings() {
                     </div>
                     <div className="text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
                       {t("relay.deviceSummary", {
-                        platform: formatPlatformName(dev.platform, t),
+                        platform: formatPlatformName(dev.platform, t, dev.capabilities),
                         count: dev.botCount,
                       })}
                     </div>

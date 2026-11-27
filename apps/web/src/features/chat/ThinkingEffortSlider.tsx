@@ -82,7 +82,7 @@ function resolveThemeEffortPalette(
     };
   }
 
-  if (preset === "paper") {
+  if (preset === "gruvbox" || preset === "rose-pine") {
     return {
       off: {
         labelColor: "var(--pi-ink-tertiary)",
@@ -99,36 +99,36 @@ function resolveThemeEffortPalette(
         stars: false,
       },
       low: {
-        labelColor: dark ? "#f0a57e" : "#9a4424",
-        trackBg: "linear-gradient(90deg, #9f3a20 0%, #c85a32 100%)",
+        labelColor: dark ? "#f6c177" : "#9a4424",
+        trackBg: "linear-gradient(90deg, #9f3a20 0%, #d97706 100%)",
         glow: "0 0 12px rgba(180, 70, 42, 0.28)",
         effectClass: "pi-effort-low",
         stars: false,
       },
       medium: {
-        labelColor: dark ? "#f39278" : "#9a2d1b",
-        trackBg: "linear-gradient(90deg, #8b2819 0%, #b93822 60%, #dc4a2e 100%)",
+        labelColor: dark ? "#fe8019" : "#9a2d1b",
+        trackBg: "linear-gradient(90deg, #8b2819 0%, #c2410c 60%, #ea580c 100%)",
         glow: "0 0 14px rgba(185, 56, 34, 0.34)",
         effectClass: "pi-effort-medium",
         stars: false,
       },
       high: {
-        labelColor: dark ? "#fb7185" : "#881337",
-        trackBg: "linear-gradient(90deg, #6c1824 0%, #b91c1c 52%, #e11d48 100%)",
+        labelColor: dark ? "#eb6f92" : "#881337",
+        trackBg: "linear-gradient(90deg, #6c1824 0%, #b44e6b 52%, #e11d48 100%)",
         glow: "0 0 16px rgba(225, 29, 72, 0.36)",
         effectClass: "pi-effort-high",
         stars: false,
       },
       xhigh: {
-        labelColor: dark ? "#fda4af" : "#881337",
-        trackBg: "linear-gradient(90deg, #52101a 0%, #9f1239 45%, #dc2626 82%, #fb7185 100%)",
+        labelColor: dark ? "#ebbcba" : "#881337",
+        trackBg: "linear-gradient(90deg, #52101a 0%, #9f1239 45%, #d946ef 82%, #f472b6 100%)",
         glow: "0 0 18px rgba(225, 29, 72, 0.42)",
         effectClass: "pi-effort-ultra",
         stars: true,
       },
       max: {
-        labelColor: dark ? "#fda4af" : "#7f1d1d",
-        trackBg: "linear-gradient(90deg, #3f0a13 0%, #9f1239 42%, #e11d48 78%, #fb7185 100%)",
+        labelColor: dark ? "#f5c2e7" : "#7f1d1d",
+        trackBg: "linear-gradient(90deg, #3f0a13 0%, #9f1239 40%, #e11d48 74%, #fb7185 100%)",
         glow: "0 0 20px rgba(244, 63, 94, 0.46)",
         effectClass: "pi-effort-ultra",
         stars: true,
@@ -136,7 +136,7 @@ function resolveThemeEffortPalette(
     };
   }
 
-  if (preset === "santorini" || preset === "oceanic") {
+  if (preset === "night-owl" || preset === "solarized" || preset === "nord") {
     return {
       off: {
         labelColor: "var(--pi-ink-tertiary)",
@@ -153,29 +153,29 @@ function resolveThemeEffortPalette(
         stars: false,
       },
       low: {
-        labelColor: dark ? "#67c7d9" : "#0e657c",
-        trackBg: "linear-gradient(90deg, #0e7490 0%, #22a3b8 100%)",
+        labelColor: dark ? "#7fdbca" : "#0e657c",
+        trackBg: "linear-gradient(90deg, #0e7490 0%, #2aa198 100%)",
         glow: "0 0 12px rgba(14, 116, 144, 0.28)",
         effectClass: "pi-effort-low",
         stars: false,
       },
       medium: {
-        labelColor: dark ? "#7cb2e8" : "#005a9e",
+        labelColor: dark ? "#82aaff" : "#005a9e",
         trackBg: "linear-gradient(90deg, #005a9e 0%, #0284c7 62%, #0d9488 100%)",
         glow: "0 0 14px rgba(2, 132, 199, 0.34)",
         effectClass: "pi-effort-medium",
         stars: false,
       },
       high: {
-        labelColor: dark ? "#5eead4" : "#0c5678",
-        trackBg: "linear-gradient(90deg, #0c4a6e 0%, #0067b8 50%, #0d9488 100%)",
+        labelColor: dark ? "#88c0d0" : "#0c5678",
+        trackBg: "linear-gradient(90deg, #0c4a6e 0%, #268bd2 50%, #2aa198 100%)",
         glow: "0 0 16px rgba(13, 148, 136, 0.38)",
         effectClass: "pi-effort-high",
         stars: false,
       },
       xhigh: {
-        labelColor: dark ? "#5eead4" : "#0b4f6c",
-        trackBg: "linear-gradient(90deg, #0c3d59 0%, #0067b8 46%, #0d9488 80%, #2dd4bf 100%)",
+        labelColor: dark ? "#7fdbca" : "#0b4f6c",
+        trackBg: "linear-gradient(90deg, #0c3d59 0%, #268bd2 46%, #0d9488 80%, #2dd4bf 100%)",
         glow: "0 0 18px rgba(45, 212, 191, 0.42)",
         effectClass: "pi-effort-ultra",
         stars: true,
@@ -190,7 +190,7 @@ function resolveThemeEffortPalette(
     };
   }
 
-  if (preset === "slate" || preset === "classic-blue") {
+  if (preset === "tokyo-night" || preset === "catppuccin" || preset === "dracula") {
     return {
       off: {
         labelColor: "var(--pi-ink-tertiary)",
@@ -200,44 +200,44 @@ function resolveThemeEffortPalette(
         stars: false,
       },
       minimal: {
-        labelColor: dark ? "#b4c8e0" : "#334155",
+        labelColor: dark ? "#a9b1d6" : "#454e6e",
         trackBg: "linear-gradient(90deg, #475569 0%, #64748b 100%)",
         glow: "0 0 10px rgba(71, 85, 105, 0.24)",
         effectClass: "pi-effort-minimal",
         stars: false,
       },
       low: {
-        labelColor: dark ? "#7db5f8" : "#1e4b8f",
-        trackBg: "linear-gradient(90deg, #2563eb 0%, #60a5fa 100%)",
-        glow: "0 0 12px rgba(37, 99, 235, 0.26)",
+        labelColor: dark ? "#7aa2f7" : "#2e6be6",
+        trackBg: "linear-gradient(90deg, #2563eb 0%, #6366f1 100%)",
+        glow: "0 0 12px rgba(99, 102, 241, 0.28)",
         effectClass: "pi-effort-low",
         stars: false,
       },
       medium: {
-        labelColor: dark ? "#70b0ff" : "#1d4ed8",
-        trackBg: "linear-gradient(90deg, #1e3a8a 0%, #1d4ed8 60%, #3b82f6 100%)",
-        glow: "0 0 14px rgba(29, 78, 216, 0.34)",
+        labelColor: dark ? "#bb9af7" : "#6d28d9",
+        trackBg: "linear-gradient(90deg, #3730a3 0%, #6366f1 56%, #8b5cf6 100%)",
+        glow: "0 0 14px rgba(139, 92, 246, 0.36)",
         effectClass: "pi-effort-medium",
         stars: false,
       },
       high: {
-        labelColor: dark ? "#93c5fd" : "#1e3a8a",
-        trackBg: "linear-gradient(90deg, #172554 0%, #1d4ed8 52%, #0ea5e9 100%)",
-        glow: "0 0 16px rgba(14, 165, 233, 0.36)",
+        labelColor: dark ? "#cba6f7" : "#7c3aed",
+        trackBg: "linear-gradient(90deg, #2e1065 0%, #6d28d9 50%, #a855f7 100%)",
+        glow: "0 0 16px rgba(168, 85, 247, 0.4)",
         effectClass: "pi-effort-high",
         stars: false,
       },
       xhigh: {
-        labelColor: dark ? "#bae6fd" : "#172554",
-        trackBg: "linear-gradient(90deg, #0f172a 0%, #1d4ed8 46%, #0284c7 80%, #38bdf8 100%)",
-        glow: "0 0 18px rgba(56, 189, 248, 0.42)",
+        labelColor: dark ? "#d8b4fe" : "#6b21a8",
+        trackBg: "linear-gradient(90deg, #1e1b4b 0%, #6d28d9 46%, #a855f7 80%, #f472b6 100%)",
+        glow: "0 0 18px rgba(192, 132, 252, 0.44)",
         effectClass: "pi-effort-ultra",
         stars: true,
       },
       max: {
-        labelColor: dark ? "#e0f2fe" : "#0f172a",
-        trackBg: "linear-gradient(90deg, #0b1220 0%, #1e40af 44%, #0284c7 78%, #7dd3fc 100%)",
-        glow: "0 0 20px rgba(125, 211, 252, 0.45)",
+        labelColor: dark ? "#f5d0fe" : "#581c87",
+        trackBg: "linear-gradient(90deg, #17153b 0%, #6d28d9 40%, #c026d3 76%, #f472b6 100%)",
+        glow: "0 0 20px rgba(232, 121, 249, 0.48)",
         effectClass: "pi-effort-ultra",
         stars: true,
       },

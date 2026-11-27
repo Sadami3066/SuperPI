@@ -50,24 +50,26 @@
 
 :root {
   color-scheme: light;
-  --pi-chrome: #f3f3f0;
+  --pi-chrome: #f5f6f8;
   --pi-canvas: #ffffff;
-  --pi-canvas-border: color-mix(in oklab, #141413 8%, transparent);
+  --pi-canvas-border: color-mix(in oklab, #141417 8%, transparent);
   --pi-canvas-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -16px rgba(15, 23, 42, 0.1);
-  --pi-focus-ring: color-mix(in oklab, #141416 82%, transparent);
+  --pi-focus-ring: color-mix(in oklab, #18181b 82%, transparent);
   --pi-scrollbar-thumb: rgba(17, 17, 19, 0.22);
   --pi-skeleton: rgba(17, 17, 19, 0.06);
   --pi-skeleton-shine: rgba(17, 17, 19, 0.12);
-  --pi-paper: #f3f3f0;
+  --pi-paper: #f5f6f8;
   --pi-surface: #ffffff;
   --pi-raised: #ffffff;
-  --pi-ink: #141413;
-  --pi-ink-secondary: #3f3f44;
-  --pi-ink-tertiary: #606068;
-  --pi-accent: #141416;
-  --pi-accent-pressed: #28282c;
+  --pi-ink: #141417;
+  --pi-ink-secondary: #3f414a;
+  --pi-ink-tertiary: #636672;
+  --pi-accent: #18181b;
+  --pi-accent-pressed: #2d2d33;
   --pi-on-accent: #fafafa;
-  --pi-accent-soft: #e8e8e4;
+  --pi-accent-soft: #eceef2;
+  --pi-user-bubble: #f2f4f7;
+  --pi-user-bubble-border: #e3e6ec;
   --pi-danger: #c4251d;
   --pi-on-danger: #ffffff;
   --pi-success: #0e7342;

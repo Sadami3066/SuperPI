@@ -12,6 +12,7 @@ import { resolveLocale, type AppLanguagePreference, type ResolvedLocale } from "
 import { syncNativeLanguage } from "../platform/bridge";
 import {
   applyThemeTokens,
+  normalizeThemePresetId,
   type AppearanceMode,
   type FontStyleId,
   type ThemePresetId,
@@ -36,6 +37,7 @@ function writeStored(key: string, value: string): void {
 }
 
 export type BrowserSearchEngine = "google" | "bing" | "duckduckgo" | "baidu";
+export const DEFAULT_BROWSER_HOMEPAGE = "https://www.google.com";
 
 export interface SettingsStoreState {
   themePreset: ThemePresetId;
@@ -43,6 +45,7 @@ export interface SettingsStoreState {
   fontStyle: FontStyleId;
   customAccent: string | null;
   browserSearchEngine: BrowserSearchEngine;
+  browserHomepage: string;
   languagePref: AppLanguagePreference;
   locale: ResolvedLocale;
   dark: boolean;
@@ -61,6 +64,7 @@ export interface SettingsStoreState {
   setFontStyle: (font: FontStyleId) => void;
   setCustomAccent: (hex: string | null) => void;
   setBrowserSearchEngine: (engine: BrowserSearchEngine) => void;
+  setBrowserHomepage: (url: string) => void;
   resetAppearance: () => void;
   setLanguagePref: (client: HostClient | null, pref: AppLanguagePreference) => Promise<void>;
 
@@ -103,13 +107,23 @@ const initialSearchEngine = readStored<BrowserSearchEngine>(
   "superpi:browserSearchEngine",
   "google",
 );
+const initialBrowserHomepage = (() => {
+  if (typeof window === "undefined") return DEFAULT_BROWSER_HOMEPAGE;
+  try {
+    const raw = window.localStorage.getItem("superpi:browserHomepage");
+    return raw === null ? DEFAULT_BROWSER_HOMEPAGE : raw;
+  } catch {
+    return DEFAULT_BROWSER_HOMEPAGE;
+  }
+})();
 
 export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
-  themePreset: readStored<ThemePresetId>("superpi:themePreset", "pi"),
+  themePreset: normalizeThemePresetId(readStored<string>("superpi:themePreset", "pi")),
   appearance: readStored<AppearanceMode>("superpi:appearance", "system"),
   fontStyle: readStored<FontStyleId>("superpi:fontStyle", "manrope"),
   customAccent: initialCustomAccent,
   browserSearchEngine: initialSearchEngine,
+  browserHomepage: initialBrowserHomepage,
   languagePref: initialLanguagePref,
   locale: resolveLocale(initialLanguagePref),
   dark: false,
@@ -161,6 +175,12 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
   setBrowserSearchEngine: (browserSearchEngine) => {
     writeStored("superpi:browserSearchEngine", browserSearchEngine);
     set({ browserSearchEngine });
+  },
+
+  setBrowserHomepage: (url) => {
+    const clean = url.trim();
+    writeStored("superpi:browserHomepage", clean);
+    set({ browserHomepage: clean });
   },
 
   resetAppearance: () => {

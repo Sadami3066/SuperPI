@@ -138,6 +138,7 @@ const PLATFORM_MAP: Record<string, I18nKey> = {
   win32: "enum.platform.windows",
   linux: "enum.platform.linux",
   desktop: "enum.platform.desktop",
+  cli: "enum.platform.desktop",
 };
 
 function lookup(map: Record<string, I18nKey>, raw: string | null | undefined, t: Translate, upper = false): string {
@@ -203,6 +204,18 @@ export function formatDiagStatus(raw: string, t: Translate): string {
   return lookup(DIAG_STATUS_MAP, raw, t, true);
 }
 
-export function formatPlatformName(raw: string, t: Translate): string {
+export function formatPlatformName(
+  raw: string,
+  t: Translate,
+  capabilities?: string[] | null,
+): string {
+  const capOs = (capabilities ?? [])
+    .find((c) => c.toLowerCase().startsWith("os:"))
+    ?.slice(3)
+    .trim();
+  if (capOs) {
+    const resolved = lookup(PLATFORM_MAP, capOs, t, false);
+    if (resolved) return resolved;
+  }
   return lookup(PLATFORM_MAP, raw, t, false);
 }

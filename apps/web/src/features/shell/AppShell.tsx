@@ -23,7 +23,7 @@ import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { SettingsModal, type SettingsTabId } from "../settings/SettingsModal";
 import { SuperTeamDialog } from "../super/SuperTeamDialog";
 import { SuperWorkspace } from "../super/SuperWorkspace";
-import { WorkerDetailDialog } from "../super/WorkerDetailDialog";
+import { WorkerWorkspace } from "../super/WorkerWorkspace";
 import { CommandPalette } from "./CommandPalette";
 import { DesktopTitlebar } from "./DesktopTitlebar";
 import { type FeatureViewKind, FeatureWorkspaceView } from "./FeatureWorkspaceView";
@@ -53,6 +53,7 @@ export function AppShell() {
 
   const refreshSuperState = useSuperStore((s) => s.refreshState);
   const refreshSuperTeam = useSuperStore((s) => s.refreshTeam);
+  const selectedWorkerId = useSuperStore((s) => s.selectedWorkerId);
   const setSelectedWorkerId = useSuperStore((s) => s.setSelectedWorkerId);
 
   useEffect(() => {
@@ -100,12 +101,15 @@ export function AppShell() {
     (nextMode: AppMode) => {
       setAppMode(nextMode);
       setActiveView(nextMode === "super" ? "super" : "chat");
-      if (nextMode === "super" && client) {
-        void refreshSuperState(client);
-        void refreshSuperTeam(client);
+      if (nextMode === "super") {
+        setSelectedWorkerId(null);
+        if (client) {
+          void refreshSuperState(client);
+          void refreshSuperTeam(client);
+        }
       }
     },
-    [client, refreshSuperState, refreshSuperTeam],
+    [client, refreshSuperState, refreshSuperTeam, setSelectedWorkerId],
   );
 
   const selectMainView = useCallback(
@@ -367,12 +371,11 @@ export function AppShell() {
           }}
           onOpenBotSettings={(bot) => setSettingsBot(bot)}
           onOpenSuperTeam={() => setSuperTeamDialogOpen(true)}
-          onOpenRelay={() => openSettings("relay")}
           onOpenSettings={() => openSettings("general")}
         />
 
         <div
-          className={`flex min-h-0 min-w-0 flex-1 sm:gap-2 sm:pr-2 sm:pb-2 sm:pl-1 ${
+          className={`flex min-h-0 min-w-0 flex-1 sm:pr-2 sm:pb-2 sm:pl-1 ${
             isElectron ? "sm:pt-0" : "sm:pt-2"
           }`}
         >
@@ -405,12 +408,21 @@ export function AppShell() {
               </div>
             )}
 
-            <div key={activeView} className="pi-view-enter flex min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              key={activeView === "super" && selectedWorkerId ? `worker:${selectedWorkerId}` : activeView}
+              className="pi-view-enter flex min-h-0 min-w-0 flex-1 flex-col"
+            >
               {activeView === "super" ? (
-                <SuperWorkspace
-                  onOpenTeamDialog={() => setSuperTeamDialogOpen(true)}
-                  onOpenProvidersSettings={() => openSettings("providers")}
-                />
+                selectedWorkerId ? (
+                  <WorkerWorkspace
+                    onOpenProvidersSettings={() => openSettings("providers")}
+                  />
+                ) : (
+                  <SuperWorkspace
+                    onOpenTeamDialog={() => setSuperTeamDialogOpen(true)}
+                    onOpenProvidersSettings={() => openSettings("providers")}
+                  />
+                )
               ) : activeView === "timers" ||
                 activeView === "memory" ||
                 activeView === "skills" ||
@@ -496,10 +508,6 @@ export function AppShell() {
       <SuperTeamDialog
         open={superTeamDialogOpen}
         onOpenChange={setSuperTeamDialogOpen}
-      />
-
-      <WorkerDetailDialog
-        onOpenProvidersSettings={() => openSettings("providers")}
       />
 
       {pendingDeletes.length > 0 && (

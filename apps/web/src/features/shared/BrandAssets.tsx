@@ -1,4 +1,56 @@
 import { type CSSProperties, useEffect, useState } from "react";
+import {
+  IconBrandApple,
+  IconBrandWindows,
+  IconDeviceDesktop,
+  IconDeviceMobile,
+} from "@tabler/icons-react";
+
+export type DeviceOsKind = "macos" | "windows" | "linux" | "android" | "ios" | "desktop";
+
+export function resolveDeviceOsKind(
+  platform?: string | null,
+  capabilities?: string[] | null,
+): DeviceOsKind {
+  const capOs = (capabilities ?? [])
+    .find((c) => c.toLowerCase().startsWith("os:"))
+    ?.slice(3)
+    .trim()
+    .toLowerCase();
+  const raw = (capOs || platform || "").trim().toLowerCase();
+  if (raw.includes("mac") || raw.includes("darwin") || raw.includes("apple")) return "macos";
+  if (raw.includes("win")) return "windows";
+  if (raw.includes("android")) return "android";
+  if (raw.includes("ios") || raw.includes("iphone") || raw.includes("ipad")) return "ios";
+  if (raw.includes("linux")) return "linux";
+  return "desktop";
+}
+
+export function DevicePlatformIcon({
+  platform,
+  capabilities,
+  size = 13.5,
+  className = "",
+  style,
+}: {
+  platform?: string | null;
+  capabilities?: string[] | null;
+  size?: number;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const kind = resolveDeviceOsKind(platform, capabilities);
+  if (kind === "macos") {
+    return <IconBrandApple size={size} stroke={1.75} className={`shrink-0 ${className}`} style={style} />;
+  }
+  if (kind === "windows") {
+    return <IconBrandWindows size={size} stroke={1.75} className={`shrink-0 ${className}`} style={style} />;
+  }
+  if (kind === "android" || kind === "ios") {
+    return <IconDeviceMobile size={size} stroke={1.75} className={`shrink-0 ${className}`} style={style} />;
+  }
+  return <IconDeviceDesktop size={size} stroke={1.75} className={`shrink-0 ${className}`} style={style} />;
+}
 
 const SVG_ICONS = new Set([
   "action/eye",

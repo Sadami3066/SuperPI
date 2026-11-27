@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { HostSuperSettingsDto, HostSuperTeamBotDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -58,20 +58,11 @@ export function SuperTeamDialog({
   const [showAdvancedLimits, setShowAdvancedLimits] = useState(false);
   const [confirmResetDefaults, setConfirmResetDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [savedNotice, setSavedNotice] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     if (!open || !client) return;
     setError(null);
-    setSavedNotice(false);
     setTeamLoading(true);
     void refreshTeam(client).finally(() => setTeamLoading(false));
     void refreshSuperSettings(client).catch((err) =>
@@ -137,12 +128,6 @@ export function SuperTeamDialog({
     }
     return groups;
   }, [t, team]);
-
-  const showSaved = () => {
-    setSavedNotice(true);
-    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-    savedTimerRef.current = setTimeout(() => setSavedNotice(false), 1600);
-  };
 
   return (
     <Dialog
@@ -248,7 +233,10 @@ export function SuperTeamDialog({
             placeholder={t("bot.instructionsPlaceholder")}
             style={{ fontFamily: "var(--pi-font-mono)" }}
           />
-          <div className="flex justify-end gap-2">
+          <div
+            className="flex items-center justify-between gap-2 pt-3"
+            style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
+          >
             <Button
               variant="ghost"
               size="sm"
@@ -261,7 +249,7 @@ export function SuperTeamDialog({
                   .deleteSuperAgentsDoc()
                   .then(() => {
                     setAgentsDoc("");
-                    showSaved();
+                    onOpenChange(false);
                   })
                   .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                   .finally(() => setBusy(false));
@@ -269,23 +257,28 @@ export function SuperTeamDialog({
             >
               {t("super.clearInstructions")}
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                if (!client) return;
-                setBusy(true);
-                setError(null);
-                void client
-                  .saveSuperAgentsDoc(agentsDoc)
-                  .then(() => showSaved())
-                  .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {savedNotice ? t("bot.saved") : t("common.save")}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  if (!client) return;
+                  setBusy(true);
+                  setError(null);
+                  void client
+                    .saveSuperAgentsDoc(agentsDoc)
+                    .then(() => onOpenChange(false))
+                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                {t("common.save")}
+              </Button>
+            </div>
           </div>
         </TabsContent>
 
@@ -473,7 +466,10 @@ export function SuperTeamDialog({
                 </div>
               )}
 
-              <div className="flex items-center justify-between pt-2">
+              <div
+                className="flex items-center justify-between pt-3"
+                style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
+              >
                 <Button
                   variant="ghost"
                   size="sm"
@@ -482,22 +478,27 @@ export function SuperTeamDialog({
                 >
                   {t("super.teamResetDefaults")}
                 </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    if (!client) return;
-                    setBusy(true);
-                    setError(null);
-                    void updateSuperSettings(client, settingsDraft)
-                      .then(() => showSaved())
-                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                      .finally(() => setBusy(false));
-                  }}
-                >
-                  {savedNotice ? t("bot.saved") : t("common.save")}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+                    {t("common.cancel")}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      if (!client) return;
+                      setBusy(true);
+                      setError(null);
+                      void updateSuperSettings(client, settingsDraft)
+                        .then(() => onOpenChange(false))
+                        .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                        .finally(() => setBusy(false));
+                    }}
+                  >
+                    {t("common.save")}
+                  </Button>
+                </div>
               </div>
             </>
           ) : (
@@ -529,7 +530,6 @@ export function SuperTeamDialog({
           setBusy(true);
           setError(null);
           void updateSuperSettings(client, DEFAULT_SUPER_SETTINGS)
-            .then(() => showSaved())
             .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
             .finally(() => setBusy(false));
         }}

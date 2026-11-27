@@ -121,7 +121,6 @@ export function SuperWorkspace({
   const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[SUPER_SESSION_ID]?.streaming));
 
   const workbenchOpen = useWorkbenchStore((s) => s.open);
-  const openPanel = useWorkbenchStore((s) => s.openPanel);
   const toggleWorkbench = useWorkbenchStore((s) => s.toggleWorkbench);
 
   const [confirmReset, setConfirmReset] = useState(false);
@@ -428,11 +427,6 @@ export function SuperWorkspace({
             />
           </Popover>
 
-          <Button variant="ghost" size="sm" onClick={onOpenTeamDialog}>
-            <BrandIcon name="ai/agent" size={14.5} />
-            <span className="hidden sm:inline">{t("super.teamButton")}</span>
-          </Button>
-
           {!isElectron && (
             <IconButton
               size="sm"
@@ -485,14 +479,12 @@ export function SuperWorkspace({
               );
             })}
           </div>
-          <button
-            type="button"
-            onClick={() => openPanel("super-team")}
-            className="shrink-0 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium whitespace-nowrap transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-secondary)" }}
+          <span
+            className="shrink-0 px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap"
+            style={{ color: "var(--pi-ink-tertiary)" }}
           >
             {t("super.activeStripCount", { count: activeWorkers.length })}
-          </button>
+          </span>
         </div>
       )}
 

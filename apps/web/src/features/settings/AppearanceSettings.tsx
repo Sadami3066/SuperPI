@@ -131,28 +131,35 @@ function ThemePresetCard({
       }}
     >
       <div
-        className="flex h-[58px] w-full overflow-hidden rounded-[8px] p-1.5"
+        className="flex h-[62px] w-full overflow-hidden rounded-[8px] p-1.5"
         style={{ background: p.paper, border: `1px solid ${cardBorder}` }}
       >
         <div className="flex w-7 shrink-0 flex-col justify-between pr-1.5">
           <div className="space-y-1">
-            <div className="h-1.5 w-4 rounded-full" style={{ background: p.inkTertiary, opacity: 0.55 }} />
-            <div className="h-1 w-5 rounded-full" style={{ background: p.inkTertiary, opacity: 0.3 }} />
-            <div className="h-1 w-3.5 rounded-full" style={{ background: p.inkTertiary, opacity: 0.3 }} />
+            <div className="h-1.5 w-4 rounded-full" style={{ background: p.inkTertiary, opacity: 0.6 }} />
+            <div className="h-1 w-5 rounded-full" style={{ background: p.inkTertiary, opacity: 0.35 }} />
+            <div className="h-1 w-3.5 rounded-full" style={{ background: p.inkTertiary, opacity: 0.35 }} />
           </div>
-          <div className="h-1.5 w-3 rounded-full" style={{ background: p.accent, opacity: 0.7 }} />
+          <div className="flex items-center gap-0.5">
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.codeKeyword }} />
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.codeFunction }} />
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.codeString }} />
+          </div>
         </div>
         <div
           className="flex min-w-0 flex-1 flex-col justify-between rounded-[6px] p-1.5"
           style={{ background: p.surface, border: `1px solid ${cardBorder}` }}
         >
-          <div className="ml-auto h-2 w-8 rounded-full" style={{ background: p.wash }} />
+          <div
+            className="ml-auto h-2.5 w-9 rounded-full"
+            style={{ background: p.userBubble, border: `0.5px solid ${p.userBubbleBorder}` }}
+          />
           <div className="space-y-1">
-            <div className="h-1 w-10 rounded-full" style={{ background: p.ink, opacity: 0.65 }} />
-            <div className="h-1 w-7 rounded-full" style={{ background: p.inkTertiary, opacity: 0.45 }} />
+            <div className="h-1 w-10 rounded-full" style={{ background: p.ink, opacity: 0.72 }} />
+            <div className="h-1 w-7 rounded-full" style={{ background: p.codeFunction, opacity: 0.75 }} />
           </div>
           <div className="flex items-center justify-between pt-0.5">
-            <div className="h-1.5 w-6 rounded-full" style={{ background: p.wash }} />
+            <div className="h-1.5 w-6 rounded-full" style={{ background: p.codeBackground }} />
             <div className="h-2.5 w-5 rounded-full" style={{ background: p.accent }} />
           </div>
         </div>

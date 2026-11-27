@@ -5,7 +5,6 @@ import { extractLatestTodosFromTurns } from "../../api/todo";
 import type {
   ChatTurn,
   HostBotDto,
-  HostCheckpointDto,
   PermissionMode,
   QuestionAnswerInput,
   ToolApprovalDecision,
@@ -18,7 +17,7 @@ import { draftComposerKey, useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
-import { Button, ChatLoadingSkeleton, Dialog, IconButton, NoticeBar, Popover } from "../../ui";
+import { Button, ChatLoadingSkeleton, IconButton, NoticeBar, Popover } from "../../ui";
 import { BotAvatar, BrandIcon, PiMascot } from "../shared/BrandAssets";
 import { Composer } from "./Composer";
 import { ContextMeter } from "./ContextMeter";
@@ -171,25 +170,16 @@ export function ChatWorkspace({
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [rewindTarget, setRewindTarget] = useState<{
-    turnIndex: number;
-    rawText: string;
-    preview: string;
-  } | null>(null);
-  const [rewindCheckpoint, setRewindCheckpoint] = useState<HostCheckpointDto | null>(null);
-  const [rewinding, setRewinding] = useState(false);
-  const [rewindError, setRewindError] = useState<string | null>(null);
 
   const dragDepthRef = useRef(0);
+  const rewindingRef = useRef(false);
   const snapToBottomRef = useRef<(() => void) | null>(null);
   const attachFilesRef = useRef<((files: FileList | File[]) => void) | null>(null);
 
   useEffect(() => {
     dragDepthRef.current = 0;
+    rewindingRef.current = false;
     setDraggingFiles(false);
-    setRewindTarget(null);
-    setRewindCheckpoint(null);
-    setRewindError(null);
   }, [activeSessionId, draftBotId]);
 
   const activeBot = useMemo(() => {
@@ -293,52 +283,19 @@ export function ChatWorkspace({
 
   const handleRequestRewind = useCallback(
     (turnIndex: number, rawText: string) => {
-      if (!activeSessionId) return;
-      const preview = rawText.replace(/\s+/g, " ").trim().slice(0, 48) || `#${turnIndex + 1}`;
-      setRewindCheckpoint(null);
-      setRewindError(null);
-      setRewindTarget({ turnIndex, rawText, preview });
-      if (client) {
-        void client
-          .listCheckpoints(activeSessionId)
-          .then((list) => {
-            const matched =
-              list.find((c) => c.turnIndex === turnIndex) ??
-              list.findLast((c) => c.turnIndex <= turnIndex) ??
-              null;
-            setRewindCheckpoint(matched);
-          })
-          .catch(() => setRewindCheckpoint(null));
-      }
-    },
-    [activeSessionId, client],
-  );
-
-  const executeRewind = async (mode: "chat_only" | "files_only" | "files_and_chat") => {
-    if (!client || !activeSessionId || !rewindTarget) return;
-    setRewinding(true);
-    setRewindError(null);
-    try {
-      const ok = await rewindSessionTurn(client, activeSessionId, {
-        turnIndex: rewindTarget.turnIndex,
-        mode,
-        checkpointId: rewindCheckpoint?.id,
-        restoreText: rewindTarget.rawText,
+      if (!client || !activeSessionId || rewindingRef.current) return;
+      rewindingRef.current = true;
+      void rewindSessionTurn(client, activeSessionId, {
+        turnIndex,
+        mode: "files_and_chat",
+        restoreText: rawText,
         locale,
+      }).finally(() => {
+        rewindingRef.current = false;
       });
-      if (ok) {
-        setRewindTarget(null);
-        setRewindCheckpoint(null);
-        setRewindError(null);
-      } else {
-        const errMsg = useSessionStore.getState().actionError || "Request failed";
-        useSessionStore.getState().clearActionError();
-        setRewindError(t("chat.rewindFailed", { error: errMsg }));
-      }
-    } finally {
-      setRewinding(false);
-    }
-  };
+    },
+    [activeSessionId, client, locale, rewindSessionTurn],
+  );
 
   const handleAnswerQuestion = useCallback(
     async (reqId: string, answers: QuestionAnswerInput[]) => {
@@ -871,140 +828,6 @@ export function ChatWorkspace({
           <span className="text-[14px] font-medium">{t("chat.dropFiles")}</span>
         </div>
       )}
-
-      <Dialog
-        open={Boolean(rewindTarget)}
-        onOpenChange={(v) => {
-          if (!v && !rewinding) {
-            setRewindTarget(null);
-            setRewindCheckpoint(null);
-            setRewindError(null);
-          }
-        }}
-        title={t("chat.rewindTitle")}
-        maxWidthClass="max-w-[440px]"
-      >
-        {rewindTarget && (
-          <div className="space-y-3.5">
-            <p className="text-[13px] leading-[1.6]" style={{ color: "var(--pi-ink-secondary)" }}>
-              {t("chat.rewindDesc", { preview: rewindTarget.preview })}
-            </p>
-
-            <div className="space-y-2">
-              {rewindCheckpoint && (
-                <button
-                  type="button"
-                  disabled={rewinding}
-                  onClick={() => void executeRewind("files_and_chat")}
-                  className="flex w-full items-start gap-3 rounded-[12px] p-3 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--pi-hover)] disabled:opacity-45 motion-safe:active:scale-[0.99]"
-                  style={{
-                    background: "var(--pi-chrome)",
-                    border: "1px solid var(--pi-accent)",
-                  }}
-                >
-                  <div
-                    className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px]"
-                    style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
-                  >
-                    <BrandIcon name="action/retry" size={14.5} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                        {t("chat.rewindFilesAndChat")}
-                      </span>
-                      <span
-                        className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                        style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
-                      >
-                        {t("ask.recommended")}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[12px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
-                      {t("chat.rewindFilesAndChatDesc")}
-                    </p>
-                  </div>
-                </button>
-              )}
-
-              <button
-                type="button"
-                disabled={rewinding}
-                onClick={() => void executeRewind("chat_only")}
-                className="flex w-full items-start gap-3 rounded-[12px] p-3 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--pi-hover)] disabled:opacity-45 motion-safe:active:scale-[0.99]"
-                style={{
-                  background: "var(--pi-chrome)",
-                  border: rewindCheckpoint
-                    ? "1px solid var(--pi-canvas-border)"
-                    : "1px solid var(--pi-accent)",
-                }}
-              >
-                <div
-                  className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px]"
-                  style={{
-                    background: rewindCheckpoint ? "var(--pi-wash)" : "var(--pi-accent-soft)",
-                    color: rewindCheckpoint ? "var(--pi-ink-secondary)" : "var(--pi-accent)",
-                  }}
-                >
-                  <BrandIcon name="chat/new_chat" size={14.5} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
-                    {t("chat.rewindChatOnly")}
-                  </div>
-                  <p className="mt-0.5 text-[12px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
-                    {t("chat.rewindChatOnlyDesc")}
-                  </p>
-                </div>
-              </button>
-
-              {rewindCheckpoint && (
-                <button
-                  type="button"
-                  disabled={rewinding}
-                  onClick={() => void executeRewind("files_only")}
-                  className="flex w-full items-start gap-3 rounded-[12px] p-3 text-left transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--pi-hover)] disabled:opacity-45 motion-safe:active:scale-[0.99]"
-                  style={{
-                    background: "var(--pi-chrome)",
-                    border: "1px solid var(--pi-canvas-border)",
-                  }}
-                >
-                  <div
-                    className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px]"
-                    style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
-                  >
-                    <BrandIcon name="file/folder_open" size={14.5} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
-                      {t("chat.rewindFilesOnly")}
-                    </div>
-                    <p className="mt-0.5 text-[12px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
-                      {t("chat.rewindFilesOnlyDesc")}
-                    </p>
-                  </div>
-                </button>
-              )}
-            </div>
-
-            {rewindError && <NoticeBar tone="danger" message={rewindError} />}
-
-            <div className="flex justify-end pt-1">
-              <Button
-                variant="ghost"
-                disabled={rewinding}
-                onClick={() => {
-                  setRewindTarget(null);
-                  setRewindCheckpoint(null);
-                  setRewindError(null);
-                }}
-              >
-                {t("common.cancel")}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Dialog>
     </div>
   );
 }

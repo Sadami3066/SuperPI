@@ -702,7 +702,7 @@ export const zhCN = {
   "super.activeStripCount": "{count} 项进行中",
   "super.waitingApproval": "{name} 需要你的确认",
   "super.openWorker": "查看详情",
-  "super.workersDrawerTitle": "协作任务",
+  "super.workersDrawerTitle": "执行者",
   "super.workersActiveGroup": "进行中",
   "super.workersSavedGroup": "已保留",
   "super.teamGroupLocal": "本机",
@@ -957,13 +957,13 @@ export const zhCN = {
   "auto.errorOpenFailed": "无法打开目标对话",
   "auto.errorDeliveryFailed": "上次触发发送失败",
   "auto.piTimersTitle": "PI 定时任务",
-  "auto.superTimersTitle": "Super PI 定时任务",
-  "auto.superEmptyDesc": "让 Super PI 主线程或协作任务按计划自动执行。",
+  "auto.superTimersTitle": "订阅任务",
+  "auto.superEmptyDesc": "订阅关注的信息或周期任务，到期后自动由 Super PI 跟进处理。",
 
   "super.drawerTeam": "团队配置",
-  "super.drawerWorkersEmpty": "暂无协作任务，向 Super PI 下达任务后将在这里展示。",
-  "super.drawerWorkerDelete": "删除协作任务",
-  "super.drawerWorkerDeleteConfirm": "确定删除协作任务「{title}」及其记录吗？",
+  "super.drawerWorkersEmpty": "暂无执行者，向 Super PI 下达任务后将在这里展示。",
+  "super.drawerWorkerDelete": "删除执行者",
+  "super.drawerWorkerDeleteConfirm": "确定删除执行者「{title}」及其记录吗？",
   "super.nonImageDropped": "Super PI 目前仅支持发送图片附件，其他文件请交给本机助理处理。",
   "super.teamEmpty": "暂无可用助理，请先在 PI 模式下创建本机或互联助理。",
   "super.questionTimeout": "提问超时（分钟）",
@@ -981,6 +981,12 @@ export const zhCN = {
 
   "bot.detailsLoadFailed": "未能加载助理指令与能力配置，请重试后再保存。",
   "providers.deleteCustomConfirm": "确定删除自定义模型服务「{name}」吗？",
+  "browser.home": "主页",
+  "settings.browserHomepage": "默认主页",
+  "settings.browserHomepageDesc": "打开内置浏览器时自动加载的起始网址，留空则显示快捷书签页",
+  "settings.browserHomepagePlaceholder": "https://www.google.com",
+  "settings.browserHomepageSaved": "已保存默认主页",
+  "settings.browserHomepageReset": "恢复 Google",
 } as const;
 
 export type I18nKey = keyof typeof zhCN;

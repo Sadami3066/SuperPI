@@ -6,7 +6,6 @@ import {
   IconLoader2,
   IconPinnedOff,
   IconPlugConnected,
-  IconSparkles,
 } from "@tabler/icons-react";
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostBotDto, HostWorkerDto, SessionSummary } from "../../api/types";
@@ -30,7 +29,7 @@ import {
   IconButton,
   Input,
 } from "../../ui";
-import { BotAvatar, BrandIcon, PiBrandMark } from "../shared/BrandAssets";
+import { BotAvatar, BrandIcon, DevicePlatformIcon, PiBrandMark } from "../shared/BrandAssets";
 import { ModeSwitcher } from "./ModeSwitcher";
 
 const SIDEBAR_WIDTH_KEY = "superpi:sidebarWidth";
@@ -129,7 +128,6 @@ export function Sidebar({
   onOpenCreateBot,
   onOpenBotSettings,
   onOpenSuperTeam,
-  onOpenRelay,
   onOpenSettings,
 }: {
   open: boolean;
@@ -145,7 +143,6 @@ export function Sidebar({
   onOpenCreateBot: (target?: { deviceId: string; deviceName: string }) => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenSuperTeam: () => void;
-  onOpenRelay: () => void;
   onOpenSettings: () => void;
 }) {
   const { t } = useI18n();
@@ -226,6 +223,28 @@ export function Sidebar({
     return map;
   }, [superTeam]);
 
+  const resolveWorkerMeta = (w: HostWorkerDto) => {
+    const matchedBot =
+      botsById.get(w.botId) ??
+      (w.deviceId ? botsById.get(`remote:${w.deviceId}:${w.botId}`) : undefined) ??
+      bots.find(
+        (b) => b.remoteBotId === w.botId && (!w.deviceId || b.deviceId === w.deviceId),
+      );
+    const matchedTeam =
+      teamByBotId.get(w.botId) ??
+      superTeam.find(
+        (m) =>
+          w.deviceId &&
+          m.deviceId === w.deviceId &&
+          (m.botId === w.botId || m.name === w.botName),
+      );
+    return {
+      matchedBot,
+      matchedTeam,
+      avatar: matchedBot?.avatar ?? matchedTeam?.avatar ?? null,
+    };
+  };
+
   const enabledSuperTeamCount = useMemo(
     () => superTeam.filter((m) => m.enabledInSuper).length,
     [superTeam],
@@ -265,7 +284,14 @@ export function Sidebar({
   const remoteGroups = useMemo(() => {
     const map = new Map<
       string,
-      { deviceId: string; deviceName: string; platform: string; online: boolean; bots: HostBotDto[] }
+      {
+        deviceId: string;
+        deviceName: string;
+        platform: string;
+        capabilities: string[];
+        online: boolean;
+        bots: HostBotDto[];
+      }
     >();
     for (const dev of relayDevices) {
       if (dev.isSelf) continue;
@@ -273,6 +299,7 @@ export function Sidebar({
         deviceId: dev.deviceId,
         deviceName: dev.name,
         platform: dev.platform || "",
+        capabilities: dev.capabilities ?? [],
         online: dev.online,
         bots: [],
       });
@@ -283,9 +310,13 @@ export function Sidebar({
         deviceId: key,
         deviceName: rb.deviceName || t("nav.remoteBots"),
         platform: "",
+        capabilities: rb.capabilities ?? [],
         online: Boolean(rb.online),
         bots: [],
       };
+      if (existing.capabilities.length === 0 && rb.capabilities?.length) {
+        existing.capabilities = rb.capabilities;
+      }
       existing.online = existing.online || Boolean(rb.online);
       existing.bots.push(rb);
       map.set(key, existing);
@@ -377,45 +408,12 @@ export function Sidebar({
           <>
             <button
               type="button"
-              title={t("super.title")}
-              onClick={onSelectSuperMain}
-              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-              style={{
-                background: activeView === "super" ? "var(--pi-wash)" : "transparent",
-                color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-              }}
-            >
-              <IconSparkles size={16} stroke={1.7} />
-            </button>
-            <button
-              type="button"
               title={t("super.drawerTeam")}
               onClick={onOpenSuperTeam}
               className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
               style={{ color: "var(--pi-ink-secondary)" }}
             >
               <BrandIcon name="ai/agent" size={16} />
-            </button>
-            <button
-              type="button"
-              title={t("settings.navMemory")}
-              onClick={() => onSelectFeature("memory")}
-              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-              style={{
-                background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
-                color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-              }}
-            >
-              <BrandIcon name="ai/memory" size={15.5} />
-            </button>
-            <button
-              type="button"
-              title={t("settings.navRelay")}
-              onClick={onOpenRelay}
-              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-              style={{ color: "var(--pi-ink-secondary)" }}
-            >
-              <BrandIcon name="system/device" size={15.5} />
             </button>
             <button
               type="button"
@@ -435,10 +433,10 @@ export function Sidebar({
                 <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
                 <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
                   {superWorkers.slice(0, 10).map((w) => {
-                    const matchedBot = botsById.get(w.botId);
+                    const { matchedBot, avatar } = resolveWorkerMeta(w);
                     const waiting = isWorkerWaiting(w);
                     const active = isWorkerActiveStatus(w.status);
-                    const selected = selectedWorkerId === w.workerId;
+                    const selected = activeView === "super" && selectedWorkerId === w.workerId;
                     return (
                       <button
                         key={w.workerId}
@@ -452,7 +450,7 @@ export function Sidebar({
                         style={{ background: selected ? "var(--pi-wash)" : "transparent" }}
                       >
                         <BotAvatar
-                          avatar={matchedBot?.avatar}
+                          avatar={avatar}
                           name={w.botName}
                           isHome={matchedBot?.isHome}
                           isRemote={w.isRemote}
@@ -1033,11 +1031,10 @@ export function Sidebar({
   };
 
   const renderWorkerRow = (w: HostWorkerDto) => {
-    const matchedBot = botsById.get(w.botId);
-    const matchedTeam = teamByBotId.get(w.botId);
+    const { matchedBot, matchedTeam, avatar } = resolveWorkerMeta(w);
     const active = isWorkerActiveStatus(w.status);
     const waiting = isWorkerWaiting(w);
-    const selected = selectedWorkerId === w.workerId;
+    const selected = activeView === "super" && selectedWorkerId === w.workerId;
     const deviceLabel = w.isRemote && w.deviceName ? w.deviceName : t("super.teamGroupLocal");
     const slotText =
       matchedTeam && matchedTeam.maxWorkerSlots > 0
@@ -1064,7 +1061,7 @@ export function Sidebar({
           className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
         >
           <BotAvatar
-            avatar={matchedBot?.avatar ?? matchedTeam?.avatar}
+            avatar={avatar}
             name={w.botName}
             isHome={matchedBot?.isHome}
             isRemote={w.isRemote}
@@ -1200,25 +1197,8 @@ export function Sidebar({
                 <div className={`space-y-0.5 px-2.5 pb-2 ${hideHeader ? "pt-1.5" : "pt-0.5"}`}>
                   <button
                     type="button"
-                    onClick={onSelectSuperMain}
-                    className="flex h-[32px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{
-                      background: activeView === "super" ? "var(--pi-canvas)" : "transparent",
-                      border:
-                        activeView === "super"
-                          ? "1px solid var(--pi-canvas-border)"
-                          : "1px solid transparent",
-                      color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-                    }}
-                  >
-                    <IconSparkles size={14.5} stroke={1.7} style={{ color: "var(--pi-accent)" }} />
-                    <span className="min-w-0 flex-1 truncate text-left">{t("super.title")}</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={onOpenSuperTeam}
-                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    className="flex h-[32px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
                     style={{ color: "var(--pi-ink-secondary)" }}
                   >
                     <BrandIcon name="ai/agent" size={14.5} />
@@ -1233,33 +1213,14 @@ export function Sidebar({
 
                   <button
                     type="button"
-                    onClick={() => onSelectFeature("memory")}
-                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{
-                      background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
-                      color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-                    }}
-                  >
-                    <BrandIcon name="ai/memory" size={14.5} />
-                    <span className="min-w-0 flex-1 truncate text-left">{t("settings.navMemory")}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={onOpenRelay}
-                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{ color: "var(--pi-ink-secondary)" }}
-                  >
-                    <BrandIcon name="system/device" size={14.5} />
-                    <span className="min-w-0 flex-1 truncate text-left">{t("settings.navRelay")}</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => onSelectFeature("timers")}
-                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    className="flex h-[32px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
                     style={{
-                      background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+                      background: activeView === "timers" ? "var(--pi-canvas)" : "transparent",
+                      border:
+                        activeView === "timers"
+                          ? "1px solid var(--pi-canvas-border)"
+                          : "1px solid transparent",
                       color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
                     }}
                   >
@@ -1514,9 +1475,10 @@ export function Sidebar({
                                 style={{ color: "var(--pi-ink-tertiary)" }}
                               >
                                 <div className="flex min-w-0 items-center gap-1.5">
-                                  <BrandIcon
-                                    name={group.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
-                                    size={12.5}
+                                  <DevicePlatformIcon
+                                    platform={group.platform}
+                                    capabilities={group.capabilities}
+                                    size={13.5}
                                   />
                                   <span
                                     className="h-1.5 w-1.5 shrink-0 rounded-full"

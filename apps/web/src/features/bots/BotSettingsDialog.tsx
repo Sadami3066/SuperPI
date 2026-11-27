@@ -79,16 +79,8 @@ export function BotSettingsDialog({
   const [policy, setPolicy] = useState<HostBotPolicyDto | null>(null);
   const [detailsStatus, setDetailsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState(false);
-  const [savedFlag, setSavedFlag] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-    };
-  }, []);
 
   const fetchDetails = (targetBot: HostBotDto) => {
     if (!client) return;
@@ -113,7 +105,6 @@ export function BotSettingsDialog({
     setClearAvatarFlag(false);
     setDefaultModel(bot.defaultModel ?? "");
     setPermMode((bot.permissionMode as PermissionMode) || "workspace_auto");
-    setSavedFlag(false);
     setSaveError(null);
     setPolicy(null);
     fetchDetails(bot);
@@ -178,9 +169,7 @@ export function BotSettingsDialog({
           superEnabled: policy.superEnabled,
         });
       }
-      setSavedFlag(true);
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => setSavedFlag(false), 1600);
+      onClose();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
@@ -300,14 +289,6 @@ export function BotSettingsDialog({
                   />
                 </div>
               </>
-            )}
-
-            {!bot.isHome && (
-              <div className="pt-2">
-                <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
-                  {t("bot.deleteBot")}
-                </Button>
-              </div>
             )}
           </TabsContent>
 
@@ -492,17 +473,34 @@ export function BotSettingsDialog({
           </div>
         )}
 
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            {t("common.close")}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || detailsStatus !== "ready"}
-            onClick={() => void handleSave()}
-          >
-            {savedFlag ? t("bot.saved") : t("bot.save")}
-          </Button>
+        <div
+          className="mt-5 flex items-center justify-between gap-2 pt-4"
+          style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
+        >
+          <div>
+            {!bot.isHome && (
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={busy}
+                onClick={() => setConfirmDelete(true)}
+              >
+                {t("bot.deleteBot")}
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || detailsStatus !== "ready"}
+              onClick={() => void handleSave()}
+            >
+              {t("bot.save")}
+            </Button>
+          </div>
         </div>
       </Dialog>
 

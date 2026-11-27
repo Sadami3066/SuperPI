@@ -152,8 +152,6 @@ export function WorkbenchDock({
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth : 1360,
   );
-  const hasOpenedRef = useRef(open);
-  if (open) hasOpenedRef.current = true;
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -175,8 +173,6 @@ export function WorkbenchDock({
       useWorkbenchStore.getState().addTab("browser", { url });
     });
   }, [isElectron]);
-
-  if (!hasOpenedRef.current) return null;
 
   const botId = activeSummary?.botId ?? draftBotId ?? bots[0]?.id ?? "home";
   const activeBot = bots.find((b) => b.id === botId);
@@ -243,19 +239,32 @@ export function WorkbenchDock({
     <>
       {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
       <aside
-        className="pi-inset-canvas relative h-full shrink-0 flex-col overflow-hidden sm:rounded-[14px]"
+        aria-hidden={!open}
+        className={`pi-inset-canvas relative flex h-full shrink-0 flex-col overflow-hidden sm:rounded-[14px] ${
+          resizing
+            ? ""
+            : "transition-[width,opacity,margin] duration-200 ease-out motion-reduce:transition-none"
+        }`}
         style={{
-          display: open ? "flex" : "none",
-          width: effectiveWidth,
+          width: open ? effectiveWidth : 0,
+          marginLeft: open ? 8 : 0,
+          opacity: open ? 1 : 0,
+          borderWidth: open ? undefined : 0,
+          boxShadow: open ? undefined : "none",
+          pointerEvents: open ? "auto" : "none",
         }}
       >
         <div
-          onMouseDown={startResize}
-          onDoubleClick={() => setWidth(520, true)}
-          role="separator"
-          aria-orientation="vertical"
-          className="absolute top-0 bottom-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
-        />
+          className="relative flex h-full flex-col overflow-hidden"
+          style={{ width: effectiveWidth }}
+        >
+          <div
+            onMouseDown={startResize}
+            onDoubleClick={() => setWidth(520, true)}
+            role="separator"
+            aria-orientation="vertical"
+            className="absolute top-0 bottom-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
+          />
 
         <div
           className="flex h-[44px] shrink-0 items-center justify-between gap-2 px-2.5"
@@ -398,6 +407,7 @@ export function WorkbenchDock({
               </div>
             );
           })}
+        </div>
         </div>
       </aside>
     </>

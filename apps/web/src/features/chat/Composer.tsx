@@ -830,7 +830,11 @@ export const Composer = memo(function Composer({
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-[opacity,transform] duration-150 hover:opacity-90 motion-safe:active:scale-[0.94]"
                   style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
                 >
-                  <BrandIcon name="action/stop" size={15} />
+                  <span
+                    aria-hidden="true"
+                    className="h-[11px] w-[11px] rounded-[2.5px]"
+                    style={{ background: "currentColor" }}
+                  />
                 </button>
               ) : (
                 <button

@@ -10,7 +10,11 @@ import {
   browserSetPersistSession,
 } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
-import { type BrowserSearchEngine, useSettingsStore } from "../../stores/settingsStore";
+import {
+  type BrowserSearchEngine,
+  DEFAULT_BROWSER_HOMEPAGE,
+  useSettingsStore,
+} from "../../stores/settingsStore";
 import { Badge, Button, ConfirmDialog, IconButton, Input, Select, Switch } from "../../ui";
 
 export function BrowserSettings() {
@@ -18,7 +22,10 @@ export function BrowserSettings() {
   const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
   const searchEngine = useSettingsStore((s) => s.browserSearchEngine);
   const setSearchEngine = useSettingsStore((s) => s.setBrowserSearchEngine);
+  const browserHomepage = useSettingsStore((s) => s.browserHomepage);
+  const setBrowserHomepage = useSettingsStore((s) => s.setBrowserHomepage);
 
+  const [homepageDraft, setHomepageDraft] = useState(browserHomepage);
   const [summary, setSummary] = useState<BrowserStorageSummary | null>(null);
   const [siteQuery, setSiteQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,6 +47,10 @@ export function BrowserSettings() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    setHomepageDraft(browserHomepage);
+  }, [browserHomepage]);
 
   const searchEngineOptions = useMemo(
     () => [
@@ -243,6 +254,54 @@ export function BrowserSettings() {
         </h3>
 
         <div className="divide-y divide-[var(--pi-hairline)]">
+          <div className="space-y-2.5 py-4">
+            <div className="min-w-0">
+              <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                {t("settings.browserHomepage")}
+              </div>
+              <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                {t("settings.browserHomepageDesc")}
+              </div>
+            </div>
+            <form
+              className="flex flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setBrowserHomepage(homepageDraft);
+                showNotice(t("settings.browserHomepageSaved"));
+              }}
+            >
+              <Input
+                value={homepageDraft}
+                onChange={(e) => setHomepageDraft(e.target.value)}
+                placeholder={t("settings.browserHomepagePlaceholder")}
+                className="h-8.5 min-w-[220px] flex-1 text-[12.5px]"
+              />
+              <Button
+                type="submit"
+                variant="secondary"
+                size="sm"
+                disabled={homepageDraft.trim() === browserHomepage.trim()}
+              >
+                {t("common.save")}
+              </Button>
+              {browserHomepage.trim() !== DEFAULT_BROWSER_HOMEPAGE && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setHomepageDraft(DEFAULT_BROWSER_HOMEPAGE);
+                    setBrowserHomepage(DEFAULT_BROWSER_HOMEPAGE);
+                    showNotice(t("settings.browserHomepageSaved"));
+                  }}
+                >
+                  {t("settings.browserHomepageReset")}
+                </Button>
+              )}
+            </form>
+          </div>
+
           <div className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
             <div className="min-w-0">
               <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>

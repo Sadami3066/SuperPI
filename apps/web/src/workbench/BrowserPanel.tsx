@@ -3,6 +3,7 @@ import {
   IconArrowLeft,
   IconArrowRight,
   IconExternalLink,
+  IconHome,
   IconMessageForward,
   IconRefresh,
   IconWorld,
@@ -25,7 +26,7 @@ import {
   subscribeBrowserState,
 } from "../platform/bridge";
 import { useSessionStore } from "../stores/sessionStore";
-import { useSettingsStore } from "../stores/settingsStore";
+import { DEFAULT_BROWSER_HOMEPAGE, useSettingsStore } from "../stores/settingsStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { Button, IconButton, Input } from "../ui";
 import type { WorkbenchPanelContext } from "./registry";
@@ -90,6 +91,7 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
   const { t } = useI18n();
   const dark = useSettingsStore((s) => s.dark);
   const searchEngine = useSettingsStore((s) => s.browserSearchEngine);
+  const browserHomepage = useSettingsStore((s) => s.browserHomepage);
 
   const workbenchOpen = useWorkbenchStore((s) => s.open);
   const activePanelId = useWorkbenchStore((s) => s.activePanelId);
@@ -102,13 +104,14 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
   const myTabId = context.tabId || "browser-default";
   const initialPayloadUrl =
     typeof context.payload?.url === "string" ? context.payload.url.trim() : "";
+  const effectiveInitialUrl = initialPayloadUrl || browserHomepage.trim();
 
   const [tabState, setTabState] = useState<BrowserTabState>({
     ...EMPTY_TAB,
     id: myTabId,
-    url: initialPayloadUrl,
+    url: effectiveInitialUrl,
   });
-  const [urlInput, setUrlInput] = useState(initialPayloadUrl);
+  const [urlInput, setUrlInput] = useState(effectiveInitialUrl);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const initialNavDoneRef = useRef(false);
 
@@ -157,15 +160,15 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
   }, [myTabId, syncFromNavSnapshot]);
 
   useEffect(() => {
-    if (!initialPayloadUrl || initialNavDoneRef.current || !isTabVisible) return;
+    if (!effectiveInitialUrl || initialNavDoneRef.current || !isTabVisible) return;
     initialNavDoneRef.current = true;
-    const resolved = resolveUserBrowserInput(initialPayloadUrl, searchEngine);
+    const resolved = resolveUserBrowserInput(effectiveInitialUrl, searchEngine);
     if (!resolved) return;
     const bounds = getViewportBounds() ?? { x: 0, y: 0, width: 480, height: 480 };
     void browserMount(bounds, resolved, myTabId).then(syncFromNavSnapshot);
   }, [
+    effectiveInitialUrl,
     getViewportBounds,
-    initialPayloadUrl,
     isTabVisible,
     myTabId,
     searchEngine,
@@ -275,6 +278,14 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
           ) : (
             <IconRefresh size={14.5} stroke={1.7} />
           )}
+        </IconButton>
+
+        <IconButton
+          size="sm"
+          label={t("browser.home")}
+          onClick={() => void navigateTo(browserHomepage.trim() || DEFAULT_BROWSER_HOMEPAGE)}
+        >
+          <IconHome size={14.5} stroke={1.7} />
         </IconButton>
 
         <form
