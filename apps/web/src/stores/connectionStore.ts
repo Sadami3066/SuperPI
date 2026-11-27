@@ -1,14 +1,22 @@
 import { create } from "zustand";
 import { HostClient } from "../api/hostClient";
 import type { HostSseEvent } from "../api/types";
+import { translate } from "../i18n";
 import {
   clearBrowserToken,
   discoverHostConnection,
   getDesktopEnv,
   reconnectHostNative,
   saveManualBrowserToken,
+  showDesktopNotification,
   type DesktopEnv,
 } from "../platform/bridge";
+import {
+  collectNewNotificationItems,
+  isUserAbortedError,
+  resetNotificationBaselines,
+  seedNotificationBaselines,
+} from "../platform/notifications";
 import { useBotStore } from "./botStore";
 import { useSessionStore } from "./sessionStore";
 import { useSettingsStore } from "./settingsStore";
@@ -28,7 +36,26 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
   const locale = settingsStore.locale;
 
   if (ev.type === "questions_changed") {
-    void sessionStore.refreshQuestions(client);
+    void sessionStore.refreshQuestions(client).then(() => {
+      const fresh = collectNewNotificationItems(
+        "question",
+        useSessionStore.getState().pendingQuestions,
+        (q) => q.requestId,
+      );
+      for (const q of fresh) {
+        const isSuper = ev.status?.startsWith("super:");
+        const title = isSuper
+          ? "Super PI"
+          : useSessionStore.getState().summariesById[q.sessionId]?.title ||
+            translate(locale, "nav.untitledChat");
+        void showDesktopNotification({
+          tag: isSuper ? "super" : `session:${q.sessionId}`,
+          title: translate(locale, "notify.questionTitle", { title }),
+          body: translate(locale, "notify.questionBody"),
+          command: isSuper ? { kind: "super" } : { kind: "chat", sessionId: q.sessionId },
+        });
+      }
+    });
     if (ev.status?.startsWith("super:")) {
       useSuperStore.getState().scheduleRefreshState(client);
     }
@@ -36,13 +63,52 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
   }
 
   if (ev.type === "approvals_changed") {
-    void sessionStore.refreshApprovals(client);
+    void sessionStore.refreshApprovals(client).then(() => {
+      const fresh = collectNewNotificationItems(
+        "approval",
+        useSessionStore.getState().pendingApprovals,
+        (a) => a.id,
+      );
+      for (const a of fresh) {
+        const isSuper = a.sessionId === "super" || Boolean(a.workerId);
+        const title = isSuper
+          ? "Super PI"
+          : useSessionStore.getState().summariesById[a.sessionId]?.title ||
+            translate(locale, "nav.untitledChat");
+        void showDesktopNotification({
+          tag: isSuper ? "super" : `session:${a.sessionId}`,
+          title: translate(locale, "notify.approvalTitle", { title }),
+          body: translate(locale, "notify.approvalBody"),
+          command: isSuper ? { kind: "super" } : { kind: "chat", sessionId: a.sessionId },
+        });
+      }
+    });
     useSuperStore.getState().scheduleRefreshState(client);
     return;
   }
 
   if (ev.type === "inbox_changed") {
-    void useSuperStore.getState().refreshInbox(client);
+    void useSuperStore
+      .getState()
+      .refreshInbox(client)
+      .then(() => {
+        const fresh = collectNewNotificationItems(
+          "inbox",
+          useSuperStore.getState().inbox,
+          (item) => item.id,
+        );
+        for (const item of fresh) {
+          if (item.source !== "timer" || item.status !== "unread") continue;
+          void showDesktopNotification({
+            tag: item.sessionId ? `session:${item.sessionId}` : `inbox:${item.id}`,
+            title: item.title || translate(locale, "notify.timerTitle"),
+            body: item.summary || translate(locale, "notify.chatDoneBody"),
+            command: item.sessionId
+              ? { kind: "chat", sessionId: item.sessionId }
+              : { kind: "feature", view: "inbox" },
+          });
+        }
+      });
     return;
   }
 
@@ -115,6 +181,12 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
     }
     if (baseType === "run_finished") {
       streamStore.finishRun(SUPER_SESSION_ID, runId, ev.status, ev.text);
+      void showDesktopNotification({
+        tag: "super",
+        title: translate(locale, "notify.superDoneTitle"),
+        body: translate(locale, "notify.chatDoneBody"),
+        command: { kind: "super" },
+      });
       void useSuperStore
         .getState()
         .refreshState(client)
@@ -124,7 +196,16 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
       return;
     }
     if (baseType === "run_failed") {
-      streamStore.failRun(SUPER_SESSION_ID, runId, ev.text?.trim() || "Run failed");
+      const errText = ev.text?.trim() || "Run failed";
+      streamStore.failRun(SUPER_SESSION_ID, runId, errText);
+      if (!isUserAbortedError(errText)) {
+        void showDesktopNotification({
+          tag: "super",
+          title: translate(locale, "notify.superFailedTitle"),
+          body: translate(locale, "notify.chatFailedBody"),
+          command: { kind: "super" },
+        });
+      }
       void useSuperStore
         .getState()
         .refreshState(client)
@@ -247,6 +328,15 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
     if (sid !== sessionStore.activeSessionId) {
       sessionStore.markSessionUnread(sid);
     }
+    const title =
+      useSessionStore.getState().summariesById[sid]?.title ||
+      translate(locale, "nav.untitledChat");
+    void showDesktopNotification({
+      tag: `session:${sid}`,
+      title: translate(locale, "notify.chatDoneTitle", { title }),
+      body: translate(locale, "notify.chatDoneBody"),
+      command: { kind: "chat", sessionId: sid },
+    });
     void sessionStore.loadSession(client, sid, locale, runId);
     return;
   }
@@ -255,14 +345,20 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
     const errText = ev.text?.trim() || "";
     const curLive = streamStore.activeBySession[sid];
     const wasAborted =
-      curLive?.status === "stopped" ||
-      /\b(abort(ed)?|cancel(led|ed)?|interrupted|stopped by user|user_aborted)\b|已取消|已停止|用户中断/i.test(
-        errText,
-      );
+      curLive?.status === "stopped" || isUserAbortedError(errText);
     if (wasAborted) {
       streamStore.finishRun(sid, runId, "stopped");
     } else {
       streamStore.failRun(sid, runId, errText || "Run failed");
+      const title =
+        useSessionStore.getState().summariesById[sid]?.title ||
+        translate(locale, "nav.untitledChat");
+      void showDesktopNotification({
+        tag: `session:${sid}`,
+        title: translate(locale, "notify.chatFailedTitle", { title }),
+        body: translate(locale, "notify.chatFailedBody"),
+        command: { kind: "chat", sessionId: sid },
+      });
     }
     sessionStore.setSessionBusy(sid, false);
     void sessionStore.loadSession(client, sid, locale);
@@ -339,9 +435,19 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
       await sessionStore.hydrateSessionLists(client, bots, useSettingsStore.getState().locale);
       if (gen !== connectGeneration) return;
 
-      void sessionStore.refreshQuestions(client);
-      void sessionStore.refreshApprovals(client);
-      void useSuperStore.getState().refreshInbox(client);
+      await Promise.all([
+        sessionStore.refreshQuestions(client),
+        sessionStore.refreshApprovals(client),
+        useSuperStore.getState().refreshInbox(client),
+      ]);
+      if (gen !== connectGeneration) return;
+
+      const seededSessions = useSessionStore.getState();
+      seedNotificationBaselines({
+        questionIds: seededSessions.pendingQuestions.map((q) => q.requestId),
+        approvalIds: seededSessions.pendingApprovals.map((a) => a.id),
+        inboxIds: useSuperStore.getState().inbox.map((item) => item.id),
+      });
 
       let hadSse = false;
       let sseDisconnectedAfterOpen = false;
@@ -408,5 +514,6 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
     }
     useStreamStore.getState().resetAll();
     useSuperStore.getState().reset();
+    resetNotificationBaselines();
   },
 }));

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n, type AppLanguagePreference } from "../../i18n";
-import { getDesktopCloseToTray, setDesktopCloseToTray } from "../../platform/bridge";
+import {
+  getDesktopCloseToTray,
+  getDesktopNotificationsEnabled,
+  setDesktopCloseToTray,
+  setDesktopNotificationsEnabled,
+} from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Select, Slider, Switch } from "../../ui";
@@ -17,10 +22,14 @@ export function GeneralSettings() {
 
   const [compactDraft, setCompactDraft] = useState(hostSettings?.compactionTriggerPercent ?? 75);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
     if (isElectron) {
       void getDesktopCloseToTray().then(setCloseToTray).catch(() => void 0);
+      void getDesktopNotificationsEnabled()
+        .then(setNotificationsEnabled)
+        .catch(() => void 0);
     }
   }, [isElectron]);
 
@@ -225,24 +234,45 @@ export function GeneralSettings() {
             </div>
 
             {isElectron && (
-              <div className="flex items-center justify-between gap-3 py-4">
-                <div className="min-w-0">
-                  <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
-                    {t("settings.closeToTray")}
+              <>
+                <div className="flex items-center justify-between gap-3 py-4">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                      {t("settings.closeToTray")}
+                    </div>
+                    <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                      {t("settings.closeToTrayDesc")}
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                    {t("settings.closeToTrayDesc")}
-                  </div>
+                  <Switch
+                    checked={closeToTray}
+                    ariaLabel={t("settings.closeToTray")}
+                    onCheckedChange={(checked) => {
+                      setCloseToTray(checked);
+                      void setDesktopCloseToTray(checked).then(setCloseToTray);
+                    }}
+                  />
                 </div>
-                <Switch
-                  checked={closeToTray}
-                  ariaLabel={t("settings.closeToTray")}
-                  onCheckedChange={(checked) => {
-                    setCloseToTray(checked);
-                    void setDesktopCloseToTray(checked).then(setCloseToTray);
-                  }}
-                />
-              </div>
+
+                <div className="flex items-center justify-between gap-3 py-4">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                      {t("settings.notifications")}
+                    </div>
+                    <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                      {t("settings.notificationsDesc")}
+                    </div>
+                  </div>
+                  <Switch
+                    checked={notificationsEnabled}
+                    ariaLabel={t("settings.notifications")}
+                    onCheckedChange={(checked) => {
+                      setNotificationsEnabled(checked);
+                      void setDesktopNotificationsEnabled(checked).then(setNotificationsEnabled);
+                    }}
+                  />
+                </div>
+              </>
             )}
           </div>
         </section>

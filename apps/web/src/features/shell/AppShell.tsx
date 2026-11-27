@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { HostBotDto } from "../../api/types";
 import { useI18n } from "../../i18n";
+import {
+  consumePendingDesktopNavigateCommand,
+  onDesktopNavigateCommand,
+  type DesktopNavigateCommand,
+  updateDesktopTrayState,
+} from "../../platform/bridge";
 import { isShortcutBlockedByTarget } from "../../platform/shortcuts";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, NoticeBar } from "../../ui";
 import { WorkbenchDock } from "../../workbench/WorkbenchDock";
@@ -72,6 +79,8 @@ export function AppShell() {
   const [settingsBot, setSettingsBot] = useState<HostBotDto | null>(null);
 
   const activeSummary = useSessionStore((s) => s.summariesById[s.activeSessionId]);
+  const summariesById = useSessionStore((s) => s.summariesById);
+  const activeRunsBySession = useStreamStore((s) => s.activeBySession);
 
   useEffect(() => {
     if (activeView === "super") {
@@ -103,16 +112,92 @@ export function AppShell() {
     document.title = titlePart ? `${titlePart} — Super PI` : "Super PI";
   }, [activeSummary?.botId, activeSummary?.title, activeView, bots, draftBotId, t]);
 
-  const openSettings = (tab: SettingsTabId = "general") => {
-    setSettingsTab(tab);
-    setSettingsOpen(true);
-    if (client) {
-      void refreshSettingsData(client);
-      if (tab === "archived") {
-        void loadArchivedSessions(client);
+  const openSettings = useCallback(
+    (tab: SettingsTabId = "general") => {
+      setSettingsTab(tab);
+      setSettingsOpen(true);
+      if (client) {
+        void refreshSettingsData(client);
+        if (tab === "archived") {
+          void loadArchivedSessions(client);
+        }
       }
-    }
-  };
+    },
+    [client, loadArchivedSessions, refreshSettingsData],
+  );
+
+  const handleNavigateCommand = useCallback(
+    (cmd: DesktopNavigateCommand) => {
+      if (cmd.kind === "chat") {
+        setSettingsOpen(false);
+        selectMainView("chat");
+        if (client) {
+          void selectSession(client, cmd.sessionId, locale);
+        }
+        return;
+      }
+      if (cmd.kind === "super") {
+        setSettingsOpen(false);
+        selectMainView("super");
+        return;
+      }
+      if (cmd.kind === "new_chat") {
+        setSettingsOpen(false);
+        selectMainView("chat");
+        const targetBot =
+          bots.find((b) => !b.isRemote || b.online)?.id ?? bots[0]?.id;
+        if (targetBot) startDraftSession(targetBot);
+        return;
+      }
+      if (cmd.kind === "feature") {
+        setSettingsOpen(false);
+        selectMainView(cmd.view);
+        return;
+      }
+      if (cmd.kind === "settings") {
+        openSettings((cmd.tab as SettingsTabId) || "general");
+      }
+    },
+    [bots, client, locale, openSettings, selectSession, startDraftSession],
+  );
+
+  useEffect(() => {
+    if (!isElectron) return undefined;
+    let cancelled = false;
+    void consumePendingDesktopNavigateCommand().then((cmd) => {
+      if (!cancelled && cmd) {
+        handleNavigateCommand(cmd);
+      }
+    });
+    const unsubscribe = onDesktopNavigateCommand(handleNavigateCommand);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [handleNavigateCommand, isElectron]);
+
+  useEffect(() => {
+    if (!isElectron) return undefined;
+    const timer = setTimeout(() => {
+      const runningIds = new Set<string>();
+      for (const [sid, sum] of Object.entries(summariesById)) {
+        if (sum.busy) runningIds.add(sid);
+      }
+      for (const [sid, run] of Object.entries(activeRunsBySession)) {
+        if (run.streaming) runningIds.add(sid);
+      }
+      const recentSessions = Object.values(summariesById)
+        .filter((s) => !s.archived)
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        .slice(0, 5)
+        .map((s) => ({ id: s.id, title: s.title }));
+      void updateDesktopTrayState({
+        activeRunsCount: runningIds.size,
+        recentSessions,
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [activeRunsBySession, isElectron, summariesById]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
