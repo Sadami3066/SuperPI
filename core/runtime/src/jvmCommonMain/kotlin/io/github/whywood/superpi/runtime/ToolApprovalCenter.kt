@@ -7,6 +7,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class ToolRiskLevel(val wire: String) {
     STANDARD("standard"),
@@ -85,6 +86,7 @@ class ToolApprovalCenter {
         workspaceRoot: String? = null,
         detail: String,
         signal: RunSignal? = null,
+        timeoutMs: Long = DEFAULT_APPROVAL_TIMEOUT_MS,
     ): ToolApprovalOutcome {
         if (signal?.isAborted == true) {
             return ToolApprovalOutcome.Cancelled
@@ -119,7 +121,18 @@ class ToolApprovalCenter {
             if (signal?.isAborted == true) {
                 cancel(approvalId)
             }
-            deferred.await()
+            val outcome = if (timeoutMs > 0L) {
+                withTimeoutOrNull(timeoutMs) { deferred.await() }
+            } else {
+                deferred.await()
+            }
+            if (outcome != null) {
+                outcome
+            } else {
+                synchronized(lock) { waiters.remove(approvalId) }
+                val minutes = (timeoutMs / 60_000L).coerceAtLeast(1L)
+                ToolApprovalOutcome.Denied("Approval timed out after $minutes minute(s) without confirmation.")
+            }
         } finally {
             unsubscribe?.invoke()
             removePending(approvalId)
@@ -179,5 +192,9 @@ class ToolApprovalCenter {
             waiters.remove(approvalId)
             pendingState.value = pendingState.value.filterNot { it.id == approvalId }
         }
+    }
+
+    companion object {
+        const val DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000L
     }
 }

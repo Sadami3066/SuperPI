@@ -358,6 +358,12 @@ class WorktreeManager(
         true
     }
 
+    fun hasUncommittedChanges(wtDir: File): Boolean {
+        if (!wtDir.isDirectory) return false
+        val (code, out) = runGit(wtDir, listOf("status", "--porcelain"), timeoutMs = 5_000L)
+        return code == 0 && out.isNotBlank()
+    }
+
     fun openInExternalEditor(dir: File, requestedEditor: String? = null): OpenEditorResult {
         if (!dir.isDirectory) {
             return OpenEditorResult(false, "", "Directory does not exist")

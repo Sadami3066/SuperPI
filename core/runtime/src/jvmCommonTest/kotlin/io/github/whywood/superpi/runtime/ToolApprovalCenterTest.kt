@@ -120,4 +120,21 @@ class ToolApprovalCenterTest {
         assertEquals(ToolApprovalOutcome.Cancelled, withTimeout(2_000) { job.await() })
         assertTrue(center.pending.value.isEmpty())
     }
+
+    @Test
+    fun `timeout denies pending approval and clears pending list`() = runBlocking {
+        val center = ToolApprovalCenter()
+        val outcome = center.requestApproval(
+            sessionId = "s4",
+            toolCallId = "tc-timeout",
+            toolName = "bash",
+            riskLevel = ToolRiskLevel.STANDARD,
+            reason = ToolApprovalReason.COMMAND_EXECUTION,
+            command = "sleep 5",
+            detail = "sleep 5",
+            timeoutMs = 50L,
+        )
+        assertTrue(outcome is ToolApprovalOutcome.Denied)
+        assertTrue(center.pending.value.isEmpty())
+    }
 }

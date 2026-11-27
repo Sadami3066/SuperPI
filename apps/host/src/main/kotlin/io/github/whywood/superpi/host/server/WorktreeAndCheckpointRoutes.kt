@@ -429,14 +429,37 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
     delete("/v1/worktrees/{wtId}") {
         val wtId = call.parameters["wtId"].orEmpty().trim()
         val deleteBranch = call.request.queryParameters["deleteBranch"]?.equals("false", ignoreCase = true) != true
+        val force = call.request.queryParameters["force"]?.equals("true", ignoreCase = true) == true
         val existing = controller.worktreeManager.findById(wtId)
         if (existing != null) {
-            controller.ptySessionManager.killByCwd(File(existing.worktreePath))
+            val wtDir = File(existing.worktreePath)
+            val isDirty = withContext(Dispatchers.IO) { controller.worktreeManager.hasUncommittedChanges(wtDir) }
+            if (isDirty && !force) {
+                call.respond(HttpStatusCode.Conflict, ApiErrorResponse("Worktree has uncommitted changes"))
+                return@delete
+            }
+            var capturedSafetyBackup = false
+            if (isDirty && force) {
+                val backupSessionId = existing.sessionId ?: "worktree-${existing.id}"
+                val snap = runCatching {
+                    controller.checkpointStore.capture(
+                        sessionId = backupSessionId,
+                        workspaceDir = wtDir,
+                        turnIndex = 0,
+                        label = "Safety snapshot before removing worktree ${existing.branch}",
+                        messageCount = 0,
+                    )
+                }.getOrNull()
+                capturedSafetyBackup = snap != null
+            }
+            controller.ptySessionManager.killByCwd(wtDir)
             existing.sessionId?.let { sid ->
                 controller.autoRetryController.cancel(sid)
                 runCatching { controller.runtimeHost.stop(sid) }
                 runCatching { controller.runtimeHost.closeSession(sid) }
-                runCatching { controller.checkpointStore.deleteSession(sid) }
+                if (!capturedSafetyBackup) {
+                    runCatching { controller.checkpointStore.deleteSession(sid) }
+                }
             }
         }
         val ok = controller.worktreeManager.remove(wtId, deleteBranch = deleteBranch)
@@ -546,12 +569,21 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
                 call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Remote sessions cannot be rewound locally"))
                 return@post
             }
+            val turnExists = withContext(Dispatchers.IO) { hasUserTurnAtIndex(file, req.turnIndex) }
+            if (!turnExists) {
+                call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Rewind target turn index not found: ${req.turnIndex}"))
+                return@post
+            }
             runCatching { controller.runtimeHost.stop(sessionId) }
             runCatching { controller.runtimeHost.closeSession(sessionId) }
-            withContext(Dispatchers.IO) {
+            val truncated = withContext(Dispatchers.IO) {
                 truncateSessionJsonlBeforeUserTurn(file, req.turnIndex)
             }
             runCatching { controller.runtimeHost.openSession(file.absolutePath, summary.cwd) }
+            if (!truncated) {
+                call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Rewind target turn index not found: ${req.turnIndex}"))
+                return@post
+            }
         }
         call.respond(
             RestoreCheckpointResponse(
@@ -693,18 +725,35 @@ private fun isUserMessageEntry(line: String): Boolean {
     return (msg["role"] as? JsonPrimitive)?.contentOrNull == "user"
 }
 
-private fun truncateSessionJsonlBeforeUserTurn(file: File, targetTurnIndex: Int) {
-    val lines = file.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
-    if (lines.isEmpty()) return
+private fun hasUserTurnAtIndex(file: File, targetTurnIndex: Int): Boolean {
+    if (!file.isFile || targetTurnIndex < 0) return false
     var seenUsers = 0
+    file.forEachLine(Charsets.UTF_8) { line ->
+        if (line.isNotBlank() && isUserMessageEntry(line)) {
+            if (seenUsers == targetTurnIndex) return true
+            seenUsers++
+        }
+    }
+    return false
+}
+
+private fun truncateSessionJsonlBeforeUserTurn(file: File, targetTurnIndex: Int): Boolean {
+    val lines = file.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
+    if (lines.isEmpty()) return false
+    var seenUsers = 0
+    var foundTarget = false
     val kept = ArrayList<String>(lines.size)
     for (line in lines) {
         if (isUserMessageEntry(line)) {
-            if (seenUsers >= targetTurnIndex) break
+            if (seenUsers >= targetTurnIndex) {
+                foundTarget = true
+                break
+            }
             seenUsers++
         }
         kept.add(line)
     }
+    if (!foundTarget) return false
     if (kept.isNotEmpty()) {
         // Save a reversible pre-truncate backup alongside the session file and swap atomically.
         runCatching {
@@ -728,6 +777,7 @@ private fun truncateSessionJsonlBeforeUserTurn(file: File, targetTurnIndex: Int)
             runCatching { Files.deleteIfExists(tmp) }
         }
     }
+    return true
 }
 
 private fun sliceSessionJsonlLines(

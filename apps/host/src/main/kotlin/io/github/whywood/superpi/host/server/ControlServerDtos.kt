@@ -490,6 +490,7 @@ data class WorkspaceFileReadResponse(
     val sizeBytes: Long = 0L,
     val truncated: Boolean = false,
     val isBinary: Boolean = false,
+    val mtimeMs: Long? = null,
 )
 
 @Serializable
@@ -497,6 +498,13 @@ data class UploadWorkspaceFileRequest(
     val path: String,
     val dataBase64: String,
     val overwrite: Boolean = true,
+    val expectedMtimeMs: Long? = null,
+)
+
+@Serializable
+data class UploadWorkspaceFileResponse(
+    val ok: Boolean = true,
+    val mtimeMs: Long? = null,
 )
 
 @Serializable

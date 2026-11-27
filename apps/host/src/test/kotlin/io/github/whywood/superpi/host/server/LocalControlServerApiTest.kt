@@ -739,4 +739,60 @@ class LocalControlServerApiTest {
             assertTrue("Expected second bot session $bot2SessionId in $ids", bot2SessionId in ids)
         }
     }
+
+    @Test
+    fun `workspace upload detects external modification conflict via expectedMtimeMs`() = runBlocking {
+        val port = server.start()
+        val encoded = java.util.Base64.getEncoder().encodeToString("v1".toByteArray())
+        val createReq = authReq(port, "/api/v1/bots/home/files/upload")
+            .post("""{"path":"conflict-test.txt","dataBase64":"$encoded","overwrite":true}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        val firstMtime = http.newCall(createReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["mtimeMs"]!!.jsonPrimitive.content.toLong()
+        }
+
+        val readReq = authReq(port, "/api/v1/bots/home/files/read?path=conflict-test.txt").get().build()
+        val readMtime = http.newCall(readReq).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["mtimeMs"]!!.jsonPrimitive.content.toLong()
+        }
+        assertEquals(firstMtime, readMtime)
+
+        val staleReq = authReq(port, "/api/v1/bots/home/files/upload")
+            .post(
+                """{"path":"conflict-test.txt","dataBase64":"$encoded","overwrite":true,"expectedMtimeMs":${firstMtime - 1000}}"""
+                    .toRequestBody("application/json".toMediaType()),
+            )
+            .build()
+        http.newCall(staleReq).execute().use { resp ->
+            assertEquals(409, resp.code)
+        }
+    }
+
+    @Test
+    fun `terminal resize returns 404 for missing terminal and 200 for live terminal`() = runBlocking {
+        val port = server.start()
+        val missingReq = authReq(port, "/api/v1/terminals/term-missing/resize")
+            .post("""{"cols":80,"rows":24}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(missingReq).execute().use { resp ->
+            assertEquals(404, resp.code)
+        }
+
+        val createTermReq = authReq(port, "/api/v1/bots/home/terminals")
+            .post("""{"fresh":true}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        val termId = http.newCall(createTermReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject["id"]!!.jsonPrimitive.content
+        }
+        val resizeReq = authReq(port, "/api/v1/terminals/$termId/resize")
+            .post("""{"cols":140,"rows":42}""".toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(resizeReq).execute().use { resp ->
+            assertEquals(200, resp.code)
+        }
+        controller.ptySessionManager.kill(termId)
+    }
 }

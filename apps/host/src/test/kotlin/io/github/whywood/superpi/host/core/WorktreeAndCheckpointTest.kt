@@ -38,9 +38,11 @@ class WorktreeAndCheckpointTest {
             val wt = mgr.create(botId = "bot-1", repoDir = repo, label = "feature-a")
             assertTrue(File(wt.worktreePath).isDirectory)
             assertEquals(1, mgr.listForBot("bot-1").size)
+            assertFalse(mgr.hasUncommittedChanges(File(wt.worktreePath)))
 
             File(wt.worktreePath, "hello.txt").writeText("v1\nv2\n")
             File(wt.worktreePath, "added.txt").writeText("new file\n")
+            assertTrue(mgr.hasUncommittedChanges(File(wt.worktreePath)))
 
             val diff = mgr.diff(wt.id)
             assertTrue(diff.files.any { it.path == "hello.txt" })

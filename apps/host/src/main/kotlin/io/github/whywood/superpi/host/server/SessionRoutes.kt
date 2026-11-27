@@ -53,6 +53,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -88,6 +89,18 @@ internal class SseTicketStore(
     }
 }
 
+private val LOW_PRIORITY_SSE_EVENTS = setOf(
+    "text_delta",
+    "reasoning_delta",
+    "activity_changed",
+    "usage_changed",
+    "worker_progress",
+    "super_text_delta",
+    "super_reasoning_delta",
+    "super_activity_changed",
+    "super_usage_changed",
+)
+
 internal fun Route.installSseEventRoute(
     controller: SuperPiController,
     json: Json,
@@ -98,24 +111,37 @@ internal fun Route.installSseEventRoute(
         call.response.header(HttpHeaders.Connection, "keep-alive")
         call.response.header("X-Accel-Buffering", "no")
         call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
-            val outbound = Channel<String>(capacity = 1024, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-            fun enqueueFrame(frame: String) {
-                outbound.trySend(frame)
+            val controlOutbound = Channel<String>(capacity = 256, onBufferOverflow = BufferOverflow.SUSPEND)
+            val deltaOutbound = Channel<String>(capacity = 512, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+            fun closeChannels() {
+                controlOutbound.close()
+                deltaOutbound.close()
             }
-            fun enqueue(eventName: String, payload: SseEventPayload) {
+            suspend fun enqueue(eventName: String, payload: SseEventPayload) {
                 val encoded = json.encodeToString(SseEventPayload.serializer(), payload)
-                enqueueFrame("event: $eventName\ndata: $encoded\n\n")
+                val frame = "event: $eventName\ndata: $encoded\n\n"
+                if (eventName in LOW_PRIORITY_SSE_EVENTS) {
+                    deltaOutbound.trySend(frame)
+                } else {
+                    controlOutbound.send(frame)
+                }
             }
             try {
                 coroutineScope {
                     val parentJob = coroutineContext[Job]
                     val shutdownWatcher = serverScope.coroutineContext[Job]?.invokeOnCompletion {
-                        outbound.close()
+                        closeChannels()
                         parentJob?.cancel()
                     }
                     val writerJob = launch {
-                        for (frame in outbound) {
-                            writeStringUtf8(frame)
+                        while (true) {
+                            val next = controlOutbound.tryReceive().getOrNull()
+                                ?: select<String?> {
+                                    controlOutbound.onReceiveCatching { it.getOrNull() }
+                                    deltaOutbound.onReceiveCatching { it.getOrNull() }
+                                }
+                                ?: break
+                            writeStringUtf8(next)
                             flush()
                         }
                     }
@@ -234,7 +260,7 @@ internal fun Route.installSseEventRoute(
                     val heartbeatJob = launch {
                         while (isActive) {
                             delay(15_000L)
-                            enqueueFrame(": heartbeat\n\n")
+                            deltaOutbound.trySend(": heartbeat\n\n")
                         }
                     }
                     // Emit ready ONLY after all collectors are subscribed.
@@ -243,7 +269,7 @@ internal fun Route.installSseEventRoute(
                         writerJob.join()
                     } finally {
                         shutdownWatcher?.dispose()
-                        outbound.close()
+                        closeChannels()
                         heartbeatJob.cancel()
                         runtimeJob.cancel()
                         passiveRemoteJob.cancel()

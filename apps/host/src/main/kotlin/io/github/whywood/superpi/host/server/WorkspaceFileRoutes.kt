@@ -22,10 +22,12 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Base64
 import java.util.Locale
 import java.util.UUID
@@ -421,6 +423,7 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                             }
                         }
                         val slice = if (readTotal == bytes.size) bytes else bytes.copyOf(readTotal)
+                        val mtimeMs = file.lastModified()
                         val binary = slice.take(8192).any { it == 0.toByte() }
                         if (binary) {
                             WorkspaceFileReadResponse(
@@ -430,6 +433,7 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                                 sizeBytes = totalSize,
                                 truncated = false,
                                 isBinary = true,
+                                mtimeMs = mtimeMs,
                             )
                         } else {
                             WorkspaceFileReadResponse(
@@ -439,6 +443,7 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                                 sizeBytes = totalSize,
                                 truncated = totalSize > WorkspacePathGuard.MAX_PREVIEW_BYTES,
                                 isBinary = false,
+                                mtimeMs = mtimeMs,
                             )
                         }
                     }
@@ -647,7 +652,7 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                     throw SecurityException("Attachment path escapes attachments directory")
                 }
                 val targetFile = targetPath.toFile()
-                targetFile.writeBytes(decoded)
+                writeBytesAtomically(targetFile, decoded)
                 val finalReal = targetFile.toPath().toRealPath()
                 if (!finalReal.startsWith(rootReal)) {
                     runCatching { targetFile.delete() }
@@ -809,14 +814,20 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                     call.respond(HttpStatusCode.Conflict, ApiErrorResponse("File already exists"))
                     return@post
                 }
+                if (req.expectedMtimeMs != null && targetFile.exists() && targetFile.lastModified() != req.expectedMtimeMs) {
+                    call.respond(HttpStatusCode.Conflict, ApiErrorResponse("File was modified externally"))
+                    return@post
+                }
                 val res = withContext(Dispatchers.IO) {
                     runCatching {
-                        targetFile.parentFile?.mkdirs()
-                        targetFile.writeBytes(bytes)
+                        writeBytesAtomically(targetFile, bytes)
+                        targetFile.lastModified()
                     }
                 }
                 res.fold(
-                    onSuccess = { call.respond(HttpStatusCode.Created, HealthResponse(ok = true)) },
+                    onSuccess = { newMtime ->
+                        call.respond(HttpStatusCode.Created, UploadWorkspaceFileResponse(ok = true, mtimeMs = newMtime))
+                    },
                     onFailure = { err ->
                         call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(err.message ?: "Upload failed"))
                     },
@@ -1417,4 +1428,25 @@ private fun zipFolderForRemote(rootDir: File, maxCompressedBytes: Int): ByteArra
         throw IllegalStateException("Folder has no files to transfer")
     }
     return baos.toByteArray()
+}
+
+internal fun writeBytesAtomically(targetFile: File, bytes: ByteArray) {
+    val parent = targetFile.parentFile ?: error("Target file has no parent: ${targetFile.path}")
+    parent.mkdirs()
+    val tmpPath = Files.createTempFile(parent.toPath(), ".tmp-", ".part")
+    try {
+        tmpPath.toFile().writeBytes(bytes)
+        try {
+            Files.move(
+                tmpPath,
+                targetFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(tmpPath, targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    } finally {
+        runCatching { Files.deleteIfExists(tmpPath) }
+    }
 }

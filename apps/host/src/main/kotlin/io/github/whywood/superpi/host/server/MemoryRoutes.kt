@@ -506,23 +506,23 @@ internal fun Route.installMemoryRoutes(controller: SuperPiController) {
             eventsBudgetChars = if (req.clearSectionBudgets) null else (req.eventsBudgetChars ?: cur.eventsBudgetChars),
             directoryBudgetChars = if (req.clearSectionBudgets) null else (req.directoryBudgetChars ?: cur.directoryBudgetChars),
         )
+        val cleanGuidance = req.guidance?.trim()
+        if (cleanGuidance != null && cleanGuidance.toByteArray(Charsets.UTF_8).size > io.github.whywood.superpi.data.AGENT_DOC_MAX_BYTES) {
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ApiErrorResponse("Memory guidance exceeds maximum size of ${io.github.whywood.superpi.data.AGENT_DOC_MAX_BYTES / 1024} KB."),
+            )
+            return@put
+        }
         controller.memoryPreferencesStore.save(next)
-        if (req.guidance != null) {
-            val clean = req.guidance.trim()
-            if (clean.toByteArray(Charsets.UTF_8).size > io.github.whywood.superpi.data.AGENT_DOC_MAX_BYTES) {
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    ApiErrorResponse("Memory guidance exceeds maximum size of ${io.github.whywood.superpi.data.AGENT_DOC_MAX_BYTES / 1024} KB."),
-                )
-                return@put
-            }
+        if (cleanGuidance != null) {
             withContext(Dispatchers.IO) {
                 controller.paths.memoryDir.mkdirs()
                 val dirPath = controller.paths.memoryDir.absolutePath
-                if (clean.isEmpty()) {
+                if (cleanGuidance.isEmpty()) {
                     controller.botRegistry.agentDocStore.delete(dirPath)
                 } else {
-                    controller.botRegistry.agentDocStore.save(dirPath, clean + "\n")
+                    controller.botRegistry.agentDocStore.save(dirPath, cleanGuidance + "\n")
                 }
             }
         }

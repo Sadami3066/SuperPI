@@ -3,6 +3,8 @@ package io.github.whywood.superpi.host.core
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -52,6 +54,7 @@ class PtySessionManager(
         val lastActiveAt = AtomicLong(createdAt)
         val closed = AtomicBoolean(false)
         val exitCode = AtomicInteger(Int.MIN_VALUE)
+        val activeSubscribers = AtomicInteger(0)
         val bufferLock = Any()
         val historyBuf = StringBuilder()
         val events = MutableSharedFlow<TerminalEvent>(
@@ -89,7 +92,6 @@ class PtySessionManager(
     private val createLock = Any()
 
     fun listForBot(botId: String): List<TerminalInfo> {
-        pruneIdleAndDead()
         return sessions.values
             .filter { it.botId == botId }
             .sortedByDescending { it.createdAt }
@@ -99,6 +101,28 @@ class PtySessionManager(
     fun getInfo(termId: String): TerminalInfo? = sessions[termId]?.toInfo()
 
     fun eventsFlow(termId: String): SharedFlow<TerminalEvent>? = sessions[termId]?.events?.asSharedFlow()
+
+    fun attachSubscriber(termId: String) {
+        val managed = sessions[termId] ?: return
+        managed.activeSubscribers.incrementAndGet()
+        managed.lastActiveAt.set(System.currentTimeMillis())
+    }
+
+    fun detachSubscriber(termId: String) {
+        val managed = sessions[termId] ?: return
+        managed.activeSubscribers.updateAndGet { cur -> maxOf(0, cur - 1) }
+        managed.lastActiveAt.set(System.currentTimeMillis())
+    }
+
+    fun resize(termId: String, cols: Int, rows: Int): Boolean {
+        val managed = sessions[termId] ?: return false
+        if (managed.closed.get() || !managed.process.isAlive) return false
+        val safeCols = cols.coerceIn(MIN_COLS, MAX_COLS)
+        val safeRows = rows.coerceIn(MIN_ROWS, MAX_ROWS)
+        managed.lastActiveAt.set(System.currentTimeMillis())
+        applyPtyWindowSize(managed.process, safeCols, safeRows)
+        return true
+    }
 
     fun createOrReuse(botId: String, cwd: File, fresh: Boolean = false): TerminalInfo = synchronized(createLock) {
         require(cwd.isDirectory) { "Workspace directory does not exist: ${cwd.absolutePath}" }
@@ -204,12 +228,60 @@ class PtySessionManager(
     fun pruneIdleAndDead() {
         val now = System.currentTimeMillis()
         sessions.values.toList().forEach { term ->
+            val alive = term.process.isAlive
+            if (alive && term.activeSubscribers.get() > 0) return@forEach
             val idleTooLong = now - term.lastActiveAt.get() > IDLE_TIMEOUT_MS
-            val deadTooLong = !term.process.isAlive && now - term.lastActiveAt.get() > 60_000L
+            val deadTooLong = !alive && now - term.lastActiveAt.get() > 60_000L
             if (idleTooLong || deadTooLong) {
                 kill(term.id)
             }
         }
+    }
+
+    private fun applyPtyWindowSize(proc: Process, cols: Int, rows: Int) {
+        val os = System.getProperty("os.name").orEmpty().lowercase(Locale.US)
+        if ("win" in os) return
+        val ttyPath = resolvePtySlavePath(proc, os) ?: return
+        val flag = if ("mac" in os || "darwin" in os) "-f" else "-F"
+        runCatching {
+            val stty = ProcessBuilder("stty", flag, ttyPath, "rows", rows.toString(), "cols", cols.toString())
+                .redirectErrorStream(true)
+                .start()
+            stty.waitFor(1_000, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private fun resolvePtySlavePath(proc: Process, os: String): String? {
+        val pids = buildList {
+            runCatching { addAll(proc.toHandle().descendants().map { it.pid() }.toList()) }
+            add(proc.pid())
+        }
+        if ("mac" in os || "darwin" in os) {
+            for (pid in pids) {
+                val ttyName = runCatching {
+                    val ps = ProcessBuilder("ps", "-o", "tty=", "-p", pid.toString())
+                        .redirectErrorStream(true)
+                        .start()
+                    val out = ps.inputStream.bufferedReader().readText().trim()
+                    ps.waitFor(1_000, TimeUnit.MILLISECONDS)
+                    out.takeIf { it.isNotBlank() && it != "??" && !it.startsWith("?") }
+                }.getOrNull() ?: continue
+                val dev = if (ttyName.startsWith("/dev/")) ttyName else "/dev/$ttyName"
+                if (File(dev).exists()) return dev
+            }
+            return null
+        }
+        for (pid in pids) {
+            for (fd in listOf("0", "1")) {
+                val target = runCatching {
+                    Files.readSymbolicLink(Path.of("/proc/$pid/fd/$fd")).toString()
+                }.getOrNull() ?: continue
+                if (target.startsWith("/dev/pts/") || target.startsWith("/dev/tty")) {
+                    return target
+                }
+            }
+        }
+        return null
     }
 
     private fun terminateProcessTree(proc: Process) {
@@ -264,5 +336,9 @@ class PtySessionManager(
     companion object {
         private const val MAX_HISTORY_CHARS = 128 * 1024
         private const val IDLE_TIMEOUT_MS = 30 * 60_000L
+        const val MIN_COLS = 20
+        const val MAX_COLS = 500
+        const val MIN_ROWS = 5
+        const val MAX_ROWS = 200
     }
 }

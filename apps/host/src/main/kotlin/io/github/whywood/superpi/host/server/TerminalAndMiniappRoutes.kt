@@ -71,6 +71,12 @@ data class TerminalInputRequest(
 )
 
 @Serializable
+data class TerminalResizeRequest(
+    val cols: Int,
+    val rows: Int,
+)
+
+@Serializable
 data class TerminalStreamFrame(
     val type: String,
     val data: String = "",
@@ -174,6 +180,7 @@ internal fun Route.installTerminalAndMiniappRoutes(
         call.response.header("X-Accel-Buffering", "no")
         call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
             val outbound = Channel<String>(capacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+            controller.ptySessionManager.attachSubscriber(termId)
             try {
                 coroutineScope {
                     val parentJob = coroutineContext[Job]
@@ -193,14 +200,14 @@ internal fun Route.installTerminalAndMiniappRoutes(
                                 TerminalStreamFrame.serializer(),
                                 TerminalStreamFrame(type = "history", data = info.history),
                             )
-                            outbound.trySend("event: history\ndata: $initFrame\n\n")
+                            outbound.send("event: history\ndata: $initFrame\n\n")
                         }
                         if (!info.alive) {
                             val exitFrame = termJson.encodeToString(
                                 TerminalStreamFrame.serializer(),
                                 TerminalStreamFrame(type = "exit", exitCode = info.exitCode ?: -1),
                             )
-                            outbound.trySend("event: exit\ndata: $exitFrame\n\n")
+                            outbound.send("event: exit\ndata: $exitFrame\n\n")
                             outbound.close()
                             writerJob.join()
                             return@coroutineScope
@@ -218,9 +225,12 @@ internal fun Route.installTerminalAndMiniappRoutes(
                                     TerminalStreamFrame.serializer(),
                                     TerminalStreamFrame(type = ev.type, data = ev.data, exitCode = ev.exitCode),
                                 )
-                                outbound.trySend("event: ${ev.type}\ndata: $payload\n\n")
+                                val frame = "event: ${ev.type}\ndata: $payload\n\n"
                                 if (ev.type == "exit") {
+                                    outbound.send(frame)
                                     exited = true
+                                } else {
+                                    outbound.trySend(frame)
                                 }
                             }
                             heartbeatJob.cancel()
@@ -238,6 +248,8 @@ internal fun Route.installTerminalAndMiniappRoutes(
             } catch (_: IOException) {
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } finally {
+                controller.ptySessionManager.detachSubscriber(termId)
             }
         }
     }
@@ -251,6 +263,19 @@ internal fun Route.installTerminalAndMiniappRoutes(
         }
         val ok = withContext(Dispatchers.IO) {
             controller.ptySessionManager.writeInput(termId, req.data)
+        }
+        if (!ok) {
+            call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Terminal is closed or not found"))
+        } else {
+            call.respond(HealthResponse(ok = true))
+        }
+    }
+
+    post("/v1/terminals/{termId}/resize") {
+        val termId = call.parameters["termId"].orEmpty().trim()
+        val req = call.receive<TerminalResizeRequest>()
+        val ok = withContext(Dispatchers.IO) {
+            controller.ptySessionManager.resize(termId, req.cols, req.rows)
         }
         if (!ok) {
             call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Terminal is closed or not found"))

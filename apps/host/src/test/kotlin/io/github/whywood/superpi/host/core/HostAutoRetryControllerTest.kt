@@ -74,4 +74,34 @@ class HostAutoRetryControllerTest {
         delay(120L)
         assertEquals("Live retry coroutine must NOT self-cancel on RunStarted", 1, completed.get())
     }
+
+    @Test
+    fun freshUserRunResetsRetryAttemptBudget() = runBlocking {
+        val retried = AtomicInteger(0)
+        val controller = HostAutoRetryController(
+            scope = this,
+            isEnabled = { true },
+            isBusy = { false },
+            awaitIdle = {},
+            emitRetrying = { _, _, _ -> },
+            retryTurn = { retried.incrementAndGet() },
+            maxAttempts = 1,
+            baseDelayMs = 20L,
+        )
+
+        controller.onRuntimeEvent("s3", RuntimeEvent.RunFailed(runId = "r1", message = "HTTP 502 Bad Gateway"))
+        delay(80L)
+        assertEquals(1, retried.get())
+
+        // Second failure exceeds maxAttempts=1 without a new user RunStarted
+        controller.onRuntimeEvent("s3", RuntimeEvent.RunFailed(runId = "r1b", message = "HTTP 502 Bad Gateway"))
+        delay(80L)
+        assertEquals(1, retried.get())
+
+        // User starts a new prompt -> RunStarted outside retryTurn resets attempts
+        controller.onRuntimeEvent("s3", RuntimeEvent.RunStarted(runId = "u2", prompt = "new msg", startedAt = System.currentTimeMillis()))
+        controller.onRuntimeEvent("s3", RuntimeEvent.RunFailed(runId = "u2", message = "HTTP 502 Bad Gateway"))
+        delay(80L)
+        assertEquals(2, retried.get())
+    }
 }

@@ -27,12 +27,17 @@ class HostAutoRetryController(
 ) {
     private val attemptsBySession = ConcurrentHashMap<String, Int>()
     private val pendingJobs = ConcurrentHashMap<String, Job>()
+    private val activeRetries = ConcurrentHashMap.newKeySet<String>()
 
     fun onRuntimeEvent(sessionId: String, event: RuntimeEvent) {
         when (event) {
             is RuntimeEvent.RunStarted -> {
                 // Cancel any pending backoff timer; live retries already detached themselves before invoking retryTurn.
                 pendingJobs.remove(sessionId)?.cancel()
+                // Reset retry counter for fresh user-initiated runs, while preserving it for internal retryTurn starts.
+                if (!activeRetries.remove(sessionId)) {
+                    attemptsBySession.remove(sessionId)
+                }
             }
             is RuntimeEvent.RunFinished, is RuntimeEvent.SessionRemoved -> {
                 cancel(sessionId)
@@ -83,7 +88,12 @@ class HostAutoRetryController(
                 if (!pendingJobs.remove(sessionId, job)) {
                     return@launch
                 }
-                retryTurn(sessionId)
+                activeRetries.add(sessionId)
+                try {
+                    retryTurn(sessionId)
+                } finally {
+                    activeRetries.remove(sessionId)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
