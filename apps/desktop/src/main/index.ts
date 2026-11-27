@@ -457,36 +457,77 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.browserMount,
-    async (_event, bounds: BrowserBounds, url?: string) => {
-      return browserManager.mount(mainWindow, bounds, url);
+    async (_event, bounds: BrowserBounds, url?: string, tabId?: string) => {
+      return browserManager.mount(mainWindow, bounds, url, tabId);
     },
   );
 
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.browserSetBounds,
-    async (_event, bounds: BrowserBounds) => {
-      browserManager.setBounds(bounds);
+    async (_event, bounds: BrowserBounds, tabId?: string) => {
+      browserManager.setBounds(bounds, tabId);
     },
   );
 
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserHide, async () => {
-    browserManager.hide();
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserHide, async (_event, tabId?: string) => {
+    browserManager.hide(tabId);
   });
 
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.browserNavigate,
-    async (_event, rawUrl: string) => {
-      return browserManager.navigate(mainWindow, rawUrl);
+    async (_event, rawUrl: string, tabId?: string) => {
+      return browserManager.navigate(mainWindow, rawUrl, tabId);
     },
   );
 
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserBack, async () => browserManager.goBack());
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserForward, async () => browserManager.goForward());
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserReload, async () => browserManager.reload());
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserStop, async () => browserManager.stop());
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserCreateTab,
+    async (_event, bounds: BrowserBounds, url?: string) => {
+      return browserManager.createTab(mainWindow, bounds, url);
+    },
+  );
+
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserSwitchTab,
+    async (_event, tabId: string, bounds: BrowserBounds) => {
+      return browserManager.switchTab(mainWindow, tabId, bounds);
+    },
+  );
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserCloseTab, async (_event, tabId: string) => {
+    return browserManager.closeTab(tabId);
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserBack, async (_event, tabId?: string) =>
+    browserManager.goBack(tabId),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserForward, async (_event, tabId?: string) =>
+    browserManager.goForward(tabId),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserReload, async (_event, tabId?: string) =>
+    browserManager.reload(tabId),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserStop, async (_event, tabId?: string) =>
+    browserManager.stop(tabId),
+  );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.browserDestroy, async () => browserManager.destroy());
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserGetPageContext, async () =>
-    browserManager.getPageContext(),
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserGetPageContext, async (_event, tabId?: string) =>
+    browserManager.getPageContext(tabId),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserGetStorageSummary, async () =>
+    browserManager.getStorageSummary(),
+  );
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserSetPersistSession,
+    async (_event, persist: boolean) => browserManager.setPersistSession(Boolean(persist)),
+  );
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.browserClearDomainCookies,
+    async (_event, domain: string) => browserManager.clearDomainCookies(String(domain ?? "")),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserClearCache, async () => browserManager.clearCache());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.browserClearAllData, async () =>
+    browserManager.clearAllData(),
   );
 }
 
@@ -523,10 +564,16 @@ if (!gotSingleInstanceLock) {
     if (shutdownStarted) return;
     shutdownStarted = true;
     event.preventDefault();
-    browserManager.destroy();
-    void hostManager.shutdownIfOwned().finally(() => {
-      app.exit(0);
-    });
+    void browserManager
+      .flushCookies()
+      .catch(() => undefined)
+      .then(() => {
+        browserManager.destroy();
+        return hostManager.shutdownIfOwned();
+      })
+      .finally(() => {
+        app.exit(0);
+      });
   });
 
   app.on("window-all-closed", () => {

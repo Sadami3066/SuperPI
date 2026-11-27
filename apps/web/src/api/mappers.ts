@@ -15,6 +15,13 @@ import type {
 const ATTACHMENTS_OPEN = "<attachments>";
 const ATTACHMENTS_CLOSE = "</attachments>";
 
+export function isAbortErrorMessage(message?: string | null): boolean {
+  if (!message) return false;
+  return /\b(abort(ed)?|cancel(led|ed)?|interrupted|stopped by user|user_aborted)\b|已取消|已停止|用户中断/i.test(
+    message,
+  );
+}
+
 export function normalizeThinkingLevel(raw?: string | null): ThinkingLevel {
   const lower = (raw ?? "").trim().toLowerCase();
   if (
@@ -62,8 +69,12 @@ export function computeContextPercent(usage?: HostUsageDto | null): number {
   return Math.min(100, Math.max(0, Math.round((active / usage.contextWindow) * 100)));
 }
 
-export function classifyAttachmentKind(mime: string, name: string): "image" | "text" | "other" {
+export function classifyAttachmentKind(
+  mime: string,
+  name: string,
+): "image" | "text" | "folder" | "other" {
   const m = mime.toLowerCase();
+  if (m === "inode/directory") return "folder";
   if (m.startsWith("image/")) return "image";
   if (
     m.startsWith("text/") ||
@@ -305,6 +316,7 @@ export function mapHostMessageToTurn(
   }
 
   const blocks: TurnBlock[] = [];
+  const deferredTodoCards: TurnBlock[] = [];
   let activity: ActivityStep[] = [];
   const flushActivity = () => {
     if (activity.length === 0) return;
@@ -333,9 +345,8 @@ export function mapHostMessageToTurn(
     } else if (st.kind === "notice" && st.text && st.text.trim()) {
       notices.push(st.text.trim());
     } else if (st.kind === "custom_card" && (st.payload || st.text)) {
-      flushActivity();
-      blocks.push({
-        key: `cc-${st.id}-${blocks.length}`,
+      const cardBlock: TurnBlock = {
+        key: `cc-${st.id}-${blocks.length + deferredTodoCards.length}`,
         kind: "custom_card",
         card: {
           id: `cc-${st.id}`,
@@ -343,10 +354,17 @@ export function mapHostMessageToTurn(
           payload: st.payload || "{}",
           text: st.text || "",
         },
-      });
+      };
+      if (st.customType === "todo_write") {
+        deferredTodoCards.push(cardBlock);
+      } else {
+        flushActivity();
+        blocks.push(cardBlock);
+      }
     }
   }
   flushActivity();
+  blocks.push(...deferredTodoCards);
 
   if (!blocks.some((b) => b.kind === "text") && dto.text && dto.text.trim()) {
     blocks.push({ key: `txt-top-${dto.id}`, kind: "text", text: dto.text });
@@ -369,11 +387,17 @@ export function mapHostMessageToTurn(
   }
 
   const lowerStatus = dto.status.toLowerCase();
-  const isFailed = lowerStatus === "failed" || Boolean(dto.error);
-  const turnStatus: ChatTurn["status"] = isFailed
-    ? "failed"
-    : lowerStatus === "stopped" || lowerStatus === "aborted" || lowerStatus === "cancelled"
-      ? "stopped"
+  const isStopped =
+    lowerStatus === "stopped" ||
+    lowerStatus === "aborted" ||
+    lowerStatus === "cancelled" ||
+    lowerStatus === "canceled" ||
+    (Boolean(dto.error) && isAbortErrorMessage(dto.error));
+  const isFailed = !isStopped && (lowerStatus === "failed" || Boolean(dto.error));
+  const turnStatus: ChatTurn["status"] = isStopped
+    ? "stopped"
+    : isFailed
+      ? "failed"
       : "done";
   const durationMs =
     dto.startedAt > 0 && dto.finishedAt && dto.finishedAt >= dto.startedAt
@@ -413,7 +437,7 @@ export function mapHostMessageToTurn(
     durationMs,
     status: turnStatus,
     failed: isFailed,
-    error: dto.error?.trim() || undefined,
+    error: isFailed ? dto.error?.trim() || undefined : undefined,
     reminder: dto.reminder?.trim() || undefined,
     notices,
     summary: dto.summary

@@ -450,8 +450,12 @@ data class UpdateSessionRequest(
 data class PromptRequest(
     val text: String = "",
     val steer: Boolean = false,
-    val planFirst: Boolean = false,
     val images: List<ImageAttachmentDto> = emptyList(),
+)
+
+@Serializable
+data class StageFolderAttachmentRequest(
+    val path: String = "",
 )
 
 @Serializable

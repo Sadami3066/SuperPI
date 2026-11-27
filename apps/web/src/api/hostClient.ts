@@ -267,7 +267,6 @@ export class HostClient {
     body: {
       text: string;
       steer?: boolean;
-      planFirst?: boolean;
       images?: Array<{ data: string; mimeType: string; name?: string }>;
     },
   ): Promise<HostHealthDto> {
@@ -343,6 +342,13 @@ export class HostClient {
     return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/attachments`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  stageFolderAttachment(botId: string, path: string): Promise<HostStagedAttachmentDto> {
+    return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/attachments/folder`, {
+      method: "POST",
+      body: JSON.stringify({ path }),
     });
   }
 
@@ -578,6 +584,7 @@ export class HostClient {
       "usage_changed",
       "notice",
       "questions_changed",
+      "approvals_changed",
       "devices_changed",
       "super_run_started",
       "super_activity_changed",
@@ -884,6 +891,20 @@ export class HostClient {
         body: JSON.stringify({ mode }),
       },
     );
+  }
+
+  rewindSession(
+    sessionId: string,
+    body: {
+      turnIndex: number;
+      mode: "chat_only" | "files_only" | "files_and_chat";
+      checkpointId?: string;
+    },
+  ): Promise<HostRestoreCheckpointResponse> {
+    return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/rewind`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   forkSession(

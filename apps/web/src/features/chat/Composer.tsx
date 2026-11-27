@@ -1,5 +1,4 @@
 import { memo, type MutableRefObject, useEffect, useMemo, useRef, useState } from "react";
-import { IconChecklist } from "@tabler/icons-react";
 import { classifyAttachmentKind, formatAttachmentSize } from "../../api/mappers";
 import type {
   ComposerAttachment,
@@ -10,9 +9,11 @@ import type {
   ThinkingLevel,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
+import { pickWorkspaceDirectory } from "../../platform/bridge";
+import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useStreamStore } from "../../stores/streamStore";
-import { IconButton, Select, type SelectOption } from "../../ui";
+import { DropdownItem, DropdownMenu, IconButton, Select, type SelectOption } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import { ModelPicker } from "./ModelPicker";
 
@@ -46,24 +47,33 @@ function readFileAsComposerAttachment(file: File): Promise<ComposerAttachment | 
   });
 }
 
+function folderDisplayName(folderPath: string): string {
+  const clean = folderPath.replace(/[\\/]+$/, "");
+  const parts = clean.split(/[\\/]/);
+  return parts[parts.length - 1] || folderPath;
+}
+
 export const Composer = memo(function Composer({
   dark,
   variant = "docked",
-  workspaceLabel,
-  workspacePath,
   sessionId,
-  queuedInputs,
+  controlledValue,
+  onControlledValueChange,
+  queuedInputs = [],
   providers,
-  slashCommands,
+  slashCommands = [],
   currentModel,
   currentThinking,
-  permissionMode,
-  isRemote,
-  remoteOffline,
+  permissionMode = "workspace_auto",
+  showPermissions = true,
+  allowFolderAttach = true,
+  isRemote = false,
+  remoteOffline = false,
   isBusy = false,
+  isStreamingOverride,
+  placeholderOverride,
   sendKey,
   sendWhileRunning,
-  planFirst,
   onChangePermissionMode,
   onModelChange,
   onOpenProvidersSettings,
@@ -76,48 +86,62 @@ export const Composer = memo(function Composer({
 }: {
   dark: boolean;
   variant?: "hero" | "docked";
-  workspaceLabel?: string;
-  workspacePath?: string;
   sessionId: string;
-  queuedInputs: HostQueuedInputDto[];
+  controlledValue?: string;
+  onControlledValueChange?: (value: string) => void;
+  queuedInputs?: HostQueuedInputDto[];
   providers: HostProviderDto[];
-  slashCommands: HostSlashCommandDto[];
+  slashCommands?: HostSlashCommandDto[];
   currentModel: string;
   currentThinking: ThinkingLevel;
-  permissionMode: PermissionMode;
-  isRemote: boolean;
-  remoteOffline: boolean;
+  permissionMode?: PermissionMode;
+  showPermissions?: boolean;
+  allowFolderAttach?: boolean;
+  isRemote?: boolean;
+  remoteOffline?: boolean;
   isBusy?: boolean;
+  isStreamingOverride?: boolean;
+  placeholderOverride?: string;
   sendKey: "enter" | "mod_enter";
   sendWhileRunning: "steer" | "queue";
-  planFirst: boolean;
-  onChangePermissionMode: (mode: PermissionMode) => Promise<void>;
+  onChangePermissionMode?: (mode: PermissionMode) => Promise<void>;
   onModelChange: (model: string, thinking: ThinkingLevel) => Promise<void> | void;
   onOpenProvidersSettings: () => void;
   onSend: (overrideText?: string, attachments?: ComposerAttachment[]) => void;
   onStop: () => void;
-  onRemoveQueued: (kind: "steer" | "follow_up", text: string) => Promise<void>;
-  onPromoteQueued: (text: string) => Promise<void>;
-  onSnapToBottom: () => void;
+  onRemoveQueued?: (kind: "steer" | "follow_up", text: string) => Promise<void>;
+  onPromoteQueued?: (text: string) => Promise<void>;
+  onSnapToBottom?: () => void;
   attachFilesRef?: MutableRefObject<((files: FileList | File[]) => void) | null>;
 }) {
   const { t } = useI18n();
-  const composerText = useSessionStore((s) => s.composerTextBySession[sessionId] ?? "");
+  const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
+  const storeText = useSessionStore((s) => s.composerTextBySession[sessionId] ?? "");
   const quotedText = useSessionStore((s) => s.quotedTextBySession[sessionId] ?? null);
   const composerFocusTick = useSessionStore((s) => s.composerFocusTick);
-  const onComposerChange = useSessionStore((s) => s.setComposerText);
+  const setStoreComposerText = useSessionStore((s) => s.setComposerText);
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
-  const togglePlanFirst = useSessionStore((s) => s.togglePlanFirst);
   const liveStreaming = useStreamStore((s) => Boolean(s.activeBySession[sessionId]?.streaming));
-  const isStreaming = liveStreaming || isBusy;
+
+  const isControlled = controlledValue !== undefined && onControlledValueChange !== undefined;
+  const composerText = isControlled ? controlledValue : storeText;
+  const onComposerChange = (next: string) => {
+    if (isControlled) {
+      onControlledValueChange(next);
+    } else {
+      setStoreComposerText(sessionId, next);
+    }
+  };
+
+  const isStreaming = isStreamingOverride !== undefined ? isStreamingOverride : liveStreaming || isBusy;
   const onClearQuote = () => setQuotedText(sessionId, null);
-  const onTogglePlanFirst = () => togglePlanFirst(sessionId);
 
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRef = useRef<Record<string, string[]>>({});
   const historyIdxRef = useRef<number>(-1);
@@ -165,12 +189,15 @@ export const Composer = memo(function Composer({
       list.push({ command, description, insertOnly });
     };
     push("/compact", t("usage.compactNow"));
+    if (!isControlled) {
+      push("/goal", t("slash.goalDesc"), true);
+    }
     for (const c of slashCommands) {
       const cmd = c.name.startsWith("/") ? c.name : `/${c.name}`;
       push(cmd, c.description || c.source, cmd === "/goal" || cmd.startsWith("/skill:"));
     }
     return list;
-  }, [slashCommands, t]);
+  }, [isControlled, slashCommands, t]);
 
   const showSlashMenu = composerText.startsWith("/") && !composerText.includes(" ");
   const filteredCommands = useMemo(() => {
@@ -204,6 +231,29 @@ export const Composer = memo(function Composer({
     }
   };
 
+  const handleAttachFolder = async () => {
+    if (isElectron) {
+      const picked = await pickWorkspaceDirectory();
+      if (!picked) return;
+      setAttachments((prev) => {
+        if (prev.some((x) => x.kind === "folder" && x.folderPath === picked)) return prev;
+        const folderAtt: ComposerAttachment = {
+          id: `folder-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: folderDisplayName(picked),
+          mimeType: "inode/directory",
+          size: 0,
+          kind: "folder",
+          isInlineImage: false,
+          dataBase64: "",
+          folderPath: picked,
+        };
+        return [...prev, folderAtt].slice(0, 8);
+      });
+      return;
+    }
+    folderInputRef.current?.click();
+  };
+
   const appendFilesRef = useRef(appendFiles);
   appendFilesRef.current = appendFiles;
 
@@ -229,7 +279,7 @@ export const Composer = memo(function Composer({
       historyIdxRef.current = -1;
       historyDraftRef.current = "";
     }
-    onSnapToBottom();
+    onSnapToBottom?.();
     onSend(overrideText, files);
     if (!overrideText) setAttachments([]);
   };
@@ -258,9 +308,10 @@ export const Composer = memo(function Composer({
                 type="button"
                 onClick={() => {
                   if (cmd.insertOnly) {
-                    onComposerChange(sessionId, `${cmd.command} `);
+                    onComposerChange(`${cmd.command} `);
                     textareaRef.current?.focus();
                   } else {
+                    onComposerChange("");
                     triggerSend(cmd.command);
                   }
                 }}
@@ -302,7 +353,7 @@ export const Composer = memo(function Composer({
                   {q.kind === "steer" ? t("chat.steerTag") : t("chat.followUpTag")}
                 </span>
                 <span className="max-w-[200px] truncate">{q.text}</span>
-                {q.kind === "follow_up" && (
+                {q.kind === "follow_up" && onPromoteQueued && (
                   <button
                     type="button"
                     onClick={() => void onPromoteQueued(q.text)}
@@ -313,21 +364,23 @@ export const Composer = memo(function Composer({
                     <BrandIcon name="navigation/arrow_up" size={12} />
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => void onRemoveQueued(q.kind, q.text)}
-                  aria-label={t("chat.cancelQueue")}
-                  className="rounded-full p-0.5 hover:bg-[var(--pi-hover)]"
-                >
-                  <BrandIcon name="navigation/close" size={12} />
-                </button>
+                {onRemoveQueued && (
+                  <button
+                    type="button"
+                    onClick={() => void onRemoveQueued(q.kind, q.text)}
+                    aria-label={t("chat.cancelQueue")}
+                    className="rounded-full p-0.5 hover:bg-[var(--pi-hover)]"
+                  >
+                    <BrandIcon name="navigation/close" size={12} />
+                  </button>
+                )}
               </span>
             ))}
           </div>
         )}
 
         <div className="pi-composer-shell px-3.5 pt-2.5 pb-2" data-streaming={isStreaming ? "true" : "false"}>
-          {quotedText && (
+          {!isControlled && quotedText && (
             <div
               className="mb-2 flex items-center justify-between gap-2 rounded-[9px] px-3 py-1.5 text-[12px]"
               style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
@@ -361,23 +414,32 @@ export const Composer = memo(function Composer({
                 ) : (
                   <div
                     key={att.id}
-                    className="inline-flex h-9 max-w-[220px] items-center gap-2 rounded-[9px] px-2.5 text-[12px]"
+                    title={att.folderPath || att.name}
+                    className="inline-flex h-9 max-w-[240px] items-center gap-2 rounded-[9px] px-2.5 text-[12px]"
                     style={{
                       background: "var(--pi-wash)",
                       border: "0.5px solid var(--pi-hairline)",
                       color: "var(--pi-ink)",
                     }}
                   >
-                    {att.kind === "text" ? (
+                    {att.kind === "folder" ? (
+                      <BrandIcon name="file/folder_closed" size={14} className="shrink-0" style={{ color: "var(--pi-accent)" }} />
+                    ) : att.kind === "text" ? (
                       <BrandIcon name="file/plain" size={14} className="shrink-0" />
                     ) : (
                       <BrandIcon name="file/attachment" size={14} className="shrink-0" />
                     )}
                     <div className="min-w-0">
                       <div className="truncate font-medium">{att.name}</div>
-                      <div className="text-[10.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                        {formatAttachmentSize(att.size)}
-                      </div>
+                      {att.kind === "folder" ? (
+                        <div className="truncate text-[10.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                          {isRemote ? t("chat.folderRemoteHint") : att.folderPath}
+                        </div>
+                      ) : (
+                        <div className="text-[10.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                          {formatAttachmentSize(att.size)}
+                        </div>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -409,13 +471,24 @@ export const Composer = memo(function Composer({
               e.target.value = "";
             }}
           />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            {...({ webkitdirectory: "" } as Record<string, string>)}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) void appendFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
 
           <textarea
             ref={textareaRef}
             rows={isHero ? 2 : 1}
             disabled={remoteOffline}
             value={composerText}
-            onChange={(e) => onComposerChange(sessionId, e.target.value)}
+            onChange={(e) => onComposerChange(e.target.value)}
             onPaste={(e) => {
               const files = Array.from(e.clipboardData?.files ?? []);
               if (files.length > 0) {
@@ -428,10 +501,10 @@ export const Composer = memo(function Composer({
               if (e.key === "Escape") {
                 if (showSlashMenu) {
                   e.preventDefault();
-                  onComposerChange(sessionId, "");
+                  onComposerChange("");
                   return;
                 }
-                if (quotedText) {
+                if (!isControlled && quotedText) {
                   e.preventDefault();
                   onClearQuote();
                   return;
@@ -454,8 +527,12 @@ export const Composer = memo(function Composer({
                   e.preventDefault();
                   const chosen = filteredCommands[slashIndex] ?? filteredCommands[0];
                   if (chosen) {
-                    if (chosen.insertOnly) onComposerChange(sessionId, `${chosen.command} `);
-                    else triggerSend(chosen.command);
+                    if (chosen.insertOnly) {
+                      onComposerChange(`${chosen.command} `);
+                    } else {
+                      onComposerChange("");
+                      triggerSend(chosen.command);
+                    }
                   }
                   return;
                 }
@@ -478,7 +555,7 @@ export const Composer = memo(function Composer({
                   } else if (historyIdxRef.current > 0) {
                     historyIdxRef.current -= 1;
                   }
-                  onComposerChange(sessionId, hist[historyIdxRef.current] ?? "");
+                  onComposerChange(hist[historyIdxRef.current] ?? "");
                   return;
                 }
                 if (
@@ -489,10 +566,10 @@ export const Composer = memo(function Composer({
                   e.preventDefault();
                   if (historyIdxRef.current < hist.length - 1) {
                     historyIdxRef.current += 1;
-                    onComposerChange(sessionId, hist[historyIdxRef.current] ?? "");
+                    onComposerChange(hist[historyIdxRef.current] ?? "");
                   } else {
                     historyIdxRef.current = -1;
-                    onComposerChange(sessionId, historyDraftRef.current);
+                    onComposerChange(historyDraftRef.current);
                   }
                   return;
                 }
@@ -508,13 +585,14 @@ export const Composer = memo(function Composer({
               }
             }}
             placeholder={
-              isStreaming
+              placeholderOverride ??
+              (isStreaming
                 ? sendWhileRunning === "queue"
                   ? t("chat.placeholderQueue")
                   : t("chat.placeholderStreaming")
                 : sendKey === "mod_enter"
                   ? t("chat.placeholderModEnter")
-                  : t("chat.placeholder")
+                  : t("chat.placeholder"))
             }
             className={`max-h-[160px] w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-[1.55] outline-none placeholder:opacity-55 disabled:opacity-45 ${
               isHero ? "min-h-[54px]" : "min-h-[34px]"
@@ -524,36 +602,36 @@ export const Composer = memo(function Composer({
             }}
           />
 
-          <div className="mt-1.5 flex items-center justify-between gap-2 pt-0.5">
-            <div className="flex min-w-0 items-center gap-1">
-              <IconButton
-                size="sm"
-                label={t("chat.attach")}
-                disabled={remoteOffline}
-                onClick={() => fileInputRef.current?.click()}
+          <div className="mt-1.5 flex items-center justify-between gap-1.5 pt-0.5">
+            <div className="flex shrink-0 items-center gap-1">
+              <DropdownMenu
+                align="start"
+                trigger={
+                  <IconButton
+                    size="sm"
+                    label={t("chat.attach")}
+                    disabled={remoteOffline}
+                  >
+                    <BrandIcon name="action/add" size={16} />
+                  </IconButton>
+                }
               >
-                <BrandIcon name="file/attachment" size={15} />
-              </IconButton>
-
-              {!isRemote && (
-                <button
-                  type="button"
-                  onClick={onTogglePlanFirst}
-                  title={t("chat.planFirstHint")}
-                  aria-pressed={planFirst}
-                  className="inline-flex h-7 items-center gap-1 rounded-[8px] px-2 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                  style={{
-                    background: planFirst ? "var(--pi-accent-soft)" : "transparent",
-                    color: planFirst ? "var(--pi-accent)" : "var(--pi-ink-tertiary)",
-                  }}
-                >
-                  <IconChecklist size={13.5} stroke={1.7} />
-                  <span className="hidden sm:inline">{t("chat.planFirst")}</span>
-                </button>
-              )}
+                <DropdownItem
+                  icon={<BrandIcon name="file/plain" size={14} />}
+                  label={t("chat.attachFile")}
+                  onSelect={() => fileInputRef.current?.click()}
+                />
+                {allowFolderAttach && (
+                  <DropdownItem
+                    icon={<BrandIcon name="file/folder_closed" size={14} />}
+                    label={t("chat.attachFolder")}
+                    onSelect={() => void handleAttachFolder()}
+                  />
+                )}
+              </DropdownMenu>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
               <ModelPicker
                 providers={providers}
                 currentModel={currentModel}
@@ -567,8 +645,8 @@ export const Composer = memo(function Composer({
                 onOpenProvidersSettings={onOpenProvidersSettings}
               />
 
-              {!isRemote && (
-                <div className="hidden items-center gap-0.5 sm:inline-flex">
+              {showPermissions && !isRemote && onChangePermissionMode && (
+                <div className="pi-composer-perm shrink-0 items-center gap-0.5">
                   <BrandIcon
                     name="system/permissions"
                     size={13.5}
@@ -614,22 +692,6 @@ export const Composer = memo(function Composer({
               )}
             </div>
           </div>
-
-          {isHero && workspaceLabel && (
-            <div
-              className="mt-2 flex items-center gap-2 pt-2 text-[11.5px]"
-              title={workspacePath || undefined}
-              style={{
-                borderTop: "0.5px solid var(--pi-hairline)",
-                color: "var(--pi-ink-tertiary)",
-              }}
-            >
-              <BrandIcon name="file/workspace" size={13} />
-              <span className="font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
-                {workspaceLabel}
-              </span>
-            </div>
-          )}
         </div>
       </div>
     </div>

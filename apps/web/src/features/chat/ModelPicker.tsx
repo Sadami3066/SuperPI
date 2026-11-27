@@ -5,6 +5,7 @@ import type { HostProviderDto, ThinkingLevel } from "../../api/types";
 import { useI18n, type I18nKey } from "../../i18n";
 import { Button, Input, Popover } from "../../ui";
 import { BrandIcon, ProviderIcon } from "../shared/BrandAssets";
+import { ThinkingEffortSlider } from "./ThinkingEffortSlider";
 
 const THINKING_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -93,7 +94,7 @@ export function ModelPicker({
       trigger={
         <button
           type="button"
-          className="inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+          className="inline-flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors hover:bg-[var(--pi-hover)]"
           style={{ color: "var(--pi-ink-secondary)" }}
         >
           {selectedModelMeta ? (
@@ -104,12 +105,12 @@ export function ModelPicker({
               size={14}
             />
           ) : (
-            <IconSparkles size={13.5} stroke={1.7} />
+            <IconSparkles size={13.5} stroke={1.7} className="shrink-0" />
           )}
-          <span className="truncate">{triggerLabel}</span>
+          <span className="min-w-0 truncate">{triggerLabel}</span>
           {currentThinking !== "off" && availableThinking.length > 1 && (
             <span
-              className="shrink-0 rounded-full px-1.5 py-0.2 text-[10.5px]"
+              className="pi-composer-thinking-badge shrink-0 rounded-full px-1.5 py-0.2 text-[10.5px] whitespace-nowrap"
               style={{ background: "var(--pi-wash)", color: "var(--pi-ink-tertiary)" }}
             >
               {t(THINKING_KEY_MAP[currentThinking])}
@@ -153,32 +154,14 @@ export function ModelPicker({
           </div>
 
           {availableThinking.length > 1 && (
-            <div className="space-y-1">
-              <div className="px-1 text-[11px] font-medium" style={{ color: "var(--pi-ink-tertiary)" }}>
-                {t("model.thinkingLevel")}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {availableThinking.map((lvl) => {
-                  const active = currentThinking === lvl;
-                  return (
-                    <button
-                      key={lvl}
-                      type="button"
-                      onClick={() => {
-                        if (currentModel) onSelect(currentModel, lvl);
-                      }}
-                      className="rounded-full px-2.5 py-0.5 text-[11.5px] font-medium transition-colors"
-                      style={{
-                        background: active ? "var(--pi-accent)" : "var(--pi-wash)",
-                        color: active ? "var(--pi-on-accent)" : "var(--pi-ink-secondary)",
-                      }}
-                    >
-                      {t(THINKING_KEY_MAP[lvl])}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <ThinkingEffortSlider
+              levels={availableThinking}
+              value={currentThinking}
+              dark={dark}
+              onChange={(lvl) => {
+                if (currentModel) onSelect(currentModel, lvl);
+              }}
+            />
           )}
 
           <div data-scrollable className="max-h-[260px] space-y-2 overflow-y-auto pr-0.5">

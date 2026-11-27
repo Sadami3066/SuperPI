@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { IconAlertCircle, IconSparkles } from "@tabler/icons-react";
+import { IconAlertCircle, IconArrowBackUp, IconSparkles } from "@tabler/icons-react";
 import { formatAttachmentSize } from "../../api/mappers";
 import type { ChatTurn, CustomCardItem, TurnBlock } from "../../api/types";
 import { useI18n } from "../../i18n";
@@ -133,21 +133,29 @@ export function renderTurnBlock(
 export const TurnItem = memo(function TurnItem({
   turn,
   sessionId,
+  userTurnIndex,
   isLastAssistant,
   compactProcess,
   dark,
   canRetry = true,
+  canBranchOrRewind = false,
   onQuote,
   onRetry,
+  onForkFromTurn,
+  onRewindTurn,
 }: {
   turn: ChatTurn;
   sessionId: string;
+  userTurnIndex?: number;
   isLastAssistant: boolean;
   compactProcess: boolean;
   dark: boolean;
   canRetry?: boolean;
+  canBranchOrRewind?: boolean;
   onQuote: (text: string) => void;
   onRetry: () => void;
+  onForkFromTurn?: (upToUserTurn: number) => void;
+  onRewindTurn?: (turnIndex: number, rawText: string) => void;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -202,6 +210,8 @@ export const TurnItem = memo(function TurnItem({
                         alt={chip.name}
                         className="h-5 w-5 shrink-0 rounded-[5px] object-cover"
                       />
+                    ) : chip.kind === "folder" ? (
+                      <BrandIcon name="file/folder_closed" size={14} style={{ color: "var(--pi-accent)" }} />
                     ) : chip.kind === "image" ? (
                       <BrandIcon name="file/image" size={14} style={{ color: "var(--pi-ink-tertiary)" }} />
                     ) : chip.kind === "text" ? (
@@ -234,34 +244,49 @@ export const TurnItem = memo(function TurnItem({
               </div>
             )}
 
-            {turn.rawText && (
+            {(turn.rawText || (canBranchOrRewind && onRewindTurn && userTurnIndex !== undefined)) && (
               <div
                 className="flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(turn.rawText);
-                    setCopied(true);
-                    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
-                    copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
-                  }}
-                  aria-label={t("chat.copy")}
-                  title={t("chat.copy")}
-                  className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
-                >
-                  {copied ? <BrandIcon name="status/confirm" size={13} /> : <BrandIcon name="action/copy" size={13} />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onQuote(turn.rawText.slice(0, 140))}
-                  aria-label={t("chat.quote")}
-                  title={t("chat.quote")}
-                  className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
-                >
-                  <BrandIcon name="action/quote" size={13} />
-                </button>
+                {turn.rawText && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(turn.rawText);
+                        setCopied(true);
+                        if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+                        copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
+                      }}
+                      aria-label={t("chat.copy")}
+                      title={t("chat.copy")}
+                      className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                    >
+                      {copied ? <BrandIcon name="status/confirm" size={13} /> : <BrandIcon name="action/copy" size={13} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onQuote(turn.rawText.slice(0, 140))}
+                      aria-label={t("chat.quote")}
+                      title={t("chat.quote")}
+                      className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                    >
+                      <BrandIcon name="action/quote" size={13} />
+                    </button>
+                  </>
+                )}
+                {canBranchOrRewind && onRewindTurn && userTurnIndex !== undefined && (
+                  <button
+                    type="button"
+                    onClick={() => onRewindTurn(userTurnIndex, turn.rawText)}
+                    aria-label={t("chat.rewindFromHere")}
+                    title={t("chat.rewindFromHere")}
+                    className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                  >
+                    <IconArrowBackUp size={13.5} stroke={1.75} />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -283,6 +308,13 @@ export const TurnItem = memo(function TurnItem({
             if (turn.rawText) onQuote(turn.rawText.slice(0, 140));
           }}
         />
+        {canBranchOrRewind && onRewindTurn && userTurnIndex !== undefined && (
+          <ContextMenuItem
+            icon={<IconArrowBackUp size={14} stroke={1.75} />}
+            label={t("chat.rewindFromHere")}
+            onSelect={() => onRewindTurn(userTurnIndex, turn.rawText)}
+          />
+        )}
       </ContextMenu>
     );
   }
@@ -389,36 +421,51 @@ export const TurnItem = memo(function TurnItem({
         </div>
       )}
 
-      {copyText && (
+      {(copyText || (canBranchOrRewind && onForkFromTurn && userTurnIndex !== undefined && userTurnIndex >= 0)) && (
         <div
           className={`mt-2 flex items-center gap-1 transition-opacity duration-150 ${
             isLastAssistant ? "opacity-90" : "opacity-0 group-hover:opacity-100"
           }`}
           style={{ color: "var(--pi-ink-tertiary)" }}
         >
-          <button
-            type="button"
-            onClick={() => {
-              void navigator.clipboard?.writeText(copyText);
-              setCopied(true);
-              if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
-              copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
-            }}
-            aria-label={t("chat.copy")}
-            title={t("chat.copy")}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
-          >
-            {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
-          </button>
-          <button
-            type="button"
-            onClick={() => onQuote(copyText.slice(0, 140))}
-            aria-label={t("chat.quote")}
-            title={t("chat.quote")}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
-          >
-            <BrandIcon name="action/quote" size={14} />
-          </button>
+          {copyText && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(copyText);
+                  setCopied(true);
+                  if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+                  copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
+                }}
+                aria-label={t("chat.copy")}
+                title={t("chat.copy")}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
+              >
+                {copied ? <BrandIcon name="status/confirm" size={14} /> : <BrandIcon name="action/copy" size={14} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => onQuote(copyText.slice(0, 140))}
+                aria-label={t("chat.quote")}
+                title={t("chat.quote")}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
+              >
+                <BrandIcon name="action/quote" size={14} />
+              </button>
+            </>
+          )}
+          {canBranchOrRewind && onForkFromTurn && userTurnIndex !== undefined && userTurnIndex >= 0 && (
+            <button
+              type="button"
+              onClick={() => onForkFromTurn(userTurnIndex)}
+              aria-label={t("chat.forkFromHere")}
+              title={t("chat.forkFromHere")}
+              className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--pi-hover)]"
+            >
+              <BrandIcon name="system/git_branch" size={13.5} />
+            </button>
+          )}
           {turn.timestamp && (
             <span className="ml-1.5 text-[11.5px]">{copied ? t("chat.copied") : turn.timestamp}</span>
           )}
@@ -443,6 +490,13 @@ export const TurnItem = memo(function TurnItem({
           if (copyText) onQuote(copyText.slice(0, 140));
         }}
       />
+      {canBranchOrRewind && onForkFromTurn && userTurnIndex !== undefined && userTurnIndex >= 0 && (
+        <ContextMenuItem
+          icon={<BrandIcon name="system/git_branch" size={14} />}
+          label={t("chat.forkFromHere")}
+          onSelect={() => onForkFromTurn(userTurnIndex)}
+        />
+      )}
     </ContextMenu>
   );
 });

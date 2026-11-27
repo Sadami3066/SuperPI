@@ -419,15 +419,60 @@ export function resolveThemePalette(
   return dark ? def.dark : def.light;
 }
 
+function parseHexColor(hex: string): [number, number, number] | null {
+  const clean = hex.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(clean)) return null;
+  return [
+    parseInt(clean.slice(1, 3), 16),
+    parseInt(clean.slice(3, 5), 16),
+    parseInt(clean.slice(5, 7), 16),
+  ];
+}
+
+function relativeLuminance(r: number, g: number, b: number): number {
+  const norm = [r, g, b].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * norm[0] + 0.7152 * norm[1] + 0.0722 * norm[2];
+}
+
+function adjustChannel(c: number, delta: number): string {
+  return Math.max(0, Math.min(255, Math.round(c + delta)))
+    .toString(16)
+    .padStart(2, "0");
+}
+
+function deriveAccentTokens(hex: string, dark: boolean): {
+  accent: string;
+  accentPressed: string;
+  onAccent: string;
+  accentSoft: string;
+} | null {
+  const rgb = parseHexColor(hex);
+  if (!rgb) return null;
+  const [r, g, b] = rgb;
+  const lum = relativeLuminance(r, g, b);
+  const delta = dark ? 22 : -22;
+  return {
+    accent: hex.trim(),
+    accentPressed: `#${adjustChannel(r, delta)}${adjustChannel(g, delta)}${adjustChannel(b, delta)}`,
+    onAccent: lum > 0.42 ? "#111113" : "#FFFFFF",
+    accentSoft: `color-mix(in srgb, ${hex.trim()} ${dark ? 22 : 14}%, transparent)`,
+  };
+}
+
 export function applyThemeTokens(
   preset: ThemePresetId,
   appearance: AppearanceMode,
   font: FontStyleId,
+  customAccent?: string | null,
 ): boolean {
   const palette = resolveThemePalette(preset, appearance);
   const dark = palette.dark;
   if (typeof document === "undefined") return dark;
 
+  const accentOverride = customAccent ? deriveAccentTokens(customAccent, dark) : null;
   const root = document.documentElement;
   root.classList.toggle("pi-dark", dark);
   root.style.colorScheme = dark ? "dark" : "light";
@@ -439,10 +484,10 @@ export function applyThemeTokens(
     "--pi-ink": palette.ink,
     "--pi-ink-secondary": palette.inkSecondary,
     "--pi-ink-tertiary": palette.inkTertiary,
-    "--pi-accent": palette.accent,
-    "--pi-accent-pressed": palette.accentPressed,
-    "--pi-on-accent": palette.onAccent,
-    "--pi-accent-soft": palette.accentSoft,
+    "--pi-accent": accentOverride?.accent ?? palette.accent,
+    "--pi-accent-pressed": accentOverride?.accentPressed ?? palette.accentPressed,
+    "--pi-on-accent": accentOverride?.onAccent ?? palette.onAccent,
+    "--pi-accent-soft": accentOverride?.accentSoft ?? palette.accentSoft,
     "--pi-danger": palette.danger,
     "--pi-on-danger": palette.onDanger,
     "--pi-success": palette.success,

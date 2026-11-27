@@ -69,11 +69,10 @@ class ToolPermissionGuardTest {
     }
 
     @Test
-    fun `read only and plan-first block write and job start while allowing job list and full auto`() = runBlocking {
+    fun `read only blocks write and job start while allowing job list and full auto`() = runBlocking {
         val workspace = Files.createTempDirectory("superpi-perm-exec").toFile()
         try {
             var mode = PermissionMode.READ_ONLY
-            var planFirstActive = false
             var writeCount = 0
             var jobCount = 0
             val binding = SessionBinding().apply {
@@ -95,7 +94,6 @@ class ToolPermissionGuardTest {
                 workspaceRoot = workspace,
                 modeProvider = { mode },
                 toolApprovalCenter = ToolApprovalCenter(),
-                planFirstCheck = { planFirstActive },
             )
 
             val wrappedJob = ToolPermissionGuard.wrapTool(
@@ -113,7 +111,6 @@ class ToolPermissionGuardTest {
                 workspaceRoot = workspace,
                 modeProvider = { mode },
                 toolApprovalCenter = ToolApprovalCenter(),
-                planFirstCheck = { planFirstActive },
             )
 
             // READ_ONLY denies write and job(action=start), allows job(action=list)
@@ -124,14 +121,8 @@ class ToolPermissionGuardTest {
             assertEquals(0, writeCount)
             assertEquals(1, jobCount)
 
-            // FULL_AUTO with planFirstActive=true still enforces READ_ONLY!
+            // FULL_AUTO permits write and job start
             mode = PermissionMode.FULL_AUTO
-            planFirstActive = true
-            assertTrue(runCatching { wrappedWrite.execute("c4", JsonObject(mapOf("path" to JsonPrimitive("a.txt"))), null, null) }.isFailure)
-            assertEquals(0, writeCount)
-
-            // Once planFirst clears, FULL_AUTO permits write and job start
-            planFirstActive = false
             val allowedWrite = wrappedWrite.execute("c5", JsonObject(mapOf("path" to JsonPrimitive("a.txt"))), null, null)
             val allowedJob = wrappedJob.execute("c6", JsonObject(mapOf("action" to JsonPrimitive("start"), "command" to JsonPrimitive("echo hi"))), null, null)
             assertFalse(allowedWrite.isError == true)

@@ -3,7 +3,7 @@ export function isShortcutBlockedByTarget(
   options: { allowWhenModPressed?: boolean; hasMod?: boolean } = {},
 ): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  if (target.closest("[data-shortcut-ignore='true']")) return true;
+  if (target.closest("[data-shortcut-ignore='true']") || target.closest(".xterm")) return true;
 
   const tag = target.tagName;
   const isFormField =

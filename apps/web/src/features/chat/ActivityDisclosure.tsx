@@ -559,47 +559,51 @@ export const ActivityDisclosure = memo(function ActivityDisclosure({
         />
       </button>
 
-      {expanded && (
-        <div className="mt-1 mb-1">
-          {nodes.map((node, idx) => {
-            const connectTop = idx > 0;
-            const connectBottom = idx < nodes.length - 1;
-            if (node.kind === "tool_run") {
-              return (
-                <ToolGroupNode
-                  key={node.id}
-                  tools={node.tools}
-                  compact={compact}
-                  connectTop={connectTop}
-                  connectBottom={connectBottom}
-                />
-              );
-            }
-            if (node.step.kind === "thinking") {
-              return (
-                <ReasoningRow
-                  key={node.id}
-                  text={node.step.text}
-                  active={Boolean(streaming && idx === nodes.length - 1)}
-                  compact={compact}
-                  failed={isFailed && idx === nodes.length - 1}
-                  connectTop={connectTop}
-                  connectBottom={connectBottom}
-                />
-              );
-            }
-            return (
-              <ToolTimelineRow
-                key={node.id}
-                tool={node.step.tool}
-                compact={compact}
-                connectTop={connectTop}
-                connectBottom={connectBottom}
-              />
-            );
-          })}
+      <div className="pi-collapse" data-open={expanded ? "true" : "false"} aria-hidden={!expanded}>
+        <div className="pi-collapse-inner">
+          {expanded && (
+            <div className="mt-1 mb-1">
+              {nodes.map((node, idx) => {
+                const connectTop = idx > 0;
+                const connectBottom = idx < nodes.length - 1;
+                if (node.kind === "tool_run") {
+                  return (
+                    <ToolGroupNode
+                      key={node.id}
+                      tools={node.tools}
+                      compact={compact}
+                      connectTop={connectTop}
+                      connectBottom={connectBottom}
+                    />
+                  );
+                }
+                if (node.step.kind === "thinking") {
+                  return (
+                    <ReasoningRow
+                      key={node.id}
+                      text={node.step.text}
+                      active={Boolean(streaming && idx === nodes.length - 1)}
+                      compact={compact}
+                      failed={isFailed && idx === nodes.length - 1}
+                      connectTop={connectTop}
+                      connectBottom={connectBottom}
+                    />
+                  );
+                }
+                return (
+                  <ToolTimelineRow
+                    key={node.id}
+                    tool={node.step.tool}
+                    compact={compact}
+                    connectTop={connectTop}
+                    connectBottom={connectBottom}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 });

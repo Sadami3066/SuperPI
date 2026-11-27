@@ -1,10 +1,49 @@
-import { WebContentsView, type BrowserWindow } from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import { app, session, WebContentsView, type BrowserWindow } from "electron";
 import {
   DESKTOP_IPC_CHANNELS,
   type BrowserBounds,
   type BrowserNavState,
   type BrowserPageContext,
+  type BrowserStorageSummary,
+  type BrowserTabState,
 } from "../shared/bridge.js";
+
+const BROWSER_PERSIST_PARTITION = "persist:superpi-browser";
+const BROWSER_EPHEMERAL_PARTITION = "superpi-browser-ephemeral";
+const MAX_TABS = 12;
+
+function prefsFilePath(): string | null {
+  try {
+    return path.join(app.getPath("userData"), "browser-prefs.json");
+  } catch {
+    return null;
+  }
+}
+
+function readPersistSessionPref(): boolean {
+  const file = prefsFilePath();
+  if (!file) return true;
+  try {
+    if (!fs.existsSync(file)) return true;
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { persistSession?: boolean };
+    return parsed.persistSession !== false;
+  } catch {
+    return true;
+  }
+}
+
+function writePersistSessionPref(persistSession: boolean): void {
+  const file = prefsFilePath();
+  if (!file) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ persistSession }), "utf8");
+  } catch {
+    void 0;
+  }
+}
 
 export function normalizeBrowserUrl(raw: string): string | null {
   const trimmed = raw.trim();
@@ -58,7 +97,7 @@ function clampBounds(bounds: BrowserBounds): BrowserBounds {
   };
 }
 
-function emptyNavState(): BrowserNavState {
+function emptyNavState(tabs: BrowserTabState[] = [], activeTabId = ""): BrowserNavState {
   return {
     url: "",
     title: "",
@@ -66,23 +105,88 @@ function emptyNavState(): BrowserNavState {
     canGoBack: false,
     canGoForward: false,
     error: null,
+    activeTabId,
+    tabs,
   };
 }
 
-export class EmbeddedBrowserManager {
-  private view: WebContentsView | null = null;
-  private hostWindow: BrowserWindow | null = null;
-  private state: BrowserNavState = emptyNavState();
+interface ManagedTab {
+  id: string;
+  view: WebContentsView;
+  state: BrowserTabState;
+}
 
-  private ensureView(win: BrowserWindow): WebContentsView {
-    if (this.view && this.hostWindow === win) {
-      return this.view;
+export class EmbeddedBrowserManager {
+  private tabs = new Map<string, ManagedTab>();
+  private tabOrder: string[] = [];
+  private activeTabId = "";
+  private hostWindow: BrowserWindow | null = null;
+  private lastBounds: BrowserBounds = { x: 0, y: 0, width: 480, height: 480 };
+  private visible = false;
+  private tabSeq = 0;
+  private persistSession = readPersistSessionPref();
+
+  private activePartition(): string {
+    return this.persistSession ? BROWSER_PERSIST_PARTITION : BROWSER_EPHEMERAL_PARTITION;
+  }
+
+  private buildSnapshot(): BrowserNavState {
+    const tabList = this.tabOrder
+      .map((id) => this.tabs.get(id)?.state)
+      .filter((t): t is BrowserTabState => Boolean(t));
+    const active = this.tabs.get(this.activeTabId)?.state;
+    if (!active) {
+      return emptyNavState(tabList, "");
     }
-    this.destroy();
+    return {
+      url: active.url,
+      title: active.title,
+      loading: active.loading,
+      canGoBack: active.canGoBack,
+      canGoForward: active.canGoForward,
+      error: active.error,
+      activeTabId: active.id,
+      tabs: tabList,
+    };
+  }
+
+  private emitSnapshot(): BrowserNavState {
+    const snapshot = this.buildSnapshot();
+    if (this.hostWindow && !this.hostWindow.isDestroyed()) {
+      this.hostWindow.webContents.send(DESKTOP_IPC_CHANNELS.browserStateChanged, snapshot);
+    }
+    return snapshot;
+  }
+
+  private syncVisibility(): void {
+    for (const [id, tab] of this.tabs) {
+      const shouldShow = this.visible && id === this.activeTabId && Boolean(tab.state.url);
+      if (shouldShow) {
+        tab.view.setBounds(this.lastBounds);
+      }
+      tab.view.setVisible(shouldShow);
+    }
+  }
+
+  private createManagedTab(win: BrowserWindow, requestedId?: string): ManagedTab {
+    if (this.hostWindow && this.hostWindow !== win) {
+      this.destroy();
+    }
+    this.hostWindow = win;
+
+    const partition = this.activePartition();
+    const activeSess = session.fromPartition(partition);
+    const cleanUa = activeSess
+      .getUserAgent()
+      .replace(/\sElectron\/[^\s]+/g, "")
+      .replace(/\sSuperPI\/[^\s]+/gi, "");
+    if (cleanUa && cleanUa !== activeSess.getUserAgent()) {
+      activeSess.setUserAgent(cleanUa);
+    }
 
     const view = new WebContentsView({
       webPreferences: {
-        partition: "persist:superpi-browser",
+        partition,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -90,12 +194,32 @@ export class EmbeddedBrowserManager {
       },
     });
 
+    const id = requestedId?.trim() || `tab-${++this.tabSeq}`;
+    const managed: ManagedTab = {
+      id,
+      view,
+      state: {
+        id,
+        url: "",
+        title: "",
+        favicon: "",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+      },
+    };
+
     const wc = view.webContents;
 
     wc.setWindowOpenHandler(({ url }) => {
       const safe = normalizeBrowserUrl(url);
       if (safe) {
-        void wc.loadURL(safe);
+        if (this.hostWindow && !this.hostWindow.isDestroyed()) {
+          this.hostWindow.webContents.send(DESKTOP_IPC_CHANNELS.browserOpenTabRequested, safe);
+        } else {
+          void wc.loadURL(safe);
+        }
       }
       return { action: "deny" };
     });
@@ -111,116 +235,233 @@ export class EmbeddedBrowserManager {
       }
     });
 
-    const syncState = (patch: Partial<BrowserNavState> = {}) => {
+    const syncTab = (patch: Partial<BrowserTabState> = {}) => {
+      if (!this.tabs.has(id)) return;
       const history = wc.navigationHistory;
-      this.state = {
-        ...this.state,
-        url: wc.getURL() || this.state.url,
-        title: wc.getTitle() || this.state.title,
+      managed.state = {
+        ...managed.state,
+        url: wc.getURL() || managed.state.url,
+        title: wc.getTitle() || managed.state.title,
         canGoBack: history ? history.canGoBack() : false,
         canGoForward: history ? history.canGoForward() : false,
         ...patch,
       };
-      if (!win.isDestroyed()) {
-        win.webContents.send(DESKTOP_IPC_CHANNELS.browserStateChanged, this.state);
-      }
+      this.syncVisibility();
+      this.emitSnapshot();
     };
 
-    wc.on("did-start-loading", () => syncState({ loading: true, error: null }));
-    wc.on("did-stop-loading", () => syncState({ loading: false }));
-    wc.on("did-navigate", (_e, url) => syncState({ url, error: null }));
-    wc.on("did-navigate-in-page", (_e, url) => syncState({ url }));
-    wc.on("page-title-updated", (_e, title) => syncState({ title }));
+    wc.on("did-start-loading", () => syncTab({ loading: true, error: null }));
+    wc.on("did-stop-loading", () => syncTab({ loading: false }));
+    wc.on("did-navigate", (_e, url) => syncTab({ url, error: null }));
+    wc.on("did-navigate-in-page", (_e, url) => syncTab({ url }));
+    wc.on("page-title-updated", (_e, title) => syncTab({ title }));
+    wc.on("page-favicon-updated", (_e, favicons) => {
+      const icon = favicons[0] ?? "";
+      if (icon) syncTab({ favicon: icon });
+    });
     wc.on("did-fail-load", (_e, errorCode, errorDescription, validatedUrl, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return;
-      syncState({
+      syncTab({
         loading: false,
-        url: validatedUrl || this.state.url,
+        url: validatedUrl || managed.state.url,
         error: errorDescription || `Load error (${errorCode})`,
       });
     });
 
     win.contentView.addChildView(view);
     view.setVisible(false);
-    this.view = view;
-    this.hostWindow = win;
-    return view;
+    this.tabs.set(id, managed);
+    this.tabOrder.push(id);
+    return managed;
   }
 
-  mount(win: BrowserWindow | null, bounds: BrowserBounds, url?: string): BrowserNavState {
-    if (!win || win.isDestroyed()) return this.state;
-    const view = this.ensureView(win);
-    view.setBounds(clampBounds(bounds));
+  private ensureTab(win: BrowserWindow, tabId?: string): ManagedTab {
+    const key = tabId?.trim();
+    if (key) {
+      if (this.hostWindow === win) {
+        const existing = this.tabs.get(key);
+        if (existing) {
+          this.activeTabId = existing.id;
+          return existing;
+        }
+      }
+      const created = this.createManagedTab(win, key);
+      this.activeTabId = created.id;
+      return created;
+    }
+    if (this.hostWindow === win && this.activeTabId) {
+      const existing = this.tabs.get(this.activeTabId);
+      if (existing) return existing;
+    }
+    const created = this.createManagedTab(win);
+    this.activeTabId = created.id;
+    return created;
+  }
+
+  mount(
+    win: BrowserWindow | null,
+    bounds: BrowserBounds,
+    url?: string,
+    tabId?: string,
+  ): BrowserNavState {
+    if (!win || win.isDestroyed()) return this.buildSnapshot();
+    this.lastBounds = clampBounds(bounds);
+    this.visible = true;
+    const tab = this.ensureTab(win, tabId);
     if (url) {
       const normalized = normalizeBrowserUrl(url);
       if (normalized) {
-        view.setVisible(true);
-        void view.webContents.loadURL(normalized);
-        return this.state;
+        tab.state = { ...tab.state, url: normalized, loading: true, error: null };
+        this.syncVisibility();
+        void tab.view.webContents.loadURL(normalized);
+        return this.emitSnapshot();
       }
     }
-    view.setVisible(Boolean(this.state.url));
-    return this.state;
+    this.syncVisibility();
+    return this.emitSnapshot();
   }
 
-  setBounds(bounds: BrowserBounds): void {
-    if (!this.view) return;
-    this.view.setBounds(clampBounds(bounds));
+  createTab(win: BrowserWindow | null, bounds: BrowserBounds, url?: string): BrowserNavState {
+    if (!win || win.isDestroyed()) return this.buildSnapshot();
+    this.lastBounds = clampBounds(bounds);
+    this.visible = true;
+    if (this.tabOrder.length >= MAX_TABS) {
+      return this.emitSnapshot();
+    }
+    const tab = this.createManagedTab(win);
+    this.activeTabId = tab.id;
+    if (url) {
+      const normalized = normalizeBrowserUrl(url);
+      if (normalized) {
+        tab.state = { ...tab.state, url: normalized, loading: true, error: null };
+        this.syncVisibility();
+        void tab.view.webContents.loadURL(normalized);
+        return this.emitSnapshot();
+      }
+    }
+    this.syncVisibility();
+    return this.emitSnapshot();
   }
 
-  hide(): void {
-    if (!this.view) return;
-    this.view.setVisible(false);
+  switchTab(win: BrowserWindow | null, tabId: string, bounds?: BrowserBounds): BrowserNavState {
+    if (!win || win.isDestroyed()) return this.buildSnapshot();
+    if (!this.tabs.has(tabId)) return this.buildSnapshot();
+    if (bounds) this.lastBounds = clampBounds(bounds);
+    this.activeTabId = tabId;
+    this.visible = true;
+    this.syncVisibility();
+    return this.emitSnapshot();
   }
 
-  navigate(win: BrowserWindow | null, rawUrl: string): BrowserNavState {
-    if (!win || win.isDestroyed()) return this.state;
+  closeTab(tabId: string): BrowserNavState {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return this.buildSnapshot();
+    const idx = this.tabOrder.indexOf(tabId);
+    this.tabs.delete(tabId);
+    if (idx >= 0) this.tabOrder.splice(idx, 1);
+
+    try {
+      if (this.hostWindow && !this.hostWindow.isDestroyed()) {
+        this.hostWindow.contentView.removeChildView(tab.view);
+      }
+    } catch {
+      void 0;
+    }
+    try {
+      const wc = tab.view.webContents as unknown as { close?: () => void };
+      wc.close?.();
+    } catch {
+      void 0;
+    }
+
+    if (this.activeTabId === tabId) {
+      const nextId = this.tabOrder[Math.min(idx, this.tabOrder.length - 1)] ?? "";
+      this.activeTabId = nextId;
+    }
+    this.syncVisibility();
+    return this.emitSnapshot();
+  }
+
+  setBounds(bounds: BrowserBounds, tabId?: string): void {
+    this.lastBounds = clampBounds(bounds);
+    const targetId = tabId?.trim() || this.activeTabId;
+    const active = this.tabs.get(targetId);
+    if (active && this.visible && targetId === this.activeTabId && active.state.url) {
+      active.view.setBounds(this.lastBounds);
+    }
+  }
+
+  hide(tabId?: string): void {
+    if (tabId?.trim()) {
+      const key = tabId.trim();
+      const tab = this.tabs.get(key);
+      if (tab) tab.view.setVisible(false);
+      if (this.activeTabId === key) {
+        this.visible = false;
+      }
+      return;
+    }
+    this.visible = false;
+    for (const tab of this.tabs.values()) {
+      tab.view.setVisible(false);
+    }
+  }
+
+  navigate(win: BrowserWindow | null, rawUrl: string, tabId?: string): BrowserNavState {
+    if (!win || win.isDestroyed()) return this.buildSnapshot();
+    const tab = this.ensureTab(win, tabId);
     const normalized = normalizeBrowserUrl(rawUrl);
     if (!normalized) {
-      this.state = { ...this.state, error: "Unsupported URL" };
-      return this.state;
+      tab.state = { ...tab.state, error: "Unsupported URL" };
+      return this.emitSnapshot();
     }
-    const view = this.ensureView(win);
-    view.setVisible(true);
-    this.state = { ...this.state, url: normalized, loading: true, error: null };
-    void view.webContents.loadURL(normalized);
-    return this.state;
+    this.visible = true;
+    tab.state = { ...tab.state, url: normalized, loading: true, error: null };
+    this.syncVisibility();
+    void tab.view.webContents.loadURL(normalized);
+    return this.emitSnapshot();
   }
 
-  goBack(): BrowserNavState {
-    const history = this.view?.webContents.navigationHistory;
+  goBack(tabId?: string): BrowserNavState {
+    const tab = this.tabs.get(tabId?.trim() || this.activeTabId);
+    const history = tab?.view.webContents.navigationHistory;
     if (history?.canGoBack()) {
       history.goBack();
     }
-    return this.state;
+    return this.buildSnapshot();
   }
 
-  goForward(): BrowserNavState {
-    const history = this.view?.webContents.navigationHistory;
+  goForward(tabId?: string): BrowserNavState {
+    const tab = this.tabs.get(tabId?.trim() || this.activeTabId);
+    const history = tab?.view.webContents.navigationHistory;
     if (history?.canGoForward()) {
       history.goForward();
     }
-    return this.state;
+    return this.buildSnapshot();
   }
 
-  reload(): BrowserNavState {
-    if (this.view && this.state.url) {
-      this.view.webContents.reload();
+  reload(tabId?: string): BrowserNavState {
+    const tab = this.tabs.get(tabId?.trim() || this.activeTabId);
+    if (tab && tab.state.url) {
+      tab.view.webContents.reload();
     }
-    return this.state;
+    return this.buildSnapshot();
   }
 
-  stop(): BrowserNavState {
-    if (this.view) {
-      this.view.webContents.stop();
-      this.state = { ...this.state, loading: false };
+  stop(tabId?: string): BrowserNavState {
+    const tab = this.tabs.get(tabId?.trim() || this.activeTabId);
+    if (tab) {
+      tab.view.webContents.stop();
+      tab.state = { ...tab.state, loading: false };
+      return this.emitSnapshot();
     }
-    return this.state;
+    return this.buildSnapshot();
   }
 
-  async getPageContext(): Promise<BrowserPageContext | null> {
-    if (!this.view) return null;
-    const wc = this.view.webContents;
+  async getPageContext(tabId?: string): Promise<BrowserPageContext | null> {
+    const tab = this.tabs.get(tabId?.trim() || this.activeTabId);
+    if (!tab) return null;
+    const wc = tab.view.webContents;
     const url = wc.getURL();
     if (!url) return null;
     try {
@@ -242,25 +483,117 @@ export class EmbeddedBrowserManager {
     }
   }
 
-  destroy(): void {
-    const view = this.view;
-    const win = this.hostWindow;
-    this.view = null;
-    this.hostWindow = null;
-    this.state = emptyNavState();
-    if (!view) return;
+  async getStorageSummary(): Promise<BrowserStorageSummary> {
     try {
-      if (win && !win.isDestroyed()) {
-        win.contentView.removeChildView(view);
+      const cookies = await session.fromPartition(BROWSER_PERSIST_PARTITION).cookies.get({});
+      const domainCounts = new Map<string, number>();
+      for (const c of cookies) {
+        const domain = (c.domain || "").replace(/^\.+/, "").toLowerCase();
+        if (!domain) continue;
+        domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
       }
+      const sites = Array.from(domainCounts.entries())
+        .map(([domain, cookieCount]) => ({ domain, cookieCount }))
+        .sort((a, b) => b.cookieCount - a.cookieCount || a.domain.localeCompare(b.domain));
+      return {
+        persistSession: this.persistSession,
+        totalCookies: cookies.length,
+        sites,
+      };
+    } catch {
+      return {
+        persistSession: this.persistSession,
+        totalCookies: 0,
+        sites: [],
+      };
+    }
+  }
+
+  async setPersistSession(persist: boolean): Promise<BrowserStorageSummary> {
+    const next = Boolean(persist);
+    if (next !== this.persistSession) {
+      this.persistSession = next;
+      writePersistSessionPref(next);
+      this.destroy();
+      this.emitSnapshot();
+    }
+    return this.getStorageSummary();
+  }
+
+  async clearDomainCookies(domain: string): Promise<BrowserStorageSummary> {
+    const target = domain.trim().replace(/^\.+/, "").toLowerCase();
+    if (!target) return this.getStorageSummary();
+    try {
+      const sess = session.fromPartition(BROWSER_PERSIST_PARTITION);
+      const all = await sess.cookies.get({});
+      for (const c of all) {
+        const normalized = (c.domain || "").replace(/^\.+/, "").toLowerCase();
+        if (normalized === target || normalized.endsWith(`.${target}`)) {
+          const scheme = c.secure ? "https" : "http";
+          const host = (c.domain || target).replace(/^\.+/, "");
+          const cookiePath = c.path || "/";
+          await sess.cookies.remove(`${scheme}://${host}${cookiePath}`, c.name).catch(() => void 0);
+        }
+      }
+      await sess.cookies.flushStore();
     } catch {
       void 0;
     }
+    return this.getStorageSummary();
+  }
+
+  async clearCache(): Promise<void> {
     try {
-      const wc = view.webContents as unknown as { close?: () => void };
-      wc.close?.();
+      await session.fromPartition(BROWSER_PERSIST_PARTITION).clearCache();
+      await session.fromPartition(BROWSER_EPHEMERAL_PARTITION).clearCache();
     } catch {
       void 0;
+    }
+  }
+
+  async clearAllData(): Promise<BrowserStorageSummary> {
+    try {
+      const sess = session.fromPartition(BROWSER_PERSIST_PARTITION);
+      await sess.clearStorageData();
+      await sess.clearCache();
+      await sess.cookies.flushStore();
+      await session.fromPartition(BROWSER_EPHEMERAL_PARTITION).clearStorageData();
+    } catch {
+      void 0;
+    }
+    return this.getStorageSummary();
+  }
+
+  async flushCookies(): Promise<void> {
+    try {
+      await session.fromPartition(BROWSER_PERSIST_PARTITION).cookies.flushStore();
+    } catch {
+      void 0;
+    }
+  }
+
+  destroy(): void {
+    const win = this.hostWindow;
+    const allTabs = Array.from(this.tabs.values());
+    this.tabs.clear();
+    this.tabOrder = [];
+    this.activeTabId = "";
+    this.hostWindow = null;
+    this.visible = false;
+    for (const tab of allTabs) {
+      try {
+        if (win && !win.isDestroyed()) {
+          win.contentView.removeChildView(tab.view);
+        }
+      } catch {
+        void 0;
+      }
+      try {
+        const wc = tab.view.webContents as unknown as { close?: () => void };
+        wc.close?.();
+      } catch {
+        void 0;
+      }
     }
   }
 }

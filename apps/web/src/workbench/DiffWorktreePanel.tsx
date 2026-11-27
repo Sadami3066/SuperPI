@@ -1,20 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   IconArrowBackUp,
-  IconCheck,
   IconExternalLink,
   IconGitBranch,
   IconGitCommit,
-  IconGitFork,
   IconGitMerge,
   IconMinus,
   IconPlus,
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
-import { formatClockTime } from "../api/mappers";
 import type {
-  HostCheckpointDto,
   HostGitSummaryResponse,
   HostWorktreeDiffResponse,
   HostWorktreeDto,
@@ -29,9 +25,6 @@ import {
   Button,
   Card,
   ConfirmDialog,
-  ContextMenu,
-  ContextMenuItem,
-  ContextMenuSeparator,
   IconButton,
   Input,
   Select,
@@ -43,8 +36,18 @@ import {
 import { parseUnifiedDiff } from "./diffParser";
 import type { WorkbenchPanelContext } from "./registry";
 
+const INITIAL_FILES_LIMIT = 100;
+const AUTO_ALL_DIFF_FILE_LIMIT = 40;
+const INITIAL_DIFF_LINES_LIMIT = 400;
+
 function DiffCodeView({ diffText, truncated }: { diffText: string; truncated?: boolean }) {
   const { t } = useI18n();
+  const [maxLines, setMaxLines] = useState(INITIAL_DIFF_LINES_LIMIT);
+
+  useEffect(() => {
+    setMaxLines(INITIAL_DIFF_LINES_LIMIT);
+  }, [diffText]);
+
   const parsed = useMemo(() => parseUnifiedDiff(diffText), [diffText]);
 
   if (!diffText.trim()) {
@@ -53,6 +56,12 @@ function DiffCodeView({ diffText, truncated }: { diffText: string; truncated?: b
         {t("git.diffEmpty")}
       </div>
     );
+  }
+
+  let remainingLines = maxLines;
+  let totalLines = 0;
+  for (const f of parsed) {
+    for (const h of f.hunks) totalLines += h.lines.length;
   }
 
   return (
@@ -65,99 +74,119 @@ function DiffCodeView({ diffText, truncated }: { diffText: string; truncated?: b
           {t("git.diffTruncated")}
         </div>
       )}
-      {parsed.map((file, idx) => (
-        <div
-          key={`${file.displayPath}-${idx}`}
-          className="overflow-hidden rounded-[10px]"
-          style={{
-            background: "var(--pi-surface)",
-            border: "0.5px solid var(--pi-hairline)",
-          }}
-        >
+      {parsed.map((file, idx) => {
+        if (remainingLines <= 0) return null;
+        return (
           <div
-            className="flex items-center justify-between gap-2 px-3 py-1.5 text-[12px]"
+            key={`${file.displayPath}-${idx}`}
+            className="overflow-hidden rounded-[10px]"
             style={{
-              background: "var(--pi-code-bg)",
-              borderBottom: "0.5px solid var(--pi-hairline)",
+              background: "var(--pi-surface)",
+              border: "0.5px solid var(--pi-hairline)",
             }}
           >
-            <span
-              className="truncate font-medium"
-              style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink)" }}
+            <div
+              className="flex items-center justify-between gap-2 px-3 py-1.5 text-[12px]"
+              style={{
+                background: "var(--pi-code-bg)",
+                borderBottom: "0.5px solid var(--pi-hairline)",
+              }}
             >
-              {file.displayPath}
-            </span>
-            <span className="shrink-0 text-[11px] tabular-nums">
-              <span style={{ color: "var(--pi-success)" }}>+{file.additions}</span>{" "}
-              <span style={{ color: "var(--pi-danger)" }}>-{file.deletions}</span>
-            </span>
-          </div>
+              <span
+                className="truncate font-medium"
+                style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink)" }}
+              >
+                {file.displayPath}
+              </span>
+              <span className="shrink-0 text-[11px] tabular-nums">
+                <span style={{ color: "var(--pi-success)" }}>+{file.additions}</span>{" "}
+                <span style={{ color: "var(--pi-danger)" }}>-{file.deletions}</span>
+              </span>
+            </div>
 
-          {file.isBinary ? (
-            <div className="px-3 py-2 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              Binary file
-            </div>
-          ) : (
-            <div data-scrollable className="overflow-x-auto text-[11.5px] leading-[1.55]">
-              {file.hunks.map((hunk, hIdx) => (
-                <div key={hIdx}>
-                  <div
-                    className="px-3 py-0.5"
-                    style={{
-                      background: "var(--pi-wash)",
-                      color: "var(--pi-ink-tertiary)",
-                      fontFamily: "var(--pi-font-mono)",
-                    }}
-                  >
-                    {hunk.header}
-                  </div>
-                  {hunk.lines.map((line, lIdx) => {
-                    const bg =
-                      line.kind === "add"
-                        ? "color-mix(in srgb, var(--pi-success) 13%, transparent)"
-                        : line.kind === "del"
-                          ? "color-mix(in srgb, var(--pi-danger) 13%, transparent)"
-                          : "transparent";
-                    const fg =
-                      line.kind === "add"
-                        ? "var(--pi-success)"
-                        : line.kind === "del"
-                          ? "var(--pi-danger)"
-                          : "var(--pi-ink)";
-                    const prefix = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
-                    return (
+            {file.isBinary ? (
+              <div className="px-3 py-2 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                Binary file
+              </div>
+            ) : (
+              <div data-scrollable className="overflow-x-auto text-[11.5px] leading-[1.55]">
+                {file.hunks.map((hunk, hIdx) => {
+                  if (remainingLines <= 0) return null;
+                  const slice = hunk.lines.slice(0, remainingLines);
+                  remainingLines -= slice.length;
+                  return (
+                    <div key={hIdx}>
                       <div
-                        key={lIdx}
-                        className="flex px-2 whitespace-pre"
-                        style={{ background: bg, fontFamily: "var(--pi-font-mono)" }}
+                        className="px-3 py-0.5"
+                        style={{
+                          background: "var(--pi-wash)",
+                          color: "var(--pi-ink-tertiary)",
+                          fontFamily: "var(--pi-font-mono)",
+                        }}
                       >
-                        <span
-                          className="w-9 shrink-0 pr-2 text-right select-none"
-                          style={{ color: "var(--pi-ink-tertiary)", opacity: 0.65 }}
-                        >
-                          {line.oldLine ?? ""}
-                        </span>
-                        <span
-                          className="w-9 shrink-0 pr-2 text-right select-none"
-                          style={{ color: "var(--pi-ink-tertiary)", opacity: 0.65 }}
-                        >
-                          {line.newLine ?? ""}
-                        </span>
-                        <span className="w-4 shrink-0 select-none" style={{ color: fg }}>
-                          {prefix}
-                        </span>
-                        <span style={{ color: line.kind === "meta" ? "var(--pi-ink-tertiary)" : "var(--pi-ink)" }}>
-                          {line.text}
-                        </span>
+                        {hunk.header}
                       </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          )}
+                      {slice.map((line, lIdx) => {
+                        const bg =
+                          line.kind === "add"
+                            ? "color-mix(in srgb, var(--pi-success) 13%, transparent)"
+                            : line.kind === "del"
+                              ? "color-mix(in srgb, var(--pi-danger) 13%, transparent)"
+                              : "transparent";
+                        const fg =
+                          line.kind === "add"
+                            ? "var(--pi-success)"
+                            : line.kind === "del"
+                              ? "var(--pi-danger)"
+                              : "var(--pi-ink)";
+                        const prefix = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
+                        return (
+                          <div
+                            key={lIdx}
+                            className="flex px-2 whitespace-pre"
+                            style={{ background: bg, fontFamily: "var(--pi-font-mono)" }}
+                          >
+                            <span
+                              className="w-9 shrink-0 pr-2 text-right select-none"
+                              style={{ color: "var(--pi-ink-tertiary)", opacity: 0.65 }}
+                            >
+                              {line.oldLine ?? ""}
+                            </span>
+                            <span
+                              className="w-9 shrink-0 pr-2 text-right select-none"
+                              style={{ color: "var(--pi-ink-tertiary)", opacity: 0.65 }}
+                            >
+                              {line.newLine ?? ""}
+                            </span>
+                            <span className="w-4 shrink-0 select-none" style={{ color: fg }}>
+                              {prefix}
+                            </span>
+                            <span
+                              style={{
+                                color: line.kind === "meta" ? "var(--pi-ink-tertiary)" : "var(--pi-ink)",
+                              }}
+                            >
+                              {line.text}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {totalLines > maxLines && (
+        <div className="flex justify-center pt-1">
+          <Button variant="secondary" size="sm" onClick={() => setMaxLines((n) => n + 600)}>
+            {t("git.showMoreLines", { count: totalLines - maxLines })}
+          </Button>
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -177,63 +206,97 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
 
   const [tab, setTab] = useState("changes");
   const [gitSummary, setGitSummary] = useState<HostGitSummaryResponse | null>(null);
+  const [fileQuery, setFileQuery] = useState("");
+  const [visibleFilesLimit, setVisibleFilesLimit] = useState(INITIAL_FILES_LIMIT);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [forceLoadAllDiff, setForceLoadAllDiff] = useState(false);
   const [diffText, setDiffText] = useState("");
   const [diffTruncated, setDiffTruncated] = useState(false);
+  const [loadingDiff, setLoadingDiff] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
   const [revertTarget, setRevertTarget] = useState<string | null>(null);
 
   const [worktrees, setWorktrees] = useState<HostWorktreeDto[]>([]);
-  const [wtLabel, setWtLabel] = useState("");
   const [wtDiff, setWtDiff] = useState<HostWorktreeDiffResponse | null>(null);
   const [wtDeleteTarget, setWtDeleteTarget] = useState<HostWorktreeDto | null>(null);
   const [conflicts, setConflicts] = useState<string[]>([]);
-
-  const [checkpoints, setCheckpoints] = useState<HostCheckpointDto[]>([]);
-  const [restoreBothTarget, setRestoreBothTarget] = useState<HostCheckpointDto | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
 
   const effectiveWtId = activeWtId ?? sessionSummary?.worktreeId ?? null;
 
-  const refreshChanges = useCallback(async () => {
+  const refreshSummary = useCallback(async () => {
     if (!client || !bot || bot.isRemote) return;
     setBusy(true);
     try {
-      const [sum, diffRes, wtList] = await Promise.all([
+      const [sum, wtList] = await Promise.all([
         client.getGitSummary(bot.id, effectiveWtId),
-        client.getGitDiff(bot.id, { path: selectedFile, worktreeId: effectiveWtId }),
         client.listWorktrees(bot.id),
       ]);
       setGitSummary(sum);
-      setDiffText(diffRes.diff);
-      setDiffTruncated(diffRes.truncated);
       setWorktrees(wtList);
     } catch (err) {
       setFeedback({ tone: "err", text: err instanceof Error ? err.message : "Failed" });
     } finally {
       setBusy(false);
     }
-  }, [bot, client, effectiveWtId, selectedFile]);
+  }, [bot, client, effectiveWtId]);
 
-  const refreshCheckpoints = useCallback(async () => {
-    if (!client || !activeSessionId || bot?.isRemote) return;
-    try {
-      const list = await client.listCheckpoints(activeSessionId);
-      setCheckpoints(list);
-    } catch {
-      setCheckpoints([]);
+  useEffect(() => {
+    setVisibleFilesLimit(INITIAL_FILES_LIMIT);
+    setForceLoadAllDiff(false);
+    setSelectedFile(null);
+    void refreshSummary();
+  }, [refreshSummary]);
+
+  const fileCount = gitSummary?.files.length ?? 0;
+  const deferLargeAllDiff =
+    selectedFile === null && fileCount > AUTO_ALL_DIFF_FILE_LIMIT && !forceLoadAllDiff;
+
+  useEffect(() => {
+    if (!client || !bot || bot.isRemote || !gitSummary?.isGitRepo) {
+      setDiffText("");
+      setDiffTruncated(false);
+      return;
     }
-  }, [activeSessionId, bot?.isRemote, client]);
+    if (fileCount === 0 || deferLargeAllDiff) {
+      setDiffText("");
+      setDiffTruncated(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingDiff(true);
+    void client
+      .getGitDiff(bot.id, { path: selectedFile, worktreeId: effectiveWtId })
+      .then((res) => {
+        if (cancelled) return;
+        setDiffText(res.diff);
+        setDiffTruncated(res.truncated);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setFeedback({ tone: "err", text: err instanceof Error ? err.message : "Failed" });
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDiff(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bot, client, deferLargeAllDiff, effectiveWtId, fileCount, gitSummary?.isGitRepo, selectedFile]);
 
-  useEffect(() => {
-    void refreshChanges();
-  }, [refreshChanges]);
+  const filteredFiles = useMemo(() => {
+    const files = gitSummary?.files ?? [];
+    const q = fileQuery.trim().toLowerCase();
+    if (!q) return files;
+    return files.filter((f) => f.path.toLowerCase().includes(q));
+  }, [fileQuery, gitSummary?.files]);
 
-  useEffect(() => {
-    void refreshCheckpoints();
-  }, [refreshCheckpoints]);
+  const visibleFiles = useMemo(
+    () => filteredFiles.slice(0, visibleFilesLimit),
+    [filteredFiles, visibleFilesLimit],
+  );
 
   if (!bot) return null;
 
@@ -250,29 +313,6 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
     ...worktrees.map((w) => ({ value: w.id, label: `${w.branch} (${w.label})` })),
   ];
 
-  const handleCreateWorktree = async () => {
-    if (!client) return;
-    setBusy(true);
-    setFeedback(null);
-    try {
-      const res = await client.createWorktree(bot.id, {
-        label: wtLabel.trim(),
-        createSession: true,
-      });
-      setWtLabel("");
-      setBotWorktree(bot.id, res.worktree.id);
-      await refreshSessionLists(client, bots);
-      if (res.sessionId) {
-        await selectSession(client, res.sessionId, locale);
-      }
-      await refreshChanges();
-    } catch (err) {
-      setFeedback({ tone: "err", text: err instanceof Error ? err.message : "Failed" });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
@@ -284,17 +324,13 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
             <TabsList>
               <TabsTrigger value="changes">{t("git.tabChanges")}</TabsTrigger>
               <TabsTrigger value="worktrees">{t("git.tabWorktrees")}</TabsTrigger>
-              <TabsTrigger value="checkpoints">{t("git.tabCheckpoints")}</TabsTrigger>
             </TabsList>
 
             <IconButton
               size="sm"
               label={t("common.refresh")}
               disabled={busy}
-              onClick={() => {
-                void refreshChanges();
-                void refreshCheckpoints();
-              }}
+              onClick={() => void refreshSummary()}
             >
               <IconRefresh size={14} stroke={1.7} />
             </IconButton>
@@ -366,11 +402,11 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
               <>
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[12px]" style={{ color: "var(--pi-ink-secondary)" }}>
-                    {gitSummary.files.length === 0 ? (
+                    {fileCount === 0 ? (
                       t("git.cleanTree")
                     ) : (
                       <span>
-                        {gitSummary.files.length} files ·{" "}
+                        {fileCount} files ·{" "}
                         <span style={{ color: "var(--pi-success)" }}>
                           +{gitSummary.totalAdditions}
                         </span>{" "}
@@ -380,7 +416,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                       </span>
                     )}
                   </div>
-                  {gitSummary.files.length > 0 && (
+                  {fileCount > 0 && (
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
@@ -389,10 +425,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                           client &&
                           void client
                             .stageGitPath(bot.id, { all: true, worktreeId: effectiveWtId })
-                            .then((next) => {
-                              setGitSummary(next);
-                              void refreshChanges();
-                            })
+                            .then((next) => setGitSummary(next))
                             .catch((err) =>
                               setFeedback({
                                 tone: "err",
@@ -410,10 +443,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                           client &&
                           void client
                             .unstageGitPath(bot.id, { all: true, worktreeId: effectiveWtId })
-                            .then((next) => {
-                              setGitSummary(next);
-                              void refreshChanges();
-                            })
+                            .then((next) => setGitSummary(next))
                             .catch((err) =>
                               setFeedback({
                                 tone: "err",
@@ -428,7 +458,19 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                   )}
                 </div>
 
-                {gitSummary.files.length > 0 && (
+                {fileCount > 20 && (
+                  <Input
+                    value={fileQuery}
+                    onChange={(e) => {
+                      setFileQuery(e.target.value);
+                      setVisibleFilesLimit(INITIAL_FILES_LIMIT);
+                    }}
+                    placeholder={t("files.searchPlaceholder")}
+                    className="h-8 text-[12px]"
+                  />
+                )}
+
+                {fileCount > 0 && (
                   <Card className="divide-y divide-[var(--pi-hairline)] overflow-hidden">
                     <button
                       type="button"
@@ -442,122 +484,104 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                       <span>{t("git.allChanges")}</span>
                     </button>
 
-                    {gitSummary.files.map((f) => {
-                      const active = selectedFile === f.path;
-                      const badgeLabel = f.workTreeStatus || f.indexStatus || "M";
-                      const handleToggleStage = () => {
-                        if (!client) return;
-                        const op = f.staged
-                          ? client.unstageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
-                          : client.stageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId });
-                        void op
-                          .then((next) => {
-                            setGitSummary(next);
-                            void refreshChanges();
-                          })
-                          .catch((err) =>
-                            setFeedback({
-                              tone: "err",
-                              text: err instanceof Error ? err.message : "Failed",
-                            }),
-                          );
-                      };
-                      return (
-                        <ContextMenu
-                          key={f.path}
-                          trigger={
-                            <div
-                              className="group flex items-center gap-2 px-3 py-1.5 text-[12px]"
-                              style={{ background: active ? "var(--pi-wash)" : "transparent" }}
+                    <div className="max-h-[280px] divide-y divide-[var(--pi-hairline)] overflow-y-auto">
+                      {visibleFiles.map((f) => {
+                        const active = selectedFile === f.path;
+                        const badgeLabel = f.workTreeStatus || f.indexStatus || "M";
+                        const handleToggleStage = () => {
+                          if (!client) return;
+                          const op = f.staged
+                            ? client.unstageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId })
+                            : client.stageGitPath(bot.id, { path: f.path, worktreeId: effectiveWtId });
+                          void op
+                            .then((next) => setGitSummary(next))
+                            .catch((err) =>
+                              setFeedback({
+                                tone: "err",
+                                text: err instanceof Error ? err.message : "Failed",
+                              }),
+                            );
+                        };
+                        return (
+                          <div
+                            key={f.path}
+                            className="group flex items-center gap-2 px-3 py-1.5 text-[12px]"
+                            style={{ background: active ? "var(--pi-wash)" : "transparent" }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setSelectedFile(f.path)}
+                              className="flex min-w-0 flex-1 items-center gap-2 text-left"
                             >
-                              <button
-                                type="button"
-                                onClick={() => setSelectedFile(f.path)}
-                                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                              <span
+                                className="w-4 shrink-0 text-center text-[11px] font-semibold"
+                                style={{
+                                  fontFamily: "var(--pi-font-mono)",
+                                  color: f.staged ? "var(--pi-success)" : "var(--pi-warning)",
+                                }}
                               >
-                                <span
-                                  className="w-4 shrink-0 text-center text-[11px] font-semibold"
-                                  style={{
-                                    fontFamily: "var(--pi-font-mono)",
-                                    color: f.staged ? "var(--pi-success)" : "var(--pi-warning)",
-                                  }}
-                                >
-                                  {badgeLabel}
-                                </span>
-                                <span
-                                  className="min-w-0 flex-1 truncate"
-                                  style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink)" }}
-                                >
-                                  {f.path}
-                                </span>
-                              </button>
-
-                              <span className="shrink-0 text-[11px] tabular-nums">
-                                <span style={{ color: "var(--pi-success)" }}>+{f.additions}</span>{" "}
-                                <span style={{ color: "var(--pi-danger)" }}>-{f.deletions}</span>
+                                {badgeLabel}
                               </span>
+                              <span
+                                className="min-w-0 flex-1 truncate"
+                                style={{ fontFamily: "var(--pi-font-mono)", color: "var(--pi-ink)" }}
+                              >
+                                {f.path}
+                              </span>
+                            </button>
 
-                              <div className="flex shrink-0 items-center gap-0.5">
-                                {f.staged ? (
-                                  <IconButton
-                                    size="sm"
-                                    label={t("git.unstage")}
-                                    onClick={handleToggleStage}
-                                  >
-                                    <IconMinus size={13} />
-                                  </IconButton>
-                                ) : (
-                                  <IconButton
-                                    size="sm"
-                                    label={t("git.stage")}
-                                    onClick={handleToggleStage}
-                                  >
-                                    <IconPlus size={13} />
-                                  </IconButton>
-                                )}
+                            <span className="shrink-0 text-[11px] tabular-nums">
+                              <span style={{ color: "var(--pi-success)" }}>+{f.additions}</span>{" "}
+                              <span style={{ color: "var(--pi-danger)" }}>-{f.deletions}</span>
+                            </span>
+
+                            <div className="flex shrink-0 items-center gap-0.5">
+                              {f.staged ? (
                                 <IconButton
                                   size="sm"
-                                  label={t("git.revert")}
-                                  onClick={() => setRevertTarget(f.path)}
+                                  label={t("git.unstage")}
+                                  onClick={handleToggleStage}
                                 >
-                                  <IconArrowBackUp size={13} />
+                                  <IconMinus size={13} />
                                 </IconButton>
-                              </div>
+                              ) : (
+                                <IconButton
+                                  size="sm"
+                                  label={t("git.stage")}
+                                  onClick={handleToggleStage}
+                                >
+                                  <IconPlus size={13} />
+                                </IconButton>
+                              )}
+                              <IconButton
+                                size="sm"
+                                label={t("git.revert")}
+                                onClick={() => setRevertTarget(f.path)}
+                              >
+                                <IconArrowBackUp size={13} />
+                              </IconButton>
                             </div>
-                          }
-                        >
-                          <ContextMenuItem
-                            label={t("preview.modePreview")}
-                            onSelect={() =>
-                              useWorkbenchStore.getState().openFileInPreview({
-                                source: "workspace",
-                                botId: bot.id,
-                                path: f.path,
-                                name: f.path.split("/").pop() || f.path,
-                              })
-                            }
-                          />
-                          <ContextMenuItem
-                            label={f.staged ? t("git.unstage") : t("git.stage")}
-                            onSelect={handleToggleStage}
-                          />
-                          <ContextMenuItem
-                            label={t("files.copyPath")}
-                            onSelect={() => void navigator.clipboard?.writeText(f.path)}
-                          />
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            danger
-                            label={t("git.revert")}
-                            onSelect={() => setRevertTarget(f.path)}
-                          />
-                        </ContextMenu>
-                      );
-                    })}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {filteredFiles.length > visibleFilesLimit && (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleFilesLimit((n) => n + 200)}
+                        className="w-full py-2 text-center text-[12px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                        style={{ color: "var(--pi-accent)" }}
+                      >
+                        {t("git.showMoreFiles", {
+                          count: filteredFiles.length - visibleFilesLimit,
+                        })}
+                      </button>
+                    )}
                   </Card>
                 )}
 
-                {gitSummary.files.length > 0 && (
+                {fileCount > 0 && (
                   <form
                     className="flex items-center gap-2"
                     onSubmit={(e) => {
@@ -573,7 +597,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                         .then((r) => {
                           setCommitMsg("");
                           setFeedback({ tone: "ok", text: r.message });
-                          void refreshChanges();
+                          void refreshSummary();
                         })
                         .catch((err) =>
                           setFeedback({
@@ -602,7 +626,28 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                   </form>
                 )}
 
-                <DiffCodeView diffText={diffText} truncated={diffTruncated} />
+                {deferLargeAllDiff ? (
+                  <Card className="space-y-2.5 p-4 text-center">
+                    <div className="text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
+                      {t("git.largeDiffHint", { count: fileCount })}
+                    </div>
+                    <div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setForceLoadAllDiff(true)}
+                      >
+                        {t("git.loadAllDiff")}
+                      </Button>
+                    </div>
+                  </Card>
+                ) : loadingDiff ? (
+                  <div className="py-8 text-center text-[12.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {t("common.loading")}
+                  </div>
+                ) : (
+                  <DiffCodeView diffText={diffText} truncated={diffTruncated} />
+                )}
               </>
             )}
           </div>
@@ -610,19 +655,6 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
 
         {tab === "worktrees" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Input
-                value={wtLabel}
-                onChange={(e) => setWtLabel(e.target.value)}
-                placeholder={t("wt.createPlaceholder")}
-                className="h-8 text-[12.5px]"
-              />
-              <Button variant="primary" size="sm" disabled={busy} onClick={() => void handleCreateWorktree()}>
-                <IconPlus size={14} />
-                <span>{t("wt.createBtn")}</span>
-              </Button>
-            </div>
-
             {conflicts.length > 0 && (
               <Card className="space-y-1 p-3">
                 <div className="text-[12.5px] font-semibold" style={{ color: "var(--pi-danger)" }}>
@@ -709,7 +741,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                             .applyWorktree(wt.id)
                             .then((res) => {
                               setFeedback({ tone: "ok", text: res.message });
-                              void refreshChanges();
+                              void refreshSummary();
                             })
                             .catch((e) =>
                               setFeedback({
@@ -748,88 +780,6 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
             )}
           </div>
         )}
-
-        {tab === "checkpoints" && (
-          <div className="space-y-3">
-            {activeSessionId && (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  if (!client) return;
-                  void client
-                    .forkSession(activeSessionId)
-                    .then(async (res) => {
-                      await refreshSessionLists(client, bots);
-                      await selectSession(client, res.sessionId, locale);
-                    })
-                    .catch((e) =>
-                      setFeedback({
-                        tone: "err",
-                        text: e instanceof Error ? e.message : "Fork failed",
-                      }),
-                    );
-                }}
-              >
-                <IconGitFork size={14} />
-                <span>{t("cp.forkBtn")}</span>
-              </Button>
-            )}
-
-            {checkpoints.length === 0 ? (
-              <div className="py-10 text-center text-[12.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                {t("cp.empty")}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {checkpoints.map((cp) => (
-                  <Card key={cp.id} className="space-y-2 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[13px] font-medium" style={{ color: "var(--pi-ink)" }}>
-                        {cp.label}
-                      </span>
-                      <span className="shrink-0 text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                        {formatClockTime(cp.createdAt, locale)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          if (!client || !activeSessionId) return;
-                          void client
-                            .restoreCheckpoint(activeSessionId, cp.id, "files_only")
-                            .then((res) => {
-                              setFeedback({ tone: "ok", text: res.message });
-                              void refreshChanges();
-                            })
-                            .catch((e) =>
-                              setFeedback({
-                                tone: "err",
-                                text: e instanceof Error ? e.message : "Restore failed",
-                              }),
-                            );
-                        }}
-                      >
-                        <IconCheck size={13} />
-                        <span>{t("cp.restoreFiles")}</span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setRestoreBothTarget(cp)}
-                      >
-                        {t("cp.restoreBoth")}
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <ConfirmDialog
@@ -845,7 +795,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
           if (!client || !revertTarget) return;
           void client
             .revertGitPath(bot.id, { path: revertTarget, worktreeId: effectiveWtId })
-            .then(() => refreshChanges())
+            .then(() => refreshSummary())
             .catch((e) =>
               setFeedback({ tone: "err", text: e instanceof Error ? e.message : "Revert failed" }),
             );
@@ -868,36 +818,10 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
             .then(async () => {
               if (activeWtId === wtDeleteTarget.id) setBotWorktree(bot.id, null);
               await refreshSessionLists(client, bots);
-              await refreshChanges();
+              await refreshSummary();
             })
             .catch((e) =>
               setFeedback({ tone: "err", text: e instanceof Error ? e.message : "Delete failed" }),
-            );
-        }}
-      />
-
-      <ConfirmDialog
-        open={Boolean(restoreBothTarget)}
-        onOpenChange={(v) => {
-          if (!v) setRestoreBothTarget(null);
-        }}
-        title={t("cp.restoreBoth")}
-        description={t("cp.restoreBothConfirm", { label: restoreBothTarget?.label ?? "" })}
-        confirmLabel={t("common.confirm")}
-        cancelLabel={t("common.cancel")}
-        onConfirm={() => {
-          if (!client || !activeSessionId || !restoreBothTarget) return;
-          void client
-            .restoreCheckpoint(activeSessionId, restoreBothTarget.id, "files_and_chat")
-            .then((res) => {
-              setFeedback({ tone: "ok", text: res.message });
-              void useSessionStore.getState().loadSession(client, activeSessionId, locale);
-            })
-            .catch((e) =>
-              setFeedback({
-                tone: "err",
-                text: e instanceof Error ? e.message : "Restore failed",
-              }),
             );
         }}
       />

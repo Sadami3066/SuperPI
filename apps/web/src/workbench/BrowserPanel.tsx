@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -11,7 +11,7 @@ import {
 import { PiMascot } from "../features/shared/BrandAssets";
 import { useI18n } from "../i18n";
 import {
-  type BrowserNavState,
+  type BrowserTabState,
   browserBack,
   browserForward,
   browserGetPageContext,
@@ -30,9 +30,11 @@ import { useWorkbenchStore } from "../stores/workbenchStore";
 import { Button, IconButton, Input } from "../ui";
 import type { WorkbenchPanelContext } from "./registry";
 
-const EMPTY_STATE: BrowserNavState = {
+const EMPTY_TAB: BrowserTabState = {
+  id: "",
   url: "",
   title: "",
+  favicon: "",
   loading: false,
   canGoBack: false,
   canGoForward: false,
@@ -46,63 +48,148 @@ const QUICK_BOOKMARKS = [
   { label: "localhost:5173", url: "http://localhost:5173" },
 ];
 
+function tabDisplayLabel(title: string, url: string, fallback: string): string {
+  if (title.trim()) return title.trim();
+  if (url) {
+    try {
+      return new URL(url).hostname || url;
+    } catch {
+      return url;
+    }
+  }
+  return fallback;
+}
+
+function resolveUserBrowserInput(
+  raw: string,
+  engine: "google" | "bing" | "duckduckgo" | "baidu",
+): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ||
+    /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/.*)?$/i.test(trimmed) ||
+    (!/\s/.test(trimmed) && /^[^/\s]+\.[a-zA-Z]{2,}(:\d+)?(\/.*)?$/.test(trimmed))
+  ) {
+    return trimmed;
+  }
+  const encoded = encodeURIComponent(trimmed);
+  switch (engine) {
+    case "bing":
+      return `https://www.bing.com/search?q=${encoded}`;
+    case "duckduckgo":
+      return `https://duckduckgo.com/?q=${encoded}`;
+    case "baidu":
+      return `https://www.baidu.com/s?wd=${encoded}`;
+    default:
+      return `https://www.google.com/search?q=${encoded}`;
+  }
+}
+
 export default function BrowserPanel({ context }: { context: WorkbenchPanelContext }) {
   const { t } = useI18n();
   const dark = useSettingsStore((s) => s.dark);
+  const searchEngine = useSettingsStore((s) => s.browserSearchEngine);
 
   const workbenchOpen = useWorkbenchStore((s) => s.open);
   const activePanelId = useWorkbenchStore((s) => s.activePanelId);
   const overlayCount = useWorkbenchStore((s) => s.overlayCount);
+  const updateTabTitle = useWorkbenchStore((s) => s.updateTabTitle);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId) || context.sessionId || "";
   const setComposerText = useSessionStore((s) => s.setComposerText);
 
-  const [navState, setNavState] = useState<BrowserNavState>(EMPTY_STATE);
-  const [urlInput, setUrlInput] = useState("");
-  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const myTabId = context.tabId || "browser-default";
+  const initialPayloadUrl =
+    typeof context.payload?.url === "string" ? context.payload.url.trim() : "";
 
-  const shouldShowView =
-    workbenchOpen && activePanelId === "browser" && overlayCount === 0 && Boolean(navState.url);
+  const [tabState, setTabState] = useState<BrowserTabState>({
+    ...EMPTY_TAB,
+    id: myTabId,
+    url: initialPayloadUrl,
+  });
+  const [urlInput, setUrlInput] = useState(initialPayloadUrl);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const initialNavDoneRef = useRef(false);
+
+  const isTabVisible =
+    context.isActiveTab !== undefined
+      ? context.isActiveTab
+      : workbenchOpen && activePanelId === "browser";
+  const shouldShowView = isTabVisible && overlayCount === 0 && Boolean(tabState.url);
+
+  const getViewportBounds = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) return null;
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  }, []);
+
+  const syncFromNavSnapshot = useCallback(
+    (snapshot: { tabs?: BrowserTabState[] } | null) => {
+      if (!snapshot?.tabs) return;
+      const mine = snapshot.tabs.find((x) => x.id === myTabId);
+      if (!mine) return;
+      setTabState(mine);
+      setUrlInput(mine.url || "");
+      const label = tabDisplayLabel(mine.title, mine.url, t("wb.browserTitle"));
+      if (context.tabId) {
+        updateTabTitle(context.tabId, label);
+      }
+    },
+    [context.tabId, myTabId, t, updateTabTitle],
+  );
 
   useEffect(() => {
     const unsubscribe = subscribeBrowserState((next) => {
-      setNavState(next);
-      if (next.url) {
-        setUrlInput(next.url);
-      }
+      syncFromNavSnapshot(next);
     });
     return () => {
       unsubscribe();
-      void browserHide();
+      void browserHide(myTabId);
     };
-  }, []);
+  }, [myTabId, syncFromNavSnapshot]);
+
+  useEffect(() => {
+    if (!initialPayloadUrl || initialNavDoneRef.current || !isTabVisible) return;
+    initialNavDoneRef.current = true;
+    const resolved = resolveUserBrowserInput(initialPayloadUrl, searchEngine);
+    if (!resolved) return;
+    const bounds = getViewportBounds() ?? { x: 0, y: 0, width: 480, height: 480 };
+    void browserMount(bounds, resolved, myTabId).then(syncFromNavSnapshot);
+  }, [
+    getViewportBounds,
+    initialPayloadUrl,
+    isTabVisible,
+    myTabId,
+    searchEngine,
+    syncFromNavSnapshot,
+  ]);
 
   useEffect(() => {
     const el = viewportRef.current;
     if (!el || !shouldShowView) {
-      void browserHide();
+      void browserHide(myTabId);
       return undefined;
     }
 
     let boundsRaf: number | null = null;
     const syncBounds = (mountInitially: boolean) => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 40 || rect.height < 40) return;
-      const bounds = {
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      };
+      const bounds = getViewportBounds();
+      if (!bounds) return;
       if (mountInitially) {
-        void browserMount(bounds).then((state) => {
-          if (state) setNavState(state);
-        });
+        void browserMount(bounds, undefined, myTabId).then(syncFromNavSnapshot);
       } else {
         if (boundsRaf !== null) cancelAnimationFrame(boundsRaf);
         boundsRaf = requestAnimationFrame(() => {
           boundsRaf = null;
-          void browserSetBounds(bounds);
+          void browserSetBounds(bounds, myTabId);
         });
       }
     };
@@ -117,43 +204,36 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
       if (boundsRaf !== null) cancelAnimationFrame(boundsRaf);
       ro.disconnect();
       window.removeEventListener("resize", onResize);
-      void browserHide();
+      void browserHide(myTabId);
     };
-  }, [shouldShowView]);
+  }, [getViewportBounds, myTabId, shouldShowView, syncFromNavSnapshot]);
 
   const navigateTo = async (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed) return;
+    const resolved = resolveUserBrowserInput(raw, searchEngine);
+    if (!resolved) return;
     if (shouldShowView) {
-      const next = await browserNavigate(trimmed);
-      if (next) setNavState(next);
+      const next = await browserNavigate(resolved, myTabId);
+      syncFromNavSnapshot(next);
       return;
     }
-    const el = viewportRef.current;
-    if (el) {
-      const rect = el.getBoundingClientRect();
-      const mounted = await browserMount(
-        {
-          x: Math.round(rect.left),
-          y: Math.round(rect.top),
-          width: Math.max(120, Math.round(rect.width)),
-          height: Math.max(120, Math.round(rect.height)),
-        },
-        trimmed,
-      );
-      if (mounted) setNavState(mounted);
-    }
+    const bounds = getViewportBounds() ?? { x: 0, y: 0, width: 480, height: 480 };
+    const mounted = await browserMount(bounds, resolved, myTabId);
+    syncFromNavSnapshot(mounted);
   };
 
   const handleQuotePage = async () => {
-    const ctx = await browserGetPageContext();
-    if (!ctx || !activeSessionId) return;
+    const ctx = await browserGetPageContext(myTabId);
+    if (!ctx) return;
+    const sessionState = useSessionStore.getState();
+    const targetKey =
+      activeSessionId || (sessionState.draftBotId ? `__draft__:${sessionState.draftBotId}` : "");
+    if (!targetKey) return;
     const snippet = ctx.text.trim().slice(0, 1200);
     const header = ctx.title ? `[${ctx.title}](${ctx.url})` : ctx.url;
     const formatted = snippet ? `${header}\n\n${snippet}` : header;
-    const current = useSessionStore.getState().composerTextBySession[activeSessionId] ?? "";
+    const current = sessionState.composerTextBySession[targetKey] ?? "";
     const next = current ? `${current.trimEnd()}\n\n${formatted}\n` : `${formatted}\n`;
-    setComposerText(activeSessionId, next);
+    setComposerText(targetKey, next);
   };
 
   return (
@@ -165,8 +245,8 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
         <IconButton
           size="sm"
           label={t("browser.back")}
-          disabled={!navState.canGoBack}
-          onClick={() => void browserBack().then((s) => s && setNavState(s))}
+          disabled={!tabState.canGoBack}
+          onClick={() => void browserBack(myTabId).then(syncFromNavSnapshot)}
         >
           <IconArrowLeft size={14.5} stroke={1.7} />
         </IconButton>
@@ -174,21 +254,23 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
         <IconButton
           size="sm"
           label={t("browser.forward")}
-          disabled={!navState.canGoForward}
-          onClick={() => void browserForward().then((s) => s && setNavState(s))}
+          disabled={!tabState.canGoForward}
+          onClick={() => void browserForward(myTabId).then(syncFromNavSnapshot)}
         >
           <IconArrowRight size={14.5} stroke={1.7} />
         </IconButton>
 
         <IconButton
           size="sm"
-          label={navState.loading ? t("browser.stop") : t("browser.reload")}
-          disabled={!navState.url}
+          label={tabState.loading ? t("browser.stop") : t("browser.reload")}
+          disabled={!tabState.url}
           onClick={() =>
-            void (navState.loading ? browserStop() : browserReload()).then((s) => s && setNavState(s))
+            void (tabState.loading ? browserStop(myTabId) : browserReload(myTabId)).then(
+              syncFromNavSnapshot,
+            )
           }
         >
-          {navState.loading ? (
+          {tabState.loading ? (
             <IconX size={14.5} stroke={1.7} />
           ) : (
             <IconRefresh size={14.5} stroke={1.7} />
@@ -213,7 +295,7 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
         <IconButton
           size="sm"
           label={t("browser.sendToChat")}
-          disabled={!navState.url || !activeSessionId}
+          disabled={!tabState.url}
           onClick={() => void handleQuotePage()}
         >
           <IconMessageForward size={14.5} stroke={1.7} />
@@ -222,21 +304,21 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
         <IconButton
           size="sm"
           label={t("browser.openExternal")}
-          disabled={!navState.url}
+          disabled={!tabState.url}
           onClick={() => {
-            if (navState.url) void openExternalUrl(navState.url);
+            if (tabState.url) void openExternalUrl(tabState.url);
           }}
         >
           <IconExternalLink size={14.5} stroke={1.7} />
         </IconButton>
       </div>
 
-      {navState.error && (
+      {tabState.error && (
         <div
           className="shrink-0 px-3 py-1.5 text-[12px]"
           style={{ background: "var(--pi-wash)", color: "var(--pi-danger)" }}
         >
-          {navState.error}
+          {tabState.error}
         </div>
       )}
 
@@ -245,7 +327,7 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
         className="relative min-h-0 flex-1 overflow-hidden"
         style={{ background: "var(--pi-surface)" }}
       >
-        {!navState.url && (
+        {!tabState.url && (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <PiMascot mood="wave" size={52} dark={dark} className="mb-3" />
             <div className="text-[14.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  IconInbox,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconPinnedOff,
+  IconPlugConnected,
 } from "@tabler/icons-react";
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostBotDto, SessionSummary } from "../../api/types";
@@ -79,7 +81,6 @@ export function Sidebar({
   onOpenCreateBot,
   onOpenBotSettings,
   onOpenSettings,
-  onOpenArchived,
 }: {
   open: boolean;
   activeView: "chat" | "super" | FeatureViewKind;
@@ -90,7 +91,6 @@ export function Sidebar({
   onOpenCreateBot: (target?: { deviceId: string; deviceName: string }) => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenSettings: () => void;
-  onOpenArchived: () => void;
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
@@ -110,8 +110,9 @@ export function Sidebar({
   const pendingApprovals = useSessionStore((s) => s.pendingApprovals);
   const unreadSessionIds = useSessionStore((s) => s.unreadSessionIds);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const draftBotId = useSessionStore((s) => s.draftBotId);
   const selectSession = useSessionStore((s) => s.selectSession);
-  const createSession = useSessionStore((s) => s.createSession);
+  const startDraftSession = useSessionStore((s) => s.startDraftSession);
   const forkSession = useSessionStore((s) => s.forkSession);
   const renameSession = useSessionStore((s) => s.renameSession);
   const togglePinSession = useSessionStore((s) => s.togglePinSession);
@@ -136,7 +137,7 @@ export function Sidebar({
   const isElectron = Boolean(desktopEnv?.isElectron);
   const isMacOverlay = Boolean(isElectron && desktopEnv?.platform === "darwin");
   const isFrameless = Boolean(isElectron && desktopEnv?.platform !== "darwin");
-  const activeBotId = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
+  const activeBotId = summariesById[activeSessionId]?.botId ?? draftBotId ?? bots[0]?.id;
   const newChatTargetBotId = useMemo(() => {
     const current = bots.find((b) => b.id === activeBotId);
     if (current && (!current.isRemote || current.online)) return current.id;
@@ -283,7 +284,7 @@ export function Sidebar({
             label={t("nav.newChat")}
             onClick={() => {
               onSelectChat();
-              if (client && newChatTargetBotId) void createSession(client, newChatTargetBotId, locale);
+              if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
             }}
           >
             <BrandIcon name="chat/new_chat" size={16} />
@@ -297,9 +298,78 @@ export function Sidebar({
             <BrandIcon name="action/search" size={15} />
           </IconButton>
 
-          <div className="my-1 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+          <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
 
-          <div className="flex max-h-[300px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
+          <button
+            type="button"
+            title={t("nav.timers")}
+            onClick={() => onSelectFeature("timers")}
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="system/timer" size={15.5} />
+          </button>
+          <button
+            type="button"
+            title={t("nav.inbox")}
+            onClick={() => onSelectFeature("inbox")}
+            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "inbox" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "inbox" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <IconInbox size={16} stroke={1.65} />
+            {unreadInboxCount > 0 && (
+              <span
+                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--pi-accent)" }}
+              />
+            )}
+          </button>
+          <button
+            type="button"
+            title={t("settings.navMemory")}
+            onClick={() => onSelectFeature("memory")}
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/memory" size={15.5} />
+          </button>
+          <button
+            type="button"
+            title={t("nav.skills")}
+            onClick={() => onSelectFeature("skills")}
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/skills" size={15.5} />
+          </button>
+          <button
+            type="button"
+            title={t("nav.mcp")}
+            onClick={() => onSelectFeature("mcp")}
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <IconPlugConnected size={16} stroke={1.65} />
+          </button>
+
+          <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+
+          <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
             {bots.slice(0, 10).map((bot) => {
               const selected = activeView === "chat" && bot.id === activeBotId;
               const offline = Boolean(bot.isRemote && !bot.online);
@@ -312,12 +382,11 @@ export function Sidebar({
                       title={bot.name}
                       onClick={() => {
                         onSelectChat();
-                        if (!client) return;
                         const firstSess = sessionsForBot(bot.id)[0];
-                        if (firstSess) {
+                        if (firstSess && client) {
                           void selectSession(client, firstSess.id, locale);
                         } else if (!offline) {
-                          void createSession(client, bot.id, locale);
+                          startDraftSession(bot.id);
                         }
                       }}
                       className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
@@ -350,7 +419,7 @@ export function Sidebar({
                     disabled={offline}
                     onSelect={() => {
                       onSelectChat();
-                      if (client) void createSession(client, bot.id, locale);
+                      startDraftSession(bot.id);
                     }}
                   />
                   <ContextMenuItem
@@ -372,52 +441,7 @@ export function Sidebar({
         </div>
 
         <div className="flex flex-col items-center gap-1">
-          <button
-            type="button"
-            title={t("settings.navAutomations")}
-            onClick={() => onSelectFeature("automations")}
-            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "automations" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "automations" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="system/timer" size={15.5} />
-            {unreadInboxCount > 0 && (
-              <span
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
-                style={{ background: "var(--pi-accent)" }}
-              />
-            )}
-          </button>
-          <button
-            type="button"
-            title={t("settings.navMemory")}
-            onClick={() => onSelectFeature("memory")}
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/memory" size={15.5} />
-          </button>
-          <button
-            type="button"
-            title={t("nav.capabilities")}
-            onClick={() => onSelectFeature("capabilities")}
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "capabilities" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "capabilities" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/skills" size={15.5} />
-          </button>
           <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
-          <IconButton size="md" label={t("nav.archived")} onClick={onOpenArchived}>
-            <BrandIcon name="action/archive" size={15} />
-          </IconButton>
           <IconButton size="md" label={t("nav.settings")} onClick={onOpenSettings}>
             <BrandIcon name="system/settings" size={16} />
           </IconButton>
@@ -706,21 +730,21 @@ export function Sidebar({
               <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/bot:opacity-100">
                 <IconButton
                   size="sm"
-                  label={t("nav.newChat")}
-                  disabled={offline}
-                  onClick={() => {
-                    onSelectChat();
-                    if (client) void createSession(client, bot.id, locale);
-                  }}
-                >
-                  <BrandIcon name="chat/new_chat" size={13.5} />
-                </IconButton>
-                <IconButton
-                  size="sm"
                   label={t("nav.botSettings")}
                   onClick={() => onOpenBotSettings(bot)}
                 >
                   <BrandIcon name="navigation/more" size={13.5} />
+                </IconButton>
+                <IconButton
+                  size="sm"
+                  label={t("nav.newChat")}
+                  disabled={offline}
+                  onClick={() => {
+                    onSelectChat();
+                    startDraftSession(bot.id);
+                  }}
+                >
+                  <BrandIcon name="chat/new_chat" size={13.5} />
                 </IconButton>
               </div>
             </div>
@@ -732,7 +756,7 @@ export function Sidebar({
             disabled={offline}
             onSelect={() => {
               onSelectChat();
-              if (client) void createSession(client, bot.id, locale);
+              startDraftSession(bot.id);
             }}
           />
           <ContextMenuItem
@@ -761,33 +785,35 @@ export function Sidebar({
           />
         </ContextMenu>
 
-        {!collapsed && (
-          <div className="space-y-0.5 pl-3">
-            {list.length === 0 ? (
-              <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                {t("nav.noSessions")}
-              </div>
-            ) : (
-              <>
-                {visibleList.map((s) => renderSessionRow(s, Boolean(bot.isRemote)))}
-                {hasMore && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedBots((prev) => ({ ...prev, [bot.id]: !expandedList }))
-                    }
-                    className="w-full rounded-[7px] px-2 py-1 text-left text-[11.5px] transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{ color: "var(--pi-ink-tertiary)" }}
-                  >
-                    {expandedList
-                      ? t("nav.collapseSessions")
-                      : t("nav.showAllSessions", { count: list.length })}
-                  </button>
-                )}
-              </>
-            )}
+        <div className="pi-collapse" data-open={collapsed ? "false" : "true"} aria-hidden={collapsed}>
+          <div className="pi-collapse-inner">
+            <div className="space-y-0.5 pl-3 pt-0.5">
+              {list.length === 0 ? (
+                <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                  {t("nav.noSessions")}
+                </div>
+              ) : (
+                <>
+                  {visibleList.map((s) => renderSessionRow(s, Boolean(bot.isRemote)))}
+                  {hasMore && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedBots((prev) => ({ ...prev, [bot.id]: !expandedList }))
+                      }
+                      className="w-full rounded-[7px] px-2 py-1 text-left text-[11.5px] transition-colors hover:bg-[var(--pi-hover)]"
+                      style={{ color: "var(--pi-ink-tertiary)" }}
+                    >
+                      {expandedList
+                        ? t("nav.collapseSessions")
+                        : t("nav.showAllSessions", { count: list.length })}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -836,12 +862,12 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className="space-y-1 px-2.5 pt-1 pb-2">
+        <div className="space-y-0.5 px-2.5 pt-1 pb-2">
           <button
             type="button"
             onClick={() => {
               onSelectChat();
-              if (client && newChatTargetBotId) void createSession(client, newChatTargetBotId, locale);
+              if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
             }}
             className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
             style={{ color: "var(--pi-ink)" }}
@@ -879,9 +905,87 @@ export function Sidebar({
               {formatShortcut(["mod", "k"], desktopEnv?.platform)}
             </kbd>
           </button>
+
+          <div className="my-1.5 h-[0.5px]" style={{ background: "var(--pi-hairline)" }} />
+
+          <button
+            type="button"
+            onClick={() => onSelectFeature("timers")}
+            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="system/timer" size={14.5} />
+            <span className="min-w-0 flex-1 truncate text-left">{t("nav.timers")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectFeature("inbox")}
+            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "inbox" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "inbox" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <IconInbox size={15} stroke={1.65} className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-left">{t("nav.inbox")}</span>
+            {unreadInboxCount > 0 && (
+              <span
+                className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
+                style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
+              >
+                {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectFeature("memory")}
+            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/memory" size={14.5} />
+            <span className="truncate">{t("settings.navMemory")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectFeature("skills")}
+            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <BrandIcon name="ai/skills" size={14.5} />
+            <span className="truncate">{t("nav.skills")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectFeature("mcp")}
+            className="flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+            style={{
+              background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
+              color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+            }}
+          >
+            <IconPlugConnected size={15} stroke={1.65} className="shrink-0" />
+            <span className="truncate">{t("nav.mcp")}</span>
+          </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 py-1">
+        <div
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 py-2"
+          style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+        >
           <div className="space-y-1">
             <div className="flex items-center justify-between px-1.5">
               <span
@@ -951,68 +1055,18 @@ export function Sidebar({
         </div>
 
         <div
-          className="shrink-0 space-y-0.5 px-2.5 py-2"
+          className="shrink-0 px-2.5 py-2"
           style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
         >
           <button
             type="button"
-            onClick={() => onSelectFeature("automations")}
+            onClick={onOpenSettings}
             className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "automations" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "automations" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
+            style={{ color: "var(--pi-ink-secondary)" }}
           >
-            <BrandIcon name="system/timer" size={14.5} />
-            <span className="min-w-0 flex-1 truncate text-left">{t("settings.navAutomations")}</span>
-            {unreadInboxCount > 0 && (
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ background: "var(--pi-accent)" }}
-              />
-            )}
+            <BrandIcon name="system/settings" size={15} />
+            <span>{t("nav.settings")}</span>
           </button>
-          <button
-            type="button"
-            onClick={() => onSelectFeature("memory")}
-            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/memory" size={14.5} />
-            <span className="truncate">{t("settings.navMemory")}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onSelectFeature("capabilities")}
-            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "capabilities" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "capabilities" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/skills" size={14.5} />
-            <span className="truncate">{t("nav.capabilities")}</span>
-          </button>
-
-          <div className="my-1.5 h-[0.5px]" style={{ background: "var(--pi-hairline)" }} />
-
-          <div className="flex items-center justify-between gap-1">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="flex h-8 flex-1 items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-              style={{ color: "var(--pi-ink-secondary)" }}
-            >
-              <BrandIcon name="system/settings" size={15} />
-              <span>{t("nav.settings")}</span>
-            </button>
-            <IconButton size="sm" label={t("nav.archived")} onClick={onOpenArchived}>
-              <BrandIcon name="action/archive" size={14.5} />
-            </IconButton>
-          </div>
         </div>
       </aside>
 

@@ -23,6 +23,17 @@ export interface BrowserBounds {
   height: number;
 }
 
+export interface BrowserTabState {
+  id: string;
+  url: string;
+  title: string;
+  favicon: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  error: string | null;
+}
+
 export interface BrowserNavState {
   url: string;
   title: string;
@@ -30,12 +41,25 @@ export interface BrowserNavState {
   canGoBack: boolean;
   canGoForward: boolean;
   error: string | null;
+  activeTabId?: string;
+  tabs?: BrowserTabState[];
 }
 
 export interface BrowserPageContext {
   url: string;
   title: string;
   text: string;
+}
+
+export interface BrowserSiteStorageItem {
+  domain: string;
+  cookieCount: number;
+}
+
+export interface BrowserStorageSummary {
+  persistSession: boolean;
+  totalCookies: number;
+  sites: BrowserSiteStorageItem[];
 }
 
 interface ElectronPreloadBridge {
@@ -66,17 +90,26 @@ interface ElectronPreloadBridge {
   windowClose(): Promise<void>;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
-  browserMount(bounds: BrowserBounds, url?: string): Promise<BrowserNavState>;
-  browserSetBounds(bounds: BrowserBounds): Promise<void>;
-  browserHide(): Promise<void>;
-  browserNavigate(rawUrl: string): Promise<BrowserNavState>;
-  browserBack(): Promise<BrowserNavState>;
-  browserForward(): Promise<BrowserNavState>;
-  browserReload(): Promise<BrowserNavState>;
-  browserStop(): Promise<BrowserNavState>;
+  browserMount(bounds: BrowserBounds, url?: string, tabId?: string): Promise<BrowserNavState>;
+  browserSetBounds(bounds: BrowserBounds, tabId?: string): Promise<void>;
+  browserHide(tabId?: string): Promise<void>;
+  browserNavigate(rawUrl: string, tabId?: string): Promise<BrowserNavState>;
+  browserCreateTab(bounds: BrowserBounds, url?: string): Promise<BrowserNavState>;
+  browserSwitchTab(tabId: string, bounds: BrowserBounds): Promise<BrowserNavState>;
+  browserCloseTab(tabId: string): Promise<BrowserNavState>;
+  browserBack(tabId?: string): Promise<BrowserNavState>;
+  browserForward(tabId?: string): Promise<BrowserNavState>;
+  browserReload(tabId?: string): Promise<BrowserNavState>;
+  browserStop(tabId?: string): Promise<BrowserNavState>;
   browserDestroy(): Promise<void>;
-  browserGetPageContext(): Promise<BrowserPageContext | null>;
+  browserGetPageContext(tabId?: string): Promise<BrowserPageContext | null>;
+  browserGetStorageSummary(): Promise<BrowserStorageSummary>;
+  browserSetPersistSession(persist: boolean): Promise<BrowserStorageSummary>;
+  browserClearDomainCookies(domain: string): Promise<BrowserStorageSummary>;
+  browserClearCache(): Promise<void>;
+  browserClearAllData(): Promise<BrowserStorageSummary>;
   onBrowserState(cb: (state: BrowserNavState) => void): () => void;
+  onBrowserOpenTabRequest(cb: (url: string) => void): () => void;
 }
 
 declare global {
@@ -254,52 +287,83 @@ export function subscribeWindowMaximized(cb: (maximized: boolean) => void): () =
   return native.onWindowMaximizedChange(cb);
 }
 
-export async function browserMount(bounds: BrowserBounds, url?: string): Promise<BrowserNavState | null> {
+export async function browserMount(
+  bounds: BrowserBounds,
+  url?: string,
+  tabId?: string,
+): Promise<BrowserNavState | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserMount(bounds, url);
+  return native.browserMount(bounds, url, tabId);
 }
 
-export async function browserSetBounds(bounds: BrowserBounds): Promise<void> {
+export async function browserSetBounds(bounds: BrowserBounds, tabId?: string): Promise<void> {
   const native = getElectronBridge();
   if (!native) return;
-  await native.browserSetBounds(bounds);
+  await native.browserSetBounds(bounds, tabId);
 }
 
-export async function browserHide(): Promise<void> {
+export async function browserHide(tabId?: string): Promise<void> {
   const native = getElectronBridge();
   if (!native) return;
-  await native.browserHide();
+  await native.browserHide(tabId);
 }
 
-export async function browserNavigate(rawUrl: string): Promise<BrowserNavState | null> {
+export async function browserNavigate(
+  rawUrl: string,
+  tabId?: string,
+): Promise<BrowserNavState | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserNavigate(rawUrl);
+  return native.browserNavigate(rawUrl, tabId);
 }
 
-export async function browserBack(): Promise<BrowserNavState | null> {
+export async function browserCreateTab(
+  bounds: BrowserBounds,
+  url?: string,
+): Promise<BrowserNavState | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserBack();
+  return native.browserCreateTab(bounds, url);
 }
 
-export async function browserForward(): Promise<BrowserNavState | null> {
+export async function browserSwitchTab(
+  tabId: string,
+  bounds: BrowserBounds,
+): Promise<BrowserNavState | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserForward();
+  return native.browserSwitchTab(tabId, bounds);
 }
 
-export async function browserReload(): Promise<BrowserNavState | null> {
+export async function browserCloseTab(tabId: string): Promise<BrowserNavState | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserReload();
+  return native.browserCloseTab(tabId);
 }
 
-export async function browserStop(): Promise<BrowserNavState | null> {
+export async function browserBack(tabId?: string): Promise<BrowserNavState | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserStop();
+  return native.browserBack(tabId);
+}
+
+export async function browserForward(tabId?: string): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserForward(tabId);
+}
+
+export async function browserReload(tabId?: string): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserReload(tabId);
+}
+
+export async function browserStop(tabId?: string): Promise<BrowserNavState | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserStop(tabId);
 }
 
 export async function browserDestroy(): Promise<void> {
@@ -308,14 +372,54 @@ export async function browserDestroy(): Promise<void> {
   await native.browserDestroy();
 }
 
-export async function browserGetPageContext(): Promise<BrowserPageContext | null> {
+export async function browserGetPageContext(tabId?: string): Promise<BrowserPageContext | null> {
   const native = getElectronBridge();
   if (!native) return null;
-  return native.browserGetPageContext();
+  return native.browserGetPageContext(tabId);
+}
+
+export async function browserGetStorageSummary(): Promise<BrowserStorageSummary | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserGetStorageSummary();
+}
+
+export async function browserSetPersistSession(
+  persist: boolean,
+): Promise<BrowserStorageSummary | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserSetPersistSession(persist);
+}
+
+export async function browserClearDomainCookies(
+  domain: string,
+): Promise<BrowserStorageSummary | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserClearDomainCookies(domain);
+}
+
+export async function browserClearCache(): Promise<void> {
+  const native = getElectronBridge();
+  if (!native) return;
+  await native.browserClearCache();
+}
+
+export async function browserClearAllData(): Promise<BrowserStorageSummary | null> {
+  const native = getElectronBridge();
+  if (!native) return null;
+  return native.browserClearAllData();
 }
 
 export function subscribeBrowserState(cb: (state: BrowserNavState) => void): () => void {
   const native = getElectronBridge();
   if (!native) return () => {};
   return native.onBrowserState(cb);
+}
+
+export function subscribeBrowserOpenTabRequest(cb: (url: string) => void): () => void {
+  const native = getElectronBridge();
+  if (!native?.onBrowserOpenTabRequest) return () => {};
+  return native.onBrowserOpenTabRequest(cb);
 }

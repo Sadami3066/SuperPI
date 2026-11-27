@@ -54,7 +54,7 @@ export function Select({
     <SelectPrimitive.Root value={value} onValueChange={onValueChange} onOpenChange={handleOpenChange}>
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
-        className={`inline-flex items-center justify-between gap-2 outline-none transition-colors hover:bg-[var(--pi-hover)] ${triggerSize} ${className}`}
+        className={`inline-flex items-center justify-between gap-2 whitespace-nowrap outline-none transition-colors hover:bg-[var(--pi-hover)] ${triggerSize} ${className}`}
         style={{
           background: size === "sm" ? "transparent" : "var(--pi-paper)",
           border: size === "sm" ? "0.5px solid transparent" : "0.5px solid var(--pi-hairline)",
@@ -71,7 +71,7 @@ export function Select({
         <SelectPrimitive.Content
           position="popper"
           sideOffset={6}
-          className="pi-popover z-50 min-w-[var(--radix-select-trigger-width)] max-h-[260px] overflow-hidden p-1"
+          className="pi-popover pi-popover-anim z-50 min-w-[var(--radix-select-trigger-width)] max-h-[260px] overflow-hidden p-1"
         >
           <SelectPrimitive.Viewport className="max-h-[250px] overflow-y-auto">
             {options.map((opt) => (

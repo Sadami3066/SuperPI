@@ -407,7 +407,7 @@ export interface AttachmentChip {
   mime: string;
   size: number;
   path: string;
-  kind: "image" | "text" | "other";
+  kind: "image" | "text" | "folder" | "other";
   previewUrl?: string;
 }
 
@@ -416,9 +416,10 @@ export interface ComposerAttachment {
   name: string;
   mimeType: string;
   size: number;
-  kind: "image" | "text" | "other";
+  kind: "image" | "text" | "folder" | "other";
   isInlineImage: boolean;
   dataBase64: string;
+  folderPath?: string;
   previewUrl?: string;
 }
 
@@ -599,7 +600,7 @@ export interface HostTerminalInfoDto {
 }
 
 export interface HostTerminalStreamFrame {
-  type: "history" | "output" | "exit" | string;
+  type: "history" | "chunk" | "output" | "exit" | string;
   data?: string;
   exitCode?: number | null;
 }

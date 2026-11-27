@@ -1,14 +1,19 @@
 import { Suspense, useEffect, useRef, useState } from "react";
+import { IconPlus, IconSearch, IconX } from "@tabler/icons-react";
 import { useI18n } from "../i18n";
-import { windowToggleMaximize } from "../platform/bridge";
+import { subscribeBrowserOpenTabRequest, windowToggleMaximize } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
-import { IconButton } from "../ui";
+import { IconButton, Input } from "../ui";
 import { BrandIcon } from "../features/shared/BrandAssets";
 import { WindowControls } from "../features/shell/WindowControls";
-import { getAvailableWorkbenchPanels, getWorkbenchPanel } from "./registry";
+import {
+  getAvailableWorkbenchPanels,
+  getWorkbenchPanel,
+  type WorkbenchPanelDefinition,
+} from "./registry";
 
 const TAB_BRAND_ICONS: Record<string, string> = {
   files: "file/folder_closed",
@@ -16,22 +21,124 @@ const TAB_BRAND_ICONS: Record<string, string> = {
   terminal: "system/terminal",
 };
 
+function NewTabLauncher({
+  tabId,
+  available,
+  isElectron,
+  onSelectPanel,
+  onOpenUrl,
+}: {
+  tabId: string;
+  available: WorkbenchPanelDefinition[];
+  isElectron: boolean;
+  onSelectPanel: (panelId: string) => void;
+  onOpenUrl: (url: string) => void;
+}) {
+  const { t } = useI18n();
+  const [query, setQuery] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    if (isElectron) {
+      onOpenUrl(trimmed);
+    } else {
+      onSelectPanel("files");
+    }
+  };
+
+  return (
+    <div
+      key={tabId}
+      className="flex h-full min-h-0 flex-1 flex-col items-center justify-center px-6 py-8"
+      style={{ background: "var(--pi-surface)" }}
+    >
+      <div className="w-full max-w-[380px] space-y-6">
+        {isElectron && (
+          <form onSubmit={handleSubmit} className="relative">
+            <IconSearch
+              size={15}
+              stroke={1.7}
+              className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2"
+              style={{ color: "var(--pi-ink-tertiary)" }}
+            />
+            <Input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("wb.newTabSearchPlaceholder")}
+              className="h-10 rounded-full pl-9 text-[13px]"
+            />
+          </form>
+        )}
+
+        <div className="space-y-2.5">
+          <div className="px-1 text-[12px] font-medium" style={{ color: "var(--pi-ink-tertiary)" }}>
+            {t("wb.quickLaunch")}
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            {available.map((panel) => {
+              const Icon = panel.icon;
+              const brandIcon = TAB_BRAND_ICONS[panel.id];
+              return (
+                <button
+                  key={panel.id}
+                  type="button"
+                  onClick={() => onSelectPanel(panel.id)}
+                  className="flex flex-col items-start gap-2.5 rounded-[14px] p-4 text-left transition-colors hover:bg-[var(--pi-hover)]"
+                  style={{
+                    background: "var(--pi-paper)",
+                    border: "0.5px solid var(--pi-hairline)",
+                    color: "var(--pi-ink)",
+                  }}
+                >
+                  <span
+                    className="flex h-7 w-7 items-center justify-center rounded-[8px]"
+                    style={{
+                      background: "var(--pi-surface)",
+                      color: "var(--pi-ink-secondary)",
+                    }}
+                  >
+                    {brandIcon ? (
+                      <BrandIcon name={brandIcon} size={15} />
+                    ) : (
+                      <Icon size={15.5} stroke={1.7} />
+                    )}
+                  </span>
+                  <span className="text-[13px] font-medium">{t(panel.labelKey)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WorkbenchDock({
   showWindowControls = false,
+  activeView = "chat",
 }: {
   showWindowControls?: boolean;
+  activeView?: string;
 }) {
   const { t } = useI18n();
   const open = useWorkbenchStore((s) => s.open);
-  const activePanelId = useWorkbenchStore((s) => s.activePanelId);
+  const tabs = useWorkbenchStore((s) => s.tabs);
+  const activeTabId = useWorkbenchStore((s) => s.activeTabId);
   const width = useWorkbenchStore((s) => s.width);
-  const payload = useWorkbenchStore((s) => s.contextPayload);
-  const openPanel = useWorkbenchStore((s) => s.openPanel);
+  const addTab = useWorkbenchStore((s) => s.addTab);
+  const replaceTab = useWorkbenchStore((s) => s.replaceTab);
+  const selectTab = useWorkbenchStore((s) => s.selectTab);
+  const closeTab = useWorkbenchStore((s) => s.closeTab);
   const close = useWorkbenchStore((s) => s.close);
   const setWidth = useWorkbenchStore((s) => s.setWidth);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const activeSummary = useSessionStore((s) => s.summariesById[s.activeSessionId]);
+  const draftBotId = useSessionStore((s) => s.draftBotId);
   const bots = useBotStore((s) => s.bots);
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
   const isElectron = Boolean(desktopEnv?.isElectron);
@@ -48,19 +155,32 @@ export function WorkbenchDock({
     };
   }, []);
 
+  useEffect(() => {
+    if (!isElectron) return undefined;
+    return subscribeBrowserOpenTabRequest((url) => {
+      useWorkbenchStore.getState().addTab("browser", { url });
+    });
+  }, [isElectron]);
+
   if (!hasOpenedRef.current) return null;
 
-  const botId = activeSummary?.botId ?? bots[0]?.id ?? "home";
-  const ctx = { botId, sessionId: activeSessionId || null, payload };
-  const available = getAvailableWorkbenchPanels(ctx, isElectron);
-  const resolvedPanel = getWorkbenchPanel(activePanelId) ?? available[0] ?? null;
+  const botId = activeSummary?.botId ?? draftBotId ?? bots[0]?.id ?? "home";
+  const baseCtx = { botId, sessionId: activeSessionId || null, activeView };
+  const available = getAvailableWorkbenchPanels(baseCtx, isElectron);
+  const availableIds = new Set(available.map((p) => p.id));
+
+  const visibleTabs = tabs.filter(
+    (tab) => tab.panelId === "new-tab" || availableIds.has(tab.panelId),
+  );
+  const resolvedActiveTab =
+    visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0] ?? null;
 
   const clampDynamicWidth = (raw: number) => {
-    const maxW = typeof window !== "undefined" ? Math.min(720, Math.max(360, window.innerWidth - 420)) : 720;
+    const maxW =
+      typeof window !== "undefined" ? Math.min(720, Math.max(360, window.innerWidth - 420)) : 720;
     return Math.min(maxW, Math.max(360, Math.round(raw)));
   };
   const effectiveWidth = clampDynamicWidth(width);
-  const compactTabs = effectiveWidth < 440;
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -93,6 +213,9 @@ export function WorkbenchDock({
     window.addEventListener("mouseup", cleanup);
   };
 
+  let terminalIndex = 0;
+  const terminalTotal = visibleTabs.filter((x) => x.panelId === "terminal").length;
+
   return (
     <>
       {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
@@ -113,70 +236,156 @@ export function WorkbenchDock({
           className="absolute top-0 bottom-0 left-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
         />
 
-      <div
-        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-3"
-        style={{
-          paddingRight: showWindowControls && isFrameless ? 0 : 10,
-          borderBottom: "0.5px solid var(--pi-hairline)",
-        }}
-        onDoubleClick={() => {
-          if (isFrameless) void windowToggleMaximize();
-        }}
-      >
         <div
-          className="pi-no-drag flex min-w-0 items-center gap-0.5 rounded-[9px] p-0.5"
-          style={{ background: "var(--pi-wash)" }}
+          className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-3"
+          style={{
+            paddingRight: showWindowControls && isFrameless ? 0 : 10,
+            borderBottom: "0.5px solid var(--pi-hairline)",
+          }}
+          onDoubleClick={() => {
+            if (isFrameless) void windowToggleMaximize();
+          }}
         >
-          {available.map((panel) => {
-            const Icon = panel.icon;
-            const brandIcon = TAB_BRAND_ICONS[panel.id];
-            const active = resolvedPanel?.id === panel.id;
-            const label = t(panel.labelKey);
+          <span
+            className="truncate text-[12px] font-medium select-none"
+            style={{ color: "var(--pi-ink-tertiary)" }}
+          >
+            {t("chat.workbenchToggle")}
+          </span>
+
+          <div className="pi-no-drag flex shrink-0 items-center gap-0.5">
+            <IconButton label={t("common.close")} size="sm" onClick={close}>
+              <BrandIcon name="navigation/close" size={14.5} />
+            </IconButton>
+            {showWindowControls && <WindowControls />}
+          </div>
+        </div>
+
+        <div
+          className="flex h-[36px] shrink-0 items-center gap-1 overflow-x-auto px-2"
+          style={{
+            background: "var(--pi-paper)",
+            borderBottom: "0.5px solid var(--pi-hairline)",
+          }}
+        >
+          {visibleTabs.map((tab) => {
+            const isNewTab = tab.panelId === "new-tab";
+            const panel = isNewTab ? null : getWorkbenchPanel(tab.panelId);
+            if (!isNewTab && !panel) return null;
+            const Icon = panel?.icon;
+            const brandIcon = panel ? TAB_BRAND_ICONS[panel.id] : undefined;
+            const active = resolvedActiveTab?.id === tab.id;
+            if (tab.panelId === "terminal") terminalIndex += 1;
+            const baseLabel = isNewTab ? t("wb.newTabTitle") : t(panel!.labelKey);
+            const label =
+              tab.title ||
+              (tab.panelId === "terminal" && terminalTotal > 1
+                ? `${baseLabel} ${terminalIndex}`
+                : baseLabel);
+
             return (
-              <button
-                key={panel.id}
-                type="button"
-                title={label}
-                aria-label={label}
-                onClick={() => openPanel(panel.id)}
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium transition-colors"
+              <div
+                key={tab.id}
+                onMouseDown={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    closeTab(tab.id);
+                  }
+                }}
+                className="group flex h-[27px] max-w-[176px] shrink-0 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium transition-colors"
                 style={{
                   background: active ? "var(--pi-surface)" : "transparent",
                   color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+                  border: active ? "0.5px solid var(--pi-hairline)" : "0.5px solid transparent",
                 }}
               >
-                {brandIcon ? (
-                  <BrandIcon name={brandIcon} size={13.5} />
-                ) : (
-                  <Icon size={13.5} stroke={1.7} />
-                )}
-                {!compactTabs && <span>{label}</span>}
-              </button>
+                <button
+                  type="button"
+                  title={label}
+                  onClick={() => selectTab(tab.id)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap outline-none"
+                >
+                  {isNewTab ? (
+                    <IconPlus size={13} stroke={1.8} className="shrink-0 opacity-75" />
+                  ) : brandIcon ? (
+                    <BrandIcon name={brandIcon} size={13.5} className="shrink-0" />
+                  ) : (
+                    Icon && <Icon size={13.5} stroke={1.7} />
+                  )}
+                  <span className="truncate">{label}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("common.close")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-[var(--pi-hover)] ${
+                    active ? "opacity-65 hover:opacity-100" : "opacity-0 group-hover:opacity-75"
+                  }`}
+                >
+                  <IconX size={11} stroke={1.8} />
+                </button>
+              </div>
+            );
+          })}
+
+          <IconButton size="sm" label={t("wb.addTab")} onClick={() => addTab("new-tab")}>
+            <IconPlus size={14} stroke={1.8} />
+          </IconButton>
+        </div>
+
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {visibleTabs.map((tab) => {
+            const isActive = resolvedActiveTab?.id === tab.id;
+            if (tab.panelId === "new-tab") {
+              return (
+                <div
+                  key={tab.id}
+                  className="min-h-0 flex-1 flex-col overflow-hidden"
+                  style={{ display: isActive ? "flex" : "none" }}
+                >
+                  <NewTabLauncher
+                    tabId={tab.id}
+                    available={available}
+                    isElectron={isElectron}
+                    onSelectPanel={(panelId) => replaceTab(tab.id, panelId)}
+                    onOpenUrl={(url) => replaceTab(tab.id, "browser", { url })}
+                  />
+                </div>
+              );
+            }
+            const panel = getWorkbenchPanel(tab.panelId);
+            if (!panel) return null;
+            const ctx = {
+              ...baseCtx,
+              tabId: tab.id,
+              isActiveTab: open && isActive,
+              payload: tab.payload ?? null,
+            };
+            return (
+              <div
+                key={tab.id}
+                className="min-h-0 flex-1 flex-col overflow-hidden"
+                style={{ display: isActive ? "flex" : "none" }}
+              >
+                <Suspense
+                  fallback={
+                    <div
+                      className="py-8 text-center text-[13px]"
+                      style={{ color: "var(--pi-ink-tertiary)" }}
+                    >
+                      {t("common.loading")}
+                    </div>
+                  }
+                >
+                  <panel.Component context={ctx} />
+                </Suspense>
+              </div>
             );
           })}
         </div>
-
-        <div className="pi-no-drag flex shrink-0 items-center gap-0.5">
-          <IconButton label={t("common.close")} size="sm" onClick={close}>
-            <BrandIcon name="navigation/close" size={14.5} />
-          </IconButton>
-          {showWindowControls && <WindowControls />}
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {resolvedPanel && (
-          <Suspense
-            fallback={
-              <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                {t("common.loading")}
-              </div>
-            }
-          >
-            <resolvedPanel.Component context={ctx} />
-          </Suspense>
-        )}
-      </div>
       </aside>
     </>
   );

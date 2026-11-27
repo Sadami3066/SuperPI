@@ -96,7 +96,6 @@ object ToolPermissionGuard {
         workspaceRoot: File,
         modeProvider: () -> PermissionMode,
         toolApprovalCenter: ToolApprovalCenter,
-        planFirstCheck: (sessionId: String) -> Boolean = { false },
         workerIdProvider: () -> String? = { null },
     ): CodingTool {
         if (tool.name !in GUARDED_TOOLS) return tool
@@ -111,11 +110,7 @@ object ToolPermissionGuard {
             prepareArguments = original.prepareArguments,
             execute = { callId, args, signal, update ->
                 val sessionId = binding.current()?.sessionId.orEmpty()
-                val effectiveMode = if (sessionId.isNotBlank() && planFirstCheck(sessionId)) {
-                    PermissionMode.READ_ONLY
-                } else {
-                    modeProvider()
-                }
+                val effectiveMode = modeProvider()
                 val denial = checkAndApprove(
                     toolName = original.name,
                     args = args,

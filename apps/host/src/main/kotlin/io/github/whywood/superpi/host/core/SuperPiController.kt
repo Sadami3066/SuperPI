@@ -231,7 +231,6 @@ class SuperPiController(
     val ptySessionManager = PtySessionManager()
     val miniappStore = MiniappStore(File(paths.homeDir, "miniapps"))
     val inboxStore = AutomationInboxStore(File(paths.homeDir, "inbox.json"))
-    val planFirstSessions: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     @Volatile
     private var cachedDeviceId: String? = null
@@ -327,12 +326,6 @@ class SuperPiController(
         if (!autoRetryCollectorStarted.compareAndSet(false, true)) return
         scope.launch {
             runtimeHost.events.collect { evt ->
-                if (evt.event is RuntimeEvent.RunFinished ||
-                    evt.event is RuntimeEvent.RunFailed ||
-                    evt.event is RuntimeEvent.SessionRemoved
-                ) {
-                    planFirstSessions.remove(evt.sessionId)
-                }
                 autoRetryController.onRuntimeEvent(evt.sessionId, evt.event)
             }
         }
@@ -1048,7 +1041,6 @@ class SuperPiController(
                     workspaceRoot = cwd,
                     modeProvider = { permissionModeForBot(botIdForPermission) },
                     toolApprovalCenter = toolApprovalCenter,
-                    planFirstCheck = { sid -> sid in planFirstSessions },
                 )
             },
         )

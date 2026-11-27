@@ -371,12 +371,22 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
         payload,
         text,
       };
+      const cardBlock: TurnBlock = {
+        key: `cc-${cur.blocks.length}`,
+        kind: "custom_card",
+        card,
+      };
+      const last = cur.blocks[cur.blocks.length - 1];
+      const nextBlocks =
+        customType === "todo_write" && last?.kind === "activity"
+          ? [...cur.blocks.slice(0, -1), cardBlock, last]
+          : [...cur.blocks, cardBlock];
       return {
         activeBySession: {
           ...s.activeBySession,
           [sessionId]: {
             ...cur,
-            blocks: [...cur.blocks, { key: `cc-${cur.blocks.length}`, kind: "custom_card", card }],
+            blocks: nextBlocks,
           },
         },
       };
@@ -421,6 +431,14 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
   failRun: (sessionId, runId, message) => {
     get().flushPending();
     set((s) => {
+      const existing = s.activeBySession[sessionId];
+      if (
+        existing &&
+        existing.status === "stopped" &&
+        (!runId || existing.runId === runId || existing.runId.startsWith("pending-"))
+      ) {
+        return s;
+      }
       const cur = ensureTargetRun(s.activeBySession, sessionId, runId);
       if (runId && cur.runId !== runId && !cur.runId.startsWith("pending-")) return s;
       const blocks = cur.blocks.map((blk) => {

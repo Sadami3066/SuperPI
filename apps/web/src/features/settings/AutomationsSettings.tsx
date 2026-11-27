@@ -27,8 +27,10 @@ import { BrandIcon } from "../shared/BrandAssets";
 import { formatTimerSchedule, validateTimerDraft, weekdayLabel } from "./timerSchedule";
 
 export function AutomationsSettings({
+  mode,
   onOpenSession,
 }: {
+  mode?: "timers" | "inbox";
   onOpenSession?: (sessionId: string) => void;
 }) {
   const { t } = useI18n();
@@ -41,7 +43,7 @@ export function AutomationsSettings({
   const refreshInbox = useSuperStore((s) => s.refreshInbox);
   const setInboxItems = useSuperStore((s) => s.setInboxItems);
 
-  const [tab, setTab] = useState(() => (unreadInboxCount > 0 ? "inbox" : "timers"));
+  const [tab, setTab] = useState<string>(() => mode ?? (unreadInboxCount > 0 ? "inbox" : "timers"));
   const [timers, setTimers] = useState<HostTimerDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -67,14 +69,21 @@ export function AutomationsSettings({
     setLoading(true);
     setError(null);
     try {
-      const [timerList] = await Promise.all([client.listTimers(), refreshInbox(client)]);
-      setTimers(timerList);
+      if (mode === "timers") {
+        const timerList = await client.listTimers();
+        setTimers(timerList);
+      } else if (mode === "inbox") {
+        await refreshInbox(client);
+      } else {
+        const [timerList] = await Promise.all([client.listTimers(), refreshInbox(client)]);
+        setTimers(timerList);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load automations");
     } finally {
       setLoading(false);
     }
-  }, [client, refreshInbox]);
+  }, [client, mode, refreshInbox]);
 
   useEffect(() => {
     void loadAll();
@@ -129,6 +138,248 @@ export function AutomationsSettings({
     }
   };
 
+  const timersSection = (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Button variant="secondary" size="sm" onClick={() => openEditor()}>
+          <BrandIcon name="action/add" size={14} />
+          <span>{t("auto.newTimer")}</span>
+        </Button>
+      </div>
+
+      {loading && timers.length === 0 ? (
+        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+          {t("common.loading")}
+        </div>
+      ) : timers.length === 0 ? (
+        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+          {t("auto.emptyTimers")}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {timers.map((timer) => (
+            <Card key={timer.id} className="space-y-2 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+                      {timer.name}
+                    </span>
+                    <Badge tone="neutral">{formatTimerSchedule(timer, locale)}</Badge>
+                    {timer.lastError && <Badge tone="danger">{timer.lastError}</Badge>}
+                  </div>
+                  <p className="line-clamp-2 text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
+                    {timer.prompt}
+                  </p>
+                  <div className="flex flex-wrap gap-3 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {timer.nextRunAt && (
+                      <span>
+                        {t("auto.nextRun", {
+                          time: formatRelativeTime(timer.nextRunAt, locale),
+                        })}
+                      </span>
+                    )}
+                    {timer.lastDeliveredAt && (
+                      <span>
+                        {t("auto.lastRun", {
+                          time: formatRelativeTime(timer.lastDeliveredAt, locale),
+                        })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <Switch
+                  checked={timer.enabled}
+                  disabled={busy}
+                  onCheckedChange={(checked) => {
+                    if (!client) return;
+                    setBusy(true);
+                    void client
+                      .toggleTimer(timer.id, checked)
+                      .then(() => loadAll())
+                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                      .finally(() => setBusy(false));
+                  }}
+                />
+              </div>
+
+              <div
+                className="flex items-center justify-end gap-1.5 pt-2"
+                style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+              >
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!client) return;
+                    setBusy(true);
+                    void client
+                      .runTimerNow(timer.id)
+                      .then(() => loadAll())
+                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  <BrandIcon name="action/play" size={13.5} />
+                  <span>{t("auto.runNow")}</span>
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => openEditor(timer)}>
+                  {t("common.edit")}
+                </Button>
+                <IconButton
+                  size="sm"
+                  label={t("common.delete")}
+                  onClick={() => setDeleteTarget(timer)}
+                >
+                  <BrandIcon name="action/delete" size={14} />
+                </IconButton>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const inboxSection = (
+    <div className="space-y-3">
+      {inbox.some((item) => item.status !== "unread") && (
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              if (!client) return;
+              setBusy(true);
+              void client
+                .clearSettledInbox()
+                .then(setInboxItems)
+                .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {t("auto.clearSettled")}
+          </Button>
+        </div>
+      )}
+
+      {inbox.length === 0 ? (
+        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+          {t("auto.emptyInbox")}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {inbox.map((item) => (
+            <Card key={item.id} className="space-y-2 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge tone={item.status === "unread" ? "accent" : "neutral"}>
+                      {formatAutomationSource(item.source, t)}
+                    </Badge>
+                    <span className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+                      {item.title}
+                    </span>
+                    <span className="text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                      {formatRelativeTime(item.createdAt, locale)}
+                    </span>
+                  </div>
+                  {item.summary && (
+                    <p className="text-[12.5px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
+                      {item.summary}
+                    </p>
+                  )}
+                </div>
+
+                <Badge
+                  tone={
+                    item.status === "approved"
+                      ? "success"
+                      : item.status === "unread"
+                        ? "accent"
+                        : "neutral"
+                  }
+                >
+                  {formatAutomationStatus(item.status, t)}
+                </Badge>
+              </div>
+
+              <div
+                className="flex flex-wrap items-center justify-end gap-1.5 pt-2"
+                style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+              >
+                {item.sessionId && onOpenSession && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onOpenSession(item.sessionId!)}
+                  >
+                    <BrandIcon name="navigation/external_link" size={13.5} />
+                    <span>{t("auto.openSession")}</span>
+                  </Button>
+                )}
+                {item.status === "unread" && (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!client) return;
+                        setBusy(true);
+                        void client
+                          .updateInboxStatus(item.id, "approved")
+                          .then(() => refreshInbox(client))
+                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      <BrandIcon name="status/confirm" size={13.5} />
+                      <span>{t("auto.approve")}</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!client) return;
+                        setBusy(true);
+                        void client
+                          .updateInboxStatus(item.id, "dismissed")
+                          .then(() => refreshInbox(client))
+                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      <BrandIcon name="navigation/close" size={13.5} />
+                      <span>{t("auto.dismiss")}</span>
+                    </Button>
+                  </>
+                )}
+                <IconButton
+                  size="sm"
+                  label={t("common.delete")}
+                  onClick={() => {
+                    if (!client) return;
+                    void client
+                      .deleteInboxItem(item.id)
+                      .then(() => refreshInbox(client))
+                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+                  }}
+                >
+                  <BrandIcon name="action/delete" size={14} />
+                </IconButton>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {error && (
@@ -143,253 +394,24 @@ export function AutomationsSettings({
         </div>
       )}
 
-      <Tabs value={tab} onValueChange={setTab} className="space-y-3">
-        <TabsList>
-          <TabsTrigger value="timers">{t("auto.tabTimers")}</TabsTrigger>
-          <TabsTrigger value="inbox">
-            {t("auto.tabInbox")}
-            {unreadInboxCount > 0 ? ` (${unreadInboxCount})` : ""}
-          </TabsTrigger>
-        </TabsList>
+      {mode === "timers" ? (
+        timersSection
+      ) : mode === "inbox" ? (
+        inboxSection
+      ) : (
+        <Tabs value={tab} onValueChange={setTab} className="space-y-3">
+          <TabsList>
+            <TabsTrigger value="timers">{t("auto.tabTimers")}</TabsTrigger>
+            <TabsTrigger value="inbox">
+              {t("auto.tabInbox")}
+              {unreadInboxCount > 0 ? ` (${unreadInboxCount})` : ""}
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="timers" className="space-y-3">
-          <div className="flex justify-end">
-            <Button variant="secondary" size="sm" onClick={() => openEditor()}>
-              <BrandIcon name="action/add" size={14} />
-              <span>{t("auto.newTimer")}</span>
-            </Button>
-          </div>
-
-          {loading && timers.length === 0 ? (
-            <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {t("common.loading")}
-            </div>
-          ) : timers.length === 0 ? (
-            <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {t("auto.emptyTimers")}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {timers.map((timer) => (
-                <Card key={timer.id} className="space-y-2 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                          {timer.name}
-                        </span>
-                        <Badge tone="neutral">{formatTimerSchedule(timer, locale)}</Badge>
-                        {timer.lastError && <Badge tone="danger">{timer.lastError}</Badge>}
-                      </div>
-                      <p className="line-clamp-2 text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
-                        {timer.prompt}
-                      </p>
-                      <div className="flex flex-wrap gap-3 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                        {timer.nextRunAt && (
-                          <span>
-                            {t("auto.nextRun", {
-                              time: formatRelativeTime(timer.nextRunAt, locale),
-                            })}
-                          </span>
-                        )}
-                        {timer.lastDeliveredAt && (
-                          <span>
-                            {t("auto.lastRun", {
-                              time: formatRelativeTime(timer.lastDeliveredAt, locale),
-                            })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <Switch
-                      checked={timer.enabled}
-                      disabled={busy}
-                      onCheckedChange={(checked) => {
-                        if (!client) return;
-                        setBusy(true);
-                        void client
-                          .toggleTimer(timer.id, checked)
-                          .then(() => loadAll())
-                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                          .finally(() => setBusy(false));
-                      }}
-                    />
-                  </div>
-
-                  <div
-                    className="flex items-center justify-end gap-1.5 pt-2"
-                    style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        if (!client) return;
-                        setBusy(true);
-                        void client
-                          .runTimerNow(timer.id)
-                          .then(() => loadAll())
-                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                          .finally(() => setBusy(false));
-                      }}
-                    >
-                      <BrandIcon name="action/play" size={13.5} />
-                      <span>{t("auto.runNow")}</span>
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => openEditor(timer)}>
-                      {t("common.edit")}
-                    </Button>
-                    <IconButton
-                      size="sm"
-                      label={t("common.delete")}
-                      onClick={() => setDeleteTarget(timer)}
-                    >
-                      <BrandIcon name="action/delete" size={14} />
-                    </IconButton>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="inbox" className="space-y-3">
-          {inbox.some((item) => item.status !== "unread") && (
-            <div className="flex justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  if (!client) return;
-                  setBusy(true);
-                  void client
-                    .clearSettledInbox()
-                    .then(setInboxItems)
-                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                    .finally(() => setBusy(false));
-                }}
-              >
-                {t("auto.clearSettled")}
-              </Button>
-            </div>
-          )}
-
-          {inbox.length === 0 ? (
-            <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {t("auto.emptyInbox")}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {inbox.map((item) => (
-                <Card key={item.id} className="space-y-2 p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge tone={item.status === "unread" ? "accent" : "neutral"}>
-                          {formatAutomationSource(item.source, t)}
-                        </Badge>
-                        <span className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                          {item.title}
-                        </span>
-                        <span className="text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                          {formatRelativeTime(item.createdAt, locale)}
-                        </span>
-                      </div>
-                      {item.summary && (
-                        <p className="text-[12.5px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
-                          {item.summary}
-                        </p>
-                      )}
-                    </div>
-
-                    <Badge
-                      tone={
-                        item.status === "approved"
-                          ? "success"
-                          : item.status === "unread"
-                            ? "accent"
-                            : "neutral"
-                      }
-                    >
-                      {formatAutomationStatus(item.status, t)}
-                    </Badge>
-                  </div>
-
-                  <div
-                    className="flex flex-wrap items-center justify-end gap-1.5 pt-2"
-                    style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
-                  >
-                    {item.sessionId && onOpenSession && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onOpenSession(item.sessionId!)}
-                      >
-                        <BrandIcon name="navigation/external_link" size={13.5} />
-                        <span>{t("auto.openSession")}</span>
-                      </Button>
-                    )}
-                    {item.status === "unread" && (
-                      <>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => {
-                            if (!client) return;
-                            setBusy(true);
-                            void client
-                              .updateInboxStatus(item.id, "approved")
-                              .then(() => refreshInbox(client))
-                              .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                              .finally(() => setBusy(false));
-                          }}
-                        >
-                          <BrandIcon name="status/confirm" size={13.5} />
-                          <span>{t("auto.approve")}</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => {
-                            if (!client) return;
-                            setBusy(true);
-                            void client
-                              .updateInboxStatus(item.id, "dismissed")
-                              .then(() => refreshInbox(client))
-                              .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                              .finally(() => setBusy(false));
-                          }}
-                        >
-                          <BrandIcon name="navigation/close" size={13.5} />
-                          <span>{t("auto.dismiss")}</span>
-                        </Button>
-                      </>
-                    )}
-                    <IconButton
-                      size="sm"
-                      label={t("common.delete")}
-                      onClick={() => {
-                        if (!client) return;
-                        void client
-                          .deleteInboxItem(item.id)
-                          .then(() => refreshInbox(client))
-                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
-                      }}
-                    >
-                      <BrandIcon name="action/delete" size={14} />
-                    </IconButton>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="timers">{timersSection}</TabsContent>
+          <TabsContent value="inbox">{inboxSection}</TabsContent>
+        </Tabs>
+      )}
 
       <Dialog
         open={editorOpen}

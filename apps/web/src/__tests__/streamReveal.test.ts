@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   splitMarkdownBlocks,
+  splitMarkdownBlockSpans,
   splitTextByAlpha,
+  splitTextByFadeUnit,
   STREAM_MAX_BATCHES,
   StreamTextFadeAnimator,
 } from "../features/chat/streamReveal";
@@ -34,6 +36,55 @@ describe("streamReveal", () => {
     animator.advance(700);
     expect(animator.hasActiveBatches).toBe(false);
     expect(animator.alphaAt(11, 700)).toBe(1);
+  });
+
+  it("splits staggered zero-alpha units separately so rAF opacity never jumps ahead and snaps back", () => {
+    const animator = new StreamTextFadeAnimator();
+    const chunks = ["Hello", " world", " from", " SuperPI", " streaming!"];
+    let text = "";
+    const maxObservedAlpha = new Map<number, number>();
+
+    let now = 100;
+    for (const chunk of chunks) {
+      text += chunk;
+      animator.sync(text, true, true, now);
+      const runs = splitTextByFadeUnit(text, 0, animator, now);
+
+      // Verify newly appended multi-char chunks are split per unit instead of merged under offset 0.
+      const animatingRuns = runs.filter((r) => r.animating);
+      expect(animatingRuns.length).toBeGreaterThan(1);
+
+      // Simulate rAF ticks between 32ms coalesced stream updates: each span's DOM opacity
+      // is driven solely by `animator.alphaAt(run.offset, t)`.
+      for (const dt of [0, 16, 32]) {
+        const t = now + dt;
+        animator.advance(t);
+        let charPos = 0;
+        for (const run of runs) {
+          const domAlpha = run.animating ? animator.alphaAt(run.offset, t) : 1;
+          for (let i = 0; i < run.text.length; i++) {
+            const idx = charPos + i;
+            const prevMax = maxObservedAlpha.get(idx) ?? 0;
+            expect(domAlpha).toBeGreaterThanOrEqual(prevMax);
+            maxObservedAlpha.set(idx, domAlpha);
+          }
+          charPos += run.text.length;
+        }
+        expect(charPos).toBe(text.length);
+      }
+      now += 32;
+    }
+
+    animator.advance(now + 1000);
+    expect(animator.hasActiveBatches).toBe(false);
+  });
+
+  it("aligns splitMarkdownBlockSpans offsets with normalized text", () => {
+    const spans = splitMarkdownBlockSpans("Para 1\r\n\r\nPara 2", true);
+    expect(spans).toEqual([
+      { start: 0, end: 6, text: "Para 1" },
+      { start: 8, end: 14, text: "Para 2" },
+    ]);
   });
 
   it("preserves already revealed prefix when markdown closing delimiters strip leading markers", () => {

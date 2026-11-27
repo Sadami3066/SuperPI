@@ -1,10 +1,13 @@
 import {
   cloneElement,
+  createContext,
   Fragment,
   isValidElement,
   memo,
   type ReactNode,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -38,9 +41,11 @@ import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { ContextMenu, ContextMenuItem } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import {
-  splitMarkdownBlocks,
-  splitTextByAlpha,
+  splitMarkdownBlockSpans,
+  splitTextByFadeUnit,
+  STREAM_ALPHA_LEVELS,
   STREAM_COALESCE_INTERVAL_MS,
+  STREAM_INITIAL_ANIMATE_MAX_LENGTH,
   StreamTextFadeAnimator,
 } from "./streamReveal";
 
@@ -101,10 +106,12 @@ const CodeBlock = memo(function CodeBlock({
   language,
   code,
   streaming = false,
+  rendered,
 }: {
   language: string;
   code: string;
   streaming?: boolean;
+  rendered?: ReactNode;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -252,7 +259,7 @@ const CodeBlock = memo(function CodeBlock({
               {deferredHtml !== null ? (
                 <code className="hljs" dangerouslySetInnerHTML={{ __html: deferredHtml }} />
               ) : (
-                <code>{code}</code>
+                <code>{rendered ?? code}</code>
               )}
             </pre>
           )}
@@ -287,17 +294,208 @@ const CodeBlock = memo(function CodeBlock({
   );
 });
 
-const baseMarkdownComponents: Components = {
+interface MarkdownPositionNode {
+  position?: {
+    start?: {
+      offset?: number;
+    };
+    end?: {
+      offset?: number;
+    };
+  };
+}
+
+function nodeStartOffset(node: unknown): number {
+  const offset = (node as MarkdownPositionNode | undefined)?.position?.start?.offset;
+  return typeof offset === "number" ? offset : 0;
+}
+
+function nodeEndOffset(node: unknown): number | null {
+  const offset = (node as MarkdownPositionNode | undefined)?.position?.end?.offset;
+  return typeof offset === "number" ? offset : null;
+}
+
+function collectText(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(collectText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return node.props.children === undefined ? "" : collectText(node.props.children);
+  }
+  return "";
+}
+
+function fadeRuns(
+  text: string,
+  offset: number,
+  animator: StreamTextFadeAnimator,
+  nowMs: number,
+): ReactNode {
+  const runs = splitTextByFadeUnit(text, offset, animator, nowMs);
+  if (runs.length === 1 && !runs[0].animating) return text;
+  return runs.map((run) => {
+    if (!run.animating) {
+      return <Fragment key={`s-${run.offset}`}>{run.text}</Fragment>;
+    }
+    return (
+      <span key={`f-${run.offset}`} data-fade-offset={run.offset} style={{ opacity: run.alpha }}>
+        {run.text}
+      </span>
+    );
+  });
+}
+
+function wrapStreamingText(
+  text: string,
+  source: string,
+  baseOffset: number,
+  cursor: { pos: number },
+  animator: StreamTextFadeAnimator,
+  nowMs: number,
+): ReactNode {
+  if (!text || !animator.hasActiveBatches) return text;
+  const idx = source.indexOf(text, cursor.pos);
+  if (idx >= 0) {
+    cursor.pos = idx + text.length;
+    return fadeRuns(text, baseOffset + idx, animator, nowMs);
+  }
+  if (!text.includes("\n")) return text;
+  const lines = text.split("\n");
+  let anyMatched = false;
+  const out: ReactNode[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) out.push("\n");
+    const line = lines[i];
+    if (!line) continue;
+    const at = source.indexOf(line, cursor.pos);
+    if (at >= 0) {
+      anyMatched = true;
+      cursor.pos = at + line.length;
+      out.push(<Fragment key={`l-${baseOffset + at}`}>{fadeRuns(line, baseOffset + at, animator, nowMs)}</Fragment>);
+    } else {
+      out.push(line);
+    }
+  }
+  return anyMatched ? out : text;
+}
+
+function wrapStreamingChildren(
+  node: ReactNode,
+  source: string,
+  baseOffset: number,
+  cursor: { pos: number },
+  animator: StreamTextFadeAnimator,
+  nowMs: number,
+  skipBlockTags = false,
+): ReactNode {
+  if (typeof node === "string") {
+    return wrapStreamingText(node, source, baseOffset, cursor, animator, nowMs);
+  }
+  if (Array.isArray(node)) {
+    return node.map((child, idx) => (
+      <Fragment key={idx}>
+        {wrapStreamingChildren(child, source, baseOffset, cursor, animator, nowMs, skipBlockTags)}
+      </Fragment>
+    ));
+  }
+  if (isValidElement<{ children?: ReactNode; node?: MarkdownPositionNode }>(node)) {
+    if (skipBlockTags && typeof node.type === "string" && ["p", "ul", "ol"].includes(node.type)) {
+      return node;
+    }
+    if (typeof node.type !== "string") {
+      const endOffset = nodeEndOffset(node.props.node);
+      if (endOffset !== null) {
+        cursor.pos = Math.max(cursor.pos, endOffset);
+      } else if (node.props.children !== undefined) {
+        const text = collectText(node.props.children);
+        if (text) {
+          const at = source.indexOf(text, cursor.pos);
+          if (at >= 0) cursor.pos = at + text.length;
+        }
+      }
+      return node;
+    }
+    if (node.props.children === undefined) return node;
+    return cloneElement(
+      node,
+      undefined,
+      wrapStreamingChildren(
+        node.props.children,
+        source,
+        baseOffset,
+        cursor,
+        animator,
+        nowMs,
+        skipBlockTags,
+      ),
+    );
+  }
+  return node;
+}
+
+interface StreamingFadeContextValue {
+  content: string;
+  baseOffset: number;
+  animator: StreamTextFadeAnimator;
+  nowMs: number;
+  activeFade: boolean;
+  streamingCode: boolean;
+}
+
+const StreamingFadeContext = createContext<StreamingFadeContextValue | null>(null);
+
+function wrapWithContext(
+  children: ReactNode,
+  node: unknown,
+  ctx: StreamingFadeContextValue | null,
+  skipBlockTags = false,
+): ReactNode {
+  if (!ctx?.activeFade) return children;
+  return wrapStreamingChildren(
+    children,
+    ctx.content,
+    ctx.baseOffset,
+    { pos: nodeStartOffset(node) },
+    ctx.animator,
+    ctx.nowMs,
+    skipBlockTags,
+  );
+}
+
+// Module-level stable component map so react-markdown never unmounts/remounts
+// block elements or CodeBlock instances on streaming ticks or fade settle.
+const markdownComponents: Components = {
   pre({ children }) {
     return <>{children}</>;
   },
-  code({ className, children, ...props }) {
+  code({ className, children, node, ...props }) {
+    const ctx = useContext(StreamingFadeContext);
     const match = /language-([\w-]+)/.exec(className || "");
     const raw = String(children);
     const isBlock = Boolean(match) || raw.includes("\n");
     const rawText = raw.replace(/\n$/, "");
     if (isBlock) {
-      return <CodeBlock language={match?.[1] ?? ""} code={rawText} />;
+      let rendered: ReactNode;
+      if (ctx?.activeFade && rawText) {
+        const startPos = nodeStartOffset(node);
+        const at = ctx.content.indexOf(rawText, startPos);
+        const offset = ctx.baseOffset + (at >= 0 ? at : startPos);
+        rendered = fadeRuns(rawText, offset, ctx.animator, ctx.nowMs);
+      }
+      return (
+        <CodeBlock
+          language={match?.[1] ?? ""}
+          code={rawText}
+          streaming={Boolean(ctx && (ctx.streamingCode || ctx.activeFade))}
+          rendered={rendered}
+        />
+      );
+    }
+    let inlineContent: ReactNode = children;
+    if (ctx?.activeFade && raw) {
+      const startPos = nodeStartOffset(node);
+      const at = ctx.content.indexOf(raw, startPos);
+      const offset = ctx.baseOffset + (at >= 0 ? at : startPos);
+      inlineContent = fadeRuns(raw, offset, ctx.animator, ctx.nowMs);
     }
     return (
       <code
@@ -308,11 +506,12 @@ const baseMarkdownComponents: Components = {
           fontFamily: "var(--pi-font-mono)",
         }}
       >
-        {children}
+        {inlineContent}
       </code>
     );
   },
-  a({ href, children }) {
+  a({ href, children, node }) {
+    const ctx = useContext(StreamingFadeContext);
     return (
       <a
         href={href}
@@ -324,7 +523,7 @@ const baseMarkdownComponents: Components = {
           }
         }}
       >
-        {children}
+        {wrapWithContext(children, node, ctx)}
       </a>
     );
   },
@@ -335,15 +534,39 @@ const baseMarkdownComponents: Components = {
       </div>
     );
   },
+  p({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <p>{wrapWithContext(children, node, ctx)}</p>;
+  },
+  h1({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <h1>{wrapWithContext(children, node, ctx)}</h1>;
+  },
+  h2({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <h2>{wrapWithContext(children, node, ctx)}</h2>;
+  },
+  h3({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <h3>{wrapWithContext(children, node, ctx)}</h3>;
+  },
+  h4({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <h4>{wrapWithContext(children, node, ctx)}</h4>;
+  },
+  li({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <li>{wrapWithContext(children, node, ctx, true)}</li>;
+  },
+  td({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <td>{wrapWithContext(children, node, ctx)}</td>;
+  },
+  th({ children, node }) {
+    const ctx = useContext(StreamingFadeContext);
+    return <th>{wrapWithContext(children, node, ctx)}</th>;
+  },
 };
-
-const StaticMarkdownBlock = memo(function StaticMarkdownBlock({ content }: { content: string }) {
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={baseMarkdownComponents}>
-      {content}
-    </ReactMarkdown>
-  );
-});
 
 function useCoalescedStreamText(text: string, live: boolean): string {
   const [displayed, setDisplayed] = useState(text);
@@ -381,64 +604,54 @@ function useCoalescedStreamText(text: string, live: boolean): string {
   return displayed || text;
 }
 
-function wrapStreamingChildren(
-  node: ReactNode,
-  source: string,
-  cursor: { pos: number },
-  animator: StreamTextFadeAnimator,
-  nowMs: number,
-  skipBlockTags = false,
-): ReactNode {
-  if (typeof node === "string") {
-    if (!node || !animator.hasActiveBatches) return node;
-    const idx = source.indexOf(node, cursor.pos);
-    if (idx < 0) return node;
-    cursor.pos = idx + node.length;
-    const runs = splitTextByAlpha(node, idx, animator, nowMs);
-    if (runs.length === 1 && runs[0].alpha >= 1) return node;
-    let offset = idx;
-    return runs.map((run, i) => {
-      const spanStart = offset;
-      offset += run.text.length;
-      if (run.alpha >= 1) {
-        return <Fragment key={i}>{run.text}</Fragment>;
-      }
-      return (
-        <span key={i} data-fade-offset={spanStart} style={{ opacity: run.alpha }}>
-          {run.text}
-        </span>
-      );
-    });
-  }
-  if (Array.isArray(node)) {
-    return node.map((child, idx) => (
-      <Fragment key={idx}>
-        {wrapStreamingChildren(child, source, cursor, animator, nowMs, skipBlockTags)}
-      </Fragment>
-    ));
-  }
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    if (skipBlockTags && typeof node.type === "string" && ["p", "ul", "ol"].includes(node.type)) {
-      return node;
-    }
-    if (node.props.children === undefined) return node;
-    return cloneElement(
-      node,
-      undefined,
-      wrapStreamingChildren(node.props.children, source, cursor, animator, nowMs, skipBlockTags),
-    );
-  }
-  return node;
-}
-
-const TailMarkdownBlock = memo(function TailMarkdownBlock({
+const MarkdownBlock = memo(function MarkdownBlock({
   content,
-  live,
+  baseOffset,
+  animator,
+  nowMs,
+  activeFade,
+  streamingCode,
 }: {
   content: string;
-  live: boolean;
+  baseOffset: number;
+  animator: StreamTextFadeAnimator | null;
+  nowMs: number;
+  activeFade: boolean;
+  streamingCode: boolean;
 }) {
+  const fadeCtx = useMemo<StreamingFadeContextValue | null>(
+    () =>
+      (activeFade || streamingCode) && animator
+        ? { content, baseOffset, animator, nowMs, activeFade, streamingCode }
+        : null,
+    [activeFade, animator, baseOffset, content, nowMs, streamingCode],
+  );
+
+  return (
+    <StreamingFadeContext.Provider value={fadeCtx}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {content}
+      </ReactMarkdown>
+    </StreamingFadeContext.Provider>
+  );
+});
+
+interface FadeNode {
+  el: HTMLElement;
+  offset: number;
+  level: number;
+}
+
+export const MarkdownView = memo(function MarkdownView({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
+  const live = Boolean(streaming);
   const coalesced = useCoalescedStreamText(content, live);
+  const normalized = useMemo(() => coalesced.replace(/\r\n/g, "\n"), [coalesced]);
   const reducedMotion =
     typeof window !== "undefined" &&
     Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
@@ -448,113 +661,101 @@ const TailMarkdownBlock = memo(function TailMarkdownBlock({
     animatorRef.current = new StreamTextFadeAnimator();
   }
   const animator = animatorRef.current;
-  const wasLiveRef = useRef(live);
+  const wasLiveRef = useRef(false);
   if (live) {
     wasLiveRef.current = true;
   }
 
-  const tailRef = useRef<HTMLDivElement | null>(null);
+  const [fadeSettledTick, setFadeSettledTick] = useState(0);
+
+  const spans = useMemo(
+    () => splitMarkdownBlockSpans(normalized, live),
+    [normalized, live],
+  );
+
   const shouldAnimate = !reducedMotion && (live || (wasLiveRef.current && animator.hasActiveBatches));
 
-  const rendered = useMemo(() => {
-    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const fadeState = useMemo<{ nowMs: number; activeFlags: boolean[] | null }>(() => {
+    void fadeSettledTick;
     if (reducedMotion || !shouldAnimate) {
       animator.finish();
       wasLiveRef.current = false;
-      return <StaticMarkdownBlock content={coalesced} />;
+      return { nowMs: 0, activeFlags: null };
     }
-
-    animator.sync(coalesced, true, true, nowMs);
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    animator.sync(normalized, live, normalized.length <= STREAM_INITIAL_ANIMATE_MAX_LENGTH, nowMs);
+    animator.advance(nowMs);
     if (!animator.hasActiveBatches) {
       if (!live) wasLiveRef.current = false;
-      return <StaticMarkdownBlock content={coalesced} />;
+      return { nowMs, activeFlags: null };
     }
+    return {
+      nowMs,
+      activeFlags: spans.map((span) => animator.hasBatchesInRange(span.start, span.end)),
+    };
+  }, [animator, fadeSettledTick, live, normalized, reducedMotion, shouldAnimate, spans]);
 
-    const cursor = { pos: 0 };
-    const components: Components = {
-      ...baseMarkdownComponents,
-      code({ className, children, ...props }) {
-        const match = /language-([\w-]+)/.exec(className || "");
-        const raw = String(children);
-        const isBlock = Boolean(match) || raw.includes("\n");
-        const rawText = raw.replace(/\n$/, "");
-        if (isBlock) {
-          return <CodeBlock language={match?.[1] ?? ""} code={rawText} streaming={live} />;
+  const activeFlags = fadeState.activeFlags;
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!activeFlags) return undefined;
+    const container = rootRef.current;
+    if (!container) return undefined;
+
+    let nodes: FadeNode[] = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-fade-offset]"),
+    )
+      .map((el) => ({
+        el,
+        offset: Number.parseInt(el.getAttribute("data-fade-offset") ?? "", 10),
+        level: -1,
+      }))
+      .filter((node) => Number.isFinite(node.offset));
+
+    const applyAt = (now: number) => {
+      animator.advance(now);
+      if (nodes.length > 0) {
+        const remaining: FadeNode[] = [];
+        for (const node of nodes) {
+          if (!node.el.isConnected) continue;
+          const level = animator.levelAt(node.offset, now);
+          if (level !== node.level) {
+            node.level = level;
+            if (level >= STREAM_ALPHA_LEVELS) {
+              node.el.style.opacity = "";
+              node.el.removeAttribute("data-fade-offset");
+              continue;
+            }
+            node.el.style.opacity = String(level / STREAM_ALPHA_LEVELS);
+          }
+          remaining.push(node);
         }
-        return (
-          <code
-            {...props}
-            className="rounded-[5px] px-1.5 py-[1px] text-[0.88em]"
-            style={{
-              background: "var(--pi-inline-code-bg)",
-              fontFamily: "var(--pi-font-mono)",
-            }}
-          >
-            {children}
-          </code>
-        );
-      },
-      p({ children }) {
-        return <p>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</p>;
-      },
-      h1({ children }) {
-        return <h1>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h1>;
-      },
-      h2({ children }) {
-        return <h2>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h2>;
-      },
-      h3({ children }) {
-        return <h3>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h3>;
-      },
-      h4({ children }) {
-        return <h4>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</h4>;
-      },
-      li({ children }) {
-        return <li>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs, true)}</li>;
-      },
-      td({ children }) {
-        return <td>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</td>;
-      },
-      th({ children }) {
-        return <th>{wrapStreamingChildren(children, coalesced, cursor, animator, nowMs)}</th>;
-      },
+        nodes = remaining;
+      }
     };
 
-    return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {coalesced}
-      </ReactMarkdown>
-    );
-  }, [animator, coalesced, live, reducedMotion, shouldAnimate]);
-
-  useEffect(() => {
-    if (reducedMotion || !animator.hasActiveBatches) return undefined;
     let rafId = 0;
     let cancelled = false;
+
+    const initialNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+    applyAt(initialNow);
+
+    if (!animator.hasActiveBatches) {
+      if (!live) wasLiveRef.current = false;
+      setFadeSettledTick((v) => v + 1);
+      return undefined;
+    }
+
     const step = () => {
       if (cancelled) return;
       const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const changed = animator.advance(now);
-      const container = tailRef.current;
-      if (container && (changed || !animator.hasActiveBatches)) {
-        const nodes = container.querySelectorAll<HTMLElement>("[data-fade-offset]");
-        nodes.forEach((el) => {
-          const offsetAttr = el.getAttribute("data-fade-offset");
-          if (offsetAttr === null) return;
-          const offset = Number.parseInt(offsetAttr, 10);
-          const alpha = Number.isFinite(offset) ? animator.alphaAt(offset, now) : 1;
-          if (alpha >= 1) {
-            el.style.opacity = "";
-            el.removeAttribute("data-fade-offset");
-          } else {
-            el.style.opacity = String(alpha);
-          }
-        });
-      }
+      applyAt(now);
       if (animator.hasActiveBatches) {
         rafId = requestAnimationFrame(step);
-      } else if (!live) {
-        wasLiveRef.current = false;
+      } else {
+        if (!live) wasLiveRef.current = false;
+        setFadeSettledTick((v) => v + 1);
       }
     };
     rafId = requestAnimationFrame(step);
@@ -562,36 +763,28 @@ const TailMarkdownBlock = memo(function TailMarkdownBlock({
       cancelled = true;
       cancelAnimationFrame(rafId);
     };
-  }, [animator, coalesced, live, reducedMotion]);
+  }, [activeFlags, animator, live, normalized]);
 
-  return <div ref={tailRef}>{rendered}</div>;
-});
-
-export const MarkdownView = memo(function MarkdownView({
-  content,
-  streaming = false,
-}: {
-  content: string;
-  streaming?: boolean;
-}) {
-  const blocks = useMemo(
-    () => splitMarkdownBlocks(content, Boolean(streaming)),
-    [content, streaming],
-  );
-
-  if (blocks.length === 0) return null;
-
-  const lastIdx = blocks.length - 1;
+  if (spans.length === 0) return null;
 
   return (
-    <div className="pi-prose space-y-2.5">
-      {blocks.map((block, idx) =>
-        idx < lastIdx ? (
-          <StaticMarkdownBlock key={`b-${idx}`} content={block} />
-        ) : (
-          <TailMarkdownBlock key={`b-${idx}`} content={block} live={Boolean(streaming)} />
-        ),
-      )}
+    <div ref={rootRef} className="pi-prose space-y-2.5">
+      {spans.map((span, idx) => {
+        const activeFade = Boolean(activeFlags?.[idx]);
+        const streamingCode = live && idx === spans.length - 1;
+        const needsCtx = activeFade || streamingCode;
+        return (
+          <MarkdownBlock
+            key={`b-${idx}`}
+            content={span.text}
+            baseOffset={span.start}
+            animator={needsCtx ? animator : null}
+            nowMs={activeFade ? fadeState.nowMs : 0}
+            activeFade={activeFade}
+            streamingCode={streamingCode}
+          />
+        );
+      })}
     </div>
   );
 });

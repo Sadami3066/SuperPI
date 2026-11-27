@@ -41,7 +41,7 @@ export function DropdownMenu({
         <DropdownMenuPrimitive.Content
           align={align}
           sideOffset={sideOffset}
-          className="pi-popover z-50 min-w-[172px] p-1 outline-none"
+          className="pi-popover pi-popover-anim z-50 min-w-[172px] p-1 outline-none"
         >
           {children}
         </DropdownMenuPrimitive.Content>

@@ -471,7 +471,6 @@ internal fun Route.installSessionRoutes(
         controller.autoRetryController.cancel(sessionId)
         controller.toolApprovalCenter.cancelForSession(sessionId)
         controller.toolApprovalCenter.clearSessionGrants(sessionId)
-        controller.planFirstSessions.remove(sessionId)
         controller.runtimeHost.deleteSession(sessionId)
         controller.scope.launch { runCatching { controller.checkpointStore.deleteSession(sessionId) } }
         call.respond(HealthResponse(ok = true))
@@ -528,25 +527,7 @@ internal fun Route.installSessionRoutes(
         }
         controller.autoRetryController.cancel(sessionId)
         val cwd = controller.runtimeHost.sessionCwd(sessionId).orEmpty()
-        val expandedBase = if (rawText.isNotEmpty()) controller.expandPromptCommand(cwd, rawText) else ""
-        val expanded = if (req.planFirst && expandedBase.isNotEmpty()) {
-            """
-            <plan_first>
-            The user enabled Plan-First mode.
-            Inspect the workspace read-only as needed, then reply with a concise, concrete implementation plan inside a fenced ```plan code block:
-            ```plan
-            Title: <short plan title>
-            1. <first concrete step>
-            2. <second concrete step>
-            ```
-            Do NOT modify files or run destructive commands yet; wait for the user to approve the plan.
-            </plan_first>
-
-            $expandedBase
-            """.trimIndent()
-        } else {
-            expandedBase
-        }
+        val expanded = if (rawText.isNotEmpty()) controller.expandPromptCommand(cwd, rawText) else ""
         if (req.steer && sessionId in controller.runtimeHost.busySessionIds.value) {
             controller.scope.launch {
                 runCatching { controller.runtimeHost.steer(sessionId, expanded, images) }
@@ -560,11 +541,6 @@ internal fun Route.installSessionRoutes(
             if (sessionId in controller.runtimeHost.busySessionIds.value) {
                 call.respond(HttpStatusCode.Conflict, ApiErrorResponse("Agent session is busy"))
                 return@post
-            }
-            if (req.planFirst) {
-                controller.planFirstSessions.add(sessionId)
-            } else {
-                controller.planFirstSessions.remove(sessionId)
             }
             val preHistory = runCatching { controller.runtimeHost.historySnapshot(sessionId) }.getOrDefault(emptyList())
             val userTurnIndex = preHistory.count { it.role.name.equals("USER", ignoreCase = true) }
@@ -590,10 +566,8 @@ internal fun Route.installSessionRoutes(
                 try {
                     controller.runtimeHost.send(sessionId, expanded, images)
                 } catch (cancelled: CancellationException) {
-                    controller.planFirstSessions.remove(sessionId)
                     throw cancelled
                 } catch (err: Throwable) {
-                    controller.planFirstSessions.remove(sessionId)
                     controller.emitSessionError(sessionId, err.message ?: "Failed to send message")
                 }
             }

@@ -30,11 +30,11 @@ export function Dialog({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-50"
+          className="pi-dialog-overlay fixed inset-0 z-50"
           style={{ background: "var(--pi-scrim)" }}
         />
         <DialogPrimitive.Content
-          className={`pi-popover fixed top-1/2 left-1/2 z-50 w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 p-5 outline-none ${maxWidthClass}`}
+          className={`pi-popover pi-dialog-content fixed top-1/2 left-1/2 z-50 w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 p-5 outline-none ${maxWidthClass}`}
         >
           {(title || description) && (
             <div className="mb-4 flex items-start justify-between gap-3">

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { IconArrowDown } from "@tabler/icons-react";
 import type {
@@ -26,11 +26,15 @@ export function MessageList({
   compactProcess,
   dark,
   canRetry = true,
+  canBranchOrRewind = false,
   onQuote,
   onRetry,
+  onForkFromTurn,
+  onRewindTurn,
   onAnswerQuestion,
   onDismissQuestion,
   onResolveApproval,
+  footerSlot,
   scrollRefOut,
 }: {
   sessionId: string;
@@ -40,11 +44,15 @@ export function MessageList({
   compactProcess: boolean;
   dark: boolean;
   canRetry?: boolean;
+  canBranchOrRewind?: boolean;
   onQuote: (text: string) => void;
   onRetry: () => void;
+  onForkFromTurn?: (upToUserTurn: number) => void;
+  onRewindTurn?: (turnIndex: number, rawText: string) => void;
   onAnswerQuestion: (requestId: string, answers: QuestionAnswerInput[]) => Promise<void>;
   onDismissQuestion: (requestId: string) => Promise<void>;
   onResolveApproval?: (approvalId: string, decision: ToolApprovalDecision) => Promise<void>;
+  footerSlot?: ReactNode;
   scrollRefOut?: React.MutableRefObject<(() => void) | null>;
 }) {
   const { t } = useI18n();
@@ -85,6 +93,23 @@ export function MessageList({
     return "";
   }, [turns]);
 
+  const userTurnIndices = useMemo(() => {
+    const out: Array<number | undefined> = new Array(turns.length);
+    let userCount = -1;
+    for (let i = 0; i < turns.length; i++) {
+      const turn = turns[i];
+      if (turn.summary) {
+        out[i] = undefined;
+      } else if (turn.role === "user") {
+        userCount += 1;
+        out[i] = userCount;
+      } else {
+        out[i] = userCount >= 0 ? userCount : undefined;
+      }
+    }
+    return out;
+  }, [turns]);
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} className="pi-chat-gutter min-h-0 flex-1 overflow-y-auto">
@@ -107,12 +132,16 @@ export function MessageList({
                   <TurnItem
                     turn={turn}
                     sessionId={sessionId}
+                    userTurnIndex={userTurnIndices[vRow.index]}
                     isLastAssistant={turn.id === lastAssistantId && !hasLiveRun}
                     compactProcess={compactProcess}
                     dark={dark}
                     canRetry={canRetry}
+                    canBranchOrRewind={canBranchOrRewind && !isStreaming}
                     onQuote={onQuote}
                     onRetry={onRetry}
+                    onForkFromTurn={onForkFromTurn}
+                    onRewindTurn={onRewindTurn}
                   />
                 </div>
               );
@@ -147,6 +176,8 @@ export function MessageList({
               onDismiss={onDismissQuestion}
             />
           )}
+
+          {footerSlot}
         </div>
       </div>
 

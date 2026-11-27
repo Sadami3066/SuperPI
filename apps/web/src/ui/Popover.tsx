@@ -63,7 +63,7 @@ export function Popover({
           side={side}
           sideOffset={sideOffset}
           collisionPadding={12}
-          className={`pi-popover z-50 outline-none ${className}`}
+          className={`pi-popover pi-popover-anim z-50 outline-none ${className}`}
         >
           {children}
         </PopoverPrimitive.Content>

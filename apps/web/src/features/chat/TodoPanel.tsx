@@ -84,62 +84,64 @@ export function TodoPanel({
           </div>
         </button>
 
-        {expanded && (
-          <div
-            data-scrollable
-            className="max-h-[210px] space-y-1 overflow-y-auto px-3 py-2"
-            style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
-          >
-            {visibleTodos.map((item) => {
-              const completed = item.status === "completed";
-              const running = item.status === "in_progress";
-              return (
-                <div
-                  key={item.content}
-                  className="group flex items-center justify-between gap-2 rounded-[8px] px-2 py-1"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                      {completed ? (
-                        <BrandIcon name="status/confirm" size={12.5} style={{ color: "var(--pi-success)" }} />
-                      ) : running ? (
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ background: "var(--pi-accent)" }}
-                        />
-                      ) : (
-                        <span
-                          className="h-2 w-2 rounded-full border"
-                          style={{ borderColor: "var(--pi-ink-tertiary)" }}
-                        />
-                      )}
-                    </span>
-                    <span
-                      className={`truncate text-[12.5px] ${completed ? "line-through" : ""}`}
-                      style={{
-                        color: completed ? "var(--pi-ink-tertiary)" : "var(--pi-ink)",
-                      }}
-                    >
-                      {item.content}
-                    </span>
-                  </div>
-                  <IconButton
-                    size="sm"
-                    label={t("todo.hideItem")}
-                    className="opacity-0 group-hover:opacity-100"
-                    onClick={() =>
-                      setHiddenContents((prev) =>
-                        prev.includes(item.content) ? prev : [...prev, item.content],
-                      )
-                    }
+        <div className="pi-collapse" data-open={expanded ? "true" : "false"} aria-hidden={!expanded}>
+          <div className="pi-collapse-inner">
+            <div
+              data-scrollable
+              className="max-h-[210px] space-y-1 overflow-y-auto px-3 py-2"
+              style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+            >
+              {visibleTodos.map((item) => {
+                const completed = item.status === "completed";
+                const running = item.status === "in_progress";
+                return (
+                  <div
+                    key={item.content}
+                    className="group flex items-center justify-between gap-2 rounded-[8px] px-2 py-1"
                   >
-                    <BrandIcon name="navigation/close" size={12} />
-                  </IconButton>
-                </div>
-              );
-            })}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                        {completed ? (
+                          <BrandIcon name="status/confirm" size={12.5} style={{ color: "var(--pi-success)" }} />
+                        ) : running ? (
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ background: "var(--pi-accent)" }}
+                          />
+                        ) : (
+                          <span
+                            className="h-2 w-2 rounded-full border"
+                            style={{ borderColor: "var(--pi-ink-tertiary)" }}
+                          />
+                        )}
+                      </span>
+                      <span
+                        className={`truncate text-[12.5px] ${completed ? "line-through" : ""}`}
+                        style={{
+                          color: completed ? "var(--pi-ink-tertiary)" : "var(--pi-ink)",
+                        }}
+                      >
+                        {item.content}
+                      </span>
+                    </div>
+                    <IconButton
+                      size="sm"
+                      label={t("todo.hideItem")}
+                      className="opacity-0 group-hover:opacity-100"
+                      onClick={() =>
+                        setHiddenContents((prev) =>
+                          prev.includes(item.content) ? prev : [...prev, item.content],
+                        )
+                      }
+                    >
+                      <BrandIcon name="navigation/close" size={12} />
+                    </IconButton>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

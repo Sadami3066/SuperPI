@@ -179,4 +179,196 @@ describe("sessionStore resilience", () => {
     expect(committedReplies).toEqual(["reply-1", "reply-2", "reply-3", "reply-4"]);
     expect(latestLive?.blocks.some((b) => b.kind === "text" && b.text === "reply-5")).toBe(true);
   });
+
+  it("defers session creation until first message is sent in draft mode", async () => {
+    useStreamStore.getState().resetAll();
+    useSessionStore.getState().reset();
+    useSessionStore.getState().startDraftSession("home");
+    useSessionStore.getState().setDraftModel("home", "openai/gpt-5", "high");
+
+    expect(useSessionStore.getState().activeSessionId).toBe("");
+    expect(useSessionStore.getState().draftBotId).toBe("home");
+
+    const fakeClient = {
+      createSession: vi.fn(async () => ({ sessionId: "s-lazy-1", cwd: "/tmp" })),
+      getSession: vi.fn(async () => ({
+        sessionId: "s-lazy-1",
+        busy: false,
+        messages: [],
+        queuedInputs: [],
+      })),
+      setSessionModel: vi.fn(async () => ({ ok: true })),
+      sendPrompt: vi.fn(async () => ({ ok: true })),
+    } as unknown as HostClient;
+
+    await useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "",
+      botId: "home",
+      locale: "zh-CN",
+      sendWhileRunning: "steer",
+      overrideText: "hello lazy session",
+    });
+
+    expect(fakeClient.createSession).toHaveBeenCalledTimes(1);
+    expect(fakeClient.setSessionModel).toHaveBeenCalledWith("s-lazy-1", "openai", "gpt-5", "HIGH");
+    expect(fakeClient.sendPrompt).toHaveBeenCalledWith(
+      "s-lazy-1",
+      expect.objectContaining({ text: "hello lazy session", steer: false }),
+    );
+    expect(useSessionStore.getState().activeSessionId).toBe("s-lazy-1");
+    expect(useSessionStore.getState().draftBotId).toBeNull();
+  });
+
+  it("reports instant running and completion feedback for /compact and /goal", async () => {
+    useStreamStore.getState().resetAll();
+    useSessionStore.getState().reset();
+    useSessionStore.setState({
+      summariesById: {
+        s3: {
+          id: "s3",
+          botId: "home",
+          title: "Slash",
+          updatedAtMs: 1000,
+          cwd: "/tmp",
+          pinned: false,
+          archived: false,
+          memoryExcluded: false,
+          busy: false,
+        },
+      },
+      sessionIdsByBot: { home: ["s3"] },
+      activeSessionId: "s3",
+    });
+
+    let resolveCompact!: (val: { ok: boolean; message?: string }) => void;
+    const fakeClient = {
+      compactSession: vi.fn(
+        () =>
+          new Promise<{ ok: boolean; message?: string }>((res) => {
+            resolveCompact = res;
+          }),
+      ),
+      getSession: vi.fn(async () => ({
+        sessionId: "s3",
+        busy: false,
+        messages: [],
+        queuedInputs: [],
+      })),
+      createSessionGoal: vi.fn(async () => ({ ok: true })),
+      pauseSessionGoal: vi.fn(async () => ({ ok: true })),
+      resumeSessionGoal: vi.fn(async () => ({ ok: true })),
+      deleteSessionGoal: vi.fn(async () => ({ ok: true })),
+      sendPrompt: vi.fn(async () => ({ ok: true })),
+    } as unknown as HostClient;
+
+    const compactPromise = useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "s3",
+      botId: "home",
+      locale: "zh-CN",
+      sendWhileRunning: "steer",
+      overrideText: "/compact",
+    });
+
+    expect(useSessionStore.getState().slashStatusBySession["s3"]?.phase).toBe("running");
+    resolveCompact({ ok: true });
+    await compactPromise;
+    expect(useSessionStore.getState().slashStatusBySession["s3"]?.phase).toBe("done");
+
+    await useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "s3",
+      botId: "home",
+      locale: "zh-CN",
+      sendWhileRunning: "steer",
+      overrideText: "/goal Ship desktop polish",
+    });
+
+    expect(fakeClient.createSessionGoal).toHaveBeenCalledWith("s3", {
+      objective: "Ship desktop polish",
+    });
+    expect(fakeClient.sendPrompt).toHaveBeenCalledWith(
+      "s3",
+      expect.objectContaining({ text: "Ship desktop polish" }),
+    );
+
+    await useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "s3",
+      botId: "home",
+      locale: "zh-CN",
+      sendWhileRunning: "steer",
+      overrideText: "/goal pause",
+    });
+    expect(fakeClient.pauseSessionGoal).toHaveBeenCalledWith("s3");
+  });
+
+  it("clears cached transcript pendingQuestion on answer, dismiss, and refreshQuestions", async () => {
+    useStreamStore.getState().resetAll();
+    useSessionStore.getState().reset();
+    const q1 = {
+      requestId: "q-req-1",
+      sessionId: "sq1",
+      toolCallId: "tc-1",
+      questions: [
+        {
+          id: "q1",
+          question: "Pick one?",
+          options: [{ label: "A" }],
+          multiSelect: false,
+        },
+      ],
+    };
+    useSessionStore.setState({
+      activeSessionId: "sq1",
+      pendingQuestions: [q1],
+      transcriptsById: {
+        sq1: {
+          sessionId: "sq1",
+          turns: [],
+          usage: null,
+          contextPercent: 0,
+          queuedInputs: [],
+          pendingQuestion: q1,
+          loadedAt: 1000,
+        },
+      },
+    });
+
+    const listSpy = vi.fn(async () => []);
+    const fakeClient = {
+      answerQuestion: vi.fn(async () => ({ ok: true })),
+      dismissQuestion: vi.fn(async () => ({ ok: true })),
+      listQuestions: listSpy,
+    } as unknown as HostClient;
+
+    await useSessionStore.getState().answerQuestion(fakeClient, "q-req-1", [
+      { questionId: "q1", selected: ["A"], skipped: false },
+    ]);
+    expect(useSessionStore.getState().pendingQuestions).toEqual([]);
+    expect(useSessionStore.getState().transcriptsById["sq1"]?.pendingQuestion).toBeNull();
+
+    const q2 = { ...q1, requestId: "q-req-2" };
+    useSessionStore.setState({
+      pendingQuestions: [q2],
+      transcriptsById: {
+        sq1: {
+          ...useSessionStore.getState().transcriptsById["sq1"]!,
+          pendingQuestion: q2,
+        },
+      },
+    });
+    await useSessionStore.getState().dismissQuestion(fakeClient, "q-req-2");
+    expect(useSessionStore.getState().transcriptsById["sq1"]?.pendingQuestion).toBeNull();
+
+    const q3 = { ...q1, requestId: "q-req-3" };
+    useSessionStore.setState({
+      pendingQuestions: [q3],
+      transcriptsById: {
+        sq1: {
+          ...useSessionStore.getState().transcriptsById["sq1"]!,
+          pendingQuestion: q3,
+        },
+      },
+    });
+    await useSessionStore.getState().refreshQuestions(fakeClient);
+    expect(useSessionStore.getState().transcriptsById["sq1"]?.pendingQuestion).toBeNull();
+  });
 });

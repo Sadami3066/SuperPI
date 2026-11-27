@@ -252,7 +252,18 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
   }
 
   if (ev.type === "run_failed") {
-    streamStore.failRun(sid, runId, ev.text?.trim() || "Run failed");
+    const errText = ev.text?.trim() || "";
+    const curLive = streamStore.activeBySession[sid];
+    const wasAborted =
+      curLive?.status === "stopped" ||
+      /\b(abort(ed)?|cancel(led|ed)?|interrupted|stopped by user|user_aborted)\b|已取消|已停止|用户中断/i.test(
+        errText,
+      );
+    if (wasAborted) {
+      streamStore.finishRun(sid, runId, "stopped");
+    } else {
+      streamStore.failRun(sid, runId, errText || "Run failed");
+    }
     sessionStore.setSessionBusy(sid, false);
     void sessionStore.loadSession(client, sid, locale);
     return;

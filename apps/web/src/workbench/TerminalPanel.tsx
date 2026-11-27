@@ -22,14 +22,22 @@ function readCssVar(name: string, fallback: string): string {
 export default function TerminalPanel({ context }: { context: WorkbenchPanelContext }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
-  const bot = useBotStore((s) => s.bots.find((b) => b.id === context.botId) ?? s.bots[0]);
+  const botId = useBotStore(
+    (s) => (s.bots.find((b) => b.id === context.botId) ?? s.bots[0])?.id ?? "",
+  );
+  const botIsRemote = useBotStore(
+    (s) => Boolean((s.bots.find((b) => b.id === context.botId) ?? s.bots[0])?.isRemote),
+  );
   const dark = useSettingsStore((s) => s.dark);
   const themePreset = useSettingsStore((s) => s.themePreset);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const summary = useSessionStore((s) => s.summariesById[activeSessionId]);
-  const activeWtId = useWorkbenchStore((s) => s.activeWorktreeByBot[bot?.id ?? ""] ?? null);
+  const summaryWorktreeId = useSessionStore(
+    (s) => s.summariesById[activeSessionId]?.worktreeId ?? null,
+  );
+  const activeWtId = useWorkbenchStore((s) => s.activeWorktreeByBot[botId] ?? null);
 
-  const worktreeId = activeWtId ?? summary?.worktreeId ?? null;
+  const worktreeId = activeWtId ?? summaryWorktreeId ?? null;
+  const initialFreshRef = useRef(Boolean(context.payload?.fresh));
 
   const [termInfo, setTermInfo] = useState<HostTerminalInfoDto | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -40,53 +48,73 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
   const fitRef = useRef<FitAddon | null>(null);
   const termIdRef = useRef<string | null>(null);
   const streamStopRef = useRef<(() => void) | null>(null);
+  const attachGenRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const attachTerminal = useCallback(
     async (fresh: boolean) => {
-      if (!client || !bot || bot.isRemote) return;
+      if (!client || !botId || botIsRemote) return;
+      const gen = ++attachGenRef.current;
       streamStopRef.current?.();
       streamStopRef.current = null;
       setError(null);
       setExitCode(null);
 
       try {
-        const info = await client.createTerminal(bot.id, { worktreeId, fresh });
+        const info = await client.createTerminal(botId, { worktreeId, fresh });
+        if (!mountedRef.current || attachGenRef.current !== gen) {
+          return;
+        }
         setTermInfo(info);
         termIdRef.current = info.id;
 
         const term = xtermRef.current;
-        if (term) {
-          term.reset();
-          if (info.history) {
-            term.write(info.history);
-          }
-          fitRef.current?.fit();
+        if (!term) return;
+
+        let wroteInitialHistory = false;
+        term.reset();
+        if (info.history) {
+          term.write(info.history);
+          wroteInitialHistory = true;
         }
+        fitRef.current?.fit();
+        term.focus();
 
         const stop = client.streamTerminal(
           info.id,
           (frame) => {
-            if (frame.type === "output" && frame.data) {
-              xtermRef.current?.write(frame.data);
+            if (attachGenRef.current !== gen || xtermRef.current !== term) return;
+            if ((frame.type === "chunk" || frame.type === "output") && frame.data) {
+              term.write(frame.data);
+            } else if (frame.type === "history" && frame.data && !wroteInitialHistory) {
+              wroteInitialHistory = true;
+              term.write(frame.data);
             } else if (frame.type === "exit") {
               setExitCode(frame.exitCode ?? 0);
             }
           },
           (err) => {
+            if (attachGenRef.current !== gen) return;
             setError(err.message);
           },
         );
+        if (!mountedRef.current || attachGenRef.current !== gen) {
+          stop();
+          return;
+        }
         streamStopRef.current = stop;
       } catch (err) {
+        if (!mountedRef.current || attachGenRef.current !== gen) return;
         setError(err instanceof Error ? err.message : "Failed to start terminal");
       }
     },
-    [bot, client, worktreeId],
+    [botId, botIsRemote, client, worktreeId],
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     const container = hostRef.current;
-    if (!container || bot?.isRemote) return undefined;
+    if (!container || !botId || botIsRemote) return undefined;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -112,11 +140,14 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
     const dataSub = term.onData((data) => {
       const id = termIdRef.current;
       if (id && client) {
-        void client.sendTerminalInput(id, data).catch(() => void 0);
+        void client.sendTerminalInput(id, data).catch((err) => {
+          setError(err instanceof Error ? err.message : "Failed to send input");
+        });
       }
     });
 
     const ro = new ResizeObserver(() => {
+      if (container.clientWidth < 20 || container.clientHeight < 20) return;
       try {
         fit.fit();
       } catch {
@@ -125,9 +156,13 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
     });
     ro.observe(container);
 
-    void attachTerminal(false);
+    const startFresh = initialFreshRef.current;
+    initialFreshRef.current = false;
+    void attachTerminal(startFresh);
 
     return () => {
+      mountedRef.current = false;
+      attachGenRef.current += 1;
       ro.disconnect();
       dataSub.dispose();
       streamStopRef.current?.();
@@ -136,7 +171,20 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
       xtermRef.current = null;
       fitRef.current = null;
     };
-  }, [attachTerminal, bot?.isRemote, client]);
+  }, [attachTerminal, botId, botIsRemote, client]);
+
+  useEffect(() => {
+    if (context.isActiveTab) {
+      requestAnimationFrame(() => {
+        try {
+          fitRef.current?.fit();
+          xtermRef.current?.focus();
+        } catch {
+          void 0;
+        }
+      });
+    }
+  }, [context.isActiveTab]);
 
   useEffect(() => {
     const term = xtermRef.current;
@@ -149,9 +197,9 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
     };
   }, [dark, themePreset]);
 
-  if (!bot) return null;
+  if (!botId) return null;
 
-  if (bot.isRemote) {
+  if (botIsRemote) {
     return (
       <div className="p-4 text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
         {t("term.remoteUnsupported")}
@@ -162,7 +210,7 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
-        className="flex h-[38px] shrink-0 items-center justify-between gap-2 px-3"
+        className="flex h-[36px] shrink-0 items-center justify-between gap-2 px-3"
         style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -229,6 +277,8 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
 
       <div
         ref={hostRef}
+        data-shortcut-ignore="true"
+        onMouseDown={() => xtermRef.current?.focus()}
         className="min-h-0 flex-1 overflow-hidden p-2"
         style={{ background: "var(--pi-code-bg)" }}
       />

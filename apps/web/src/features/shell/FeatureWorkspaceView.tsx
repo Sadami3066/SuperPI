@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useI18n } from "../../i18n";
 import { windowToggleMaximize } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -10,7 +9,7 @@ import { SkillsSettings } from "../settings/SkillsSettings";
 import { BrandIcon } from "../shared/BrandAssets";
 import { WindowControls } from "./WindowControls";
 
-export type FeatureViewKind = "automations" | "memory" | "capabilities";
+export type FeatureViewKind = "timers" | "inbox" | "memory" | "skills" | "mcp";
 
 export function FeatureWorkspaceView({
   kind,
@@ -26,14 +25,17 @@ export function FeatureWorkspaceView({
   const { t } = useI18n();
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
   const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
-  const [capTab, setCapTab] = useState<"skills" | "mcp">("skills");
 
   const title =
-    kind === "automations"
-      ? t("settings.navAutomations")
-      : kind === "memory"
-        ? t("settings.navMemory")
-        : t("nav.capabilities");
+    kind === "timers"
+      ? t("nav.timers")
+      : kind === "inbox"
+        ? t("nav.inbox")
+        : kind === "memory"
+          ? t("settings.navMemory")
+          : kind === "skills"
+            ? t("nav.skills")
+            : t("nav.mcp");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--pi-surface)" }}>
@@ -58,48 +60,17 @@ export function FeatureWorkspaceView({
         </div>
 
         <div className="pi-no-drag flex shrink-0 items-center gap-2">
-          {kind === "capabilities" && (
-            <div
-              className="flex items-center gap-1 rounded-full p-0.5"
-              style={{
-                background: "var(--pi-wash)",
-                border: "0.5px solid var(--pi-hairline)",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setCapTab("skills")}
-                className="rounded-full px-3 py-1 text-[12px] font-medium transition-colors"
-                style={{
-                  background: capTab === "skills" ? "var(--pi-surface)" : "transparent",
-                  color: capTab === "skills" ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
-                }}
-              >
-                {t("nav.capabilitiesSkills")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setCapTab("mcp")}
-                className="rounded-full px-3 py-1 text-[12px] font-medium transition-colors"
-                style={{
-                  background: capTab === "mcp" ? "var(--pi-surface)" : "transparent",
-                  color: capTab === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
-                }}
-              >
-                {t("nav.capabilitiesConnectors")}
-              </button>
-            </div>
-          )}
-
           {showWindowControls && <WindowControls />}
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto w-full max-w-[820px]">
-          {kind === "automations" && <AutomationsSettings onOpenSession={onOpenSession} />}
+          {kind === "timers" && <AutomationsSettings mode="timers" onOpenSession={onOpenSession} />}
+          {kind === "inbox" && <AutomationsSettings mode="inbox" onOpenSession={onOpenSession} />}
           {kind === "memory" && <MemorySettings />}
-          {kind === "capabilities" && (capTab === "skills" ? <SkillsSettings /> : <McpSettings />)}
+          {kind === "skills" && <SkillsSettings />}
+          {kind === "mcp" && <McpSettings />}
         </div>
       </div>
     </div>

@@ -113,6 +113,12 @@ export function StreamingTurnView({
         );
       })}
 
+      {liveRun.blocks.length === 0 && !liveRun.streaming && liveRun.status === "stopped" && !liveRun.failed && (
+        <div className="py-1.5 text-[12.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+          {t("activity.stopped")}
+        </div>
+      )}
+
       {liveRun.failed && (
         <div
           className="mt-2.5 rounded-[14px] px-3.5 py-2.5"

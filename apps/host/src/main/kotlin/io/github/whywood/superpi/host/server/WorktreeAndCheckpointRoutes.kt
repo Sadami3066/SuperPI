@@ -150,6 +150,13 @@ data class ForkSessionRequest(
     val title: String? = null,
 )
 
+@Serializable
+data class RewindSessionRequest(
+    val turnIndex: Int,
+    val mode: String = "chat_only", // "chat_only" | "files_only" | "files_and_chat"
+    val checkpointId: String? = null,
+)
+
 private val sessionLineJson = Json { ignoreUnknownKeys = true }
 
 internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiController) {
@@ -488,6 +495,70 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
                 message = res.message,
                 backupCheckpointId = res.backupCheckpointId,
                 restoredFiles = res.restoredFiles,
+            ),
+        )
+    }
+
+    post("/v1/sessions/{sessionId}/rewind") {
+        val sessionId = call.parameters["sessionId"].orEmpty().trim()
+        val req = call.receive<RewindSessionRequest>()
+        if (req.turnIndex < 0) {
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Invalid turnIndex"))
+            return@post
+        }
+        if (sessionId in controller.runtimeHost.busySessionIds.value) {
+            call.respond(HttpStatusCode.Conflict, ApiErrorResponse("Cannot rewind while session is running; stop generation first."))
+            return@post
+        }
+        val mode = req.mode.trim().lowercase()
+        var restoredFiles = 0
+        var backupCheckpointId: String? = null
+        if (mode == "files_only" || mode == "files_and_chat") {
+            val checkpoints = controller.checkpointStore.list(sessionId)
+            val cp = if (!req.checkpointId.isNullOrBlank()) {
+                checkpoints.firstOrNull { it.id == req.checkpointId }
+            } else {
+                checkpoints.firstOrNull { it.turnIndex == req.turnIndex }
+            }
+            if (cp == null) {
+                call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Checkpoint not found for turn ${req.turnIndex}"))
+                return@post
+            }
+            val res = controller.checkpointStore.restoreFiles(sessionId, cp.id)
+            if (!res.ok) {
+                call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(res.message))
+                return@post
+            }
+            restoredFiles = res.restoredFiles
+            backupCheckpointId = res.backupCheckpointId
+        }
+        if (mode == "chat_only" || mode == "files_and_chat") {
+            val summary = controller.runtimeHost.allSessions().firstOrNull { it.id == sessionId }
+                ?: controller.runtimeHost.archivedSessions().firstOrNull { it.id == sessionId }
+            if (summary == null || summary.filePath.isBlank()) {
+                call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Session not found: $sessionId"))
+                return@post
+            }
+            val file = File(summary.filePath)
+            val homeReal = runCatching { controller.paths.homeDir.toPath().toRealPath() }.getOrNull()
+            val fileReal = runCatching { file.toPath().toRealPath() }.getOrNull()
+            if (homeReal == null || fileReal == null || !fileReal.startsWith(homeReal) || !file.isFile) {
+                call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Remote sessions cannot be rewound locally"))
+                return@post
+            }
+            runCatching { controller.runtimeHost.stop(sessionId) }
+            runCatching { controller.runtimeHost.closeSession(sessionId) }
+            withContext(Dispatchers.IO) {
+                truncateSessionJsonlBeforeUserTurn(file, req.turnIndex)
+            }
+            runCatching { controller.runtimeHost.openSession(file.absolutePath, summary.cwd) }
+        }
+        call.respond(
+            RestoreCheckpointResponse(
+                ok = true,
+                message = "Rewound session",
+                backupCheckpointId = backupCheckpointId,
+                restoredFiles = restoredFiles,
             ),
         )
     }

@@ -30,6 +30,8 @@ import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -670,6 +672,86 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
         )
     }
 
+    post("/v1/bots/{id}/attachments/folder") {
+        val botId = call.parameters["id"].orEmpty()
+        val req = call.receive<StageFolderAttachmentRequest>()
+        val rawPath = req.path.trim()
+        if (rawPath.isEmpty()) {
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Folder path is required"))
+            return@post
+        }
+        val dirFile = File(rawPath)
+        val canonicalDir = runCatching { dirFile.toPath().toRealPath().toFile() }.getOrNull()
+        if (canonicalDir == null || !canonicalDir.isDirectory) {
+            call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Folder not found: $rawPath"))
+            return@post
+        }
+        val folderName = sanitizeAttachmentFileName(canonicalDir.name.ifBlank { "folder" })
+        val uniqueId = "${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(6)}-$folderName"
+
+        val remote = controller.findRemoteBotByWorkspaceId(botId)
+        if (remote != null) {
+            val zipResult = withContext(Dispatchers.IO) {
+                runCatching { zipFolderForRemote(canonicalDir, MAX_ATTACHMENT_BYTES) }
+            }
+            val zipBytes = zipResult.getOrElse { err ->
+                val status = if (err is IllegalStateException && err.message?.contains("25 MB") == true) {
+                    HttpStatusCode.PayloadTooLarge
+                } else {
+                    HttpStatusCode.BadRequest
+                }
+                call.respond(status, ApiErrorResponse(err.message ?: "Failed to package folder"))
+                return@post
+            }
+            val zipName = "$folderName.zip"
+            val relativePath = "$ATTACHMENTS_DIR_NAME/$uniqueId.zip"
+            val uploadRes = controller.remoteFileClient.uploadFromStream(
+                deviceId = remote.deviceId,
+                botId = remote.botId,
+                remotePath = relativePath,
+                inputStream = ByteArrayInputStream(zipBytes),
+                totalBytes = zipBytes.size.toLong(),
+                overwrite = true,
+            )
+            when (uploadRes) {
+                is RemoteFileResult.Error -> call.respond(HttpStatusCode.BadGateway, ApiErrorResponse(uploadRes.message))
+                is RemoteFileResult.Ok -> {
+                    call.respond(
+                        HttpStatusCode.Created,
+                        StagedAttachmentDto(
+                            id = "$uniqueId.zip",
+                            name = zipName,
+                            mime = "application/zip",
+                            size = zipBytes.size.toLong(),
+                            path = relativePath,
+                            relativePath = relativePath,
+                            kind = "folder",
+                        ),
+                    )
+                }
+            }
+            return@post
+        }
+
+        val bot = controller.botRegistry.findBotById(botId)
+        if (bot == null) {
+            call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Bot not found: $botId"))
+            return@post
+        }
+        call.respond(
+            HttpStatusCode.Created,
+            StagedAttachmentDto(
+                id = uniqueId,
+                name = canonicalDir.name.ifBlank { folderName },
+                mime = "inode/directory",
+                size = 0L,
+                path = canonicalDir.absolutePath,
+                relativePath = canonicalDir.absolutePath,
+                kind = "folder",
+            ),
+        )
+    }
+
     post("/v1/bots/{id}/files/upload") {
         val botId = call.parameters["id"].orEmpty()
         val req = call.receive<UploadWorkspaceFileRequest>()
@@ -1275,3 +1357,64 @@ internal fun guessMimeForFileName(name: String): String =
         "zip" -> "application/zip"
         else -> "application/octet-stream"
     }
+
+private val REMOTE_FOLDER_IGNORED_DIRS = setOf(
+    ".git",
+    "node_modules",
+    "build",
+    "dist",
+    ".gradle",
+    ".idea",
+    ".venv",
+    "__pycache__",
+    "target",
+    ".next",
+    ".nuxt",
+)
+
+private const val MAX_REMOTE_FOLDER_FILES = 2000
+
+private fun zipFolderForRemote(rootDir: File, maxCompressedBytes: Int): ByteArray {
+    val baos = ByteArrayOutputStream()
+    var fileCount = 0
+    val rootPath = rootDir.toPath().toRealPath()
+    ZipOutputStream(baos).use { zos ->
+        fun walk(dir: File) {
+            val children = dir.listFiles()?.sortedBy { it.name } ?: return
+            for (child in children) {
+                if (Files.isSymbolicLink(child.toPath())) continue
+                if (child.isDirectory) {
+                    if (child.name in REMOTE_FOLDER_IGNORED_DIRS) continue
+                    walk(child)
+                } else if (child.isFile) {
+                    fileCount++
+                    if (fileCount > MAX_REMOTE_FOLDER_FILES) {
+                        throw IllegalStateException("Folder contains more than $MAX_REMOTE_FOLDER_FILES files; select a smaller subfolder for remote upload")
+                    }
+                    val rel = rootPath.relativize(child.toPath().toRealPath()).toString().replace('\\', '/')
+                    zos.putNextEntry(ZipEntry(rel))
+                    child.inputStream().use { input ->
+                        val buf = ByteArray(16 * 1024)
+                        while (true) {
+                            val read = input.read(buf)
+                            if (read < 0) break
+                            zos.write(buf, 0, read)
+                            if (baos.size() > maxCompressedBytes) {
+                                throw IllegalStateException("Packaged folder exceeds 25 MB limit for remote transfer")
+                            }
+                        }
+                    }
+                    zos.closeEntry()
+                    if (baos.size() > maxCompressedBytes) {
+                        throw IllegalStateException("Packaged folder exceeds 25 MB limit for remote transfer")
+                    }
+                }
+            }
+        }
+        walk(rootDir)
+    }
+    if (fileCount == 0) {
+        throw IllegalStateException("Folder has no files to transfer")
+    }
+    return baos.toByteArray()
+}

@@ -1,22 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconLayoutSidebarRight } from "@tabler/icons-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconAlertCircle, IconLayoutSidebarRight, IconLoader2 } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
 import { extractLatestTodosFromTurns } from "../../api/todo";
 import type {
+  ChatTurn,
   HostBotDto,
+  HostCheckpointDto,
   PermissionMode,
   QuestionAnswerInput,
   ToolApprovalDecision,
+  TurnBlock,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { windowToggleMaximize } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
-import { useSessionStore } from "../../stores/sessionStore";
+import { draftComposerKey, useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
-import { Button, IconButton, NoticeBar, Popover } from "../../ui";
+import { Button, Dialog, IconButton, NoticeBar, Popover } from "../../ui";
 import { BotAvatar, BrandIcon, PiMascot } from "../shared/BrandAssets";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { WindowControls } from "../shell/WindowControls";
@@ -60,6 +63,33 @@ function resolveGreetingKeys(): GreetingPair {
   return { plain: "chat.greetingDefault", named: "chat.greetingDefaultNamed" };
 }
 
+const SessionTodoPanel = memo(function SessionTodoPanel({
+  sessionId,
+  turns,
+}: {
+  sessionId: string;
+  turns: ChatTurn[];
+}) {
+  const liveTodoBlock = useStreamStore((s): TurnBlock | null => {
+    const blocks = s.activeBySession[sessionId]?.blocks;
+    if (!blocks) return null;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.kind === "custom_card" && b.card.customType === "todo_write") {
+        return b;
+      }
+    }
+    return null;
+  });
+
+  const latestTodos = useMemo(
+    () => extractLatestTodosFromTurns(turns, liveTodoBlock ? [liveTodoBlock] : undefined),
+    [turns, liveTodoBlock],
+  );
+
+  return <TodoPanel todos={latestTodos} sessionKey={sessionId} />;
+});
+
 export function ChatWorkspace({
   activeView,
   onChangeView,
@@ -85,6 +115,8 @@ export function ChatWorkspace({
   const setPermissionMode = useBotStore((s) => s.setPermissionMode);
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const draftBotId = useSessionStore((s) => s.draftBotId);
+  const draftModelByBot = useSessionStore((s) => s.draftModelByBot);
   const summariesById = useSessionStore((s) => s.summariesById);
   const summaryFromList = useSessionStore((s) => s.summariesById[s.activeSessionId]);
   const archivedMatch = useSessionStore((s) =>
@@ -94,26 +126,29 @@ export function ChatWorkspace({
   const transcript = useSessionStore((s) => s.transcriptsById[s.activeSessionId]);
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
   const pendingApprovals = useSessionStore((s) => s.pendingApprovals);
-  const planFirst = useSessionStore((s) => Boolean(s.planFirstBySession[s.activeSessionId]));
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
-  const setComposerText = useSessionStore((s) => s.setComposerText);
-  const requestComposerFocus = useSessionStore((s) => s.requestComposerFocus);
   const selectSession = useSessionStore((s) => s.selectSession);
+  const setDraftModel = useSessionStore((s) => s.setDraftModel);
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const stopSession = useSessionStore((s) => s.stopSession);
   const retrySession = useSessionStore((s) => s.retrySession);
   const compactSession = useSessionStore((s) => s.compactSession);
+  const forkSession = useSessionStore((s) => s.forkSession);
+  const rewindSessionTurn = useSessionStore((s) => s.rewindSessionTurn);
   const updateSessionModel = useSessionStore((s) => s.updateSessionModel);
   const removeQueuedInput = useSessionStore((s) => s.removeQueuedInput);
   const promoteQueuedInput = useSessionStore((s) => s.promoteQueuedInput);
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const dismissQuestion = useSessionStore((s) => s.dismissQuestion);
   const resolveToolApproval = useSessionStore((s) => s.resolveToolApproval);
+  const clearSlashStatus = useSessionStore((s) => s.clearSlashStatus);
+  const renameSession = useSessionStore((s) => s.renameSession);
 
-  const hasLiveRun = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]));
-  const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[activeSessionId]?.streaming));
-  const liveRunBlocks = useStreamStore((s) =>
-    activeSessionId ? s.activeBySession[activeSessionId]?.blocks : undefined,
+  const hasLiveRun = useStreamStore((s) =>
+    Boolean(activeSessionId && s.activeBySession[activeSessionId]),
+  );
+  const isStreaming = useStreamStore((s) =>
+    Boolean(activeSessionId && s.activeBySession[activeSessionId]?.streaming),
   );
 
   const dark = useSettingsStore((s) => s.dark);
@@ -130,22 +165,39 @@ export function ChatWorkspace({
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [rewindTarget, setRewindTarget] = useState<{
+    turnIndex: number;
+    rawText: string;
+    preview: string;
+  } | null>(null);
+  const [rewindCheckpoint, setRewindCheckpoint] = useState<HostCheckpointDto | null>(null);
+  const [rewinding, setRewinding] = useState(false);
+
   const dragDepthRef = useRef(0);
-  const renameSession = useSessionStore((s) => s.renameSession);
   const snapToBottomRef = useRef<(() => void) | null>(null);
   const attachFilesRef = useRef<((files: FileList | File[]) => void) | null>(null);
 
   useEffect(() => {
     dragDepthRef.current = 0;
     setDraggingFiles(false);
-  }, [activeSessionId]);
+    setRewindTarget(null);
+    setRewindCheckpoint(null);
+  }, [activeSessionId, draftBotId]);
 
   const activeBot = useMemo(() => {
     if (summary) {
       return bots.find((b) => b.id === summary.botId) ?? bots[0];
     }
+    if (draftBotId) {
+      return bots.find((b) => b.id === draftBotId) ?? bots[0];
+    }
     return bots[0];
-  }, [bots, summary]);
+  }, [bots, draftBotId, summary]);
+
+  const composerKey = activeSessionId || (activeBot ? draftComposerKey(activeBot.id) : "");
+  const slashStatus = useSessionStore((s) =>
+    composerKey ? s.slashStatusBySession[composerKey] : undefined,
+  );
 
   useEffect(() => {
     if (!client || !activeBot) return;
@@ -170,12 +222,16 @@ export function ChatWorkspace({
     return providers;
   }, [activeBot, providers, remoteProvidersByBot]);
 
+  const draftModel = !activeSessionId && activeBot ? draftModelByBot[activeBot.id] : undefined;
+
   const currentModel =
+    draftModel?.model ||
     transcript?.model ||
     activeBot?.defaultModel ||
     (hostSettings ? `${hostSettings.defaultProvider}/${hostSettings.defaultModel}` : "");
 
   const currentThinking =
+    draftModel?.thinking ??
     transcript?.thinking ??
     (activeBot?.defaultThinkingLevel
       ? normalizeThinkingLevel(activeBot.defaultThinkingLevel)
@@ -205,18 +261,69 @@ export function ChatWorkspace({
     [activeSessionId, pendingApprovals, pendingQuestions],
   );
 
-  const greetingKeys = useMemo(() => resolveGreetingKeys(), [activeSessionId]);
+  const greetingKeys = useMemo(() => resolveGreetingKeys(), [activeSessionId, draftBotId]);
 
   const handleQuote = useCallback(
     (txt: string) => {
-      if (activeSessionId) setQuotedText(activeSessionId, txt);
+      if (composerKey) setQuotedText(composerKey, txt);
     },
-    [activeSessionId, setQuotedText],
+    [composerKey, setQuotedText],
   );
 
   const handleRetry = useCallback(() => {
     if (client && activeSessionId) void retrySession(client, activeSessionId);
   }, [activeSessionId, client, retrySession]);
+
+  const handleForkFromTurn = useCallback(
+    (upToUserTurn: number) => {
+      if (client && activeSessionId) {
+        void forkSession(client, activeSessionId, locale, upToUserTurn);
+      }
+    },
+    [activeSessionId, client, forkSession, locale],
+  );
+
+  const handleRequestRewind = useCallback(
+    (turnIndex: number, rawText: string) => {
+      if (!activeSessionId) return;
+      const preview = rawText.replace(/\s+/g, " ").trim().slice(0, 48) || `#${turnIndex + 1}`;
+      setRewindCheckpoint(null);
+      setRewindTarget({ turnIndex, rawText, preview });
+      if (client) {
+        void client
+          .listCheckpoints(activeSessionId)
+          .then((list) => {
+            const matched =
+              list.find((c) => c.turnIndex === turnIndex) ??
+              [...list].reverse().find((c) => c.turnIndex <= turnIndex) ??
+              null;
+            setRewindCheckpoint(matched);
+          })
+          .catch(() => setRewindCheckpoint(null));
+      }
+    },
+    [activeSessionId, client],
+  );
+
+  const executeRewind = async (mode: "chat_only" | "files_only" | "files_and_chat") => {
+    if (!client || !activeSessionId || !rewindTarget) return;
+    setRewinding(true);
+    try {
+      const ok = await rewindSessionTurn(client, activeSessionId, {
+        turnIndex: rewindTarget.turnIndex,
+        mode,
+        checkpointId: rewindCheckpoint?.id,
+        restoreText: rewindTarget.rawText,
+        locale,
+      });
+      if (ok) {
+        setRewindTarget(null);
+        setRewindCheckpoint(null);
+      }
+    } finally {
+      setRewinding(false);
+    }
+  };
 
   const handleAnswerQuestion = useCallback(
     async (reqId: string, answers: QuestionAnswerInput[]) => {
@@ -239,13 +346,9 @@ export function ChatWorkspace({
     [client, resolveToolApproval],
   );
 
-  const turns = transcript?.turns ?? [];
-  const latestTodos = useMemo(
-    () => extractLatestTodosFromTurns(turns, liveRunBlocks),
-    [turns, liveRunBlocks],
-  );
+  const turns = useMemo(() => transcript?.turns ?? [], [transcript?.turns]);
 
-  if (!activeBot || !activeSessionId) {
+  if (!activeBot) {
     return null;
   }
 
@@ -254,16 +357,68 @@ export function ChatWorkspace({
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
   const userNickname = hostSettings?.userNickname?.trim() || "";
-  const isHeroEmpty = turns.length === 0 && !hasLiveRun && !activeQuestion && activeApprovals.length === 0;
-  const starterPrompts = [t("chat.starter1"), t("chat.starter2"), t("chat.starter3")];
+  const isHeroEmpty =
+    !activeSessionId ||
+    (turns.length === 0 && !hasLiveRun && !activeQuestion && activeApprovals.length === 0);
+
+  const slashStatusBar = slashStatus ? (
+    <div className="my-2 w-full">
+      <div
+        className="flex items-center justify-between gap-2 rounded-[12px] px-3.5 py-2 text-[12.5px]"
+        style={{
+          background: "var(--pi-paper)",
+          border: `0.5px solid ${slashStatus.phase === "error" ? "var(--pi-danger)" : "var(--pi-hairline)"}`,
+          color: slashStatus.phase === "error" ? "var(--pi-danger)" : "var(--pi-ink-secondary)",
+        }}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {slashStatus.phase === "running" ? (
+            <IconLoader2 size={14} className="shrink-0 animate-spin" style={{ color: "var(--pi-accent)" }} />
+          ) : slashStatus.phase === "error" ? (
+            <IconAlertCircle size={14} className="shrink-0" style={{ color: "var(--pi-danger)" }} />
+          ) : (
+            <BrandIcon name="status/confirm" size={14} className="shrink-0" style={{ color: "var(--pi-success)" }} />
+          )}
+          <span className="truncate">{slashStatus.message}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {slashStatus.phase === "error" && slashStatus.retryText && client && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void sendMessage(client, {
+                  sessionId: activeSessionId,
+                  botId: activeBot.id,
+                  locale,
+                  sendWhileRunning: hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer",
+                  overrideText: slashStatus.retryText,
+                });
+              }}
+            >
+              {t("chat.retry")}
+            </Button>
+          )}
+          {slashStatus.phase !== "running" && (
+            <button
+              type="button"
+              onClick={() => clearSlashStatus(composerKey)}
+              aria-label={t("common.close")}
+              className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-[var(--pi-hover)]"
+            >
+              <BrandIcon name="navigation/close" size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   const composerElement = (variant: "hero" | "docked") => (
     <Composer
       dark={dark}
       variant={variant}
-      workspaceLabel={activeBot.name}
-      workspacePath={activeBot.cwd}
-      sessionId={activeSessionId}
+      sessionId={composerKey}
       queuedInputs={transcript?.queuedInputs ?? []}
       providers={effectiveProviders}
       slashCommands={commandsByBot[activeBot.id] ?? []}
@@ -275,11 +430,14 @@ export function ChatWorkspace({
       isBusy={Boolean(summary?.busy)}
       sendKey={hostSettings?.sendKey === "mod_enter" ? "mod_enter" : "enter"}
       sendWhileRunning={hostSettings?.sendWhileRunning === "queue" ? "queue" : "steer"}
-      planFirst={planFirst}
       onChangePermissionMode={async (mode) => {
         if (client) await setPermissionMode(client, activeBot.id, mode);
       }}
       onModelChange={async (model, thinking) => {
+        if (!activeSessionId) {
+          setDraftModel(activeBot.id, model, thinking);
+          return;
+        }
         if (client) await updateSessionModel(client, activeSessionId, model, thinking, locale);
       }}
       onOpenProvidersSettings={onOpenProvidersSettings}
@@ -295,13 +453,13 @@ export function ChatWorkspace({
         });
       }}
       onStop={() => {
-        if (client) void stopSession(client, activeSessionId);
+        if (client && activeSessionId) void stopSession(client, activeSessionId);
       }}
       onRemoveQueued={async (kind, text) => {
-        if (client) await removeQueuedInput(client, activeSessionId, kind, text);
+        if (client && activeSessionId) await removeQueuedInput(client, activeSessionId, kind, text);
       }}
       onPromoteQueued={async (text) => {
-        if (client) await promoteQueuedInput(client, activeSessionId, text);
+        if (client && activeSessionId) await promoteQueuedInput(client, activeSessionId, text);
       }}
       onSnapToBottom={() => snapToBottomRef.current?.()}
       attachFilesRef={attachFilesRef}
@@ -342,7 +500,7 @@ export function ChatWorkspace({
       }}
     >
       <header
-        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-3 pl-4"
+        className="pi-drag-region flex h-[40px] shrink-0 items-center justify-between gap-2 pl-4"
         style={{
           paddingRight: showWindowControls && isFrameless ? 0 : 12,
           borderBottom: "0.5px solid var(--pi-hairline)",
@@ -358,7 +516,7 @@ export function ChatWorkspace({
             type="button"
             onClick={() => onOpenBotSettings(activeBot)}
             title={t("nav.botSettings")}
-            className="flex h-7 min-w-0 items-center gap-1.5 rounded-full px-2 transition-colors hover:bg-[var(--pi-hover)]"
+            className="flex h-7 min-w-0 items-center gap-1.5 rounded-full px-2 whitespace-nowrap transition-colors hover:bg-[var(--pi-hover)]"
           >
             <BotAvatar
               avatar={activeBot.avatar}
@@ -410,7 +568,7 @@ export function ChatWorkspace({
                   setEditingTitle(true);
                 }}
                 title={t("nav.rename")}
-                className="hidden max-w-[220px] truncate rounded-[6px] px-1.5 py-0.5 text-[12.5px] transition-colors hover:bg-[var(--pi-hover)] sm:inline-block"
+                className="hidden max-w-[220px] truncate rounded-[6px] px-1.5 py-0.5 text-[12.5px] whitespace-nowrap transition-colors hover:bg-[var(--pi-hover)] sm:inline-block"
                 style={{ color: "var(--pi-ink-tertiary)" }}
               >
                 / {summary.title}
@@ -419,7 +577,7 @@ export function ChatWorkspace({
           )}
           {summary?.worktreeBranch && (
             <span
-              className="hidden items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium md:inline-flex"
+              className="hidden items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap md:inline-flex"
               style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
             >
               <BrandIcon name="system/git_branch" size={11} />
@@ -428,7 +586,7 @@ export function ChatWorkspace({
           )}
           {activeBot.isRemote && activeBot.deviceName && (
             <span
-              className="hidden items-center gap-1.5 text-[11.5px] md:inline-flex"
+              className="hidden items-center gap-1.5 text-[11.5px] whitespace-nowrap md:inline-flex"
               style={{ color: "var(--pi-ink-tertiary)" }}
             >
               <span
@@ -442,26 +600,28 @@ export function ChatWorkspace({
           )}
         </div>
 
-        <div className="pi-no-drag flex items-center gap-1">
-          <Popover
-            align="end"
-            className="w-[272px] p-3.5"
-            trigger={<ContextMeter percent={ctxPct} usage={usage} />}
-          >
-            <UsageSheet
-              percent={ctxPct}
-              usage={usage}
-              compacting={compacting}
-              busy={isStreaming || !client}
-              onCompact={() => {
-                if (!client) return;
-                setCompacting(true);
-                void compactSession(client, activeSessionId, locale).finally(() =>
-                  setCompacting(false),
-                );
-              }}
-            />
-          </Popover>
+        <div className="pi-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
+          {activeSessionId && (
+            <Popover
+              align="end"
+              className="w-[272px] p-3.5"
+              trigger={<ContextMeter percent={ctxPct} usage={usage} />}
+            >
+              <UsageSheet
+                percent={ctxPct}
+                usage={usage}
+                compacting={compacting}
+                busy={isStreaming || !client}
+                onCompact={() => {
+                  if (!client || !activeSessionId) return;
+                  setCompacting(true);
+                  void compactSession(client, activeSessionId, locale).finally(() =>
+                    setCompacting(false),
+                  );
+                }}
+              />
+            </Popover>
+          )}
 
           <IconButton
             size="sm"
@@ -522,27 +682,8 @@ export function ChatWorkspace({
                 ? t(greetingKeys.named, { name: userNickname })
                 : t(greetingKeys.plain)}
             </h1>
+            {slashStatusBar}
             {composerElement("hero")}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-              {starterPrompts.map((promptText) => (
-                <button
-                  key={promptText}
-                  type="button"
-                  onClick={() => {
-                    setComposerText(activeSessionId, promptText);
-                    requestComposerFocus();
-                  }}
-                  className="rounded-full px-3.5 py-1.5 text-[12.5px] transition-colors hover:bg-[var(--pi-hover)]"
-                  style={{
-                    background: "var(--pi-paper)",
-                    color: "var(--pi-ink-secondary)",
-                    border: "0.5px solid var(--pi-hairline)",
-                  }}
-                >
-                  {promptText}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       ) : (
@@ -554,17 +695,21 @@ export function ChatWorkspace({
             pendingApprovals={activeApprovals}
             compactProcess={hostSettings?.processDetail === "compact"}
             dark={dark}
+            canBranchOrRewind={!activeBot.isRemote && Boolean(activeSessionId)}
             onQuote={handleQuote}
             onRetry={handleRetry}
+            onForkFromTurn={handleForkFromTurn}
+            onRewindTurn={handleRequestRewind}
             onAnswerQuestion={handleAnswerQuestion}
             onDismissQuestion={handleDismissQuestion}
             onResolveApproval={handleResolveApproval}
+            footerSlot={slashStatusBar}
             scrollRefOut={snapToBottomRef}
           />
           <div className="shrink-0 px-4">
             <GoalBar sessionId={activeSessionId} />
             <JobsBar sessionId={activeSessionId} />
-            <TodoPanel todos={latestTodos} sessionKey={activeSessionId} />
+            <SessionTodoPanel sessionId={activeSessionId} turns={turns} />
           </div>
           {composerElement("docked")}
         </>
@@ -582,6 +727,71 @@ export function ChatWorkspace({
           <span className="text-[14px] font-medium">{t("chat.dropFiles")}</span>
         </div>
       )}
+
+      <Dialog
+        open={Boolean(rewindTarget)}
+        onOpenChange={(v) => {
+          if (!v && !rewinding) {
+            setRewindTarget(null);
+            setRewindCheckpoint(null);
+          }
+        }}
+        title={t("chat.rewindTitle")}
+        maxWidthClass="max-w-[440px]"
+      >
+        {rewindTarget && (
+          <div className="space-y-4">
+            <p className="text-[13px] leading-[1.6]" style={{ color: "var(--pi-ink-secondary)" }}>
+              {t("chat.rewindDesc", { preview: rewindTarget.preview })}
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="ghost"
+                disabled={rewinding}
+                onClick={() => {
+                  setRewindTarget(null);
+                  setRewindCheckpoint(null);
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              {rewindCheckpoint ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    disabled={rewinding}
+                    onClick={() => void executeRewind("chat_only")}
+                  >
+                    {t("chat.rewindChatOnly")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={rewinding}
+                    onClick={() => void executeRewind("files_only")}
+                  >
+                    {t("chat.rewindFilesOnly")}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={rewinding}
+                    onClick={() => void executeRewind("files_and_chat")}
+                  >
+                    {t("chat.rewindFilesAndChat")}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="primary"
+                  disabled={rewinding}
+                  onClick={() => void executeRewind("chat_only")}
+                >
+                  {t("chat.rewindChatOnly")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

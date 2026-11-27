@@ -3,6 +3,7 @@ import {
   IconFolder,
   IconGitBranch,
   IconTerminal2,
+  IconUsersGroup,
   IconWorld,
 } from "@tabler/icons-react";
 import { AppShell } from "./features/shell/AppShell";
@@ -12,6 +13,15 @@ import { useConnectionStore } from "./stores/connectionStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { Button, TooltipProvider } from "./ui";
 import { registerWorkbenchPanel } from "./workbench/registry";
+
+registerWorkbenchPanel({
+  id: "super-team",
+  labelKey: "wb.superTeamTitle",
+  icon: IconUsersGroup,
+  order: 5,
+  isAvailable: (ctx) => ctx.activeView === "super",
+  Component: lazy(() => import("./workbench/SuperTeamPanel")),
+});
 
 registerWorkbenchPanel({
   id: "files",

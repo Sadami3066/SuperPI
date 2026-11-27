@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { IconMessage, IconWorld } from "@tabler/icons-react";
+import { IconInbox, IconMessage, IconPlugConnected, IconWorld } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { formatShortcut } from "../../platform/shortcuts";
 import { useBotStore } from "../../stores/botStore";
@@ -58,8 +58,9 @@ function CommandPaletteBody({
   const bots = useBotStore((s) => s.bots);
   const summariesById = useSessionStore((s) => s.summariesById);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const draftBotId = useSessionStore((s) => s.draftBotId);
   const selectSession = useSessionStore((s) => s.selectSession);
-  const createSession = useSessionStore((s) => s.createSession);
+  const startDraftSession = useSessionStore((s) => s.startDraftSession);
   const openPanel = useWorkbenchStore((s) => s.openPanel);
 
   const botNameById = useMemo(() => new Map(bots.map((b) => [b.id, b.name])), [bots]);
@@ -75,8 +76,8 @@ function CommandPaletteBody({
         run: () => {
           onOpenChange(false);
           onSelectChatView();
-          const targetBot = summariesById[activeSessionId]?.botId ?? bots[0]?.id;
-          if (client && targetBot) void createSession(client, targetBot, locale);
+          const targetBot = summariesById[activeSessionId]?.botId ?? draftBotId ?? bots[0]?.id;
+          if (targetBot) startDraftSession(targetBot);
         },
       },
       {
@@ -109,6 +110,24 @@ function CommandPaletteBody({
         },
       },
       {
+        id: "act-timers",
+        label: t("nav.timers"),
+        icon: <BrandIcon name="system/timer" size={15} />,
+        run: () => {
+          onOpenChange(false);
+          onSelectFeatureView("timers");
+        },
+      },
+      {
+        id: "act-inbox",
+        label: t("nav.inbox"),
+        icon: <IconInbox size={15} stroke={1.7} />,
+        run: () => {
+          onOpenChange(false);
+          onSelectFeatureView("inbox");
+        },
+      },
+      {
         id: "act-memory",
         label: t("settings.navMemory"),
         icon: <BrandIcon name="ai/memory" size={15} />,
@@ -118,21 +137,21 @@ function CommandPaletteBody({
         },
       },
       {
-        id: "act-automations",
-        label: t("settings.navAutomations"),
-        icon: <BrandIcon name="system/timer" size={15} />,
-        run: () => {
-          onOpenChange(false);
-          onSelectFeatureView("automations");
-        },
-      },
-      {
-        id: "act-capabilities",
-        label: t("nav.capabilities"),
+        id: "act-skills",
+        label: t("nav.skills"),
         icon: <BrandIcon name="ai/skills" size={15} />,
         run: () => {
           onOpenChange(false);
-          onSelectFeatureView("capabilities");
+          onSelectFeatureView("skills");
+        },
+      },
+      {
+        id: "act-mcp",
+        label: t("nav.mcp"),
+        icon: <IconPlugConnected size={15} stroke={1.7} />,
+        run: () => {
+          onOpenChange(false);
+          onSelectFeatureView("mcp");
         },
       },
       {
@@ -220,7 +239,7 @@ function CommandPaletteBody({
     botNameById,
     bots,
     client,
-    createSession,
+    draftBotId,
     isElectron,
     locale,
     onOpenChange,
@@ -233,6 +252,7 @@ function CommandPaletteBody({
     platform,
     query,
     selectSession,
+    startDraftSession,
     summariesById,
     t,
   ]);

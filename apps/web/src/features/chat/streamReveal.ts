@@ -5,6 +5,7 @@ export const STREAM_STAGGER_MAX_DELAY_MS = 160;
 export const STREAM_ALPHA_LEVELS = 32;
 export const STREAM_MAX_BATCHES = 24;
 export const STREAM_MAX_UNITS_PER_BATCH = 48;
+export const STREAM_INITIAL_ANIMATE_MAX_LENGTH = 48;
 
 const RESTYLE_SKIP_LIMIT = 256;
 const RESTYLE_LENGTH_LIMIT = 4096;
@@ -32,13 +33,31 @@ function fenceMarker(trimmedLine: string): { ch: string; len: number } | null {
   return { ch: first, len };
 }
 
-export function splitMarkdownBlocks(source: string, streaming = false): string[] {
+export interface MarkdownBlockSpan {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export function splitMarkdownBlockSpans(source: string, streaming = false): MarkdownBlockSpan[] {
   if (!source) return [];
   const normalized = source.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
-  const blocks: string[] = [];
+  const lineOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineOffsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  const blocks: MarkdownBlockSpan[] = [];
   let start = 0;
   let openFence: { ch: string; len: number } | null = null;
+
+  const pushBlock = (fromLine: number, text: string, end: number) => {
+    if (!text.trim()) return;
+    blocks.push({ start: lineOffsets[fromLine], end, text });
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trimStart();
@@ -64,7 +83,7 @@ export function splitMarkdownBlocks(source: string, streaming = false): string[]
         continue;
       }
       const chunk = lines.slice(start, i).join("\n");
-      if (chunk.trim()) blocks.push(chunk);
+      pushBlock(start, chunk, lineOffsets[start] + chunk.length);
       start = i + 1;
     }
   }
@@ -72,12 +91,16 @@ export function splitMarkdownBlocks(source: string, streaming = false): string[]
   const tail = lines.slice(start).join("\n");
   if (tail.trim()) {
     if (streaming && openFence) {
-      blocks.push(`${tail}\n${openFence.ch.repeat(openFence.len)}`);
+      pushBlock(start, `${tail}\n${openFence.ch.repeat(openFence.len)}`, normalized.length);
     } else {
-      blocks.push(tail);
+      pushBlock(start, tail, lineOffsets[start] + tail.length);
     }
   }
   return blocks;
+}
+
+export function splitMarkdownBlocks(source: string, streaming = false): string[] {
+  return splitMarkdownBlockSpans(source, streaming).map((block) => block.text);
 }
 
 export interface StreamTextChange {
@@ -350,6 +373,13 @@ export class StreamTextFadeAnimator {
     return this.batches.length;
   }
 
+  hasBatchesInRange(start: number, end: number): boolean {
+    for (const batch of this.batches) {
+      if (batch.end > start && batch.start < end) return true;
+    }
+    return false;
+  }
+
   finish(): void {
     this.batches = [];
   }
@@ -410,6 +440,31 @@ export class StreamTextFadeAnimator {
     if (!batch) return STREAM_ALPHA_LEVELS;
     const unitIndex = lastIndexNotAfter(batch.unitStarts, offset);
     return this.levelOfUnit(batch, unitIndex, nowMs);
+  }
+
+  unitRangeAt(
+    offset: number,
+    nowMs: number,
+  ): { unitStart: number; unitEnd: number; level: number } | null {
+    const batch = this.batchContaining(offset);
+    if (!batch) return null;
+    const unitIndex = lastIndexNotAfter(batch.unitStarts, offset);
+    const unitStart = batch.unitStarts[unitIndex];
+    const unitEnd =
+      unitIndex + 1 < batch.unitStarts.length ? batch.unitStarts[unitIndex + 1] : batch.end;
+    const level = this.levelOfUnit(batch, unitIndex, nowMs);
+    return { unitStart, unitEnd, level };
+  }
+
+  nextBatchStartAfter(offset: number): number | null {
+    let low = 0;
+    let high = this.batches.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (this.batches[mid].start <= offset) low = mid + 1;
+      else high = mid;
+    }
+    return low < this.batches.length ? this.batches[low].start : null;
   }
 
   alphaAt(offset: number, nowMs: number): number {
@@ -587,6 +642,74 @@ export class StreamTextFadeAnimator {
 export interface AlphaTextRun {
   text: string;
   alpha: number;
+}
+
+export interface FadeTextRun {
+  text: string;
+  offset: number;
+  alpha: number;
+  animating: boolean;
+}
+
+/**
+ * Splits `text` along exact animator unit boundaries so every animating span
+ * maps to a single stagger unit whose opacity evolves monotonically in rAF
+ * without jumping ahead and snapping back on subsequent stream chunks.
+ */
+export function splitTextByFadeUnit(
+  text: string,
+  baseOffset: number,
+  animator: StreamTextFadeAnimator,
+  nowMs: number,
+): FadeTextRun[] {
+  if (!text) return [];
+  if (!animator.hasActiveBatches) {
+    return [{ text, offset: baseOffset, alpha: 1, animating: false }];
+  }
+
+  const runs: FadeTextRun[] = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const absOffset = baseOffset + cursor;
+    const unit = animator.unitRangeAt(absOffset, nowMs);
+    if (unit && unit.level < STREAM_ALPHA_LEVELS) {
+      const nextCursor = Math.min(text.length, Math.max(cursor + 1, unit.unitEnd - baseOffset));
+      runs.push({
+        text: text.slice(cursor, nextCursor),
+        offset: unit.unitStart,
+        alpha: unit.level / STREAM_ALPHA_LEVELS,
+        animating: true,
+      });
+      cursor = nextCursor;
+      continue;
+    }
+
+    const settledStart = cursor;
+    while (cursor < text.length) {
+      const curAbs = baseOffset + cursor;
+      const curUnit = animator.unitRangeAt(curAbs, nowMs);
+      if (curUnit) {
+        if (curUnit.level < STREAM_ALPHA_LEVELS) break;
+        cursor = Math.min(text.length, Math.max(cursor + 1, curUnit.unitEnd - baseOffset));
+      } else {
+        const nextBatchStart = animator.nextBatchStartAfter(curAbs);
+        if (nextBatchStart === null || nextBatchStart - baseOffset >= text.length) {
+          cursor = text.length;
+        } else {
+          cursor = Math.max(cursor + 1, nextBatchStart - baseOffset);
+        }
+      }
+    }
+    runs.push({
+      text: text.slice(settledStart, cursor),
+      offset: baseOffset + settledStart,
+      alpha: 1,
+      animating: false,
+    });
+  }
+
+  return runs;
 }
 
 export function splitTextByAlpha(

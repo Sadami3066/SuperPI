@@ -24,10 +24,23 @@ import type {
   ToolApprovalDecision,
   TurnBlock,
 } from "../api/types";
+import { translate } from "../i18n";
 import { useBotStore } from "./botStore";
 import { type LiveRunState, useStreamStore } from "./streamStore";
+import { useSuperStore } from "./superStore";
 
 export const MAX_CACHED_TRANSCRIPTS = 5;
+
+export interface SlashCommandStatus {
+  kind: "compact" | "goal";
+  phase: "running" | "done" | "error";
+  message: string;
+  retryText?: string;
+}
+
+export function draftComposerKey(botId: string): string {
+  return `__draft__:${botId}`;
+}
 
 const ACTIVE_SESSION_STORAGE_KEY = "superpi:activeSessionId";
 
@@ -76,6 +89,29 @@ function resolveBotIdByCwd(cwd: string, bots: HostBotDto[]): string {
   return matched?.id ?? bots[0]?.id ?? "home";
 }
 
+function clearResolvedQuestionFromState(
+  state: Pick<SessionStoreState, "pendingQuestions" | "transcriptsById">,
+  requestId: string,
+): Partial<SessionStoreState> {
+  const nextPending = state.pendingQuestions.filter((q) => q.requestId !== requestId);
+  let nextTranscripts = state.transcriptsById;
+  let changed = nextPending.length !== state.pendingQuestions.length;
+  for (const [sid, tr] of Object.entries(state.transcriptsById)) {
+    if (tr.pendingQuestion?.requestId === requestId) {
+      if (nextTranscripts === state.transcriptsById) {
+        nextTranscripts = { ...state.transcriptsById };
+      }
+      nextTranscripts[sid] = { ...tr, pendingQuestion: null };
+      changed = true;
+    }
+  }
+  if (!changed) return state as Partial<SessionStoreState>;
+  return {
+    pendingQuestions: nextPending,
+    transcriptsById: nextTranscripts,
+  };
+}
+
 function materializeFinishedLiveRun(
   run: LiveRunState,
   locale: "zh-CN" | "en",
@@ -107,6 +143,7 @@ function materializeFinishedLiveRun(
 
 const inFlightLoads = new Map<string, Promise<void>>();
 const pendingLoads = new Map<string, { locale: "zh-CN" | "en"; reconcileRunId?: string }>();
+const slashStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let localSeq = 0;
 let refreshSeq = 0;
 let createInFlight = false;
@@ -120,14 +157,19 @@ export interface SessionStoreState {
   pendingQuestions: HostPendingQuestionDto[];
   pendingApprovals: HostPendingToolApprovalDto[];
   activeSessionId: string;
+  draftBotId: string | null;
+  draftModelByBot: Record<string, { model: string; thinking: ThinkingLevel }>;
   unreadSessionIds: Record<string, true>;
   composerFocusTick: number;
   actionError: string | null;
   composerTextBySession: Record<string, string>;
   quotedTextBySession: Record<string, string | null>;
-  planFirstBySession: Record<string, boolean>;
+  slashStatusBySession: Record<string, SlashCommandStatus>;
 
   clearActionError: () => void;
+  clearSlashStatus: (sessionId: string) => void;
+  startDraftSession: (botId: string) => void;
+  setDraftModel: (botId: string, model: string, thinking: ThinkingLevel) => void;
 
   hydrateSessionLists: (
     client: HostClient,
@@ -155,7 +197,19 @@ export interface SessionStoreState {
     client: HostClient,
     sessionId: string,
     locale: "zh-CN" | "en",
+    upToUserTurn?: number,
   ) => Promise<string | null>;
+  rewindSessionTurn: (
+    client: HostClient,
+    sessionId: string,
+    options: {
+      turnIndex: number;
+      mode: "chat_only" | "files_only" | "files_and_chat";
+      checkpointId?: string;
+      restoreText?: string;
+      locale: "zh-CN" | "en";
+    },
+  ) => Promise<boolean>;
   renameSession: (client: HostClient, sessionId: string, title: string) => Promise<void>;
   togglePinSession: (client: HostClient, sessionId: string, pinned: boolean) => Promise<void>;
   toggleArchiveSession: (client: HostClient, sessionId: string, archived: boolean) => Promise<void>;
@@ -194,7 +248,6 @@ export interface SessionStoreState {
       sendWhileRunning: "steer" | "queue";
       overrideText?: string;
       attachments?: ComposerAttachment[];
-      planFirstOverride?: boolean;
     },
   ) => Promise<void>;
   stopSession: (client: HostClient, sessionId: string) => Promise<void>;
@@ -213,7 +266,6 @@ export interface SessionStoreState {
   ) => Promise<void>;
   setComposerText: (sessionId: string, value: string) => void;
   setQuotedText: (sessionId: string, value: string | null) => void;
-  togglePlanFirst: (sessionId: string) => void;
   setSessionBusy: (sessionId: string, busy: boolean) => void;
   markSessionUnread: (sessionId: string) => void;
   clearSessionUnread: (sessionId: string) => void;
@@ -237,7 +289,30 @@ function mapSummary(dto: HostSessionSummaryDto, botId: string): SessionSummary {
   };
 }
 
-export const useSessionStore = create<SessionStoreState>((set, get) => ({
+export const useSessionStore = create<SessionStoreState>((set, get) => {
+  const setSlashStatus = (
+    sessionId: string,
+    status: SlashCommandStatus,
+    autoClearMs?: number,
+  ) => {
+    const prevTimer = slashStatusTimers.get(sessionId);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      slashStatusTimers.delete(sessionId);
+    }
+    set((s) => ({
+      slashStatusBySession: { ...s.slashStatusBySession, [sessionId]: status },
+    }));
+    if (autoClearMs && autoClearMs > 0) {
+      const timer = setTimeout(() => {
+        slashStatusTimers.delete(sessionId);
+        get().clearSlashStatus(sessionId);
+      }, autoClearMs);
+      slashStatusTimers.set(sessionId, timer);
+    }
+  };
+
+  return {
   summariesById: {},
   sessionIdsByBot: {},
   transcriptsById: {},
@@ -246,14 +321,49 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   pendingQuestions: [],
   pendingApprovals: [],
   activeSessionId: loadStoredSessionId(),
+  draftBotId: null,
+  draftModelByBot: {},
   unreadSessionIds: {},
   composerFocusTick: 0,
   actionError: null,
   composerTextBySession: {},
   quotedTextBySession: {},
-  planFirstBySession: {},
+  slashStatusBySession: {},
 
   clearActionError: () => set({ actionError: null }),
+
+  clearSlashStatus: (sessionId) => {
+    const prevTimer = slashStatusTimers.get(sessionId);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      slashStatusTimers.delete(sessionId);
+    }
+    set((s) => {
+      if (!s.slashStatusBySession[sessionId]) return s;
+      const next = { ...s.slashStatusBySession };
+      delete next[sessionId];
+      return { slashStatusBySession: next };
+    });
+  },
+
+  startDraftSession: (botId) => {
+    useBotStore.getState().setBotCollapsed(botId, false);
+    set((s) => ({
+      activeSessionId: "",
+      draftBotId: botId,
+      actionError: null,
+      composerFocusTick: s.composerFocusTick + 1,
+    }));
+  },
+
+  setDraftModel: (botId, model, thinking) => {
+    set((s) => ({
+      draftModelByBot: {
+        ...s.draftModelByBot,
+        [botId]: { model, thinking },
+      },
+    }));
+  },
 
   hydrateSessionLists: async (client, bots, locale) => {
     const results = await Promise.all(
@@ -275,29 +385,20 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
     const allIds = Object.keys(summariesById);
     let targetId = get().activeSessionId;
+    let draftBotId: string | null = null;
     if (!targetId || !summariesById[targetId]) {
       if (allIds.length > 0) {
         targetId = allIds[0];
       } else if (bots.length > 0) {
-        const created = await client.createSession(bots[0].id);
-        targetId = created.sessionId;
-        summariesById[targetId] = {
-          id: targetId,
-          botId: bots[0].id,
-          title: "",
-          updatedAtMs: Date.now(),
-          cwd: created.cwd,
-          pinned: false,
-          archived: false,
-          memoryExcluded: false,
-          busy: false,
-        };
-        sessionIdsByBot[bots[0].id] = [targetId];
+        targetId = "";
+        draftBotId = bots[0].id;
       }
     }
 
-    saveStoredSessionId(targetId);
-    set({ summariesById, sessionIdsByBot, activeSessionId: targetId });
+    if (targetId) {
+      saveStoredSessionId(targetId);
+    }
+    set({ summariesById, sessionIdsByBot, activeSessionId: targetId, draftBotId });
     if (targetId) {
       void get().loadSession(client, targetId, locale);
     }
@@ -323,6 +424,9 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         }
       }
       const curActive = s.activeSessionId;
+      if (!curActive && s.draftBotId) {
+        return { summariesById, sessionIdsByBot };
+      }
       const prevActiveSummary = curActive ? s.summariesById[curActive] : undefined;
       const prevActiveTranscript = curActive ? s.transcriptsById[curActive] : undefined;
       if (
@@ -465,7 +569,24 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
   refreshQuestions: async (client) => {
     const list = await client.listQuestions().catch(() => [] as HostPendingQuestionDto[]);
-    set({ pendingQuestions: list });
+    const bySession = new Map(list.map((q) => [q.sessionId, q]));
+    set((s) => {
+      let changed = false;
+      let nextTranscripts = s.transcriptsById;
+      for (const [sid, tr] of Object.entries(s.transcriptsById)) {
+        const nextQ = bySession.get(sid) ?? null;
+        if ((tr.pendingQuestion?.requestId ?? null) !== (nextQ?.requestId ?? null)) {
+          if (!changed) {
+            nextTranscripts = { ...s.transcriptsById };
+            changed = true;
+          }
+          nextTranscripts[sid] = { ...tr, pendingQuestion: nextQ };
+        }
+      }
+      return changed
+        ? { pendingQuestions: list, transcriptsById: nextTranscripts }
+        : { pendingQuestions: list };
+    });
   },
 
   refreshApprovals: async (client) => {
@@ -481,6 +602,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       delete nextUnread[sessionId];
       return {
         activeSessionId: sessionId,
+        draftBotId: null,
         lruOrder: nextOrder,
         unreadSessionIds: nextUnread,
         composerFocusTick: s.composerFocusTick + 1,
@@ -529,6 +651,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         return {
           ...evicted,
           activeSessionId: id,
+          draftBotId: null,
           composerFocusTick: s.composerFocusTick + 1,
           summariesById: { ...s.summariesById, [id]: summary },
           sessionIdsByBot: { ...s.sessionIdsByBot, [botId]: nextBotIds },
@@ -546,12 +669,18 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     }
   },
 
-  forkSession: async (client, sessionId, locale) => {
+  forkSession: async (client, sessionId, locale, upToUserTurn) => {
     set({ actionError: null });
     try {
       const src = get().summariesById[sessionId];
       const forkTitle = src?.title ? `${src.title} (branch)` : undefined;
-      const res = await client.forkSession(sessionId, forkTitle ? { title: forkTitle } : undefined);
+      const payload: { title?: string; upToUserTurn?: number } = {};
+      if (forkTitle) payload.title = forkTitle;
+      if (upToUserTurn !== undefined) payload.upToUserTurn = upToUserTurn;
+      const res = await client.forkSession(
+        sessionId,
+        Object.keys(payload).length > 0 ? payload : undefined,
+      );
       const bots = useBotStore.getState().bots;
       await get().refreshSessionLists(client, bots);
       if (res.sessionId) {
@@ -562,6 +691,33 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     } catch (err) {
       set({ actionError: err instanceof Error ? err.message : "Failed to branch session" });
       return null;
+    }
+  },
+
+  rewindSessionTurn: async (client, sessionId, options) => {
+    set({ actionError: null });
+    try {
+      await client.rewindSession(sessionId, {
+        turnIndex: options.turnIndex,
+        mode: options.mode,
+        checkpointId: options.checkpointId,
+      });
+      useStreamStore.getState().clearRun(sessionId);
+      await get().loadSession(client, sessionId, options.locale);
+      await get().refreshSessionLists(client, useBotStore.getState().bots);
+      if (options.mode !== "files_only" && options.restoreText) {
+        set((s) => ({
+          composerTextBySession: {
+            ...s.composerTextBySession,
+            [sessionId]: options.restoreText ?? "",
+          },
+          composerFocusTick: s.composerFocusTick + 1,
+        }));
+      }
+      return true;
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to rewind session" });
+      return false;
     }
   },
 
@@ -613,11 +769,14 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         s.activeSessionId === sessionId
           ? Object.keys(nextSummaries)[0] ?? ""
           : s.activeSessionId;
-      if (fallbackId !== s.activeSessionId) saveStoredSessionId(fallbackId);
+      if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+      const nextDraftBotId =
+        !fallbackId ? removed?.botId ?? useBotStore.getState().bots[0]?.id ?? s.draftBotId : null;
       return {
         summariesById: nextSummaries,
         sessionIdsByBot: nextByBot,
         activeSessionId: fallbackId,
+        draftBotId: nextDraftBotId,
       };
     });
     if (!archived) {
@@ -656,7 +815,9 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         s.activeSessionId === sessionId
           ? Object.keys(nextSummaries)[0] ?? ""
           : s.activeSessionId;
-      if (fallbackId !== s.activeSessionId) saveStoredSessionId(fallbackId);
+      if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+      const nextDraftBotId =
+        !fallbackId ? removed?.botId ?? useBotStore.getState().bots[0]?.id ?? s.draftBotId : null;
       return {
         summariesById: nextSummaries,
         sessionIdsByBot: nextByBot,
@@ -664,6 +825,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
         lruOrder: s.lruOrder.filter((id) => id !== sessionId),
         archivedSessions: s.archivedSessions.filter((x) => x.id !== sessionId),
         activeSessionId: fallbackId,
+        draftBotId: nextDraftBotId,
       };
     });
   },
@@ -708,11 +870,46 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   },
 
   compactSession: async (client, sessionId, locale) => {
-    const res = await client.compactSession(sessionId);
-    if (res.ok) {
-      await get().loadSession(client, sessionId, locale);
+    setSlashStatus(sessionId, {
+      kind: "compact",
+      phase: "running",
+      message: translate(locale, "slash.compacting"),
+    });
+    try {
+      const res = await client.compactSession(sessionId);
+      if (res.ok) {
+        await get().loadSession(client, sessionId, locale);
+        setSlashStatus(
+          sessionId,
+          {
+            kind: "compact",
+            phase: "done",
+            message: res.message || translate(locale, "slash.compactDone"),
+          },
+          3600,
+        );
+      } else {
+        setSlashStatus(
+          sessionId,
+          {
+            kind: "compact",
+            phase: "done",
+            message: res.message || translate(locale, "slash.compactEmpty"),
+          },
+          3600,
+        );
+      }
+      return { ok: res.ok, message: res.message };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Compaction failed";
+      setSlashStatus(sessionId, {
+        kind: "compact",
+        phase: "error",
+        message: translate(locale, "slash.compactFailed", { error: msg }),
+        retryText: "/compact",
+      });
+      return { ok: false, message: msg };
     }
-    return { ok: res.ok, message: res.message };
   },
 
   setQueueForSession: (sessionId, queue) => {
@@ -740,29 +937,177 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
   sendMessage: async (client, options) => {
     const {
-      sessionId,
       botId,
       locale,
       sendWhileRunning,
       overrideText,
       attachments = [],
-      planFirstOverride,
     } = options;
+    const isDraft = !options.sessionId || options.sessionId.startsWith("__draft__:");
+    const composerKey = options.sessionId || draftComposerKey(botId);
     const state = get();
-    const raw = (overrideText ?? state.composerTextBySession[sessionId] ?? "").trim();
+    const raw = (overrideText ?? state.composerTextBySession[composerKey] ?? "").trim();
     if (!raw && attachments.length === 0) return;
 
     if (attachments.length === 0 && raw === "/compact") {
-      state.setComposerText(sessionId, "");
-      await state.compactSession(client, sessionId, locale);
+      state.setComposerText(composerKey, "");
+      if (isDraft) {
+        setSlashStatus(
+          composerKey,
+          {
+            kind: "compact",
+            phase: "done",
+            message: translate(locale, "slash.compactEmpty"),
+          },
+          3600,
+        );
+        return;
+      }
+      await get().compactSession(client, options.sessionId, locale);
       return;
     }
 
-    const quoted = overrideText === undefined ? state.quotedTextBySession[sessionId] : null;
+    const goalMatch = attachments.length === 0 ? raw.match(/^\/goal(?:\s+([\s\S]*))?$/i) : null;
+    if (goalMatch) {
+      const arg = (goalMatch[1] ?? "").trim();
+      const lowerArg = arg.toLowerCase();
+      state.setComposerText(composerKey, "");
+      if (!arg) {
+        setSlashStatus(composerKey, {
+          kind: "goal",
+          phase: "error",
+          message: translate(locale, "slash.goalUsage"),
+        });
+        return;
+      }
+      if (isDraft && (lowerArg === "pause" || lowerArg === "resume" || lowerArg === "clear" || lowerArg === "stop")) {
+        setSlashStatus(composerKey, {
+          kind: "goal",
+          phase: "error",
+          message: translate(locale, "slash.goalUsage"),
+        });
+        return;
+      }
+
+      let targetSessionId = options.sessionId;
+      if (isDraft) {
+        const createdId = await get().createSession(client, botId, locale);
+        if (!createdId) return;
+        const draftModel = get().draftModelByBot[botId];
+        if (draftModel) {
+          await get()
+            .updateSessionModel(client, createdId, draftModel.model, draftModel.thinking, locale)
+            .catch(() => void 0);
+        }
+        targetSessionId = createdId;
+      }
+
+      try {
+        if (lowerArg === "pause") {
+          setSlashStatus(targetSessionId, {
+            kind: "goal",
+            phase: "running",
+            message: translate(locale, "common.loading"),
+          });
+          await client.pauseSessionGoal(targetSessionId);
+          useSuperStore.getState().bumpGoalVersion();
+          setSlashStatus(
+            targetSessionId,
+            { kind: "goal", phase: "done", message: translate(locale, "slash.goalPaused") },
+            3600,
+          );
+          return;
+        }
+        if (lowerArg === "resume") {
+          setSlashStatus(targetSessionId, {
+            kind: "goal",
+            phase: "running",
+            message: translate(locale, "common.loading"),
+          });
+          await client.resumeSessionGoal(targetSessionId);
+          useSuperStore.getState().bumpGoalVersion();
+          setSlashStatus(
+            targetSessionId,
+            { kind: "goal", phase: "done", message: translate(locale, "slash.goalResumed") },
+            3600,
+          );
+          return;
+        }
+        if (lowerArg === "clear" || lowerArg === "stop" || lowerArg === "cancel") {
+          setSlashStatus(targetSessionId, {
+            kind: "goal",
+            phase: "running",
+            message: translate(locale, "common.loading"),
+          });
+          await client.deleteSessionGoal(targetSessionId);
+          useSuperStore.getState().bumpGoalVersion();
+          setSlashStatus(
+            targetSessionId,
+            { kind: "goal", phase: "done", message: translate(locale, "slash.goalCleared") },
+            3600,
+          );
+          return;
+        }
+
+        setSlashStatus(targetSessionId, {
+          kind: "goal",
+          phase: "running",
+          message: translate(locale, "common.loading"),
+        });
+        await client.createSessionGoal(targetSessionId, { objective: arg });
+        useSuperStore.getState().bumpGoalVersion();
+        setSlashStatus(
+          targetSessionId,
+          {
+            kind: "goal",
+            phase: "done",
+            message: translate(locale, "slash.goalStarted", { objective: arg }),
+          },
+          3600,
+        );
+        const live = useStreamStore.getState().activeBySession[targetSessionId];
+        const busy = Boolean(live?.streaming) || Boolean(get().summariesById[targetSessionId]?.busy);
+        if (!busy) {
+          await get().sendMessage(client, {
+            sessionId: targetSessionId,
+            botId,
+            locale,
+            sendWhileRunning,
+            overrideText: arg,
+          });
+        }
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Goal command failed";
+        setSlashStatus(targetSessionId, {
+          kind: "goal",
+          phase: "error",
+          message: translate(locale, "slash.goalFailed", { error: msg }),
+          retryText: raw,
+        });
+        return;
+      }
+    }
+
+    const quoted = overrideText === undefined ? state.quotedTextBySession[composerKey] : null;
     const baseText = quoted ? `> ${quoted}\n\n${raw}` : raw;
+
+    let sessionId = options.sessionId;
+    if (isDraft) {
+      const createdId = await get().createSession(client, botId, locale);
+      if (!createdId) return;
+      const draftModel = get().draftModelByBot[botId];
+      if (draftModel) {
+        await get()
+          .updateSessionModel(client, createdId, draftModel.model, draftModel.thinking, locale)
+          .catch(() => void 0);
+      }
+      sessionId = createdId;
+    }
+
     if (overrideText === undefined) {
-      state.setComposerText(sessionId, "");
-      state.setQuotedText(sessionId, null);
+      get().setComposerText(composerKey, "");
+      get().setQuotedText(composerKey, null);
     }
 
     const inlineImages: Array<{ data: string; mimeType: string; name?: string }> = [];
@@ -770,6 +1115,36 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     const chips: AttachmentChip[] = [];
 
     for (const att of attachments) {
+      if (att.kind === "folder" && att.folderPath) {
+        try {
+          const staged = await client.stageFolderAttachment(botId, att.folderPath);
+          stagedMeta.push({
+            path: staged.path,
+            name: staged.name,
+            mime: staged.mime,
+            size: staged.size,
+          });
+          chips.push({
+            id: staged.id,
+            name: staged.name,
+            mime: staged.mime,
+            size: staged.size,
+            path: staged.path,
+            kind: "folder",
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to attach folder";
+          set({
+            actionError: translate(locale, "chat.folderStageFailed", { error: msg }),
+          });
+          if (overrideText === undefined) {
+            get().setComposerText(sessionId, raw);
+          }
+          return;
+        }
+        continue;
+      }
+
       if (att.isInlineImage) {
         inlineImages.push({
           data: att.dataBase64,
@@ -821,7 +1196,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
     const liveRun = useStreamStore.getState().activeBySession[sessionId];
     const isCurrentlyRunning =
-      Boolean(liveRun?.streaming) || Boolean(state.summariesById[sessionId]?.busy);
+      Boolean(liveRun?.streaming) || Boolean(get().summariesById[sessionId]?.busy);
 
     if (isCurrentlyRunning) {
       if (sendWhileRunning === "queue") {
@@ -889,12 +1264,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
     useStreamStore.getState().beginRun(sessionId, pendingRunId);
 
-    const planFirst = planFirstOverride ?? Boolean(state.planFirstBySession[sessionId]);
     try {
       await client.sendPrompt(sessionId, {
         text: userContent,
         steer: false,
-        planFirst,
         images: inlineImages,
       });
     } catch (err) {
@@ -905,12 +1278,12 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   },
 
   stopSession: async (client, sessionId) => {
-    await client.abortSession(sessionId);
     const cur = useStreamStore.getState().activeBySession[sessionId];
     if (cur) {
-      useStreamStore.getState().finishRun(sessionId, cur.runId, "aborted");
+      useStreamStore.getState().finishRun(sessionId, cur.runId, "stopped");
     }
     get().setSessionBusy(sessionId, false);
+    await client.abortSession(sessionId).catch(() => void 0);
   },
 
   retrySession: async (client, sessionId) => {
@@ -928,11 +1301,13 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
 
   answerQuestion: async (client, requestId, answers) => {
     await client.answerQuestion(requestId, answers);
+    set((s) => clearResolvedQuestionFromState(s, requestId));
     await get().refreshQuestions(client);
   },
 
   dismissQuestion: async (client, requestId) => {
     await client.dismissQuestion(requestId);
+    set((s) => clearResolvedQuestionFromState(s, requestId));
     await get().refreshQuestions(client);
   },
 
@@ -970,15 +1345,6 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     }));
   },
 
-  togglePlanFirst: (sessionId) => {
-    set((s) => ({
-      planFirstBySession: {
-        ...s.planFirstBySession,
-        [sessionId]: !s.planFirstBySession[sessionId],
-      },
-    }));
-  },
-
   setSessionBusy: (sessionId, busy) => {
     set((s) => {
       const sum = s.summariesById[sessionId];
@@ -1011,6 +1377,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
   reset: () => {
     inFlightLoads.clear();
     pendingLoads.clear();
+    for (const timer of slashStatusTimers.values()) {
+      clearTimeout(timer);
+    }
+    slashStatusTimers.clear();
     set({
       summariesById: {},
       sessionIdsByBot: {},
@@ -1020,6 +1390,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
       pendingQuestions: [],
       pendingApprovals: [],
       unreadSessionIds: {},
+      draftBotId: null,
+      draftModelByBot: {},
+      slashStatusBySession: {},
     });
   },
-}));
+  };
+});

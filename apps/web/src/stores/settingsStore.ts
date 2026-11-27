@@ -35,10 +35,14 @@ function writeStored(key: string, value: string): void {
   }
 }
 
+export type BrowserSearchEngine = "google" | "bing" | "duckduckgo" | "baidu";
+
 export interface SettingsStoreState {
   themePreset: ThemePresetId;
   appearance: AppearanceMode;
   fontStyle: FontStyleId;
+  customAccent: string | null;
+  browserSearchEngine: BrowserSearchEngine;
   languagePref: AppLanguagePreference;
   locale: ResolvedLocale;
   dark: boolean;
@@ -53,6 +57,9 @@ export interface SettingsStoreState {
   setThemePreset: (preset: ThemePresetId) => void;
   setAppearance: (appearance: AppearanceMode) => void;
   setFontStyle: (font: FontStyleId) => void;
+  setCustomAccent: (hex: string | null) => void;
+  setBrowserSearchEngine: (engine: BrowserSearchEngine) => void;
+  resetAppearance: () => void;
   setLanguagePref: (client: HostClient | null, pref: AppLanguagePreference) => Promise<void>;
 
   refreshSettingsData: (client: HostClient) => Promise<void>;
@@ -84,11 +91,18 @@ export interface SettingsStoreState {
 }
 
 const initialLanguagePref = readStored<AppLanguagePreference>("superpi:language", "system");
+const initialCustomAccent = readStored<string>("superpi:customAccent", "") || null;
+const initialSearchEngine = readStored<BrowserSearchEngine>(
+  "superpi:browserSearchEngine",
+  "google",
+);
 
 export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
   themePreset: readStored<ThemePresetId>("superpi:themePreset", "pi"),
   appearance: readStored<AppearanceMode>("superpi:appearance", "system"),
   fontStyle: readStored<FontStyleId>("superpi:fontStyle", "manrope"),
+  customAccent: initialCustomAccent,
+  browserSearchEngine: initialSearchEngine,
   languagePref: initialLanguagePref,
   locale: resolveLocale(initialLanguagePref),
   dark: false,
@@ -100,8 +114,8 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
   relayDevices: [],
 
   applyLocalTheme: () => {
-    const { themePreset, appearance, fontStyle, hostSettings } = get();
-    const dark = applyThemeTokens(themePreset, appearance, fontStyle);
+    const { themePreset, appearance, fontStyle, customAccent, hostSettings } = get();
+    const dark = applyThemeTokens(themePreset, appearance, fontStyle, customAccent);
     if (typeof document !== "undefined") {
       const scale = (hostSettings?.chatFontScale ?? 100) / 100;
       document.documentElement.style.setProperty("--pi-chat-scale", String(scale));
@@ -124,6 +138,32 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
   setFontStyle: (fontStyle) => {
     writeStored("superpi:fontStyle", fontStyle);
     set({ fontStyle });
+    get().applyLocalTheme();
+  },
+
+  setCustomAccent: (hex) => {
+    const clean = hex && /^#[0-9a-fA-F]{6}$/.test(hex.trim()) ? hex.trim() : null;
+    writeStored("superpi:customAccent", clean ?? "");
+    set({ customAccent: clean });
+    get().applyLocalTheme();
+  },
+
+  setBrowserSearchEngine: (browserSearchEngine) => {
+    writeStored("superpi:browserSearchEngine", browserSearchEngine);
+    set({ browserSearchEngine });
+  },
+
+  resetAppearance: () => {
+    writeStored("superpi:themePreset", "pi");
+    writeStored("superpi:appearance", "system");
+    writeStored("superpi:fontStyle", "manrope");
+    writeStored("superpi:customAccent", "");
+    set({
+      themePreset: "pi",
+      appearance: "system",
+      fontStyle: "manrope",
+      customAccent: null,
+    });
     get().applyLocalTheme();
   },
 

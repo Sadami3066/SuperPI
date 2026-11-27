@@ -5,7 +5,7 @@ import type {
   QuestionAnswerInput,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
-import { Button, Input } from "../../ui";
+import { Button, Input, NoticeBar } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 
 function splitRecommendedLabel(raw: string): { clean: string; recommended: boolean } {
@@ -69,6 +69,7 @@ export function AskQuestionCard({
   const [stepIdx, setStepIdx] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const questions = question.questions;
   const total = questions.length;
@@ -80,6 +81,7 @@ export function AskQuestionCard({
     setSelectedMap({});
     setCustomMap({});
     setCollapsed(false);
+    setError(null);
   }, [question.requestId]);
 
   const selectOption = (qId: string, label: string, multi: boolean) => {
@@ -120,6 +122,7 @@ export function AskQuestionCard({
 
   const handleSubmit = async () => {
     setBusy(true);
+    setError(null);
     try {
       const answers: QuestionAnswerInput[] = questions.map((q) => {
         const selected = selectedMap[q.id] ?? [];
@@ -132,6 +135,20 @@ export function AskQuestionCard({
         };
       });
       await onSubmit(question.requestId, answers);
+    } catch (err) {
+      setError(err instanceof Error && err.message.trim() ? err.message : t("approval.submitError"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDismiss = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onDismiss(question.requestId);
+    } catch (err) {
+      setError(err instanceof Error && err.message.trim() ? err.message : t("approval.submitError"));
     } finally {
       setBusy(false);
     }
@@ -240,6 +257,8 @@ export function AskQuestionCard({
             placeholder={t("ask.customPlaceholder")}
           />
 
+          {error && <NoticeBar tone="danger" message={error} />}
+
           <div className="flex items-center justify-between gap-2 pt-0.5">
             <div>
               {safeIdx > 0 && (
@@ -258,10 +277,7 @@ export function AskQuestionCard({
                 variant="ghost"
                 size="sm"
                 disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  void onDismiss(question.requestId).finally(() => setBusy(false));
-                }}
+                onClick={() => void handleDismiss()}
               >
                 {t("ask.dismiss")}
               </Button>

@@ -28,9 +28,10 @@ export function AppShell() {
   const reconnect = useConnectionStore((s) => s.reconnect);
 
   const bots = useBotStore((s) => s.bots);
-  const createSession = useSessionStore((s) => s.createSession);
+  const startDraftSession = useSessionStore((s) => s.startDraftSession);
   const selectSession = useSessionStore((s) => s.selectSession);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const draftBotId = useSessionStore((s) => s.draftBotId);
   const actionError = useSessionStore((s) => s.actionError);
   const clearActionError = useSessionStore((s) => s.clearActionError);
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
@@ -66,22 +67,30 @@ export function AppShell() {
       document.title = `Super PI — ${t("app.name")}`;
       return;
     }
-    if (activeView === "automations") {
-      document.title = `${t("settings.navAutomations")} — Super PI`;
+    if (activeView === "timers") {
+      document.title = `${t("nav.timers")} — Super PI`;
+      return;
+    }
+    if (activeView === "inbox") {
+      document.title = `${t("nav.inbox")} — Super PI`;
       return;
     }
     if (activeView === "memory") {
       document.title = `${t("settings.navMemory")} — Super PI`;
       return;
     }
-    if (activeView === "capabilities") {
-      document.title = `${t("nav.capabilities")} — Super PI`;
+    if (activeView === "skills") {
+      document.title = `${t("nav.skills")} — Super PI`;
       return;
     }
-    const activeBot = bots.find((b) => b.id === (activeSummary?.botId ?? bots[0]?.id));
+    if (activeView === "mcp") {
+      document.title = `${t("nav.mcp")} — Super PI`;
+      return;
+    }
+    const activeBot = bots.find((b) => b.id === (activeSummary?.botId ?? draftBotId ?? bots[0]?.id));
     const titlePart = activeSummary?.title || activeBot?.name;
     document.title = titlePart ? `${titlePart} — Super PI` : "Super PI";
-  }, [activeSummary?.botId, activeSummary?.title, activeView, bots, t]);
+  }, [activeSummary?.botId, activeSummary?.title, activeView, bots, draftBotId, t]);
 
   const openSettings = (tab: SettingsTabId = "general") => {
     setSettingsTab(tab);
@@ -134,16 +143,17 @@ export function AppShell() {
         setPaletteOpen((v) => !v);
       } else if (key === "n") {
         e.preventDefault();
-        const curBotId = useSessionStore.getState().summariesById[activeSessionId]?.botId;
+        const st = useSessionStore.getState();
+        const curBotId = st.summariesById[activeSessionId]?.botId ?? st.draftBotId;
         const curBot = bots.find((b) => b.id === curBotId);
         const targetBotId =
           curBot && (!curBot.isRemote || curBot.online)
             ? curBot.id
             : bots.find((b) => !b.isRemote || b.online)?.id ?? bots[0]?.id;
-        if (client && targetBotId) {
+        if (targetBotId) {
           setSettingsOpen(false);
-          setActiveView("chat");
-          void createSession(client, targetBotId, locale);
+          selectMainView("chat");
+          startDraftSession(targetBotId);
         }
       } else if (key === ",") {
         e.preventDefault();
@@ -176,10 +186,10 @@ export function AppShell() {
     activeSessionId,
     bots,
     client,
-    createSession,
     isElectron,
     locale,
     settingsOpen,
+    startDraftSession,
     togglePanel,
   ]);
 
@@ -201,7 +211,6 @@ export function AppShell() {
         }}
         onOpenBotSettings={(bot) => setSettingsBot(bot)}
         onOpenSettings={() => openSettings("general")}
-        onOpenArchived={() => openSettings("archived")}
       />
 
       <main className="pi-chat-container flex min-h-0 min-w-0 flex-1 flex-col">
@@ -241,9 +250,11 @@ export function AppShell() {
               showWindowControls={!workbenchOpen}
               onOpenProvidersSettings={() => openSettings("providers")}
             />
-          ) : activeView === "automations" ||
+          ) : activeView === "timers" ||
+            activeView === "inbox" ||
             activeView === "memory" ||
-            activeView === "capabilities" ? (
+            activeView === "skills" ||
+            activeView === "mcp" ? (
             <FeatureWorkspaceView
               kind={activeView}
               showWindowControls={!workbenchOpen}
@@ -266,7 +277,7 @@ export function AppShell() {
         </div>
       </main>
 
-      <WorkbenchDock showWindowControls={workbenchOpen} />
+      <WorkbenchDock showWindowControls={workbenchOpen} activeView={activeView} />
 
       <SettingsModal
         open={settingsOpen}
@@ -307,8 +318,8 @@ export function AppShell() {
         targetDeviceName={createBotTargetDevice?.deviceName}
         onOpenChange={setCreateBotOpen}
         onCreated={(botId) => {
-          setActiveView("chat");
-          if (client) void createSession(client, botId, locale);
+          selectMainView("chat");
+          startDraftSession(botId);
         }}
       />
 
