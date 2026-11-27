@@ -9,6 +9,9 @@ describe("previewClassifier", () => {
     expect(classifyPreviewKind("report.docx")).toBe("docx");
     expect(classifyPreviewKind("metrics.csv")).toBe("csv");
     expect(classifyPreviewKind("diagram.webp")).toBe("image");
+    expect(classifyPreviewKind("clip.mp4")).toBe("video");
+    expect(classifyPreviewKind("demo.webm")).toBe("video");
+    expect(classifyPreviewKind("recording", "video/quicktime")).toBe("video");
     expect(classifyPreviewKind("MainActivity.kt")).toBe("code");
     expect(classifyPreviewKind("archive.zip")).toBe("binary");
   });

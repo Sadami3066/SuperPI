@@ -888,6 +888,28 @@ export const zhCN = {
   "about.licensesBody": "界面图标采用 Tabler Icons（MIT），服务商标识采用 LobeHub Icons（MIT），字体采用 Manrope / Noto Sans / JetBrains Mono（OFL），桌面底座基于 Electron、React、CodeMirror 与 xterm.js 构建。",
   "about.privacyTitle": "本地优先与隐私说明",
   "about.privacyBody": "你的对话记录、工作区文件与配置均默认保存在本机，仅在你主动发起对话或同步设备时与所选服务通信。",
+
+  "market.tabInstalled": "已安装",
+  "market.tabDiscover": "市场",
+  "market.searchPlaceholder": "搜索名称、说明或标签…",
+  "market.categoryAll": "全部",
+  "market.install": "安装",
+  "market.installing": "正在安装…",
+  "market.update": "更新",
+  "market.installed": "已安装",
+  "market.loadFailed": "暂时无法获取能力市场列表",
+  "market.installFailed": "安装失败，请重试",
+  "market.staleNotice": "当前离线，正在展示已缓存的列表",
+  "market.empty": "市场暂无可用条目",
+  "market.noMatches": "没有找到匹配的能力",
+  "market.sourceLink": "来源",
+  "market.requiresKeyBadge": "需填写密钥",
+  "market.requiresSignInBadge": "需账号授权",
+  "market.apiKeyLabel": "访问密钥",
+  "market.apiKeyPlaceholder": "请输入访问密钥…",
+  "market.apiKeyHelp": "如何获取访问密钥？",
+  "market.mcpNeedsSignIn": "已添加「{name}」，需要完成账号授权后才能使用",
+  "market.mcpSignInNow": "前往授权",
 } as const;
 
 export type I18nKey = keyof typeof zhCN;

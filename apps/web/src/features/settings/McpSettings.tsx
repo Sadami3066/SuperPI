@@ -22,6 +22,7 @@ import {
   Textarea,
 } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
+import { MarketBrowser } from "./MarketBrowser";
 
 function formatKeyValueLines(rec?: Record<string, string>, sep = ": "): string {
   if (!rec) return "";
@@ -53,6 +54,8 @@ export function McpSettings() {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
 
+  const [tab, setTab] = useState<"installed" | "market">("installed");
+  const [oauthNoticeName, setOauthNoticeName] = useState<string | null>(null);
   const [servers, setServers] = useState<HostMcpServerDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -182,7 +185,62 @@ export function McpSettings() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div
+        className="inline-flex rounded-[10px] p-0.5"
+        style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
+      >
+        {(["installed", "market"] as const).map((item) => {
+          const active = tab === item;
+          return (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setTab(item)}
+              className="rounded-[8px] px-3.5 py-1.5 text-[12.5px] font-medium transition-colors"
+              style={{
+                background: active ? "var(--pi-surface)" : "transparent",
+                color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+              }}
+            >
+              {item === "installed" ? t("market.tabInstalled") : t("market.tabDiscover")}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "market" ? (
+        <MarketBrowser
+          type="mcp"
+          onInstalled={(res) => {
+            void loadServers();
+            if (res.requiresOAuth) {
+              setOauthNoticeName(res.installedName);
+              setTab("installed");
+            }
+          }}
+        />
+      ) : (
+        <>
+          {oauthNoticeName && (
+            <div
+              className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2 text-[12.5px]"
+              style={{ background: "var(--pi-accent-soft)", color: "var(--pi-accent)" }}
+            >
+              <span>{t("market.mcpNeedsSignIn", { name: oauthNoticeName })}</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const target = oauthNoticeName;
+                  setOauthNoticeName(null);
+                  void startOAuth(target);
+                }}
+              >
+                {t("market.mcpSignInNow")}
+              </Button>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
           {t("mcp.summary", { count: servers.length })}
         </div>
@@ -658,6 +716,8 @@ export function McpSettings() {
             .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
         }}
       />
+        </>
+      )}
     </div>
   );
 }

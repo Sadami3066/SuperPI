@@ -553,5 +553,70 @@ describe("sessionStore reliability", () => {
     expect(useSessionStore.getState().summariesById["s-b"]?.title).toBe("Updated B");
     expect(useSessionStore.getState().sessionIdsByBot["bot-b"]).toEqual(["s-b"]);
   });
+
+  it("loads paginated sessions, prepends earlier messages without duplicates, and preserves depth on reload", async () => {
+    useSessionStore.getState().reset();
+
+    const makeMsg = (id: number, role: "user" | "assistant") => ({
+      id,
+      role,
+      text: `${role}-${id}`,
+      streaming: false,
+      status: "done",
+      startedAt: 1000 + id,
+      runId: `r-${id}`,
+      steps: [{ kind: "text", id: id * 10, text: `${role}-${id}` }],
+    });
+
+    const getSession = vi.fn(async (_sid: string, opts?: { limit?: number; before?: number }) => {
+      if (opts?.before === 50) {
+        return {
+          sessionId: "s-page",
+          busy: false,
+          messages: [makeMsg(10, "user"), makeMsg(20, "assistant"), makeMsg(30, "user")],
+          totalMessages: 45,
+          hasMore: true,
+          nextBefore: 10,
+          userTurnOffset: 5,
+          queuedInputs: [],
+        };
+      }
+      return {
+        sessionId: "s-page",
+        busy: false,
+        messages: [makeMsg(30, "user"), makeMsg(40, "assistant"), makeMsg(50, "user"), makeMsg(60, "assistant")],
+        totalMessages: 45,
+        hasMore: true,
+        nextBefore: 50,
+        userTurnOffset: 21,
+        queuedInputs: [],
+      };
+    });
+
+    const fakeClient = { getSession } as unknown as HostClient;
+
+    await useSessionStore.getState().loadSession(fakeClient, "s-page", "zh-CN");
+    expect(getSession).toHaveBeenCalledWith("s-page", { limit: 40 });
+    let tr = useSessionStore.getState().transcriptsById["s-page"];
+    expect(tr?.hasMore).toBe(true);
+    expect(tr?.nextBefore).toBe(50);
+    expect(tr?.userTurnOffset).toBe(21);
+    expect(tr?.turns.map((t) => t.rawText)).toEqual(["user-30", "assistant-40", "user-50", "assistant-60"]);
+
+    const added = await useSessionStore.getState().loadEarlierMessages(fakeClient, "s-page", "zh-CN");
+    expect(getSession).toHaveBeenCalledWith("s-page", { limit: 40, before: 50 });
+    expect(added).toBe(2); // user-30 already existed and must be deduplicated
+    tr = useSessionStore.getState().transcriptsById["s-page"];
+    expect(tr?.turns.map((t) => t.rawText)).toEqual([
+      "user-10",
+      "assistant-20",
+      "user-30",
+      "assistant-40",
+      "user-50",
+      "assistant-60",
+    ]);
+    expect(tr?.userTurnOffset).toBe(5);
+    expect(tr?.nextBefore).toBe(10);
+  });
 });
 

@@ -6,6 +6,7 @@ import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { Badge, Button, Card, ConfirmDialog, Dialog, IconButton, Switch } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
+import { MarketBrowser } from "./MarketBrowser";
 
 const MAX_ZIP_BYTES = 10 * 1024 * 1024;
 
@@ -13,6 +14,7 @@ export function SkillsSettings() {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
 
+  const [tab, setTab] = useState<"installed" | "market">("installed");
   const [skills, setSkills] = useState<HostInstalledSkillDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -66,7 +68,39 @@ export function SkillsSettings() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div
+        className="inline-flex rounded-[10px] p-0.5"
+        style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
+      >
+        {(["installed", "market"] as const).map((item) => {
+          const active = tab === item;
+          return (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setTab(item)}
+              className="rounded-[8px] px-3.5 py-1.5 text-[12.5px] font-medium transition-colors"
+              style={{
+                background: active ? "var(--pi-surface)" : "transparent",
+                color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
+              }}
+            >
+              {item === "installed" ? t("market.tabInstalled") : t("market.tabDiscover")}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "market" ? (
+        <MarketBrowser
+          type="skill"
+          onInstalled={() => {
+            void loadSkills();
+          }}
+        />
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
         <div className="text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
           {t("skills.summary", { count: skills.length })}
         </div>
@@ -226,6 +260,8 @@ export function SkillsSettings() {
             .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
         }}
       />
+        </>
+      )}
     </div>
   );
 }
