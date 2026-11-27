@@ -305,8 +305,8 @@ export function SettingsModal({
               </DialogPrimitive.Close>
             </div>
 
-            <div className="pi-scroll-shadow min-h-0 flex-1 px-7 pt-5 pb-8">
-              <div className="mx-auto w-full max-w-[680px]">
+            <div className="pi-scroll-shadow min-h-0 flex-1">
+              <div className="mx-auto w-full max-w-[680px] px-7 pt-5 pb-8">
                 {settingsError && (
                   <div className="mb-4">
                     <NoticeBar

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconBolt, IconKey } from "@tabler/icons-react";
+import { IconBolt, IconKey, IconPlugConnected } from "@tabler/icons-react";
 import { formatMcpStatus } from "../../api/formatters";
 import type {
   HostMcpServerDto,
@@ -15,9 +15,11 @@ import {
   Card,
   ConfirmDialog,
   Dialog,
+  EmptyState,
   IconButton,
   Input,
   Select,
+  Skeleton,
   Switch,
   Textarea,
 } from "../../ui";
@@ -296,13 +298,27 @@ export function McpSettings() {
       )}
 
       {loading && servers.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("common.loading")}
+        <div className="space-y-2.5" aria-busy="true">
+          <Card className="space-y-2 p-4">
+            <Skeleton className="h-4 w-44" />
+            <Skeleton className="h-3 w-3/4" />
+          </Card>
+          <Card className="space-y-2 p-4">
+            <Skeleton className="h-4 w-36" />
+            <Skeleton className="h-3 w-2/3" />
+          </Card>
         </div>
       ) : servers.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("mcp.empty")}
-        </div>
+        <EmptyState
+          icon={<IconPlugConnected size={20} stroke={1.65} />}
+          title={t("mcp.empty")}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => openEditor()}>
+              <BrandIcon name="action/add" size={14} />
+              <span>{t("mcp.addServer")}</span>
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-2.5">
           {servers.map((srv) => (

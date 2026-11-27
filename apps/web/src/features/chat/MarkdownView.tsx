@@ -547,7 +547,7 @@ const markdownComponents: Components = {
   },
   table({ children }) {
     return (
-      <div data-scrollable className="my-2 overflow-x-auto">
+      <div data-scrollable className="pi-table-wrap my-3 overflow-x-auto">
         <table>{children}</table>
       </div>
     );

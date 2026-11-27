@@ -12,7 +12,7 @@ import {
 } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { Badge, Button, Card, NoticeBar, Switch } from "../../ui";
+import { Badge, Button, Card, NoticeBar, Skeleton, Switch } from "../../ui";
 import { BrandIcon, PiBrandMark } from "../shared/BrandAssets";
 
 const RELEASES_PAGE_URL = "https://github.com/Sadami3066/SuperPI/releases/latest";
@@ -144,7 +144,7 @@ export function DiagnosticsSettings({
         {updateResult?.status === "update_available" && (
           <div
             className="space-y-3 rounded-[10px] p-3.5"
-            style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
+            style={{ background: "var(--pi-paper)", border: "1px solid var(--pi-canvas-border)" }}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -255,8 +255,15 @@ export function DiagnosticsSettings({
       )}
 
       {loading && !report ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("common.loading")}
+        <div className="space-y-2" aria-busy="true">
+          <Card className="space-y-2 p-4">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-3/4" />
+          </Card>
+          <Card className="space-y-2 p-4">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-2/3" />
+          </Card>
         </div>
       ) : (
         <div className="space-y-2">
@@ -355,7 +362,7 @@ export function DiagnosticsSettings({
 
         <div
           className="space-y-1 pt-3"
-          style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+          style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
         >
           <div className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
             {t("about.privacyTitle")}

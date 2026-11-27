@@ -92,6 +92,7 @@ function downloadText(filename: string, content: string): void {
 
 export function Sidebar({
   open,
+  hideHeader = false,
   activeView,
   onSelectChat,
   onSelectFeature,
@@ -102,6 +103,7 @@ export function Sidebar({
   onOpenSettings,
 }: {
   open: boolean;
+  hideHeader?: boolean;
   activeView: "chat" | "super" | FeatureViewKind;
   onSelectChat: () => void;
   onSelectFeature: (view: FeatureViewKind) => void;
@@ -288,23 +290,27 @@ export function Sidebar({
         }}
       >
         <div className="flex flex-col items-center gap-1.5">
-          {isMacOverlay && <div className="pi-drag-region h-[32px] w-full" />}
-          <IconButton
-            size="md"
-            label={t("nav.expandSidebar")}
-            onClick={onToggleCollapse}
-          >
-            <IconLayoutSidebarLeftExpand size={17} stroke={1.65} />
-          </IconButton>
+          {!hideHeader && (
+            <>
+              {isMacOverlay && <div className="pi-drag-region h-[32px] w-full" />}
+              <IconButton
+                size="md"
+                label={t("nav.expandSidebar")}
+                onClick={onToggleCollapse}
+              >
+                <IconLayoutSidebarLeftExpand size={17} stroke={1.65} />
+              </IconButton>
 
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            title={t("app.name")}
-            className="my-0.5 flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-          >
-            <PiBrandMark size={20} dark={dark} />
-          </button>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                title={t("app.name")}
+                className="my-0.5 flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              >
+                <PiBrandMark size={20} dark={dark} />
+              </button>
+            </>
+          )}
 
           <IconButton
             size="md"
@@ -826,9 +832,24 @@ export function Sidebar({
           <div className="pi-collapse-inner">
             <div className="space-y-0.5 pl-3 pt-0.5">
               {list.length === 0 ? (
-                <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                  {t("nav.noSessions")}
-                </div>
+                offline ? (
+                  <div className="px-2 py-1 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {t("nav.offline")}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectChat();
+                      startDraftSession(bot.id);
+                    }}
+                    className="flex h-[28px] w-full items-center gap-1.5 rounded-[8px] px-2 text-left text-[12px] transition-colors hover:bg-[var(--pi-hover)] hover:text-[var(--pi-ink)]"
+                    style={{ color: "var(--pi-ink-tertiary)" }}
+                  >
+                    <BrandIcon name="action/add" size={12.5} className="shrink-0 opacity-75" />
+                    <span className="truncate">{t("nav.startNewChat")}</span>
+                  </button>
+                )
               ) : (
                 <>
                   {visibleList.map((s) => renderSessionRow(s, Boolean(bot.isRemote)))}
@@ -877,28 +898,30 @@ export function Sidebar({
           className="absolute top-0 right-0 bottom-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
         />
 
-        <div
-          className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between px-3"
-          style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
-          onDoubleClick={() => {
-            if (isFrameless) void windowToggleMaximize();
-          }}
-        >
-          <div className="pi-no-drag flex items-center gap-2">
-            {!isMacOverlay && <PiBrandMark size={19} dark={dark} />}
-            <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
-              {t("app.name")}
-            </span>
-          </div>
+        {!hideHeader && (
+          <div
+            className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between px-3"
+            style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
+            onDoubleClick={() => {
+              if (isFrameless) void windowToggleMaximize();
+            }}
+          >
+            <div className="pi-no-drag flex items-center gap-2">
+              {!isMacOverlay && <PiBrandMark size={19} dark={dark} />}
+              <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
+                {t("app.name")}
+              </span>
+            </div>
 
-          <div className="pi-no-drag flex items-center gap-0.5">
-            <IconButton size="sm" label={t("nav.collapseSidebar")} onClick={onToggleCollapse}>
-              <IconLayoutSidebarLeftCollapse size={16} stroke={1.7} />
-            </IconButton>
+            <div className="pi-no-drag flex items-center gap-0.5">
+              <IconButton size="sm" label={t("nav.collapseSidebar")} onClick={onToggleCollapse}>
+                <IconLayoutSidebarLeftCollapse size={16} stroke={1.7} />
+              </IconButton>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="space-y-1.5 px-2.5 pt-0.5 pb-2">
+        <div className={`space-y-1.5 px-2.5 pb-2 ${hideHeader ? "pt-1.5" : "pt-0.5"}`}>
           <button
             type="button"
             onClick={() => {
@@ -1082,75 +1105,77 @@ export function Sidebar({
         </div>
 
         <div
-          className="pi-scroll-shadow min-h-0 flex-1 space-y-4 px-2.5 py-2"
+          className="pi-scroll-shadow min-h-0 flex-1"
           style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
         >
-          <div className="space-y-1">
-            <div className="flex items-center justify-between px-1.5">
-              <span
-                className="text-[11px] font-semibold tracking-wide"
-                style={{ color: "var(--pi-ink-tertiary)" }}
-              >
-                {t("nav.localBots")}
-              </span>
-              <IconButton size="sm" label={t("nav.createBot")} onClick={() => onOpenCreateBot()}>
-                <BrandIcon name="action/add" size={13.5} />
-              </IconButton>
-            </div>
-            <div className="space-y-1">{localBots.map(renderBotGroup)}</div>
-          </div>
-
-          {remoteGroups.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="px-1.5">
+          <div className="space-y-4 px-2.5 py-2">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between px-1.5">
                 <span
                   className="text-[11px] font-semibold tracking-wide"
                   style={{ color: "var(--pi-ink-tertiary)" }}
                 >
-                  {t("nav.remoteBots")}
+                  {t("nav.localBots")}
                 </span>
+                <IconButton size="sm" label={t("nav.createBot")} onClick={() => onOpenCreateBot()}>
+                  <BrandIcon name="action/add" size={13.5} />
+                </IconButton>
               </div>
-              <div className="space-y-2.5">
-                {remoteGroups.map((group) => (
-                  <div key={group.deviceId} className="space-y-1">
-                    <div
-                      className="flex items-center justify-between gap-1.5 px-2 text-[11.5px] font-medium"
-                      style={{ color: "var(--pi-ink-tertiary)" }}
-                    >
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <BrandIcon
-                          name={group.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
-                          size={12.5}
-                        />
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{
-                            background: group.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
-                          }}
-                        />
-                        <span className="truncate">{group.deviceName}</span>
-                      </div>
-                      {group.online && (
-                        <IconButton
-                          size="sm"
-                          label={t("nav.createBot")}
-                          onClick={() =>
-                            onOpenCreateBot({
-                              deviceId: group.deviceId,
-                              deviceName: group.deviceName,
-                            })
-                          }
-                        >
-                          <BrandIcon name="action/add" size={12} />
-                        </IconButton>
-                      )}
-                    </div>
-                    {group.bots.map(renderBotGroup)}
-                  </div>
-                ))}
-              </div>
+              <div className="space-y-1">{localBots.map(renderBotGroup)}</div>
             </div>
-          )}
+
+            {remoteGroups.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="px-1.5">
+                  <span
+                    className="text-[11px] font-semibold tracking-wide"
+                    style={{ color: "var(--pi-ink-tertiary)" }}
+                  >
+                    {t("nav.remoteBots")}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {remoteGroups.map((group) => (
+                    <div key={group.deviceId} className="space-y-1">
+                      <div
+                        className="flex items-center justify-between gap-1.5 px-2 text-[11.5px] font-medium"
+                        style={{ color: "var(--pi-ink-tertiary)" }}
+                      >
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <BrandIcon
+                            name={group.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
+                            size={12.5}
+                          />
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{
+                              background: group.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                            }}
+                          />
+                          <span className="truncate">{group.deviceName}</span>
+                        </div>
+                        {group.online && (
+                          <IconButton
+                            size="sm"
+                            label={t("nav.createBot")}
+                            onClick={() =>
+                              onOpenCreateBot({
+                                deviceId: group.deviceId,
+                                deviceName: group.deviceName,
+                              })
+                            }
+                          >
+                            <BrandIcon name="action/add" size={12} />
+                          </IconButton>
+                        )}
+                      </div>
+                      {group.bots.map(renderBotGroup)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div

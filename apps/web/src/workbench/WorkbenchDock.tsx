@@ -1,14 +1,19 @@
 import { Suspense, useEffect, useRef, useState } from "react";
-import { IconPlus, IconSearch, IconX } from "@tabler/icons-react";
+import {
+  IconLayoutGrid,
+  IconLayoutSidebarRightCollapse,
+  IconPlus,
+  IconSearch,
+  IconX,
+} from "@tabler/icons-react";
 import { useI18n } from "../i18n";
-import { subscribeBrowserOpenTabRequest, windowToggleMaximize } from "../platform/bridge";
+import { subscribeBrowserOpenTabRequest } from "../platform/bridge";
 import { useBotStore } from "../stores/botStore";
 import { useConnectionStore } from "../stores/connectionStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { IconButton, Input } from "../ui";
 import { BrandIcon } from "../features/shared/BrandAssets";
-import { WindowControls } from "../features/shell/WindowControls";
 import {
   getAvailableWorkbenchPanels,
   getWorkbenchPanel,
@@ -118,11 +123,9 @@ function NewTabLauncher({
 }
 
 export function WorkbenchDock({
-  showWindowControls = false,
   activeView = "chat",
   sidebarOpen = true,
 }: {
-  showWindowControls?: boolean;
   activeView?: string;
   sidebarOpen?: boolean;
 }) {
@@ -144,7 +147,6 @@ export function WorkbenchDock({
   const bots = useBotStore((s) => s.bots);
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
   const isElectron = Boolean(desktopEnv?.isElectron);
-  const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
 
   const [resizing, setResizing] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -256,14 +258,10 @@ export function WorkbenchDock({
         />
 
         <div
-          className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-2"
+          className="flex h-[44px] shrink-0 items-center justify-between gap-2 px-2.5"
           style={{
-            paddingRight: showWindowControls && isFrameless ? 0 : 10,
             background: "var(--pi-chrome)",
             borderBottom: "1px solid var(--pi-canvas-border)",
-          }}
-          onDoubleClick={() => {
-            if (isFrameless) void windowToggleMaximize();
           }}
         >
           <div className="pi-scroll-fade-x flex min-w-0 flex-1 items-center gap-1 py-1.5 pr-1">
@@ -281,17 +279,18 @@ export function WorkbenchDock({
                 (tab.panelId === "terminal" && terminalTotal > 1
                   ? `${baseLabel} ${terminalIndex}`
                   : baseLabel);
+              const hideCloseBtn = visibleTabs.length === 1 && isNewTab;
 
               return (
                 <div
                   key={tab.id}
                   onMouseDown={(e) => {
-                    if (e.button === 1) {
+                    if (e.button === 1 && !hideCloseBtn) {
                       e.preventDefault();
                       closeTab(tab.id);
                     }
                   }}
-                  className="pi-no-drag group flex h-[28px] max-w-[172px] shrink-0 items-center gap-1.5 rounded-[9px] px-2 text-[12px] font-medium transition-[background-color,border-color,color,box-shadow] duration-150"
+                  className="group flex h-[28px] max-w-[172px] shrink-0 items-center gap-1.5 rounded-[9px] px-2 text-[12px] font-medium transition-[background-color,border-color,color,box-shadow] duration-150"
                   style={{
                     background: active ? "var(--pi-canvas)" : "transparent",
                     color: active ? "var(--pi-ink)" : "var(--pi-ink-tertiary)",
@@ -306,7 +305,7 @@ export function WorkbenchDock({
                     className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap"
                   >
                     {isNewTab ? (
-                      <IconPlus size={13} stroke={1.8} className="shrink-0 opacity-75" />
+                      <IconLayoutGrid size={13} stroke={1.7} className="shrink-0 opacity-75" />
                     ) : brandIcon ? (
                       <BrandIcon name={brandIcon} size={13.5} className="shrink-0" />
                     ) : (
@@ -314,19 +313,21 @@ export function WorkbenchDock({
                     )}
                     <span className="truncate">{label}</span>
                   </button>
-                  <button
-                    type="button"
-                    aria-label={t("common.close")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeTab(tab.id);
-                    }}
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-[var(--pi-hover)] ${
-                      active ? "opacity-65 hover:opacity-100" : "pi-hover-reveal"
-                    }`}
-                  >
-                    <IconX size={11} stroke={1.8} />
-                  </button>
+                  {!hideCloseBtn && (
+                    <button
+                      type="button"
+                      aria-label={t("common.close")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeTab(tab.id);
+                      }}
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-[var(--pi-hover)] ${
+                        active ? "opacity-65 hover:opacity-100" : "pi-hover-reveal"
+                      }`}
+                    >
+                      <IconX size={11} stroke={1.8} />
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -334,18 +335,17 @@ export function WorkbenchDock({
             <IconButton
               size="sm"
               label={t("wb.addTab")}
-              className="pi-no-drag shrink-0"
+              className="shrink-0"
               onClick={() => addTab("new-tab")}
             >
               <IconPlus size={14} stroke={1.8} />
             </IconButton>
           </div>
 
-          <div className="pi-no-drag flex shrink-0 items-center gap-0.5">
-            <IconButton label={t("common.close")} size="sm" onClick={close}>
-              <BrandIcon name="navigation/close" size={14.5} />
+          <div className="flex shrink-0 items-center gap-0.5">
+            <IconButton label={t("wb.collapse")} size="sm" onClick={close}>
+              <IconLayoutSidebarRightCollapse size={15.5} stroke={1.65} />
             </IconButton>
-            {showWindowControls && <WindowControls />}
           </div>
         </div>
 

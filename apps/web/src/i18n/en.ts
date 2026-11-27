@@ -47,6 +47,7 @@ export const en: Record<I18nKey, string> = {
   "nav.online": "Online",
   "nav.offline": "Offline",
   "nav.noSessions": "No conversations yet. Click + to start.",
+  "nav.startNewChat": "Start a chat",
   "nav.noRemoteBots": "Connect another device to access its assistants here.",
 
   "chat.emptyTitle": "Ready when you are",
@@ -712,6 +713,7 @@ export const en: Record<I18nKey, string> = {
   "super.teamResetDefaults": "Reset defaults",
 
   "goal.roundsProgress": "Round {current} / {max}",
+  "goal.roundOnly": "Round {current}",
   "goal.pause": "Pause",
   "goal.resume": "Resume",
   "goal.stop": "End goal",
@@ -920,4 +922,12 @@ export const en: Record<I18nKey, string> = {
   "market.apiKeyHelp": "Where to get an access key?",
   "market.mcpNeedsSignIn": 'Added "{name}". Complete account authorization to start using it.',
   "market.mcpSignInNow": "Authorize",
+
+  "wb.collapse": "Collapse workbench",
+  "palette.recentChats": "Recent chats",
+  "palette.actions": "Quick actions",
+  "palette.workbench": "Workbench",
+  "palette.hintNav": "Navigate",
+  "palette.hintOpen": "Open",
+  "palette.hintClose": "Close",
 };

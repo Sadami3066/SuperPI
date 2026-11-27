@@ -41,12 +41,12 @@ export function JobsBar({ sessionId }: { sessionId: string }) {
 
   return (
     <>
-      <div className="mx-auto mb-2 w-full max-w-[820px]">
+      <div className="mx-auto mb-2 w-full max-w-[760px]">
         <div
-          className="rounded-[12px] px-3 py-2"
+          className="rounded-[12px] px-3 py-1.5"
           style={{
-            background: "var(--pi-surface)",
-            border: "0.5px solid var(--pi-hairline)",
+            background: "var(--pi-chrome)",
+            border: "1px solid var(--pi-canvas-border)",
           }}
         >
           <div className="flex items-center justify-between gap-2">
@@ -89,12 +89,15 @@ export function JobsBar({ sessionId }: { sessionId: string }) {
           </div>
 
           {expanded && (
-            <div className="mt-2 space-y-1.5 border-t pt-2" style={{ borderColor: "var(--pi-hairline)" }}>
+            <div className="mt-2 space-y-1.5 border-t pt-2" style={{ borderColor: "var(--pi-canvas-border)" }}>
               {jobs.map((job) => (
                 <div
                   key={job.id}
-                  className="flex items-center justify-between gap-2 rounded-[8px] px-2.5 py-1.5 text-[12px]"
-                  style={{ background: "var(--pi-paper)" }}
+                  className="flex items-center justify-between gap-2 rounded-[9px] px-2.5 py-1.5 text-[12px]"
+                  style={{
+                    background: "var(--pi-canvas)",
+                    border: "1px solid var(--pi-canvas-border)",
+                  }}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="truncate font-medium" style={{ color: "var(--pi-ink)" }}>

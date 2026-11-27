@@ -24,9 +24,11 @@ import {
   Card,
   ConfirmDialog,
   Dialog,
+  EmptyState,
   IconButton,
   Input,
   Select,
+  Skeleton,
   Switch,
   Tabs,
   TabsContent,
@@ -329,13 +331,21 @@ export function MemorySettings() {
           )}
 
           {loading && !snapshot ? (
-            <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {t("common.loading")}
+            <div className="space-y-2.5" aria-busy="true">
+              <Card className="space-y-2 p-4">
+                <Skeleton className="h-4 w-44" />
+                <Skeleton className="h-3 w-3/4" />
+              </Card>
+              <Card className="space-y-2 p-4">
+                <Skeleton className="h-4 w-36" />
+                <Skeleton className="h-3 w-2/3" />
+              </Card>
             </div>
           ) : (snapshot?.blocks.length ?? 0) === 0 ? (
-            <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {t("memory.emptyBlocks")}
-            </div>
+            <EmptyState
+              icon={<BrandIcon name="ai/memory" size={20} />}
+              title={t("memory.emptyBlocks")}
+            />
           ) : (
             <div className="space-y-2">
               {snapshot?.blocks.map((block) => (

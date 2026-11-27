@@ -21,7 +21,7 @@ export function ContextMeter({
       ? "var(--pi-danger)"
       : percent >= 75
         ? "var(--pi-warning)"
-        : "var(--pi-accent)";
+        : "var(--pi-ink-secondary)";
 
   const hasUsage = Boolean(usage && usage.contextTokens > 0) || percent > 0;
 
@@ -35,8 +35,8 @@ export function ContextMeter({
       style={{ color: "var(--pi-ink-secondary)" }}
     >
       <svg
-        width={17}
-        height={17}
+        width={16}
+        height={16}
         viewBox="0 0 18 18"
         aria-hidden="true"
         className="shrink-0 -rotate-90"
@@ -47,7 +47,7 @@ export function ContextMeter({
           r={radius}
           fill="none"
           stroke="var(--pi-hairline)"
-          strokeWidth={2.3}
+          strokeWidth={1.9}
         />
         {fraction > 0 && (
           <circle
@@ -56,7 +56,7 @@ export function ContextMeter({
             r={radius}
             fill="none"
             stroke={progressColor}
-            strokeWidth={2.3}
+            strokeWidth={1.9}
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={dashOffset}

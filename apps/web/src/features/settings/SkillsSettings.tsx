@@ -4,7 +4,7 @@ import { formatSkillSource } from "../../api/formatters";
 import type { HostInstalledSkillDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
-import { Badge, Button, Card, ConfirmDialog, Dialog, IconButton, Switch } from "../../ui";
+import { Badge, Button, Card, ConfirmDialog, Dialog, EmptyState, IconButton, Skeleton, Switch } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import { MarketBrowser } from "./MarketBrowser";
 
@@ -70,7 +70,7 @@ export function SkillsSettings() {
     <div className="space-y-4">
       <div
         className="inline-flex rounded-[10px] p-0.5"
-        style={{ background: "var(--pi-paper)", border: "0.5px solid var(--pi-hairline)" }}
+        style={{ background: "var(--pi-paper)", border: "1px solid var(--pi-canvas-border)" }}
       >
         {(["installed", "market"] as const).map((item) => {
           const active = tab === item;
@@ -145,13 +145,26 @@ export function SkillsSettings() {
       )}
 
       {loading && skills.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("common.loading")}
+        <div className="space-y-2.5" aria-busy="true">
+          <Card className="space-y-2 p-4">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-3/4" />
+          </Card>
+          <Card className="space-y-2 p-4">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-2/3" />
+          </Card>
         </div>
       ) : skills.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("skills.empty")}
-        </div>
+        <EmptyState
+          icon={<BrandIcon name="ai/skills" size={20} />}
+          title={t("skills.empty")}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => setTab("market")}>
+              <span>{t("market.tabDiscover")}</span>
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-2.5">
           {skills.map((skill) => (

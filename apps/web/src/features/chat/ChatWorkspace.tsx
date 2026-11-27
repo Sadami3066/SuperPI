@@ -12,7 +12,6 @@ import type {
   TurnBlock,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
-import { windowToggleMaximize } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { draftComposerKey, useSessionStore } from "../../stores/sessionStore";
@@ -22,7 +21,6 @@ import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, ChatLoadingSkeleton, Dialog, IconButton, NoticeBar, Popover } from "../../ui";
 import { BotAvatar, BrandIcon, PiMascot } from "../shared/BrandAssets";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
-import { WindowControls } from "../shell/WindowControls";
 import { Composer } from "./Composer";
 import { ContextMeter } from "./ContextMeter";
 import { GoalBar } from "./GoalBar";
@@ -93,19 +91,18 @@ const SessionTodoPanel = memo(function SessionTodoPanel({
 export function ChatWorkspace({
   activeView,
   onChangeView,
-  showWindowControls,
   onOpenBotSettings,
   onOpenProvidersSettings,
 }: {
   activeView: "chat" | "super";
   onChangeView: (view: "chat" | "super") => void;
-  showWindowControls: boolean;
   onOpenBotSettings: (bot: HostBotDto) => void;
   onOpenProvidersSettings: () => void;
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
+  const isElectron = Boolean(desktopEnv?.isElectron);
 
   const bots = useBotStore((s) => s.bots);
   const commandsByBot = useBotStore((s) => s.commandsByBot);
@@ -173,9 +170,7 @@ export function ChatWorkspace({
   const providers = useSettingsStore((s) => s.providers);
 
   const workbenchOpen = useWorkbenchStore((s) => s.open);
-  const activePanelId = useWorkbenchStore((s) => s.activePanelId);
-  const openPanel = useWorkbenchStore((s) => s.openPanel);
-  const closeWorkbench = useWorkbenchStore((s) => s.close);
+  const toggleWorkbench = useWorkbenchStore((s) => s.toggleWorkbench);
 
   const [compacting, setCompacting] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
@@ -385,7 +380,6 @@ export function ChatWorkspace({
     return null;
   }
 
-  const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
   const remoteOffline = Boolean(activeBot.isRemote && !activeBot.online);
   const ctxPct = transcript?.contextPercent ?? 0;
   const usage = transcript?.usage;
@@ -538,16 +532,12 @@ export function ChatWorkspace({
       }}
     >
       <header
-        className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-4"
+        className="flex h-[44px] shrink-0 items-center justify-between gap-2 px-4"
         style={{
-          paddingRight: showWindowControls && isFrameless ? 0 : 12,
           borderBottom: "1px solid var(--pi-canvas-border)",
         }}
-        onDoubleClick={() => {
-          if (isFrameless) void windowToggleMaximize();
-        }}
       >
-        <div className="pi-no-drag flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <ModeSwitcher activeView={activeView} onChange={onChangeView} />
 
           <button
@@ -639,7 +629,7 @@ export function ChatWorkspace({
           )}
         </div>
 
-        <div className="pi-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           {activeSessionId && (
             <Popover
               align="end"
@@ -662,19 +652,16 @@ export function ChatWorkspace({
             </Popover>
           )}
 
-          <IconButton
-            size="sm"
-            label={t("chat.workbenchToggle")}
-            active={workbenchOpen}
-            onClick={() => {
-              if (workbenchOpen) closeWorkbench();
-              else openPanel(activePanelId || "files");
-            }}
-          >
-            <IconLayoutSidebarRight size={16} stroke={1.65} />
-          </IconButton>
-
-          {showWindowControls && <WindowControls />}
+          {!isElectron && (
+            <IconButton
+              size="sm"
+              label={t("chat.workbenchToggle")}
+              active={workbenchOpen}
+              onClick={toggleWorkbench}
+            >
+              <IconLayoutSidebarRight size={16} stroke={1.65} />
+            </IconButton>
+          )}
         </div>
       </header>
 

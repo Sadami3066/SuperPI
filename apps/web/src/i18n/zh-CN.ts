@@ -45,6 +45,7 @@ export const zhCN = {
   "nav.online": "在线",
   "nav.offline": "离线",
   "nav.noSessions": "暂无对话，点击上方 + 开始",
+  "nav.startNewChat": "开始新对话",
   "nav.noRemoteBots": "连接其他设备后，将显示在这里",
 
   "chat.emptyTitle": "准备就绪",
@@ -710,6 +711,7 @@ export const zhCN = {
   "super.teamResetDefaults": "恢复默认",
 
   "goal.roundsProgress": "第 {current} / {max} 轮",
+  "goal.roundOnly": "第 {current} 轮",
   "goal.pause": "暂停",
   "goal.resume": "继续",
   "goal.stop": "结束目标",
@@ -918,6 +920,14 @@ export const zhCN = {
   "market.apiKeyHelp": "如何获取访问密钥？",
   "market.mcpNeedsSignIn": "已添加「{name}」，需要完成账号授权后才能使用",
   "market.mcpSignInNow": "前往授权",
+
+  "wb.collapse": "收起工作台",
+  "palette.recentChats": "最近对话",
+  "palette.actions": "快捷操作",
+  "palette.workbench": "工作台",
+  "palette.hintNav": "选择",
+  "palette.hintOpen": "打开",
+  "palette.hintClose": "关闭",
 } as const;
 
 export type I18nKey = keyof typeof zhCN;

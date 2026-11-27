@@ -72,6 +72,7 @@ export interface WorkbenchStoreState {
   closeTab: (tabId: string) => void;
   updateTabTitle: (tabId: string, title: string) => void;
   togglePanel: (panelId: string) => void;
+  toggleWorkbench: () => void;
   close: () => void;
   setWidth: (width: number, persist?: boolean) => void;
   setFilesViewMode: (mode: FilesViewMode) => void;
@@ -87,7 +88,7 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
   open: false,
   tabs: [],
   activeTabId: "",
-  activePanelId: "files",
+  activePanelId: "new-tab",
   filesViewMode: "tree",
   width: readInitialWidth(),
   contextPayload: null,
@@ -132,6 +133,17 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
   addTab: (panelId, payload) =>
     set((s) => {
       const resolvedId = normalizePanelId(panelId);
+      if (resolvedId === "new-tab") {
+        const existingNewTab = s.tabs.find((t) => t.panelId === "new-tab");
+        if (existingNewTab) {
+          return {
+            open: true,
+            activeTabId: existingNewTab.id,
+            activePanelId: "new-tab",
+            contextPayload: existingNewTab.payload ?? null,
+          };
+        }
+      }
       if (!MULTI_INSTANCE_PANELS.has(resolvedId)) {
         const existing = s.tabs.find((t) => t.panelId === resolvedId);
         if (existing) {
@@ -264,6 +276,24 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
         tabs: [...s.tabs, created],
         activeTabId: created.id,
         activePanelId: resolvedId,
+        contextPayload: null,
+      };
+    }),
+
+  toggleWorkbench: () =>
+    set((s) => {
+      if (s.open) {
+        return { open: false };
+      }
+      if (s.tabs.length > 0) {
+        return { open: true };
+      }
+      const created = createTab("new-tab", null);
+      return {
+        open: true,
+        tabs: [created],
+        activeTabId: created.id,
+        activePanelId: "new-tab",
         contextPayload: null,
       };
     }),

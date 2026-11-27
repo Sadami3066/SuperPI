@@ -150,17 +150,67 @@ body,
   }
 }
 
+html.pi-electron * {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+html.pi-electron *::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+html.pi-electron *::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+html.pi-electron *::-webkit-scrollbar-track,
+html.pi-electron *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html.pi-electron *::-webkit-scrollbar-thumb {
+  background: var(--pi-scrollbar-thumb);
+  border-radius: 999px;
+}
+
+html.pi-electron *::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--pi-ink-tertiary) 44%, transparent);
+}
+
 .pi-dark {
   color-scheme: dark;
 }
 
-:is(a, button, input, textarea, select, summary, [role="tab"], [role="slider"], [role="switch"], [tabindex]):focus-visible {
+:is(a, button, summary, [role="tab"], [role="slider"], [role="switch"], [tabindex]):focus-visible {
   outline: 2px solid var(--pi-focus-ring);
   outline-offset: 2px;
 }
 
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
 .pi-composer-textarea:focus-visible {
   outline: none;
+}
+
+.pi-input {
+  background: var(--pi-chrome);
+  border: 1px solid var(--pi-canvas-border);
+}
+
+.pi-input:focus {
+  outline: none;
+  background: var(--pi-canvas);
+  border-color: color-mix(in oklab, var(--pi-accent) 48%, var(--pi-canvas-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pi-accent) 10%, transparent);
+}
+
+.pi-dark .pi-input:focus {
+  border-color: color-mix(in oklab, var(--pi-accent) 55%, rgba(255, 255, 255, 0.22));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--pi-accent) 16%, transparent);
 }
 
 .pi-inset-canvas {
@@ -205,7 +255,7 @@ body,
   content: "";
   display: block;
   position: sticky;
-  block-size: 0.75rem;
+  block-size: 0.5rem;
   z-index: 2;
   pointer-events: none;
   opacity: 0;
@@ -214,22 +264,22 @@ body,
 
 .pi-scroll-shadow::before {
   inset-block-start: 0;
-  margin-block-end: -0.75rem;
-  background: radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.12), transparent);
+  margin-block-end: -0.5rem;
+  background: radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.06), transparent);
 }
 
 .pi-scroll-shadow::after {
   inset-block-end: 0;
-  margin-block-start: -0.75rem;
-  background: radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.12), transparent);
+  margin-block-start: -0.5rem;
+  background: radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.06), transparent);
 }
 
 .pi-dark .pi-scroll-shadow::before {
-  background: radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.36), transparent);
+  background: radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.24), transparent);
 }
 
 .pi-dark .pi-scroll-shadow::after {
-  background: radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.36), transparent);
+  background: radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.24), transparent);
 }
 
 @container scroll-state(scrollable: block-start) {
@@ -363,12 +413,10 @@ body,
 }
 
 .pi-composer-shell:focus-within {
-  border-color: color-mix(in oklab, var(--pi-ink-tertiary) 45%, var(--pi-hairline));
-}
-
-.pi-composer-shell:has(.pi-composer-textarea:focus-visible) {
-  outline: 2px solid var(--pi-focus-ring);
-  outline-offset: 2px;
+  border-color: color-mix(in oklab, var(--pi-accent) 42%, var(--pi-canvas-border));
+  box-shadow:
+    var(--pi-composer-shadow),
+    0 0 0 3px color-mix(in oklab, var(--pi-accent) 9%, transparent);
 }
 
 .pi-dark .pi-composer-shell {
@@ -376,7 +424,10 @@ body,
 }
 
 .pi-dark .pi-composer-shell:focus-within {
-  border-color: rgba(255, 255, 255, 0.24);
+  border-color: color-mix(in oklab, var(--pi-accent) 55%, rgba(255, 255, 255, 0.22));
+  box-shadow:
+    var(--pi-composer-shadow),
+    0 0 0 3px color-mix(in oklab, var(--pi-accent) 16%, transparent);
 }
 
 @keyframes pi-thinking-in {
@@ -670,21 +721,37 @@ body,
   border-top: 0.5px solid var(--pi-hairline);
   margin: 0.9em 0;
 }
+.pi-table-wrap {
+  border: 1px solid var(--pi-canvas-border);
+  border-radius: 12px;
+  background: var(--pi-canvas);
+}
+
 .pi-prose table {
   width: 100%;
   border-collapse: collapse;
-  margin: 0.75em 0;
+  margin: 0;
   font-size: 0.9em;
 }
 .pi-prose th,
 .pi-prose td {
-  border: 0.5px solid var(--pi-hairline);
-  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid var(--pi-canvas-border);
+  padding: 9px 12px;
   text-align: left;
+  vertical-align: top;
 }
 .pi-prose th {
-  background: var(--pi-wash);
+  background: var(--pi-chrome);
+  color: var(--pi-ink-secondary);
   font-weight: 600;
+  font-size: 0.88em;
+}
+.pi-prose tbody tr:last-child td {
+  border-bottom: none;
+}
+.pi-prose tbody tr:hover td {
+  background: var(--pi-hover);
 }
 .pi-prose a {
   color: var(--pi-accent);
@@ -692,34 +759,30 @@ body,
   text-underline-offset: 3px;
 }
 
-@keyframes pi-composer-ring-pulse {
+@keyframes pi-composer-halo-pulse {
   0%,
   100% {
-    opacity: 0.32;
+    box-shadow:
+      var(--pi-composer-shadow),
+      0 0 0 2px color-mix(in oklab, var(--pi-accent) 12%, transparent);
   }
   50% {
-    opacity: 0.95;
+    box-shadow:
+      var(--pi-composer-shadow),
+      0 0 0 4px color-mix(in oklab, var(--pi-accent) 22%, transparent);
   }
 }
 
 .pi-composer-shell[data-streaming="true"] {
-  border-color: var(--pi-accent) !important;
-}
-
-.pi-composer-shell[data-streaming="true"]::after {
-  content: "";
-  position: absolute;
-  inset: -1.5px;
-  border-radius: 17px;
-  border: 1.5px solid var(--pi-accent);
-  pointer-events: none;
-  opacity: 0.72;
+  border-color: color-mix(in oklab, var(--pi-accent) 62%, var(--pi-canvas-border)) !important;
+  box-shadow:
+    var(--pi-composer-shadow),
+    0 0 0 2px color-mix(in oklab, var(--pi-accent) 14%, transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .pi-composer-shell[data-streaming="true"]::after {
-    will-change: opacity;
-    animation: pi-composer-ring-pulse 1.8s ease-in-out infinite;
+  .pi-composer-shell[data-streaming="true"] {
+    animation: pi-composer-halo-pulse 2s ease-in-out infinite;
   }
 }
 

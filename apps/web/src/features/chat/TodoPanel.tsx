@@ -44,16 +44,16 @@ export function TodoPanel({
   return (
     <div className={inline ? "mx-auto mb-2 w-full max-w-[760px]" : "w-full"}>
       <div
-        className="overflow-hidden rounded-[13px]"
+        className="overflow-hidden rounded-[12px]"
         style={{
-          background: "var(--pi-canvas)",
+          background: "var(--pi-chrome)",
           border: "1px solid var(--pi-canvas-border)",
         }}
       >
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="flex w-full items-center justify-between gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--pi-hover)]"
+          className="flex w-full items-center justify-between gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-[var(--pi-hover)]"
         >
           <div className="flex min-w-0 items-center gap-2">
             <BrandIcon
@@ -89,7 +89,10 @@ export function TodoPanel({
             <div
               data-scrollable
               className="max-h-[210px] space-y-1 overflow-y-auto px-3 py-2"
-              style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+              style={{
+                background: "var(--pi-canvas)",
+                borderTop: "1px solid var(--pi-canvas-border)",
+              }}
             >
               {visibleTodos.map((item) => {
                 const completed = item.status === "completed";

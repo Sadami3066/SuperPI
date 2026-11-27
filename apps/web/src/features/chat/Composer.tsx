@@ -392,7 +392,7 @@ export const Composer = memo(function Composer({
 
   return (
     <div className={isHero ? "w-full" : "pi-chat-gutter shrink-0 pt-1 pb-4"}>
-      <div className={`relative mx-auto w-full ${isHero ? "max-w-[680px]" : "max-w-[740px]"}`}>
+      <div className={`relative mx-auto w-full ${isHero ? "max-w-[680px]" : "max-w-[760px]"}`}>
         {showSlashMenu && filteredCommands.length > 0 && (
           <div className="pi-popover absolute right-0 bottom-full left-0 z-30 mb-2 max-h-[240px] overflow-y-auto p-1.5">
             {filteredCommands.map((cmd, idx) => (
@@ -739,24 +739,31 @@ export const Composer = memo(function Composer({
               />
 
               {showPermissions && !isRemote && onChangePermissionMode && (
-                <div className="pi-composer-perm shrink-0 items-center gap-0.5">
-                  <BrandIcon
-                    name="system/permissions"
-                    size={13.5}
-                    style={{ color: "var(--pi-ink-tertiary)" }}
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="pi-composer-perm mx-0.5 h-3.5 w-[1px] shrink-0"
+                    style={{ background: "var(--pi-canvas-border)" }}
                   />
-                  <Select
-                    size="sm"
-                    ariaLabel={t("perm.label")}
-                    value={permissionMode}
-                    onValueChange={(v) => {
-                      void onChangePermissionMode(v as PermissionMode).catch((err) => {
-                        showWarning(err instanceof Error ? err.message : t("chat.switchFailed"));
-                      });
-                    }}
-                    options={permissionOptions}
-                  />
-                </div>
+                  <div className="pi-composer-perm shrink-0 items-center gap-0.5">
+                    <BrandIcon
+                      name="system/permissions"
+                      size={13.5}
+                      style={{ color: "var(--pi-ink-tertiary)" }}
+                    />
+                    <Select
+                      size="sm"
+                      ariaLabel={t("perm.label")}
+                      value={permissionMode}
+                      onValueChange={(v) => {
+                        void onChangePermissionMode(v as PermissionMode).catch((err) => {
+                          showWarning(err instanceof Error ? err.message : t("chat.switchFailed"));
+                        });
+                      }}
+                      options={permissionOptions}
+                    />
+                  </div>
+                </>
               )}
 
               {isStreaming && !composerText.trim() && attachments.length === 0 ? (

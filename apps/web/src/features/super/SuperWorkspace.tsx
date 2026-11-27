@@ -14,7 +14,6 @@ import type {
   TurnBlock,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
-import { windowToggleMaximize } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
@@ -28,7 +27,6 @@ import { TodoPanel } from "../chat/TodoPanel";
 import { UsageSheet } from "../chat/UsageSheet";
 import { BrandIcon, PiActivityIcon, PiMascot } from "../shared/BrandAssets";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
-import { WindowControls } from "../shell/WindowControls";
 import { SuperTeamDialog } from "./SuperTeamDialog";
 import { WorkerDetailDialog } from "./WorkerDetailDialog";
 
@@ -91,17 +89,16 @@ const SuperTodoPanel = memo(function SuperTodoPanel({ turns }: { turns: ChatTurn
 export function SuperWorkspace({
   activeView,
   onChangeView,
-  showWindowControls,
   onOpenProvidersSettings,
 }: {
   activeView: "chat" | "super";
   onChangeView: (view: "chat" | "super") => void;
-  showWindowControls: boolean;
   onOpenProvidersSettings: () => void;
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
   const desktopEnv = useConnectionStore((s) => s.desktopEnv);
+  const isElectron = Boolean(desktopEnv?.isElectron);
 
   const dark = useSettingsStore((s) => s.dark);
   const locale = useSettingsStore((s) => s.locale);
@@ -129,9 +126,8 @@ export function SuperWorkspace({
   const isStreaming = useStreamStore((s) => Boolean(s.activeBySession[SUPER_SESSION_ID]?.streaming));
 
   const workbenchOpen = useWorkbenchStore((s) => s.open);
-  const activePanelId = useWorkbenchStore((s) => s.activePanelId);
   const openPanel = useWorkbenchStore((s) => s.openPanel);
-  const closeWorkbench = useWorkbenchStore((s) => s.close);
+  const toggleWorkbench = useWorkbenchStore((s) => s.toggleWorkbench);
 
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -216,7 +212,6 @@ export function SuperWorkspace({
   const ctxPct = computeContextPercent(usage);
   const busy = Boolean(state?.busy || isStreaming);
   const compactProcess = hostSettings?.processDetail === "compact";
-  const isFrameless = Boolean(desktopEnv?.isElectron && desktopEnv.platform !== "darwin");
   const userNickname = hostSettings?.userNickname?.trim() || "";
 
   const handleQuote = useCallback(
@@ -348,16 +343,12 @@ export function SuperWorkspace({
       }}
     >
       <header
-        className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between gap-2 pl-4"
+        className="flex h-[44px] shrink-0 items-center justify-between gap-2 px-4"
         style={{
-          paddingRight: showWindowControls && isFrameless ? 0 : 12,
           borderBottom: "1px solid var(--pi-canvas-border)",
         }}
-        onDoubleClick={() => {
-          if (isFrameless) void windowToggleMaximize();
-        }}
       >
-        <div className="pi-no-drag flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap">
           <ModeSwitcher activeView={activeView} onChange={onChangeView} />
           {runningWorkersCount > 0 && (
             <Badge tone="accent">
@@ -369,7 +360,7 @@ export function SuperWorkspace({
           </span>
         </div>
 
-        <div className="pi-no-drag flex shrink-0 items-center gap-1 whitespace-nowrap">
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           <Popover
             align="end"
             className="w-[272px] p-3.5"
@@ -403,22 +394,16 @@ export function SuperWorkspace({
             <span className="hidden sm:inline">{t("super.teamButton")}</span>
           </Button>
 
-          <IconButton
-            size="sm"
-            label={t("chat.workbenchToggle")}
-            active={workbenchOpen}
-            onClick={() => {
-              if (workbenchOpen) {
-                closeWorkbench();
-              } else {
-                openPanel(activePanelId || "super-team");
-              }
-            }}
-          >
-            <IconLayoutSidebarRight size={15.5} stroke={1.65} />
-          </IconButton>
-
-          {showWindowControls && <WindowControls />}
+          {!isElectron && (
+            <IconButton
+              size="sm"
+              label={t("chat.workbenchToggle")}
+              active={workbenchOpen}
+              onClick={toggleWorkbench}
+            >
+              <IconLayoutSidebarRight size={15.5} stroke={1.65} />
+            </IconButton>
+          )}
         </div>
       </header>
 

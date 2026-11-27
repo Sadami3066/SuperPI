@@ -7,15 +7,18 @@ import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSuperStore } from "../../stores/superStore";
+import { IconClock, IconInbox } from "@tabler/icons-react";
 import {
   Badge,
   Button,
   Card,
   ConfirmDialog,
   Dialog,
+  EmptyState,
   IconButton,
   Input,
   Select,
+  Skeleton,
   Switch,
   Tabs,
   TabsContent,
@@ -148,13 +151,28 @@ export function AutomationsSettings({
       </div>
 
       {loading && timers.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("common.loading")}
+        <div className="space-y-2.5" aria-busy="true">
+          <Card className="space-y-2.5 p-4">
+            <Skeleton className="h-4 w-44" />
+            <Skeleton className="h-3 w-4/5" />
+            <Skeleton className="h-3 w-32" />
+          </Card>
+          <Card className="space-y-2.5 p-4">
+            <Skeleton className="h-4 w-36" />
+            <Skeleton className="h-3 w-2/3" />
+          </Card>
         </div>
       ) : timers.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("auto.emptyTimers")}
-        </div>
+        <EmptyState
+          icon={<IconClock size={20} stroke={1.65} />}
+          title={t("auto.emptyTimers")}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => openEditor()}>
+              <BrandIcon name="action/add" size={14} />
+              <span>{t("auto.newTimer")}</span>
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-2.5">
           {timers.map((timer) => (
@@ -206,7 +224,7 @@ export function AutomationsSettings({
 
               <div
                 className="flex items-center justify-end gap-1.5 pt-2"
-                style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+                style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
               >
                 <Button
                   variant="ghost"
@@ -267,9 +285,19 @@ export function AutomationsSettings({
       )}
 
       {inbox.length === 0 ? (
-        <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-          {t("auto.emptyInbox")}
-        </div>
+        loading ? (
+          <div className="space-y-2.5" aria-busy="true">
+            <Card className="space-y-2.5 p-4">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-3/4" />
+            </Card>
+          </div>
+        ) : (
+          <EmptyState
+            icon={<IconInbox size={20} stroke={1.65} />}
+            title={t("auto.emptyInbox")}
+          />
+        )
       ) : (
         <div className="space-y-2.5">
           {inbox.map((item) => (
