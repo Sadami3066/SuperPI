@@ -18,7 +18,6 @@ import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSuperStore } from "../../stores/superStore";
 import {
-  ConfirmDialog,
   ContextMenu,
   ContextMenuItem,
   ContextMenuSeparator,
@@ -118,14 +117,13 @@ export function Sidebar({
   const togglePinSession = useSessionStore((s) => s.togglePinSession);
   const toggleArchiveSession = useSessionStore((s) => s.toggleArchiveSession);
   const toggleMemoryExclude = useSessionStore((s) => s.toggleMemoryExclude);
-  const deleteSession = useSessionStore((s) => s.deleteSession);
+  const scheduleDeleteSession = useSessionStore((s) => s.scheduleDeleteSession);
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
   const [resizing, setResizing] = useState(false);
   const [expandedBots, setExpandedBots] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -498,7 +496,10 @@ export function Sidebar({
         .then((raw) => {
           downloadText(`session-${session.id}.jsonl`, raw);
         })
-        .catch(() => void 0);
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : "Export failed";
+          useSessionStore.setState({ actionError: t("nav.exportFailed", { error: msg }) });
+        });
     };
 
     return (
@@ -623,7 +624,9 @@ export function Sidebar({
                   danger
                   icon={<BrandIcon name="action/delete" size={14} />}
                   label={t("nav.delete")}
-                  onSelect={() => setDeleteTarget(session)}
+                  onSelect={() => {
+                    if (client) scheduleDeleteSession(client, session.id);
+                  }}
                 />
               </DropdownMenu>
             </div>
@@ -678,7 +681,9 @@ export function Sidebar({
           danger
           icon={<BrandIcon name="action/delete" size={14} />}
           label={t("nav.delete")}
-          onSelect={() => setDeleteTarget(session)}
+          onSelect={() => {
+            if (client) scheduleDeleteSession(client, session.id);
+          }}
         />
       </ContextMenu>
     );
@@ -1069,25 +1074,6 @@ export function Sidebar({
           </button>
         </div>
       </aside>
-
-      <ConfirmDialog
-        open={Boolean(deleteTarget)}
-        onOpenChange={(v) => {
-          if (!v) setDeleteTarget(null);
-        }}
-        title={t("nav.deleteConfirmTitle")}
-        description={t("nav.deleteConfirmDesc", {
-          title: deleteTarget?.title || t("nav.untitledChat"),
-        })}
-        confirmLabel={t("common.delete")}
-        cancelLabel={t("common.cancel")}
-        onConfirm={() => {
-          if (client && deleteTarget) {
-            void deleteSession(client, deleteTarget.id);
-          }
-          setDeleteTarget(null);
-        }}
-      />
     </>
   );
 }

@@ -246,16 +246,16 @@ export function SuperWorkspace({
   );
 
   const handleSend = useCallback(
-    (overrideText?: string, atts?: ComposerAttachment[]) => {
-      if (!client) return;
+    async (overrideText?: string, atts?: ComposerAttachment[]) => {
+      if (!client) return false;
       const text = (overrideText ?? useSuperStore.getState().composerText).trim();
       const attachments = atts ?? [];
-      if (!text && attachments.length === 0) return;
+      if (!text && attachments.length === 0) return false;
       if (attachments.length === 0 && text === "/compact") {
         setComposerText("");
         setCompacting(true);
         void compact(client).finally(() => setCompacting(false));
-        return;
+        return true;
       }
       const images = attachments
         .filter((a) => a.isInlineImage && a.dataBase64)
@@ -264,13 +264,14 @@ export function SuperWorkspace({
           mimeType: a.mimeType,
           name: a.name,
         }));
-      void sendPrompt(
+      const ok = await sendPrompt(
         client,
         text,
         busy && hostSettings?.sendWhileRunning !== "queue",
         images,
       );
-      snapToBottomRef.current?.();
+      if (ok) snapToBottomRef.current?.();
+      return ok;
     },
     [busy, client, compact, hostSettings?.sendWhileRunning, sendPrompt, setComposerText],
   );

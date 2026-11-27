@@ -41,6 +41,8 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
 
   const [termInfo, setTermInfo] = useState<HostTerminalInfoDto | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -48,23 +50,41 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
   const fitRef = useRef<FitAddon | null>(null);
   const termIdRef = useRef<string | null>(null);
   const streamStopRef = useRef<(() => void) | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
   const attachGenRef = useRef(0);
   const mountedRef = useRef(true);
 
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
   const attachTerminal = useCallback(
-    async (fresh: boolean) => {
+    async (fresh: boolean, isRetry = false) => {
       if (!client || !botId || botIsRemote) return;
+      clearReconnectTimer();
+      if (!isRetry) {
+        reconnectAttemptRef.current = 0;
+      }
       const gen = ++attachGenRef.current;
       streamStopRef.current?.();
       streamStopRef.current = null;
       setError(null);
       setExitCode(null);
+      setDisconnected(false);
+      if (!isRetry) setReconnecting(false);
 
       try {
         const info = await client.createTerminal(botId, { worktreeId, fresh });
         if (!mountedRef.current || attachGenRef.current !== gen) {
           return;
         }
+        reconnectAttemptRef.current = 0;
+        setReconnecting(false);
+        setDisconnected(false);
         setTermInfo(info);
         termIdRef.current = info.id;
 
@@ -78,6 +98,9 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
           wroteInitialHistory = true;
         }
         fitRef.current?.fit();
+        if (term.cols > 0 && term.rows > 0) {
+          void client.resizeTerminal(info.id, term.cols, term.rows).catch(() => void 0);
+        }
         term.focus();
 
         const stop = client.streamTerminal(
@@ -94,8 +117,22 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
             }
           },
           (err) => {
-            if (attachGenRef.current !== gen) return;
-            setError(err.message);
+            if (!mountedRef.current || attachGenRef.current !== gen) return;
+            const attempt = reconnectAttemptRef.current;
+            if (attempt < 3) {
+              reconnectAttemptRef.current = attempt + 1;
+              setReconnecting(true);
+              setDisconnected(false);
+              clearReconnectTimer();
+              reconnectTimerRef.current = setTimeout(() => {
+                reconnectTimerRef.current = null;
+                void attachTerminal(false, true);
+              }, 1000 * 2 ** attempt);
+            } else {
+              setReconnecting(false);
+              setDisconnected(true);
+              setError(err.message);
+            }
           },
         );
         if (!mountedRef.current || attachGenRef.current !== gen) {
@@ -105,10 +142,11 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
         streamStopRef.current = stop;
       } catch (err) {
         if (!mountedRef.current || attachGenRef.current !== gen) return;
+        setReconnecting(false);
         setError(err instanceof Error ? err.message : "Failed to start terminal");
       }
     },
-    [botId, botIsRemote, client, worktreeId],
+    [botId, botIsRemote, clearReconnectTimer, client, worktreeId],
   );
 
   useEffect(() => {
@@ -146,6 +184,13 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
       }
     });
 
+    const resizeSub = term.onResize(({ cols, rows }) => {
+      const id = termIdRef.current;
+      if (id && client && cols > 0 && rows > 0) {
+        void client.resizeTerminal(id, cols, rows).catch(() => void 0);
+      }
+    });
+
     const ro = new ResizeObserver(() => {
       if (container.clientWidth < 20 || container.clientHeight < 20) return;
       try {
@@ -163,15 +208,17 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
     return () => {
       mountedRef.current = false;
       attachGenRef.current += 1;
+      clearReconnectTimer();
       ro.disconnect();
       dataSub.dispose();
+      resizeSub.dispose();
       streamStopRef.current?.();
       streamStopRef.current = null;
       term.dispose();
       xtermRef.current = null;
       fitRef.current = null;
     };
-  }, [attachTerminal, botId, botIsRemote, client]);
+  }, [attachTerminal, botId, botIsRemote, clearReconnectTimer, client]);
 
   useEffect(() => {
     if (context.isActiveTab) {
@@ -256,6 +303,21 @@ export default function TerminalPanel({ context }: { context: WorkbenchPanelCont
           </IconButton>
         </div>
       </div>
+
+      {(reconnecting || disconnected) && (
+        <div
+          className="flex items-center justify-between px-3 py-1.5 text-[12px]"
+          style={{
+            background: "var(--pi-wash)",
+            color: disconnected ? "var(--pi-warning)" : "var(--pi-ink-secondary)",
+          }}
+        >
+          <span>{reconnecting ? t("term.reconnecting") : t("term.disconnected")}</span>
+          <Button variant="secondary" size="sm" onClick={() => void attachTerminal(false)}>
+            {t("term.reconnect")}
+          </Button>
+        </div>
+      )}
 
       {error && (
         <div className="px-3 py-1.5 text-[12px]" style={{ color: "var(--pi-danger)" }}>

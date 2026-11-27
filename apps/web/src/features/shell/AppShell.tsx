@@ -34,7 +34,18 @@ export function AppShell() {
   const draftBotId = useSessionStore((s) => s.draftBotId);
   const actionError = useSessionStore((s) => s.actionError);
   const clearActionError = useSessionStore((s) => s.clearActionError);
+  const pendingDeletes = useSessionStore((s) => s.pendingDeletes);
+  const undoDeleteSession = useSessionStore((s) => s.undoDeleteSession);
+  const flushPendingDeletes = useSessionStore((s) => s.flushPendingDeletes);
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
+
+  useEffect(() => {
+    const onUnload = () => {
+      void flushPendingDeletes();
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [flushPendingDeletes]);
   const locale = useSettingsStore((s) => s.locale);
   const refreshSettingsData = useSettingsStore((s) => s.refreshSettingsData);
   const workbenchOpen = useWorkbenchStore((s) => s.open);
@@ -324,6 +335,35 @@ export function AppShell() {
       />
 
       <BotSettingsDialog bot={settingsBot} onClose={() => setSettingsBot(null)} />
+
+      {pendingDeletes.length > 0 && (
+        <div className="fixed right-5 bottom-5 z-50 flex flex-col gap-2">
+          {pendingDeletes.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[13px] shadow-lg"
+              style={{
+                background: "var(--pi-paper)",
+                color: "var(--pi-ink)",
+                border: "0.5px solid var(--pi-surface-rim)",
+              }}
+            >
+              <span className="max-w-[240px] truncate">
+                {t("chat.undoDeleteMessage", {
+                  title: item.title || t("nav.untitledChat"),
+                })}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => undoDeleteSession(item.id)}
+              >
+                {t("chat.undo")}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

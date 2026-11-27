@@ -72,7 +72,8 @@ export function PersonalizationSettings() {
             disabled={!client || !nicknameDirty}
             onClick={() => {
               if (!client) return;
-              void patchHostSettings(client, { userNickname: nicknameDraft.trim() }).then(() => {
+              void patchHostSettings(client, { userNickname: nicknameDraft.trim() }).then((ok) => {
+                if (!ok) return;
                 setNicknameSaved(true);
                 const id = setTimeout(() => setNicknameSaved(false), 1600);
                 timersRef.current.push(id);
@@ -113,7 +114,8 @@ export function PersonalizationSettings() {
               if (!client) return;
               void patchHostSettings(client, {
                 customSystemInstruction: instructionDraft.trim(),
-              }).then(() => {
+              }).then((ok) => {
+                if (!ok) return;
                 setInstructionSaved(true);
                 const id = setTimeout(() => setInstructionSaved(false), 1600);
                 timersRef.current.push(id);

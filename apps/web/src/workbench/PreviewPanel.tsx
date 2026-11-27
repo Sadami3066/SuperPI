@@ -13,6 +13,7 @@ import {
   IconZoomReset,
   IconX,
 } from "@tabler/icons-react";
+import { HostApiError } from "../api/hostClient";
 import type { OpenPreviewTarget } from "../api/types";
 import { MarkdownView } from "../features/chat/MarkdownView";
 import { BrandIcon, PiMascot } from "../features/shared/BrandAssets";
@@ -61,6 +62,7 @@ interface LoadedContent {
   text: string;
   draft: string;
   truncated: boolean;
+  mtimeMs?: number;
   blobUrl: string | null;
   docxHtml: string;
   error: string | null;
@@ -72,6 +74,7 @@ function initialLoaded(kind: PreviewKind): LoadedContent {
     text: "",
     draft: "",
     truncated: false,
+    mtimeMs: undefined,
     blobUrl: null,
     docxHtml: "",
     error: null,
@@ -110,6 +113,8 @@ export default function PreviewPanel({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [saveConflict, setSaveConflict] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [dirtyCloseKey, setDirtyCloseKey] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<LoadedContent>(() => initialLoaded("code"));
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,6 +133,7 @@ export default function PreviewPanel({
     setViewMode("preview");
     setZoomPct(100);
     setSavedNotice(false);
+    setSaveConflict(false);
   }, [activeKey]);
 
   useEffect(() => {
@@ -189,6 +195,7 @@ export default function PreviewPanel({
               text: res.content,
               draft: res.content,
               truncated: res.truncated,
+              mtimeMs: res.mtimeMs,
             });
           }
           return;
@@ -228,7 +235,7 @@ export default function PreviewPanel({
         URL.revokeObjectURL(activeBlobUrl);
       }
     };
-  }, [activeKey, client]);
+  }, [activeKey, client, reloadTick]);
 
   const canSave =
     Boolean(activeTarget && activeTarget.source === "workspace") &&
@@ -239,28 +246,42 @@ export default function PreviewPanel({
       loaded.kind === "csv");
   const dirty = canSave && loaded.draft !== loaded.text;
 
-  const handleSave = useCallback(async () => {
-    if (!client || !activeTarget || activeTarget.source !== "workspace" || !dirty || saving) return;
-    setSaving(true);
-    try {
-      await client.uploadBotFile(activeTarget.botId, {
-        path: activeTarget.path,
-        dataBase64: utf8ToBase64(loaded.draft),
-        overwrite: true,
-      });
-      setLoaded((cur) => ({ ...cur, text: cur.draft }));
-      setSavedNotice(true);
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-      savedTimerRef.current = setTimeout(() => setSavedNotice(false), 1800);
-    } catch (err) {
-      setLoaded((cur) => ({
-        ...cur,
-        error: err instanceof Error ? err.message : "Save failed",
-      }));
-    } finally {
-      setSaving(false);
-    }
-  }, [activeTarget, client, dirty, loaded.draft, saving]);
+  const handleSave = useCallback(
+    async (forceOverwrite = false) => {
+      if (!client || !activeTarget || activeTarget.source !== "workspace" || !dirty || saving) return;
+      setSaving(true);
+      setSaveConflict(false);
+      try {
+        const res = await client.uploadBotFile(activeTarget.botId, {
+          path: activeTarget.path,
+          dataBase64: utf8ToBase64(loaded.draft),
+          overwrite: true,
+          expectedMtimeMs: forceOverwrite ? undefined : loaded.mtimeMs,
+        });
+        setLoaded((cur) => ({
+          ...cur,
+          text: cur.draft,
+          mtimeMs: res.mtimeMs ?? cur.mtimeMs,
+          error: null,
+        }));
+        setSavedNotice(true);
+        if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = setTimeout(() => setSavedNotice(false), 1800);
+      } catch (err) {
+        if (err instanceof HostApiError && err.status === 409) {
+          setSaveConflict(true);
+        } else {
+          setLoaded((cur) => ({
+            ...cur,
+            error: err instanceof Error ? err.message : "Save failed",
+          }));
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [activeTarget, client, dirty, loaded.draft, loaded.mtimeMs, saving],
+  );
 
   const handleDownload = async () => {
     if (!client || !activeTarget) return;
@@ -557,6 +578,39 @@ export default function PreviewPanel({
           style={{ background: "var(--pi-wash)", color: "var(--pi-warning)" }}
         >
           {t("preview.truncated")}
+        </div>
+      )}
+
+      {saveConflict && (
+        <div
+          className="flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 text-[12px]"
+          style={{
+            background: "var(--pi-wash)",
+            borderBottom: "0.5px solid var(--pi-hairline)",
+            color: "var(--pi-warning)",
+          }}
+        >
+          <span>{t("preview.conflictError")}</span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setSaveConflict(false);
+                setReloadTick((n) => n + 1);
+              }}
+            >
+              {t("preview.reloadFile")}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={saving}
+              onClick={() => void handleSave(true)}
+            >
+              {t("preview.overwriteSave")}
+            </Button>
+          </div>
         </div>
       )}
 

@@ -107,7 +107,7 @@ export const Composer = memo(function Composer({
   onChangePermissionMode?: (mode: PermissionMode) => Promise<void>;
   onModelChange: (model: string, thinking: ThinkingLevel) => Promise<void> | void;
   onOpenProvidersSettings: () => void;
-  onSend: (overrideText?: string, attachments?: ComposerAttachment[]) => void;
+  onSend: (overrideText?: string, attachments?: ComposerAttachment[]) => Promise<boolean | void> | boolean | void;
   onStop: () => void;
   onRemoveQueued?: (kind: "steer" | "follow_up", text: string) => Promise<void>;
   onPromoteQueued?: (text: string) => Promise<void>;
@@ -146,6 +146,7 @@ export const Composer = memo(function Composer({
   const historyRef = useRef<Record<string, string[]>>({});
   const historyIdxRef = useRef<number>(-1);
   const historyDraftRef = useRef<string>("");
+  const sendingRef = useRef(false);
   const attachmentsCountRef = useRef(0);
   attachmentsCountRef.current = attachments.length;
 
@@ -267,7 +268,8 @@ export const Composer = memo(function Composer({
     };
   }, [attachFilesRef]);
 
-  const triggerSend = (overrideText?: string) => {
+  const triggerSend = async (overrideText?: string) => {
+    if (sendingRef.current) return;
     const files = overrideText ? [] : attachments;
     const textToSend = (overrideText ?? composerText).trim();
     if (!textToSend && files.length === 0) return;
@@ -280,8 +282,13 @@ export const Composer = memo(function Composer({
       historyDraftRef.current = "";
     }
     onSnapToBottom?.();
-    onSend(overrideText, files);
-    if (!overrideText) setAttachments([]);
+    sendingRef.current = true;
+    try {
+      const ok = await onSend(overrideText, files);
+      if (ok !== false && !overrideText) setAttachments([]);
+    } finally {
+      sendingRef.current = false;
+    }
   };
 
   const permissionOptions: SelectOption[] = useMemo(

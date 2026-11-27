@@ -803,6 +803,23 @@ export const zhCN = {
   "settings.browserClearAllConfirmTitle": "清除全部浏览器数据？",
   "settings.browserClearAllConfirmDesc": "此操作会清空内置浏览器中所有已登录账号、Cookie 与缓存，且无法恢复。",
   "settings.browserAllCleared": "已清除全部网站数据与登录态",
+
+  "chat.undoDeleteMessage": "已删除「{title}」",
+  "chat.undo": "撤销",
+  "chat.sessionLoadFailed": "加载对话失败：{error}",
+  "preview.conflictError": "该文件在你编辑期间已被外部修改，请选择重新加载最新内容或覆盖保存。",
+  "preview.reloadFile": "重新加载",
+  "preview.overwriteSave": "覆盖保存",
+  "term.disconnected": "终端连接已断开",
+  "term.reconnecting": "正在重新连接终端…",
+  "term.reconnect": "重新连接",
+  "wt.dirtyDeleteTitle": "工作区仍有未保存的改动",
+  "wt.dirtyDeleteDesc": "工作区「{branch}」包含未提交的更改。强制移除前会为你保留一份安全备份，确认继续吗？",
+  "wt.forceDeleteBtn": "备份并强制移除",
+  "nav.exportFailed": "导出记录失败：{error}",
+  "settings.saveFailed": "保存设置失败：{error}",
+  "settings.closeToTray": "关闭窗口时最小化到系统托盘",
+  "settings.closeToTrayDesc": "关闭主窗口时保持后台运行，可从系统托盘图标再次打开",
 } as const;
 
 export type I18nKey = keyof typeof zhCN;

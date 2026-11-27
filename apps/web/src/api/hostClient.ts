@@ -64,6 +64,18 @@ import type {
   ToolApprovalDecision,
 } from "./types";
 
+async function readErrorMessage(resp: Response): Promise<string> {
+  const fallback = `HTTP ${resp.status}`;
+  const raw = await resp.text().catch(() => "");
+  if (!raw.trim()) return fallback;
+  try {
+    const body = JSON.parse(raw) as { error?: string; message?: string };
+    return body.error || body.message || raw.trim() || fallback;
+  } catch {
+    return raw.trim();
+  }
+}
+
 export class HostApiError extends Error {
   readonly status: number;
 
@@ -87,32 +99,56 @@ export class HostClient {
     this.token = config.token;
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async request<T>(path: string, init: RequestInit = {}, timeoutMs = 15_000): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.token}`);
     if (init.body && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
-    const resp = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers,
-    });
-    if (!resp.ok) {
-      let msg = `HTTP ${resp.status}`;
-      try {
-        const body = (await resp.json()) as { error?: string; message?: string };
-        msg = body.error || body.message || msg;
-      } catch {
-        const text = await resp.text().catch(() => "");
-        if (text.trim()) msg = text.trim();
+
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, timeoutMs)
+        : null;
+
+    const extSignal = init.signal;
+    const onExtAbort = () => controller.abort();
+    if (extSignal) {
+      if (extSignal.aborted) {
+        controller.abort();
+      } else {
+        extSignal.addEventListener("abort", onExtAbort, { once: true });
       }
-      throw new HostApiError(resp.status, msg);
     }
-    const contentType = resp.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      return (await resp.json()) as T;
+
+    try {
+      const resp = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        throw new HostApiError(resp.status, await readErrorMessage(resp));
+      }
+      const contentType = resp.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        return (await resp.json()) as T;
+      }
+      return (await resp.text()) as unknown as T;
+    } catch (err) {
+      if (timedOut) {
+        throw new HostApiError(408, "Request timed out");
+      }
+      throw err;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+      if (extSignal) extSignal.removeEventListener("abort", onExtAbort);
     }
-    return (await resp.text()) as unknown as T;
   }
 
   getHealth(): Promise<HostHealthDto> {
@@ -255,6 +291,7 @@ export class HostClient {
   deleteSession(sessionId: string): Promise<HostHealthDto> {
     return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
+      keepalive: true,
     });
   }
 
@@ -703,8 +740,8 @@ export class HostClient {
 
   uploadBotFile(
     botId: string,
-    body: { path: string; dataBase64: string; overwrite?: boolean },
-  ): Promise<HostHealthDto> {
+    body: { path: string; dataBase64: string; overwrite?: boolean; expectedMtimeMs?: number },
+  ): Promise<{ ok: boolean; mtimeMs?: number }> {
     return this.request(`/api/v1/bots/${encodeURIComponent(botId)}/files/upload`, {
       method: "POST",
       body: JSON.stringify(body),
@@ -855,22 +892,15 @@ export class HostClient {
       }
     }
     if (!resp.ok) {
-      let msg = `HTTP ${resp.status}`;
-      try {
-        const body = (await resp.json()) as { error?: string; message?: string };
-        msg = body.error || body.message || msg;
-      } catch {
-        const text = await resp.text().catch(() => "");
-        if (text.trim()) msg = text.trim();
-      }
-      throw new HostApiError(resp.status, msg);
+      throw new HostApiError(resp.status, await readErrorMessage(resp));
     }
     return (await resp.json()) as HostWorktreeOpResponse;
   }
 
-  deleteWorktree(wtId: string, deleteBranch = true): Promise<HostHealthDto> {
+  deleteWorktree(wtId: string, deleteBranch = true, force = false): Promise<HostHealthDto> {
+    const forcePart = force ? "&force=true" : "";
     return this.request(
-      `/api/v1/worktrees/${encodeURIComponent(wtId)}?deleteBranch=${deleteBranch ? "true" : "false"}`,
+      `/api/v1/worktrees/${encodeURIComponent(wtId)}?deleteBranch=${deleteBranch ? "true" : "false"}${forcePart}`,
       { method: "DELETE" },
     );
   }
@@ -938,6 +968,13 @@ export class HostClient {
     });
   }
 
+  resizeTerminal(termId: string, cols: number, rows: number): Promise<HostHealthDto> {
+    return this.request(`/api/v1/terminals/${encodeURIComponent(termId)}/resize`, {
+      method: "POST",
+      body: JSON.stringify({ cols, rows }),
+    });
+  }
+
   deleteTerminal(termId: string): Promise<HostHealthDto> {
     return this.request(`/api/v1/terminals/${encodeURIComponent(termId)}`, {
       method: "DELETE",
@@ -951,6 +988,7 @@ export class HostClient {
   ): () => void {
     const controller = new AbortController();
     let closed = false;
+    let sawExit = false;
 
     const run = async () => {
       try {
@@ -978,6 +1016,7 @@ export class HostClient {
           dataLines = [];
           try {
             const frame = JSON.parse(payload) as HostTerminalStreamFrame;
+            if (frame.type === "exit") sawExit = true;
             onFrame(frame);
           } catch {
             void 0;
@@ -1001,6 +1040,9 @@ export class HostClient {
               dataLines.push(line.slice(5).trimStart());
             }
           }
+        }
+        if (!closed && !controller.signal.aborted && !sawExit) {
+          onError?.(new Error("Terminal connection closed unexpectedly"));
         }
       } catch (err) {
         if (!closed && !controller.signal.aborted) {

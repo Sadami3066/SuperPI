@@ -3,6 +3,7 @@ import { formatJobStatus } from "../../api/formatters";
 import type { HostJobOutputDto, HostJobSnapshotDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useSuperStore } from "../../stores/superStore";
 import { Badge, Button, Dialog, IconButton } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
@@ -75,7 +76,11 @@ export function JobsBar({ sessionId }: { sessionId: string }) {
                   void client
                     .clearSettledSessionJobs(sessionId)
                     .then(() => refresh())
-                    .catch(() => void 0);
+                    .catch((err) => {
+                      useSessionStore.setState({
+                        actionError: err instanceof Error ? err.message : "Failed to clear jobs",
+                      });
+                    });
                 }}
               >
                 {t("inspector.jobsClearSettled")}
@@ -118,7 +123,12 @@ export function JobsBar({ sessionId }: { sessionId: string }) {
                           .then((detail) =>
                             setJobOutput({ label: job.label || job.command, detail }),
                           )
-                          .catch(() => void 0);
+                          .catch((err) => {
+                            useSessionStore.setState({
+                              actionError:
+                                err instanceof Error ? err.message : "Failed to load job output",
+                            });
+                          });
                       }}
                     >
                       {t("inspector.jobOutput")}

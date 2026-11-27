@@ -10,6 +10,7 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
+import { HostApiError } from "../api/hostClient";
 import type {
   HostGitSummaryResponse,
   HostWorktreeDiffResponse,
@@ -219,6 +220,7 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
   const [worktrees, setWorktrees] = useState<HostWorktreeDto[]>([]);
   const [wtDiff, setWtDiff] = useState<HostWorktreeDiffResponse | null>(null);
   const [wtDeleteTarget, setWtDeleteTarget] = useState<HostWorktreeDto | null>(null);
+  const [wtForceDeleteTarget, setWtForceDeleteTarget] = useState<HostWorktreeDto | null>(null);
   const [conflicts, setConflicts] = useState<string[]>([]);
 
   const [busy, setBusy] = useState(false);
@@ -813,10 +815,40 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
         cancelLabel={t("common.cancel")}
         onConfirm={() => {
           if (!client || !wtDeleteTarget) return;
+          const target = wtDeleteTarget;
           void client
-            .deleteWorktree(wtDeleteTarget.id, true)
+            .deleteWorktree(target.id, true)
             .then(async () => {
-              if (activeWtId === wtDeleteTarget.id) setBotWorktree(bot.id, null);
+              if (activeWtId === target.id) setBotWorktree(bot.id, null);
+              await refreshSessionLists(client, bots);
+              await refreshSummary();
+            })
+            .catch((e) => {
+              if (e instanceof HostApiError && e.status === 409) {
+                setWtForceDeleteTarget(target);
+              } else {
+                setFeedback({ tone: "err", text: e instanceof Error ? e.message : "Delete failed" });
+              }
+            });
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(wtForceDeleteTarget)}
+        onOpenChange={(v) => {
+          if (!v) setWtForceDeleteTarget(null);
+        }}
+        title={t("wt.dirtyDeleteTitle")}
+        description={t("wt.dirtyDeleteDesc", { branch: wtForceDeleteTarget?.branch ?? "" })}
+        confirmLabel={t("wt.forceDeleteBtn")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => {
+          if (!client || !wtForceDeleteTarget) return;
+          const target = wtForceDeleteTarget;
+          void client
+            .deleteWorktree(target.id, true, true)
+            .then(async () => {
+              if (activeWtId === target.id) setBotWorktree(bot.id, null);
               await refreshSessionLists(client, bots);
               await refreshSummary();
             })

@@ -127,9 +127,16 @@ export function ChatWorkspace({
   const pendingQuestions = useSessionStore((s) => s.pendingQuestions);
   const pendingApprovals = useSessionStore((s) => s.pendingApprovals);
   const setQuotedText = useSessionStore((s) => s.setQuotedText);
+  const loadSession = useSessionStore((s) => s.loadSession);
   const selectSession = useSessionStore((s) => s.selectSession);
   const setDraftModel = useSessionStore((s) => s.setDraftModel);
   const sendMessage = useSessionStore((s) => s.sendMessage);
+  const isLoadingSession = useSessionStore((s) =>
+    Boolean(s.activeSessionId && s.loadingSessionIds[s.activeSessionId]),
+  );
+  const sessionLoadError = useSessionStore((s) =>
+    s.activeSessionId ? s.sessionLoadErrors[s.activeSessionId] ?? "" : "",
+  );
   const stopSession = useSessionStore((s) => s.stopSession);
   const retrySession = useSessionStore((s) => s.retrySession);
   const compactSession = useSessionStore((s) => s.compactSession);
@@ -359,7 +366,12 @@ export function ChatWorkspace({
   const userNickname = hostSettings?.userNickname?.trim() || "";
   const isHeroEmpty =
     !activeSessionId ||
-    (turns.length === 0 && !hasLiveRun && !activeQuestion && activeApprovals.length === 0);
+    (!isLoadingSession &&
+      !sessionLoadError &&
+      turns.length === 0 &&
+      !hasLiveRun &&
+      !activeQuestion &&
+      activeApprovals.length === 0);
 
   const slashStatusBar = slashStatus ? (
     <div className="my-2 w-full">
@@ -442,8 +454,8 @@ export function ChatWorkspace({
       }}
       onOpenProvidersSettings={onOpenProvidersSettings}
       onSend={(overrideText, atts) => {
-        if (!client) return;
-        void sendMessage(client, {
+        if (!client) return false;
+        return sendMessage(client, {
           sessionId: activeSessionId,
           botId: activeBot.id,
           locale,
@@ -686,6 +698,42 @@ export function ChatWorkspace({
             {composerElement("hero")}
           </div>
         </div>
+      ) : !transcript && sessionLoadError ? (
+        <>
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+            <div className="w-full max-w-[480px]">
+              <NoticeBar
+                tone="danger"
+                message={t("chat.sessionLoadFailed", { error: sessionLoadError })}
+                action={
+                  client ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => void loadSession(client, activeSessionId, locale)}
+                    >
+                      {t("chat.retry")}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </div>
+          </div>
+          {composerElement("docked")}
+        </>
+      ) : !transcript && isLoadingSession ? (
+        <>
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+            <div
+              className="flex items-center gap-2 text-[13px]"
+              style={{ color: "var(--pi-ink-tertiary)" }}
+            >
+              <IconLoader2 size={15} className="animate-spin" style={{ color: "var(--pi-accent)" }} />
+              <span>{t("common.loading")}</span>
+            </div>
+          </div>
+          {composerElement("docked")}
+        </>
       ) : (
         <>
           <MessageList

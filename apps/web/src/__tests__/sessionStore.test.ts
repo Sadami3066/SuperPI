@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostClient } from "../api/hostClient";
-import type { HostSessionDetailDto } from "../api/types";
+import type { HostBotDto, HostSessionDetailDto } from "../api/types";
 import { useSessionStore } from "../stores/sessionStore";
 import { useStreamStore } from "../stores/streamStore";
 
@@ -372,3 +372,186 @@ describe("sessionStore resilience", () => {
     expect(useSessionStore.getState().transcriptsById["sq1"]?.pendingQuestion).toBeNull();
   });
 });
+
+describe("sessionStore reliability", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    useSessionStore.getState().reset();
+    useStreamStore.getState().resetAll();
+  });
+
+  it("prevents concurrent double-send and preserves draft and quote on failure", async () => {
+    useSessionStore.getState().reset();
+    useStreamStore.getState().resetAll();
+    useSessionStore.setState({
+      activeSessionId: "s-send",
+      summariesById: {
+        "s-send": {
+          id: "s-send",
+          botId: "home",
+          title: "Send Test",
+          updatedAtMs: 1000,
+          cwd: "/tmp",
+          pinned: false,
+          archived: false,
+          memoryExcluded: false,
+          busy: false,
+        },
+      },
+      sessionIdsByBot: { home: ["s-send"] },
+      composerTextBySession: { "s-send": "Keep my draft" },
+      quotedTextBySession: { "s-send": "Important quote" },
+    });
+
+    let rejectFirst!: (err: Error) => void;
+    const sendPrompt = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_res, rej) => {
+            rejectFirst = rej;
+          }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const fakeClient = { sendPrompt } as unknown as HostClient;
+
+    const p1 = useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "s-send",
+      botId: "home",
+      locale: "en",
+      sendWhileRunning: "steer",
+    });
+    const p2 = useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "s-send",
+      botId: "home",
+      locale: "en",
+      sendWhileRunning: "steer",
+    });
+
+    expect(await p2).toBe(false);
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
+
+    rejectFirst(new Error("Network offline"));
+    expect(await p1).toBe(false);
+    expect(useSessionStore.getState().composerTextBySession["s-send"]).toBe("Keep my draft");
+    expect(useSessionStore.getState().quotedTextBySession["s-send"]).toBe("Important quote");
+    expect(useSessionStore.getState().actionError).toBe("Network offline");
+
+    const ok = await useSessionStore.getState().sendMessage(fakeClient, {
+      sessionId: "s-send",
+      botId: "home",
+      locale: "en",
+      sendWhileRunning: "steer",
+    });
+    expect(ok).toBe(true);
+    expect(useSessionStore.getState().composerTextBySession["s-send"]).toBe("");
+    expect(useSessionStore.getState().quotedTextBySession["s-send"]).toBeNull();
+  });
+
+  it("supports 5s undo delete and rolls back on API failure", async () => {
+    vi.useFakeTimers();
+    useSessionStore.getState().reset();
+    useSessionStore.setState({
+      activeSessionId: "s-del-1",
+      summariesById: {
+        "s-del-1": {
+          id: "s-del-1",
+          botId: "home",
+          title: "First",
+          updatedAtMs: 2000,
+          cwd: "/tmp",
+          pinned: false,
+          archived: false,
+          memoryExcluded: false,
+          busy: false,
+        },
+        "s-del-2": {
+          id: "s-del-2",
+          botId: "home",
+          title: "Second",
+          updatedAtMs: 1000,
+          cwd: "/tmp",
+          pinned: false,
+          archived: false,
+          memoryExcluded: false,
+          busy: false,
+        },
+      },
+      sessionIdsByBot: { home: ["s-del-1", "s-del-2"] },
+    });
+
+    const deleteSession = vi.fn().mockRejectedValueOnce(new Error("Host busy"));
+    const fakeClient = { deleteSession } as unknown as HostClient;
+
+    useSessionStore.getState().scheduleDeleteSession(fakeClient, "s-del-1");
+    expect(useSessionStore.getState().summariesById["s-del-1"]).toBeUndefined();
+    expect(useSessionStore.getState().activeSessionId).toBe("s-del-2");
+    expect(useSessionStore.getState().pendingDeletes.map((d) => d.id)).toEqual(["s-del-1"]);
+
+    useSessionStore.getState().undoDeleteSession("s-del-1");
+    expect(useSessionStore.getState().summariesById["s-del-1"]?.title).toBe("First");
+    expect(useSessionStore.getState().activeSessionId).toBe("s-del-1");
+    expect(useSessionStore.getState().pendingDeletes).toEqual([]);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(deleteSession).not.toHaveBeenCalled();
+
+    useSessionStore.getState().scheduleDeleteSession(fakeClient, "s-del-1");
+    await vi.advanceTimersByTimeAsync(5001);
+    expect(deleteSession).toHaveBeenCalledWith("s-del-1");
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState().summariesById["s-del-1"]).toBeDefined();
+    });
+    expect(useSessionStore.getState().actionError).toBe("Host busy");
+  });
+
+  it("preserves existing bot sessions on partial refreshSessionLists failure", async () => {
+    useSessionStore.getState().reset();
+    useSessionStore.setState({
+      activeSessionId: "s-a",
+      summariesById: {
+        "s-a": {
+          id: "s-a",
+          botId: "bot-a",
+          title: "Keep Me",
+          updatedAtMs: 500,
+          cwd: "/tmp/a",
+          pinned: false,
+          archived: false,
+          memoryExcluded: false,
+          busy: false,
+        },
+      },
+      sessionIdsByBot: { "bot-a": ["s-a"], "bot-b": [] },
+    });
+
+    const bots = [
+      { id: "bot-a", name: "Bot A", cwd: "/tmp/a", permissionMode: "workspace_auto", isHome: true },
+      { id: "bot-b", name: "Bot B", cwd: "/tmp/b", permissionMode: "workspace_auto", isHome: false },
+    ] as HostBotDto[];
+
+    const fakeClient = {
+      listSessions: vi.fn(async (botId: string) => {
+        if (botId === "bot-a") throw new Error("Bot A unreachable");
+        return [
+          {
+            id: "s-b",
+            title: "Updated B",
+            updatedAt: 900,
+            cwd: "/tmp/b",
+            pinned: false,
+            archived: false,
+            memoryExcluded: false,
+            busy: false,
+          },
+        ];
+      }),
+    } as unknown as HostClient;
+
+    await useSessionStore.getState().refreshSessionLists(fakeClient, bots);
+    expect(useSessionStore.getState().summariesById["s-a"]?.title).toBe("Keep Me");
+    expect(useSessionStore.getState().sessionIdsByBot["bot-a"]).toEqual(["s-a"]);
+    expect(useSessionStore.getState().summariesById["s-b"]?.title).toBe("Updated B");
+    expect(useSessionStore.getState().sessionIdsByBot["bot-b"]).toEqual(["s-b"]);
+  });
+});
+

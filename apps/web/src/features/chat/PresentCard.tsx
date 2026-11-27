@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { PresentedItem } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
@@ -55,8 +56,10 @@ function ImageArtifactCard({
     try {
       const blob = await client.fetchSessionArtifact(sessionId, item.path, true);
       triggerBlobDownload(blob, item.name);
-    } catch {
-      void 0;
+    } catch (err) {
+      useSessionStore.setState({
+        actionError: err instanceof Error ? err.message : "Failed to download file",
+      });
     }
   };
 
@@ -130,8 +133,10 @@ export function PresentCard({
     try {
       const blob = await client.fetchSessionArtifact(sessionId, item.path, true);
       triggerBlobDownload(blob, item.name);
-    } catch {
-      void 0;
+    } catch (err) {
+      useSessionStore.setState({
+        actionError: err instanceof Error ? err.message : "Failed to download file",
+      });
     }
   };
 

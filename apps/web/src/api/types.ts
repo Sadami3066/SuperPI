@@ -500,6 +500,7 @@ export interface HostWorkspaceFileReadResponse {
   sizeBytes: number;
   truncated: boolean;
   isBinary: boolean;
+  mtimeMs?: number;
 }
 
 export interface HostWorkspaceSearchResponse {

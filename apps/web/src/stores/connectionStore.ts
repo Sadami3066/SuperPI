@@ -344,15 +344,36 @@ export const useConnectionStore = create<ConnectionStoreState>((set, get) => ({
       void useSuperStore.getState().refreshInbox(client);
 
       let hadSse = false;
+      let sseDisconnectedAfterOpen = false;
       sseUnsubscribe = client.subscribeEvents(
         (ev) => handleHostSseEvent(client, ev),
         (connected) => {
           if (gen !== connectGeneration) return;
-          if (connected) hadSse = true;
+          const shouldReconcile = connected && hadSse && sseDisconnectedAfterOpen;
+          if (connected) {
+            hadSse = true;
+            sseDisconnectedAfterOpen = false;
+          } else if (hadSse) {
+            sseDisconnectedAfterOpen = true;
+          }
           set({
             sseConnected: connected,
             sseLost: !connected && hadSse,
           });
+          if (shouldReconcile) {
+            const sStore = useSessionStore.getState();
+            const bots = useBotStore.getState().bots;
+            const loc = useSettingsStore.getState().locale;
+            void sStore.refreshQuestions(client);
+            void sStore.refreshApprovals(client);
+            void sStore.refreshSessionLists(client, bots);
+            if (sStore.activeSessionId) {
+              void sStore.loadSession(client, sStore.activeSessionId, loc);
+            }
+            const sup = useSuperStore.getState();
+            void sup.refreshState(client);
+            void sup.refreshInbox(client);
+          }
         },
       );
 

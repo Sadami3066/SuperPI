@@ -12,6 +12,7 @@ import type {
 export const SUPER_SESSION_ID = "__super__";
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let superSendInFlight = false;
 
 export interface SuperStoreState {
   state: HostSuperStateResponse | null;
@@ -40,7 +41,7 @@ export interface SuperStoreState {
     text: string,
     steer: boolean,
     images?: Array<{ data: string; mimeType: string; name?: string }>,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   abort: (client: HostClient) => Promise<void>;
   compact: (client: HostClient) => Promise<void>;
   resetThread: (client: HostClient) => Promise<void>;
@@ -132,16 +133,21 @@ export const useSuperStore = create<SuperStoreState>((set, get) => ({
   },
 
   sendPrompt: async (client, text, steer, images = []) => {
-    set({ composerText: "", error: null });
+    if (superSendInFlight) return false;
+    superSendInFlight = true;
+    set({ error: null });
     try {
       await client.sendSuperPrompt({ text, steer, images });
+      set({ composerText: "" });
       await get().refreshState(client);
+      return true;
     } catch (err) {
       set({
-        composerText: text,
         error: err instanceof Error ? err.message : "Failed to send message",
       });
-      throw err;
+      return false;
+    } finally {
+      superSendInFlight = false;
     }
   },
 

@@ -52,7 +52,9 @@ export interface SettingsStoreState {
   customProviders: HostCustomProviderDto[];
   relayStatus: HostRelayStatusDto | null;
   relayDevices: HostRelayDeviceDto[];
+  settingsError: string | null;
 
+  clearSettingsError: () => void;
   applyLocalTheme: () => void;
   setThemePreset: (preset: ThemePresetId) => void;
   setAppearance: (appearance: AppearanceMode) => void;
@@ -64,7 +66,7 @@ export interface SettingsStoreState {
 
   refreshSettingsData: (client: HostClient) => Promise<void>;
   refreshRelay: (client: HostClient) => Promise<void>;
-  patchHostSettings: (client: HostClient, patch: Record<string, unknown>) => Promise<void>;
+  patchHostSettings: (client: HostClient, patch: Record<string, unknown>) => Promise<boolean>;
 
   saveProviderKey: (client: HostClient, providerId: string, apiKey: string) => Promise<void>;
   clearProviderKey: (client: HostClient, providerId: string) => Promise<void>;
@@ -112,6 +114,9 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
   customProviders: [],
   relayStatus: null,
   relayDevices: [],
+  settingsError: null,
+
+  clearSettingsError: () => set({ settingsError: null }),
 
   applyLocalTheme: () => {
     const { themePreset, appearance, fontStyle, customAccent, hostSettings } = get();
@@ -223,14 +228,21 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
   },
 
   patchHostSettings: async (client, patch) => {
-    const updated = await client.patchSettings(patch);
-    if (typeof document !== "undefined") {
-      document.documentElement.style.setProperty(
-        "--pi-chat-scale",
-        String((updated.chatFontScale ?? 100) / 100),
-      );
+    set({ settingsError: null });
+    try {
+      const updated = await client.patchSettings(patch);
+      if (typeof document !== "undefined") {
+        document.documentElement.style.setProperty(
+          "--pi-chat-scale",
+          String((updated.chatFontScale ?? 100) / 100),
+        );
+      }
+      set({ hostSettings: updated });
+      return true;
+    } catch (err) {
+      set({ settingsError: err instanceof Error ? err.message : "Failed to save settings" });
+      return false;
     }
-    set({ hostSettings: updated });
   },
 
   saveProviderKey: async (client, providerId, apiKey) => {

@@ -2,8 +2,9 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { IconKeyboard, IconUserCircle, IconWorld } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
-import { Input } from "../../ui";
+import { Button, Input, NoticeBar } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ArchivedSettings } from "./ArchivedSettings";
@@ -50,17 +51,24 @@ export function SettingsModal({
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
+  const settingsError = useSettingsStore((s) => s.settingsError);
+  const clearSettingsError = useSettingsStore((s) => s.clearSettingsError);
 
   useEffect(() => {
     if (!open) {
       setSearch("");
+      clearSettingsError();
       return undefined;
     }
     useWorkbenchStore.getState().pushOverlay();
     return () => {
       useWorkbenchStore.getState().popOverlay();
     };
-  }, [open]);
+  }, [clearSettingsError, open]);
+
+  useEffect(() => {
+    clearSettingsError();
+  }, [clearSettingsError, tab]);
 
   const navItems = useMemo<SettingsNavItem[]>(
     () => [
@@ -290,6 +298,19 @@ export function SettingsModal({
 
             <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8">
               <div className="mx-auto w-full max-w-[680px]">
+                {settingsError && (
+                  <div className="mb-4">
+                    <NoticeBar
+                      tone="danger"
+                      message={t("settings.saveFailed", { error: settingsError })}
+                      action={
+                        <Button variant="ghost" size="sm" onClick={clearSettingsError}>
+                          {t("common.close")}
+                        </Button>
+                      }
+                    />
+                  </div>
+                )}
                 {tab === "general" && <GeneralSettings />}
                 {tab === "appearance" && <AppearanceSettings />}
                 {tab === "personalization" && <PersonalizationSettings />}

@@ -38,6 +38,13 @@ export interface SlashCommandStatus {
   retryText?: string;
 }
 
+export interface PendingDeleteItem {
+  id: string;
+  title: string;
+  botId: string;
+  expiresAt: number;
+}
+
 export function draftComposerKey(botId: string): string {
   return `__draft__:${botId}`;
 }
@@ -143,10 +150,37 @@ function materializeFinishedLiveRun(
 
 const inFlightLoads = new Map<string, Promise<void>>();
 const pendingLoads = new Map<string, { locale: "zh-CN" | "en"; reconcileRunId?: string }>();
+const inFlightSends = new Map<string, Promise<boolean>>();
 const slashStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingDeleteRecords = new Map<
+  string,
+  {
+    client: HostClient;
+    summary: SessionSummary;
+    transcript?: SessionTranscript;
+    wasArchived: boolean;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
 let localSeq = 0;
 let refreshSeq = 0;
 let createInFlight = false;
+
+function pickMostRecentFallbackSessionId(
+  summariesById: Record<string, SessionSummary>,
+  excludeId?: string,
+): string {
+  let bestId = "";
+  let bestTs = -Infinity;
+  for (const [id, sum] of Object.entries(summariesById)) {
+    if (id === excludeId) continue;
+    if (sum.updatedAtMs > bestTs) {
+      bestTs = sum.updatedAtMs;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
 
 export interface SessionStoreState {
   summariesById: Record<string, SessionSummary>;
@@ -160,6 +194,9 @@ export interface SessionStoreState {
   draftBotId: string | null;
   draftModelByBot: Record<string, { model: string; thinking: ThinkingLevel }>;
   unreadSessionIds: Record<string, true>;
+  loadingSessionIds: Record<string, true>;
+  sessionLoadErrors: Record<string, string>;
+  pendingDeletes: PendingDeleteItem[];
   composerFocusTick: number;
   actionError: string | null;
   composerTextBySession: Record<string, string>;
@@ -219,6 +256,9 @@ export interface SessionStoreState {
     excluded: boolean,
   ) => Promise<void>;
   deleteSession: (client: HostClient, sessionId: string) => Promise<void>;
+  scheduleDeleteSession: (client: HostClient, sessionId: string) => void;
+  undoDeleteSession: (sessionId: string) => void;
+  flushPendingDeletes: () => Promise<void>;
   updateSessionModel: (
     client: HostClient,
     sessionId: string,
@@ -249,7 +289,7 @@ export interface SessionStoreState {
       overrideText?: string;
       attachments?: ComposerAttachment[];
     },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   stopSession: (client: HostClient, sessionId: string) => Promise<void>;
   retrySession: (client: HostClient, sessionId: string) => Promise<void>;
   answerQuestion: (
@@ -312,6 +352,67 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
     }
   };
 
+  const restoreDeletedRecord = (
+    s: SessionStoreState,
+    rec: {
+      summary: SessionSummary;
+      transcript?: SessionTranscript;
+      wasArchived: boolean;
+    },
+    actionError: string | null,
+    activateRestored: boolean,
+  ): Partial<SessionStoreState> => {
+    const sid = rec.summary.id;
+    const baseState: Partial<SessionStoreState> = {
+      pendingDeletes: s.pendingDeletes.filter((item) => item.id !== sid),
+      actionError,
+    };
+    if (rec.wasArchived) {
+      const exists = s.archivedSessions.some((x) => x.id === sid);
+      return {
+        ...baseState,
+        archivedSessions: exists ? s.archivedSessions : [rec.summary, ...s.archivedSessions],
+      };
+    }
+    const nextSummaries = { ...s.summariesById, [sid]: rec.summary };
+    const existingIds = s.sessionIdsByBot[rec.summary.botId] ?? [];
+    const nextBotIds = existingIds.includes(sid) ? existingIds : [sid, ...existingIds];
+    const nextByBot = { ...s.sessionIdsByBot, [rec.summary.botId]: nextBotIds };
+    const nextCache = rec.transcript
+      ? { ...s.transcriptsById, [sid]: rec.transcript }
+      : s.transcriptsById;
+    const nextLru = rec.transcript ? touchLru(s.lruOrder, sid) : s.lruOrder;
+    const shouldActivate = activateRestored || !s.activeSessionId;
+    const nextActive = shouldActivate ? sid : s.activeSessionId;
+    if (shouldActivate) saveStoredSessionId(sid);
+    return {
+      ...baseState,
+      summariesById: nextSummaries,
+      sessionIdsByBot: nextByBot,
+      transcriptsById: nextCache,
+      lruOrder: nextLru,
+      activeSessionId: nextActive,
+      draftBotId: nextActive ? null : s.draftBotId,
+    };
+  };
+
+  const commitPendingDelete = async (sessionId: string): Promise<void> => {
+    const rec = pendingDeleteRecords.get(sessionId);
+    if (!rec) return;
+    pendingDeleteRecords.delete(sessionId);
+    clearTimeout(rec.timer);
+    set((s) => ({
+      pendingDeletes: s.pendingDeletes.filter((item) => item.id !== sessionId),
+    }));
+    try {
+      await rec.client.deleteSession(sessionId);
+      useStreamStore.getState().clearRun(sessionId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete session";
+      set((s) => restoreDeletedRecord(s, rec, msg, false));
+    }
+  };
+
   return {
   summariesById: {},
   sessionIdsByBot: {},
@@ -324,6 +425,9 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
   draftBotId: null,
   draftModelByBot: {},
   unreadSessionIds: {},
+  loadingSessionIds: {},
+  sessionLoadErrors: {},
+  pendingDeletes: [],
   composerFocusTick: 0,
   actionError: null,
   composerTextBySession: {},
@@ -409,18 +513,37 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
     const seq = ++refreshSeq;
     const results = await Promise.all(
       bots.map(async (b) => {
-        const list = await client.listSessions(b.id).catch(() => [] as HostSessionSummaryDto[]);
-        return { botId: b.id, list: list.filter((x) => !x.archived) };
+        try {
+          const list = await client.listSessions(b.id);
+          return {
+            botId: b.id,
+            ok: true as const,
+            list: list.filter((x) => !x.archived && !pendingDeleteRecords.has(x.id)),
+          };
+        } catch {
+          return { botId: b.id, ok: false as const, list: [] as HostSessionSummaryDto[] };
+        }
       }),
     );
     if (seq !== refreshSeq) return;
     set((s) => {
       const summariesById: Record<string, SessionSummary> = {};
       const sessionIdsByBot: Record<string, string[]> = {};
-      for (const { botId, list } of results) {
-        sessionIdsByBot[botId] = list.map((item) => item.id);
-        for (const dto of list) {
-          summariesById[dto.id] = mapSummary(dto, botId);
+      for (const { botId, ok, list } of results) {
+        if (ok) {
+          sessionIdsByBot[botId] = list.map((item) => item.id);
+          for (const dto of list) {
+            summariesById[dto.id] = mapSummary(dto, botId);
+          }
+        } else {
+          const prevIds = (s.sessionIdsByBot[botId] ?? []).filter(
+            (id) => !pendingDeleteRecords.has(id),
+          );
+          sessionIdsByBot[botId] = prevIds;
+          for (const id of prevIds) {
+            const prevSum = s.summariesById[id];
+            if (prevSum) summariesById[id] = prevSum;
+          }
         }
       }
       const curActive = s.activeSessionId;
@@ -434,7 +557,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         !summariesById[curActive] &&
         prevActiveSummary &&
         prevActiveTranscript &&
-        prevActiveTranscript.turns.length === 0
+        prevActiveTranscript.turns.length === 0 &&
+        !pendingDeleteRecords.has(curActive)
       ) {
         summariesById[curActive] = prevActiveSummary;
         const botIds = sessionIdsByBot[prevActiveSummary.botId] ?? [];
@@ -442,8 +566,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
           sessionIdsByBot[prevActiveSummary.botId] = [curActive, ...botIds];
         }
       }
-      const allIds = Object.keys(summariesById);
-      const nextActive = curActive && summariesById[curActive] ? curActive : allIds[0] ?? curActive;
+      const nextActive =
+        curActive && summariesById[curActive]
+          ? curActive
+          : pickMostRecentFallbackSessionId(summariesById) || curActive;
       if (nextActive && nextActive !== curActive) {
         saveStoredSessionId(nextActive);
       }
@@ -463,6 +589,14 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
     }
 
     const promise = (async () => {
+      set((s) => {
+        const nextErrors = { ...s.sessionLoadErrors };
+        delete nextErrors[sessionId];
+        return {
+          loadingSessionIds: { ...s.loadingSessionIds, [sessionId]: true },
+          sessionLoadErrors: nextErrors,
+        };
+      });
       try {
         const detail = await client.getSession(sessionId);
 
@@ -499,8 +633,14 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
             s.activeSessionId,
           );
           const prevSum = s.summariesById[sessionId];
+          const nextLoading = { ...s.loadingSessionIds };
+          delete nextLoading[sessionId];
+          const nextErrors = { ...s.sessionLoadErrors };
+          delete nextErrors[sessionId];
           return {
             ...evicted,
+            loadingSessionIds: nextLoading,
+            sessionLoadErrors: nextErrors,
             summariesById: prevSum
               ? {
                   ...s.summariesById,
@@ -525,8 +665,16 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
             useStreamStore.getState().clearRun(sessionId);
           }
         }
-      } catch {
-        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to load session";
+        set((s) => {
+          const nextLoading = { ...s.loadingSessionIds };
+          delete nextLoading[sessionId];
+          return {
+            loadingSessionIds: nextLoading,
+            sessionLoadErrors: { ...s.sessionLoadErrors, [sessionId]: msg },
+          };
+        });
       } finally {
         inFlightLoads.delete(sessionId);
       }
@@ -740,66 +888,92 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
   },
 
   togglePinSession: async (client, sessionId, pinned) => {
-    await client.updateSession(sessionId, { pinned });
-    set((s) => {
-      const cur = s.summariesById[sessionId];
-      if (!cur) return s;
-      return {
-        summariesById: { ...s.summariesById, [sessionId]: { ...cur, pinned } },
-      };
-    });
+    set({ actionError: null });
+    try {
+      await client.updateSession(sessionId, { pinned });
+      set((s) => {
+        const cur = s.summariesById[sessionId];
+        if (!cur) return s;
+        return {
+          summariesById: { ...s.summariesById, [sessionId]: { ...cur, pinned } },
+        };
+      });
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to update session" });
+    }
   },
 
   toggleArchiveSession: async (client, sessionId, archived) => {
-    await client.updateSession(sessionId, { archived });
-    set((s) => {
-      if (!archived) {
+    set({ actionError: null });
+    try {
+      await client.updateSession(sessionId, { archived });
+      set((s) => {
+        if (!archived) {
+          return {
+            archivedSessions: s.archivedSessions.filter((x) => x.id !== sessionId),
+          };
+        }
+        const nextSummaries = { ...s.summariesById };
+        const removed = nextSummaries[sessionId];
+        delete nextSummaries[sessionId];
+        const nextByBot = { ...s.sessionIdsByBot };
+        if (removed && nextByBot[removed.botId]) {
+          nextByBot[removed.botId] = nextByBot[removed.botId].filter((id) => id !== sessionId);
+        }
+        const fallbackId =
+          s.activeSessionId === sessionId
+            ? pickMostRecentFallbackSessionId(nextSummaries)
+            : s.activeSessionId;
+        if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+        const nextDraftBotId =
+          !fallbackId ? removed?.botId ?? useBotStore.getState().bots[0]?.id ?? s.draftBotId : null;
         return {
-          archivedSessions: s.archivedSessions.filter((x) => x.id !== sessionId),
+          summariesById: nextSummaries,
+          sessionIdsByBot: nextByBot,
+          activeSessionId: fallbackId,
+          draftBotId: nextDraftBotId,
         };
+      });
+      if (!archived) {
+        await get().refreshSessionLists(client, useBotStore.getState().bots);
       }
-      const nextSummaries = { ...s.summariesById };
-      const removed = nextSummaries[sessionId];
-      delete nextSummaries[sessionId];
-      const nextByBot = { ...s.sessionIdsByBot };
-      if (removed && nextByBot[removed.botId]) {
-        nextByBot[removed.botId] = nextByBot[removed.botId].filter((id) => id !== sessionId);
-      }
-      const fallbackId =
-        s.activeSessionId === sessionId
-          ? Object.keys(nextSummaries)[0] ?? ""
-          : s.activeSessionId;
-      if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
-      const nextDraftBotId =
-        !fallbackId ? removed?.botId ?? useBotStore.getState().bots[0]?.id ?? s.draftBotId : null;
-      return {
-        summariesById: nextSummaries,
-        sessionIdsByBot: nextByBot,
-        activeSessionId: fallbackId,
-        draftBotId: nextDraftBotId,
-      };
-    });
-    if (!archived) {
-      await get().refreshSessionLists(client, useBotStore.getState().bots);
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to archive session" });
     }
   },
 
   toggleMemoryExclude: async (client, sessionId, excluded) => {
-    await client.updateSession(sessionId, { memoryExcluded: excluded });
-    set((s) => {
-      const cur = s.summariesById[sessionId];
-      if (!cur) return s;
-      return {
-        summariesById: {
-          ...s.summariesById,
-          [sessionId]: { ...cur, memoryExcluded: excluded },
-        },
-      };
-    });
+    set({ actionError: null });
+    try {
+      await client.updateSession(sessionId, { memoryExcluded: excluded });
+      set((s) => {
+        const cur = s.summariesById[sessionId];
+        if (!cur) return s;
+        return {
+          summariesById: {
+            ...s.summariesById,
+            [sessionId]: { ...cur, memoryExcluded: excluded },
+          },
+        };
+      });
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to update memory option" });
+    }
   },
 
   deleteSession: async (client, sessionId) => {
-    await client.deleteSession(sessionId);
+    const pending = pendingDeleteRecords.get(sessionId);
+    if (pending) {
+      await commitPendingDelete(sessionId);
+      return;
+    }
+    set({ actionError: null });
+    try {
+      await client.deleteSession(sessionId);
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to delete session" });
+      throw err;
+    }
     useStreamStore.getState().clearRun(sessionId);
     set((s) => {
       const nextSummaries = { ...s.summariesById };
@@ -813,7 +987,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       delete nextCache[sessionId];
       const fallbackId =
         s.activeSessionId === sessionId
-          ? Object.keys(nextSummaries)[0] ?? ""
+          ? pickMostRecentFallbackSessionId(nextSummaries)
           : s.activeSessionId;
       if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
       const nextDraftBotId =
@@ -828,6 +1002,75 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         draftBotId: nextDraftBotId,
       };
     });
+  },
+
+  scheduleDeleteSession: (client, sessionId) => {
+    if (pendingDeleteRecords.has(sessionId)) return;
+    const s = get();
+    const activeSum = s.summariesById[sessionId];
+    const archivedSum = s.archivedSessions.find((x) => x.id === sessionId);
+    const target = activeSum ?? archivedSum;
+    if (!target) {
+      void get().deleteSession(client, sessionId).catch(() => void 0);
+      return;
+    }
+    const transcript = s.transcriptsById[sessionId];
+    const wasArchived = !activeSum && Boolean(archivedSum);
+    const expiresAt = Date.now() + 5000;
+    const timer = setTimeout(() => {
+      void commitPendingDelete(sessionId);
+    }, 5000);
+    pendingDeleteRecords.set(sessionId, {
+      client,
+      summary: target,
+      transcript,
+      wasArchived,
+      timer,
+    });
+    set((cur) => {
+      const nextSummaries = { ...cur.summariesById };
+      delete nextSummaries[sessionId];
+      const nextByBot = { ...cur.sessionIdsByBot };
+      if (nextByBot[target.botId]) {
+        nextByBot[target.botId] = nextByBot[target.botId].filter((id) => id !== sessionId);
+      }
+      const nextCache = { ...cur.transcriptsById };
+      delete nextCache[sessionId];
+      const fallbackId =
+        cur.activeSessionId === sessionId
+          ? pickMostRecentFallbackSessionId(nextSummaries)
+          : cur.activeSessionId;
+      if (fallbackId !== cur.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+      const nextDraftBotId =
+        !fallbackId ? target.botId ?? useBotStore.getState().bots[0]?.id ?? cur.draftBotId : null;
+      return {
+        actionError: null,
+        summariesById: nextSummaries,
+        sessionIdsByBot: nextByBot,
+        transcriptsById: nextCache,
+        lruOrder: cur.lruOrder.filter((id) => id !== sessionId),
+        archivedSessions: cur.archivedSessions.filter((x) => x.id !== sessionId),
+        activeSessionId: fallbackId,
+        draftBotId: nextDraftBotId,
+        pendingDeletes: [
+          ...cur.pendingDeletes,
+          { id: sessionId, title: target.title, botId: target.botId, expiresAt },
+        ],
+      };
+    });
+  },
+
+  undoDeleteSession: (sessionId) => {
+    const rec = pendingDeleteRecords.get(sessionId);
+    if (!rec) return;
+    pendingDeleteRecords.delete(sessionId);
+    clearTimeout(rec.timer);
+    set((s) => restoreDeletedRecord(s, rec, null, !rec.wasArchived));
+  },
+
+  flushPendingDeletes: async () => {
+    const ids = Array.from(pendingDeleteRecords.keys());
+    await Promise.all(ids.map((id) => commitPendingDelete(id)));
   },
 
   updateSessionModel: async (client, sessionId, model, thinking, locale) => {
@@ -926,198 +1169,249 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
   },
 
   removeQueuedInput: async (client, sessionId, kind, text) => {
-    const queue = await client.removeQueuedInput(sessionId, kind, text);
-    get().setQueueForSession(sessionId, queue);
+    try {
+      const queue = await client.removeQueuedInput(sessionId, kind, text);
+      get().setQueueForSession(sessionId, queue);
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to remove queued message" });
+    }
   },
 
   promoteQueuedInput: async (client, sessionId, text) => {
-    const queue = await client.promoteQueuedInput(sessionId, text);
-    get().setQueueForSession(sessionId, queue);
+    try {
+      const queue = await client.promoteQueuedInput(sessionId, text);
+      get().setQueueForSession(sessionId, queue);
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to promote queued message" });
+    }
   },
 
   sendMessage: async (client, options) => {
-    const {
-      botId,
-      locale,
-      sendWhileRunning,
-      overrideText,
-      attachments = [],
-    } = options;
-    const isDraft = !options.sessionId || options.sessionId.startsWith("__draft__:");
-    const composerKey = options.sessionId || draftComposerKey(botId);
-    const state = get();
-    const raw = (overrideText ?? state.composerTextBySession[composerKey] ?? "").trim();
-    if (!raw && attachments.length === 0) return;
+    const lockKey = options.sessionId || draftComposerKey(options.botId);
+    if (inFlightSends.has(lockKey)) return false;
 
-    if (attachments.length === 0 && raw === "/compact") {
-      state.setComposerText(composerKey, "");
+    const sendMessageImpl = async (
+      c: HostClient,
+      opts: Parameters<SessionStoreState["sendMessage"]>[1],
+    ): Promise<boolean> => {
+      const {
+        botId,
+        locale,
+        sendWhileRunning,
+        overrideText,
+        attachments = [],
+      } = opts;
+      const isDraft = !opts.sessionId || opts.sessionId.startsWith("__draft__:");
+      const composerKey = opts.sessionId || draftComposerKey(botId);
+      const state = get();
+      const raw = (overrideText ?? state.composerTextBySession[composerKey] ?? "").trim();
+      if (!raw && attachments.length === 0) return false;
+
+      if (attachments.length === 0 && raw === "/compact") {
+        state.setComposerText(composerKey, "");
+        if (isDraft) {
+          setSlashStatus(
+            composerKey,
+            {
+              kind: "compact",
+              phase: "done",
+              message: translate(locale, "slash.compactEmpty"),
+            },
+            3600,
+          );
+          return true;
+        }
+        await get().compactSession(c, opts.sessionId, locale);
+        return true;
+      }
+
+      const goalMatch = attachments.length === 0 ? raw.match(/^\/goal(?:\s+([\s\S]*))?$/i) : null;
+      if (goalMatch) {
+        const arg = (goalMatch[1] ?? "").trim();
+        const lowerArg = arg.toLowerCase();
+        state.setComposerText(composerKey, "");
+        if (!arg) {
+          setSlashStatus(composerKey, {
+            kind: "goal",
+            phase: "error",
+            message: translate(locale, "slash.goalUsage"),
+          });
+          return false;
+        }
+        if (isDraft && (lowerArg === "pause" || lowerArg === "resume" || lowerArg === "clear" || lowerArg === "stop")) {
+          setSlashStatus(composerKey, {
+            kind: "goal",
+            phase: "error",
+            message: translate(locale, "slash.goalUsage"),
+          });
+          return false;
+        }
+
+        let targetSessionId = opts.sessionId;
+        if (isDraft) {
+          const createdId = await get().createSession(c, botId, locale);
+          if (!createdId) return false;
+          const draftModel = get().draftModelByBot[botId];
+          if (draftModel) {
+            await get()
+              .updateSessionModel(c, createdId, draftModel.model, draftModel.thinking, locale)
+              .catch(() => void 0);
+          }
+          targetSessionId = createdId;
+        }
+
+        try {
+          if (lowerArg === "pause") {
+            setSlashStatus(targetSessionId, {
+              kind: "goal",
+              phase: "running",
+              message: translate(locale, "common.loading"),
+            });
+            await c.pauseSessionGoal(targetSessionId);
+            useSuperStore.getState().bumpGoalVersion();
+            setSlashStatus(
+              targetSessionId,
+              { kind: "goal", phase: "done", message: translate(locale, "slash.goalPaused") },
+              3600,
+            );
+            return true;
+          }
+          if (lowerArg === "resume") {
+            setSlashStatus(targetSessionId, {
+              kind: "goal",
+              phase: "running",
+              message: translate(locale, "common.loading"),
+            });
+            await c.resumeSessionGoal(targetSessionId);
+            useSuperStore.getState().bumpGoalVersion();
+            setSlashStatus(
+              targetSessionId,
+              { kind: "goal", phase: "done", message: translate(locale, "slash.goalResumed") },
+              3600,
+            );
+            return true;
+          }
+          if (lowerArg === "clear" || lowerArg === "stop" || lowerArg === "cancel") {
+            setSlashStatus(targetSessionId, {
+              kind: "goal",
+              phase: "running",
+              message: translate(locale, "common.loading"),
+            });
+            await c.deleteSessionGoal(targetSessionId);
+            useSuperStore.getState().bumpGoalVersion();
+            setSlashStatus(
+              targetSessionId,
+              { kind: "goal", phase: "done", message: translate(locale, "slash.goalCleared") },
+              3600,
+            );
+            return true;
+          }
+
+          setSlashStatus(targetSessionId, {
+            kind: "goal",
+            phase: "running",
+            message: translate(locale, "common.loading"),
+          });
+          await c.createSessionGoal(targetSessionId, { objective: arg });
+          useSuperStore.getState().bumpGoalVersion();
+          setSlashStatus(
+            targetSessionId,
+            {
+              kind: "goal",
+              phase: "done",
+              message: translate(locale, "slash.goalStarted", { objective: arg }),
+            },
+            3600,
+          );
+          const live = useStreamStore.getState().activeBySession[targetSessionId];
+          const busy = Boolean(live?.streaming) || Boolean(get().summariesById[targetSessionId]?.busy);
+          if (!busy) {
+            await sendMessageImpl(c, {
+              sessionId: targetSessionId,
+              botId,
+              locale,
+              sendWhileRunning,
+              overrideText: arg,
+            });
+          }
+          return true;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Goal command failed";
+          setSlashStatus(targetSessionId, {
+            kind: "goal",
+            phase: "error",
+            message: translate(locale, "slash.goalFailed", { error: msg }),
+            retryText: raw,
+          });
+          return false;
+        }
+      }
+
+      const quoted = overrideText === undefined ? state.quotedTextBySession[composerKey] : null;
+      const baseText = quoted ? `> ${quoted}\n\n${raw}` : raw;
+
+      let sessionId = opts.sessionId;
       if (isDraft) {
-        setSlashStatus(
-          composerKey,
-          {
-            kind: "compact",
-            phase: "done",
-            message: translate(locale, "slash.compactEmpty"),
-          },
-          3600,
-        );
-        return;
-      }
-      await get().compactSession(client, options.sessionId, locale);
-      return;
-    }
-
-    const goalMatch = attachments.length === 0 ? raw.match(/^\/goal(?:\s+([\s\S]*))?$/i) : null;
-    if (goalMatch) {
-      const arg = (goalMatch[1] ?? "").trim();
-      const lowerArg = arg.toLowerCase();
-      state.setComposerText(composerKey, "");
-      if (!arg) {
-        setSlashStatus(composerKey, {
-          kind: "goal",
-          phase: "error",
-          message: translate(locale, "slash.goalUsage"),
-        });
-        return;
-      }
-      if (isDraft && (lowerArg === "pause" || lowerArg === "resume" || lowerArg === "clear" || lowerArg === "stop")) {
-        setSlashStatus(composerKey, {
-          kind: "goal",
-          phase: "error",
-          message: translate(locale, "slash.goalUsage"),
-        });
-        return;
-      }
-
-      let targetSessionId = options.sessionId;
-      if (isDraft) {
-        const createdId = await get().createSession(client, botId, locale);
-        if (!createdId) return;
+        const createdId = await get().createSession(c, botId, locale);
+        if (!createdId) return false;
         const draftModel = get().draftModelByBot[botId];
         if (draftModel) {
           await get()
-            .updateSessionModel(client, createdId, draftModel.model, draftModel.thinking, locale)
+            .updateSessionModel(c, createdId, draftModel.model, draftModel.thinking, locale)
             .catch(() => void 0);
         }
-        targetSessionId = createdId;
+        sessionId = createdId;
+        if (overrideText === undefined) {
+          get().setComposerText(sessionId, raw);
+          if (quoted) get().setQuotedText(sessionId, quoted);
+        }
       }
 
-      try {
-        if (lowerArg === "pause") {
-          setSlashStatus(targetSessionId, {
-            kind: "goal",
-            phase: "running",
-            message: translate(locale, "common.loading"),
-          });
-          await client.pauseSessionGoal(targetSessionId);
-          useSuperStore.getState().bumpGoalVersion();
-          setSlashStatus(
-            targetSessionId,
-            { kind: "goal", phase: "done", message: translate(locale, "slash.goalPaused") },
-            3600,
-          );
-          return;
-        }
-        if (lowerArg === "resume") {
-          setSlashStatus(targetSessionId, {
-            kind: "goal",
-            phase: "running",
-            message: translate(locale, "common.loading"),
-          });
-          await client.resumeSessionGoal(targetSessionId);
-          useSuperStore.getState().bumpGoalVersion();
-          setSlashStatus(
-            targetSessionId,
-            { kind: "goal", phase: "done", message: translate(locale, "slash.goalResumed") },
-            3600,
-          );
-          return;
-        }
-        if (lowerArg === "clear" || lowerArg === "stop" || lowerArg === "cancel") {
-          setSlashStatus(targetSessionId, {
-            kind: "goal",
-            phase: "running",
-            message: translate(locale, "common.loading"),
-          });
-          await client.deleteSessionGoal(targetSessionId);
-          useSuperStore.getState().bumpGoalVersion();
-          setSlashStatus(
-            targetSessionId,
-            { kind: "goal", phase: "done", message: translate(locale, "slash.goalCleared") },
-            3600,
-          );
-          return;
+      const inlineImages: Array<{ data: string; mimeType: string; name?: string }> = [];
+      const stagedMeta: Array<{ path: string; name: string; mime: string; size: number }> = [];
+      const chips: AttachmentChip[] = [];
+
+      for (const att of attachments) {
+        if (att.kind === "folder" && att.folderPath) {
+          try {
+            const staged = await c.stageFolderAttachment(botId, att.folderPath);
+            stagedMeta.push({
+              path: staged.path,
+              name: staged.name,
+              mime: staged.mime,
+              size: staged.size,
+            });
+            chips.push({
+              id: staged.id,
+              name: staged.name,
+              mime: staged.mime,
+              size: staged.size,
+              path: staged.path,
+              kind: "folder",
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to attach folder";
+            set({
+              actionError: translate(locale, "chat.folderStageFailed", { error: msg }),
+            });
+            return false;
+          }
+          continue;
         }
 
-        setSlashStatus(targetSessionId, {
-          kind: "goal",
-          phase: "running",
-          message: translate(locale, "common.loading"),
-        });
-        await client.createSessionGoal(targetSessionId, { objective: arg });
-        useSuperStore.getState().bumpGoalVersion();
-        setSlashStatus(
-          targetSessionId,
-          {
-            kind: "goal",
-            phase: "done",
-            message: translate(locale, "slash.goalStarted", { objective: arg }),
-          },
-          3600,
-        );
-        const live = useStreamStore.getState().activeBySession[targetSessionId];
-        const busy = Boolean(live?.streaming) || Boolean(get().summariesById[targetSessionId]?.busy);
-        if (!busy) {
-          await get().sendMessage(client, {
-            sessionId: targetSessionId,
-            botId,
-            locale,
-            sendWhileRunning,
-            overrideText: arg,
+        if (att.isInlineImage) {
+          inlineImages.push({
+            data: att.dataBase64,
+            mimeType: att.mimeType,
+            name: att.name,
           });
         }
-        return;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Goal command failed";
-        setSlashStatus(targetSessionId, {
-          kind: "goal",
-          phase: "error",
-          message: translate(locale, "slash.goalFailed", { error: msg }),
-          retryText: raw,
-        });
-        return;
-      }
-    }
-
-    const quoted = overrideText === undefined ? state.quotedTextBySession[composerKey] : null;
-    const baseText = quoted ? `> ${quoted}\n\n${raw}` : raw;
-
-    let sessionId = options.sessionId;
-    if (isDraft) {
-      const createdId = await get().createSession(client, botId, locale);
-      if (!createdId) return;
-      const draftModel = get().draftModelByBot[botId];
-      if (draftModel) {
-        await get()
-          .updateSessionModel(client, createdId, draftModel.model, draftModel.thinking, locale)
-          .catch(() => void 0);
-      }
-      sessionId = createdId;
-    }
-
-    if (overrideText === undefined) {
-      get().setComposerText(composerKey, "");
-      get().setQuotedText(composerKey, null);
-    }
-
-    const inlineImages: Array<{ data: string; mimeType: string; name?: string }> = [];
-    const stagedMeta: Array<{ path: string; name: string; mime: string; size: number }> = [];
-    const chips: AttachmentChip[] = [];
-
-    for (const att of attachments) {
-      if (att.kind === "folder" && att.folderPath) {
         try {
-          const staged = await client.stageFolderAttachment(botId, att.folderPath);
+          const staged = await c.stageAttachment(botId, {
+            name: att.name,
+            mimeType: att.mimeType,
+            dataBase64: att.dataBase64,
+          });
           stagedMeta.push({
             path: staged.path,
             name: staged.name,
@@ -1130,151 +1424,144 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
             mime: staged.mime,
             size: staged.size,
             path: staged.path,
-            kind: "folder",
+            kind: att.kind,
+            previewUrl: att.previewUrl,
           });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed to attach folder";
-          set({
-            actionError: translate(locale, "chat.folderStageFailed", { error: msg }),
-          });
-          if (overrideText === undefined) {
-            get().setComposerText(sessionId, raw);
+          if (!att.isInlineImage) {
+            set({
+              actionError: err instanceof Error ? err.message : "Failed to upload attachment",
+            });
+            return false;
           }
-          return;
+          chips.push({
+            id: att.id,
+            name: att.name,
+            mime: att.mimeType,
+            size: att.size,
+            path: att.name,
+            kind: "image",
+            previewUrl: att.previewUrl,
+          });
         }
-        continue;
       }
 
-      if (att.isInlineImage) {
-        inlineImages.push({
-          data: att.dataBase64,
-          mimeType: att.mimeType,
-          name: att.name,
-        });
+      const attachmentBlock = encodeAttachmentBlock(stagedMeta);
+      const userContent = attachmentBlock
+        ? baseText
+          ? `${attachmentBlock}\n\n${baseText}`
+          : attachmentBlock
+        : baseText;
+
+      const clearDraftOnSuccess = () => {
+        if (overrideText === undefined) {
+          get().setComposerText(composerKey, "");
+          get().setQuotedText(composerKey, null);
+          if (sessionId !== composerKey) {
+            get().setComposerText(sessionId, "");
+            get().setQuotedText(sessionId, null);
+          }
+        }
+      };
+
+      const liveRun = useStreamStore.getState().activeBySession[sessionId];
+      const isCurrentlyRunning =
+        Boolean(liveRun?.streaming) || Boolean(get().summariesById[sessionId]?.busy);
+
+      if (isCurrentlyRunning) {
+        try {
+          if (sendWhileRunning === "queue") {
+            await c.followUpSession(sessionId, userContent, inlineImages);
+          } else {
+            await c.sendPrompt(sessionId, {
+              text: userContent,
+              steer: true,
+              images: inlineImages,
+            });
+          }
+          clearDraftOnSuccess();
+          return true;
+        } catch (err) {
+          set({ actionError: err instanceof Error ? err.message : "Request failed" });
+          return false;
+        }
       }
+
+      const carryTurn = liveRun ? materializeFinishedLiveRun(liveRun, locale) : null;
+      localSeq += 1;
+      const pendingRunId = `pending-${Date.now()}-${localSeq}`;
+      const userTurn: ChatTurn = {
+        id: `u-local-${Date.now()}-${localSeq}`,
+        runId: pendingRunId,
+        role: "user",
+        rawText: baseText,
+        timestamp: formatClockTime(Date.now(), locale),
+        status: "done",
+        failed: false,
+        notices: [],
+        attachments: chips,
+        blocks: [],
+      };
+
+      set((s) => {
+        const tr = s.transcriptsById[sessionId];
+        const sum = s.summariesById[sessionId];
+        const baseTurns = tr ? [...tr.turns] : [];
+        if (carryTurn && !baseTurns.some((t) => t.role === "assistant" && t.runId === carryTurn.runId)) {
+          baseTurns.push(carryTurn);
+        }
+        const nextTurns = [...baseTurns, userTurn];
+        const nextTr: SessionTranscript = tr
+          ? { ...tr, turns: nextTurns }
+          : {
+              sessionId,
+              turns: nextTurns,
+              usage: null,
+              contextPercent: 0,
+              queuedInputs: [],
+              pendingQuestion: null,
+              loadedAt: Date.now(),
+            };
+        return {
+          transcriptsById: { ...s.transcriptsById, [sessionId]: nextTr },
+          summariesById: sum
+            ? {
+                ...s.summariesById,
+                [sessionId]: {
+                  ...sum,
+                  busy: true,
+                  updatedAtMs: Date.now(),
+                  title: sum.title || baseText.slice(0, 28),
+                },
+              }
+            : s.summariesById,
+        };
+      });
+
+      useStreamStore.getState().beginRun(sessionId, pendingRunId);
+
       try {
-        const staged = await client.stageAttachment(botId, {
-          name: att.name,
-          mimeType: att.mimeType,
-          dataBase64: att.dataBase64,
-        });
-        stagedMeta.push({
-          path: staged.path,
-          name: staged.name,
-          mime: staged.mime,
-          size: staged.size,
-        });
-        chips.push({
-          id: staged.id,
-          name: staged.name,
-          mime: staged.mime,
-          size: staged.size,
-          path: staged.path,
-          kind: att.kind,
-          previewUrl: att.previewUrl,
-        });
-      } catch (err) {
-        if (!att.isInlineImage) throw err;
-        chips.push({
-          id: att.id,
-          name: att.name,
-          mime: att.mimeType,
-          size: att.size,
-          path: att.name,
-          kind: "image",
-          previewUrl: att.previewUrl,
-        });
-      }
-    }
-
-    const attachmentBlock = encodeAttachmentBlock(stagedMeta);
-    const userContent = attachmentBlock
-      ? baseText
-        ? `${attachmentBlock}\n\n${baseText}`
-        : attachmentBlock
-      : baseText;
-
-    const liveRun = useStreamStore.getState().activeBySession[sessionId];
-    const isCurrentlyRunning =
-      Boolean(liveRun?.streaming) || Boolean(get().summariesById[sessionId]?.busy);
-
-    if (isCurrentlyRunning) {
-      if (sendWhileRunning === "queue") {
-        await client.followUpSession(sessionId, userContent, inlineImages);
-      } else {
-        await client.sendPrompt(sessionId, {
+        await c.sendPrompt(sessionId, {
           text: userContent,
-          steer: true,
+          steer: false,
           images: inlineImages,
         });
+        clearDraftOnSuccess();
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Request failed";
+        useStreamStore.getState().failRun(sessionId, pendingRunId, msg);
+        get().setSessionBusy(sessionId, false);
+        set({ actionError: msg });
+        return false;
       }
-      return;
-    }
-
-    const carryTurn = liveRun ? materializeFinishedLiveRun(liveRun, locale) : null;
-    localSeq += 1;
-    const pendingRunId = `pending-${Date.now()}-${localSeq}`;
-    const userTurn: ChatTurn = {
-      id: `u-local-${Date.now()}-${localSeq}`,
-      runId: pendingRunId,
-      role: "user",
-      rawText: baseText,
-      timestamp: formatClockTime(Date.now(), locale),
-      status: "done",
-      failed: false,
-      notices: [],
-      attachments: chips,
-      blocks: [],
     };
 
-    set((s) => {
-      const tr = s.transcriptsById[sessionId];
-      const sum = s.summariesById[sessionId];
-      const baseTurns = tr ? [...tr.turns] : [];
-      if (carryTurn && !baseTurns.some((t) => t.role === "assistant" && t.runId === carryTurn.runId)) {
-        baseTurns.push(carryTurn);
-      }
-      const nextTurns = [...baseTurns, userTurn];
-      const nextTr: SessionTranscript = tr
-        ? { ...tr, turns: nextTurns }
-        : {
-            sessionId,
-            turns: nextTurns,
-            usage: null,
-            contextPercent: 0,
-            queuedInputs: [],
-            pendingQuestion: null,
-            loadedAt: Date.now(),
-          };
-      return {
-        transcriptsById: { ...s.transcriptsById, [sessionId]: nextTr },
-        summariesById: sum
-          ? {
-              ...s.summariesById,
-              [sessionId]: {
-                ...sum,
-                busy: true,
-                updatedAtMs: Date.now(),
-                title: sum.title || baseText.slice(0, 28),
-              },
-            }
-          : s.summariesById,
-      };
+    const promise = sendMessageImpl(client, options).finally(() => {
+      inFlightSends.delete(lockKey);
     });
-
-    useStreamStore.getState().beginRun(sessionId, pendingRunId);
-
-    try {
-      await client.sendPrompt(sessionId, {
-        text: userContent,
-        steer: false,
-        images: inlineImages,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Request failed";
-      useStreamStore.getState().failRun(sessionId, pendingRunId, msg);
-      get().setSessionBusy(sessionId, false);
-    }
+    inFlightSends.set(lockKey, promise);
+    return promise;
   },
 
   stopSession: async (client, sessionId) => {
@@ -1300,35 +1587,50 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
   },
 
   answerQuestion: async (client, requestId, answers) => {
-    await client.answerQuestion(requestId, answers);
-    set((s) => clearResolvedQuestionFromState(s, requestId));
-    await get().refreshQuestions(client);
+    set({ actionError: null });
+    try {
+      await client.answerQuestion(requestId, answers);
+      set((s) => clearResolvedQuestionFromState(s, requestId));
+      await get().refreshQuestions(client);
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to submit answer" });
+    }
   },
 
   dismissQuestion: async (client, requestId) => {
-    await client.dismissQuestion(requestId);
-    set((s) => clearResolvedQuestionFromState(s, requestId));
-    await get().refreshQuestions(client);
+    set({ actionError: null });
+    try {
+      await client.dismissQuestion(requestId);
+      set((s) => clearResolvedQuestionFromState(s, requestId));
+      await get().refreshQuestions(client);
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to dismiss question" });
+    }
   },
 
   resolveToolApproval: async (client, approvalId, decision, note) => {
-    await client.resolveApproval(approvalId, decision, note);
-    const activeId = get().activeSessionId;
-    await get().refreshApprovals(client);
-    if (activeId) {
-      set((s) => {
-        const tr = s.transcriptsById[activeId];
-        if (!tr?.pendingApprovals?.some((a) => a.id === approvalId)) return s;
-        return {
-          transcriptsById: {
-            ...s.transcriptsById,
-            [activeId]: {
-              ...tr,
-              pendingApprovals: tr.pendingApprovals.filter((a) => a.id !== approvalId),
+    set({ actionError: null });
+    try {
+      await client.resolveApproval(approvalId, decision, note);
+      const activeId = get().activeSessionId;
+      await get().refreshApprovals(client);
+      if (activeId) {
+        set((s) => {
+          const tr = s.transcriptsById[activeId];
+          if (!tr?.pendingApprovals?.some((a) => a.id === approvalId)) return s;
+          return {
+            transcriptsById: {
+              ...s.transcriptsById,
+              [activeId]: {
+                ...tr,
+                pendingApprovals: tr.pendingApprovals.filter((a) => a.id !== approvalId),
+              },
             },
-          },
-        };
-      });
+          };
+        });
+      }
+    } catch (err) {
+      set({ actionError: err instanceof Error ? err.message : "Failed to resolve approval" });
     }
   },
 
@@ -1377,6 +1679,11 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
   reset: () => {
     inFlightLoads.clear();
     pendingLoads.clear();
+    inFlightSends.clear();
+    for (const rec of pendingDeleteRecords.values()) {
+      clearTimeout(rec.timer);
+    }
+    pendingDeleteRecords.clear();
     for (const timer of slashStatusTimers.values()) {
       clearTimeout(timer);
     }
@@ -1390,6 +1697,9 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       pendingQuestions: [],
       pendingApprovals: [],
       unreadSessionIds: {},
+      loadingSessionIds: {},
+      sessionLoadErrors: {},
+      pendingDeletes: [],
       draftBotId: null,
       draftModelByBot: {},
       slashStatusBySession: {},
