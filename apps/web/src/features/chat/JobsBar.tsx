@@ -147,6 +147,12 @@ export function JobsBar({ sessionId }: { sessionId: string }) {
                           void client
                             .killSessionJob(sessionId, job.id)
                             .then(() => refresh())
+                            .catch((err) => {
+                              useSessionStore.setState({
+                                actionError:
+                                  err instanceof Error ? err.message : "Failed to stop job",
+                              });
+                            })
                             .finally(() => setBusyId(null));
                         }}
                       >

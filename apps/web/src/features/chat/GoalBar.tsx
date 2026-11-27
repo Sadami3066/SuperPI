@@ -3,6 +3,7 @@ import { formatGoalPhase } from "../../api/formatters";
 import type { HostGoalDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useSuperStore } from "../../stores/superStore";
 import { Badge, Button, IconButton } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
@@ -110,6 +111,11 @@ export function GoalBar({ sessionId }: { sessionId: string }) {
                   void client
                     .resumeSessionGoal(sessionId)
                     .then((res) => setGoal(res.goal ?? null))
+                    .catch((err) => {
+                      useSessionStore.setState({
+                        actionError: err instanceof Error ? err.message : "Failed to resume goal",
+                      });
+                    })
                     .finally(() => setBusy(false));
                 }}
               >
@@ -126,6 +132,11 @@ export function GoalBar({ sessionId }: { sessionId: string }) {
                   void client
                     .pauseSessionGoal(sessionId)
                     .then((res) => setGoal(res.goal ?? null))
+                    .catch((err) => {
+                      useSessionStore.setState({
+                        actionError: err instanceof Error ? err.message : "Failed to pause goal",
+                      });
+                    })
                     .finally(() => setBusy(false));
                 }}
               >
@@ -142,6 +153,11 @@ export function GoalBar({ sessionId }: { sessionId: string }) {
                 void client
                   .deleteSessionGoal(sessionId)
                   .then(() => setGoal(null))
+                  .catch((err) => {
+                    useSessionStore.setState({
+                      actionError: err instanceof Error ? err.message : "Failed to stop goal",
+                    });
+                  })
                   .finally(() => setBusy(false));
               }}
             >

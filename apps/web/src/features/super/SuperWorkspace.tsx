@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconLayoutSidebarRight } from "@tabler/icons-react";
+import { IconLayoutSidebarRight, IconSparkles } from "@tabler/icons-react";
 import {
   computeContextPercent,
   mapHostMessageToTurn,
@@ -26,9 +26,6 @@ import { MessageList } from "../chat/MessageList";
 import { TodoPanel } from "../chat/TodoPanel";
 import { UsageSheet } from "../chat/UsageSheet";
 import { BrandIcon, PiActivityIcon, PiMascot } from "../shared/BrandAssets";
-import { ModeSwitcher } from "../shell/ModeSwitcher";
-import { SuperTeamDialog } from "./SuperTeamDialog";
-import { WorkerDetailDialog } from "./WorkerDetailDialog";
 
 function workerPriority(w: HostWorkerDto): number {
   if (w.status === "waiting_input" || w.status === "waiting_approval" || w.status === "waiting") {
@@ -87,12 +84,10 @@ const SuperTodoPanel = memo(function SuperTodoPanel({ turns }: { turns: ChatTurn
 });
 
 export function SuperWorkspace({
-  activeView,
-  onChangeView,
+  onOpenTeamDialog,
   onOpenProvidersSettings,
 }: {
-  activeView: "chat" | "super";
-  onChangeView: (view: "chat" | "super") => void;
+  onOpenTeamDialog: () => void;
   onOpenProvidersSettings: () => void;
 }) {
   const { t } = useI18n();
@@ -129,11 +124,11 @@ export function SuperWorkspace({
   const openPanel = useWorkbenchStore((s) => s.openPanel);
   const toggleWorkbench = useWorkbenchStore((s) => s.toggleWorkbench);
 
-  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [greetingIndex] = useState(() => Math.floor(Math.random() * SUPER_PLAIN_GREETINGS.length));
 
   const dragDepthRef = useRef(0);
@@ -228,14 +223,28 @@ export function SuperWorkspace({
 
   const handleAnswerQuestion = useCallback(
     async (reqId: string, answers: QuestionAnswerInput[]) => {
-      if (client) await answerQuestion(client, reqId, answers);
+      if (!client) return;
+      try {
+        await answerQuestion(client, reqId, answers);
+      } catch (err) {
+        useSuperStore.setState({
+          error: err instanceof Error ? err.message : "Failed to submit answer",
+        });
+      }
     },
     [answerQuestion, client],
   );
 
   const handleDismissQuestion = useCallback(
     async (reqId: string) => {
-      if (client) await dismissQuestion(client, reqId);
+      if (!client) return;
+      try {
+        await dismissQuestion(client, reqId);
+      } catch (err) {
+        useSuperStore.setState({
+          error: err instanceof Error ? err.message : "Failed to dismiss question",
+        });
+      }
     },
     [client, dismissQuestion],
   );
@@ -249,7 +258,13 @@ export function SuperWorkspace({
       if (attachments.length === 0 && text === "/compact") {
         setComposerText("");
         setCompacting(true);
-        void compact(client).finally(() => setCompacting(false));
+        void compact(client)
+          .catch((err) => {
+            useSuperStore.setState({
+              error: err instanceof Error ? err.message : "Failed to compact",
+            });
+          })
+          .finally(() => setCompacting(false));
         return true;
       }
       const images = attachments
@@ -261,6 +276,15 @@ export function SuperWorkspace({
           mimeType: a.mimeType,
           name: a.name,
         }));
+      const droppedCount = attachments.length - images.length;
+      if (droppedCount > 0) {
+        setAttachmentNotice(t("super.nonImageDropped"));
+      } else {
+        setAttachmentNotice(null);
+      }
+      if (!text && images.length === 0) {
+        return false;
+      }
       const ok = await sendPrompt(
         client,
         text,
@@ -270,7 +294,7 @@ export function SuperWorkspace({
       if (ok) snapToBottomRef.current?.();
       return ok;
     },
-    [busy, client, compact, hostSettings?.sendWhileRunning, sendPrompt, setComposerText],
+    [busy, client, compact, hostSettings?.sendWhileRunning, sendPrompt, setComposerText, t],
   );
 
   const isEmpty = turns.length === 0 && !hasLiveRun && !state?.pendingQuestion;
@@ -305,7 +329,13 @@ export function SuperWorkspace({
       onOpenProvidersSettings={onOpenProvidersSettings}
       onSend={handleSend}
       onStop={() => {
-        if (client) void abort(client);
+        if (client) {
+          void abort(client).catch((err) => {
+            useSuperStore.setState({
+              error: err instanceof Error ? err.message : "Failed to stop",
+            });
+          });
+        }
       }}
       onSnapToBottom={() => snapToBottomRef.current?.()}
       attachFilesRef={attachFilesRef}
@@ -349,7 +379,10 @@ export function SuperWorkspace({
         }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap">
-          <ModeSwitcher activeView={activeView} onChange={onChangeView} />
+          <span className="inline-flex items-center gap-1.5 text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+            <IconSparkles size={15.5} stroke={1.7} style={{ color: "var(--pi-accent)" }} />
+            <span>{t("super.title")}</span>
+          </span>
           {runningWorkersCount > 0 && (
             <Badge tone="accent">
               {t("super.workersRunning", { count: runningWorkersCount })}
@@ -374,7 +407,13 @@ export function SuperWorkspace({
               onCompact={() => {
                 if (!client) return;
                 setCompacting(true);
-                void compact(client).finally(() => setCompacting(false));
+                void compact(client)
+                  .catch((err) => {
+                    useSuperStore.setState({
+                      error: err instanceof Error ? err.message : "Failed to compact",
+                    });
+                  })
+                  .finally(() => setCompacting(false));
               }}
               extraAction={
                 <Button
@@ -389,7 +428,7 @@ export function SuperWorkspace({
             />
           </Popover>
 
-          <Button variant="ghost" size="sm" onClick={() => setTeamDialogOpen(true)}>
+          <Button variant="ghost" size="sm" onClick={onOpenTeamDialog}>
             <BrandIcon name="ai/agent" size={14.5} />
             <span className="hidden sm:inline">{t("super.teamButton")}</span>
           </Button>
@@ -482,6 +521,20 @@ export function SuperWorkspace({
         </div>
       )}
 
+      {attachmentNotice && (
+        <div className="px-4 pt-2">
+          <NoticeBar
+            tone="warning"
+            message={attachmentNotice}
+            action={
+              <Button variant="ghost" size="sm" onClick={() => setAttachmentNotice(null)}>
+                {t("common.close")}
+              </Button>
+            }
+          />
+        </div>
+      )}
+
       {isEmpty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10">
           <div className="flex w-full max-w-[680px] flex-col items-center">
@@ -506,7 +559,7 @@ export function SuperWorkspace({
                 variant="secondary"
                 size="sm"
                 className="mt-4"
-                onClick={() => setTeamDialogOpen(true)}
+                onClick={onOpenTeamDialog}
               >
                 <BrandIcon name="ai/agent" size={14} />
                 <span>{t("super.configureTeam")}</span>
@@ -532,7 +585,7 @@ export function SuperWorkspace({
           <div className="shrink-0 px-4">
             {state?.activeToolText && !hasLiveRun && (
               <div
-                className="mx-auto mb-2 flex w-full max-w-[740px] items-center gap-2 px-1 text-[12.5px]"
+                className="mx-auto mb-2 flex w-full max-w-[760px] items-center gap-2 px-1 text-[12.5px]"
                 style={{ color: "var(--pi-ink-secondary)" }}
               >
                 <PiActivityIcon size={16} dark={dark} />
@@ -541,7 +594,7 @@ export function SuperWorkspace({
             )}
 
             {waitingWorker && (
-              <div className="mx-auto mb-2 w-full max-w-[740px]">
+              <div className="mx-auto mb-2 w-full max-w-[760px]">
                 <NoticeBar
                   tone="warning"
                   message={t("super.waitingApproval", {
@@ -579,9 +632,6 @@ export function SuperWorkspace({
         </div>
       )}
 
-      <WorkerDetailDialog onOpenProvidersSettings={onOpenProvidersSettings} />
-      <SuperTeamDialog open={teamDialogOpen} onOpenChange={setTeamDialogOpen} />
-
       <ConfirmDialog
         open={confirmReset}
         onOpenChange={setConfirmReset}
@@ -594,7 +644,13 @@ export function SuperWorkspace({
           if (!client) return;
           setResetting(true);
           setConfirmReset(false);
-          void resetThread(client).finally(() => setResetting(false));
+          void resetThread(client)
+            .catch((err) => {
+              useSuperStore.setState({
+                error: err instanceof Error ? err.message : "Failed to reset thread",
+              });
+            })
+            .finally(() => setResetting(false));
         }}
       />
     </div>

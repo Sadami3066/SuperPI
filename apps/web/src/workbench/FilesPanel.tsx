@@ -71,6 +71,7 @@ export default function FilesPanel({
   const [renameTarget, setRenameTarget] = useState<HostWorkspaceFileEntryDto | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<HostWorkspaceFileEntryDto | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -407,7 +408,15 @@ export default function FilesPanel({
         )}
       </div>
 
-      <Dialog open={newFileOpen} onOpenChange={setNewFileOpen} title={t("files.newFile")} maxWidthClass="max-w-[380px]">
+      <Dialog
+        open={newFileOpen}
+        onOpenChange={(v) => {
+          setNewFileOpen(v);
+          if (!v) setModalError(null);
+        }}
+        title={t("files.newFile")}
+        maxWidthClass="max-w-[380px]"
+      >
         <form
           className="space-y-3"
           onSubmit={(e) => {
@@ -416,6 +425,7 @@ export default function FilesPanel({
             if (!client || !raw) return;
             const target = raw.includes("/") || !currentPath ? raw : `${currentPath}/${raw}`;
             const fileName = target.split("/").pop() || target;
+            setModalError(null);
             void client
               .uploadBotFile(bot.id, { path: target, dataBase64: "", overwrite: false })
               .then(() => {
@@ -429,7 +439,7 @@ export default function FilesPanel({
                   name: fileName,
                 });
               })
-              .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+              .catch((err) => setModalError(err instanceof Error ? err.message : "Failed"));
           }}
         >
           <Input
@@ -438,8 +448,21 @@ export default function FilesPanel({
             onChange={(e) => setNewFileDraft(e.target.value)}
             placeholder={t("files.newFileName")}
           />
+          {modalError && (
+            <div className="text-[12px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={() => setNewFileOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setNewFileOpen(false);
+                setModalError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button type="submit" variant="primary" size="sm" disabled={!newFileDraft.trim()}>
@@ -449,7 +472,15 @@ export default function FilesPanel({
         </form>
       </Dialog>
 
-      <Dialog open={mkdirOpen} onOpenChange={setMkdirOpen} title={t("files.newFolder")} maxWidthClass="max-w-[380px]">
+      <Dialog
+        open={mkdirOpen}
+        onOpenChange={(v) => {
+          setMkdirOpen(v);
+          if (!v) setModalError(null);
+        }}
+        title={t("files.newFolder")}
+        maxWidthClass="max-w-[380px]"
+      >
         <form
           className="space-y-3"
           onSubmit={(e) => {
@@ -457,6 +488,7 @@ export default function FilesPanel({
             const raw = mkdirDraft.trim().replace(/^\/+/, "");
             if (!client || !raw) return;
             const target = raw.includes("/") || !currentPath ? raw : `${currentPath}/${raw}`;
+            setModalError(null);
             void client
               .mkdirBotFile(bot.id, target)
               .then(() => {
@@ -464,7 +496,7 @@ export default function FilesPanel({
                 setMkdirOpen(false);
                 void loadDir(currentPath);
               })
-              .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+              .catch((err) => setModalError(err instanceof Error ? err.message : "Failed"));
           }}
         >
           <Input
@@ -473,8 +505,21 @@ export default function FilesPanel({
             onChange={(e) => setMkdirDraft(e.target.value)}
             placeholder={t("files.newFolderName")}
           />
+          {modalError && (
+            <div className="text-[12px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={() => setMkdirOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setMkdirOpen(false);
+                setModalError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button type="submit" variant="primary" size="sm" disabled={!mkdirDraft.trim()}>
@@ -487,7 +532,10 @@ export default function FilesPanel({
       <Dialog
         open={Boolean(renameTarget)}
         onOpenChange={(v) => {
-          if (!v) setRenameTarget(null);
+          if (!v) {
+            setRenameTarget(null);
+            setModalError(null);
+          }
         }}
         title={t("files.rename")}
         maxWidthClass="max-w-[400px]"
@@ -497,13 +545,14 @@ export default function FilesPanel({
           onSubmit={(e) => {
             e.preventDefault();
             if (!client || !renameTarget || !renameDraft.trim()) return;
+            setModalError(null);
             void client
               .renameBotFile(bot.id, renameTarget.path, renameDraft.trim())
               .then(() => {
                 setRenameTarget(null);
                 void loadDir(currentPath);
               })
-              .catch((err) => setError(err instanceof Error ? err.message : "Rename failed"));
+              .catch((err) => setModalError(err instanceof Error ? err.message : "Rename failed"));
           }}
         >
           <Input
@@ -512,8 +561,21 @@ export default function FilesPanel({
             onChange={(e) => setRenameDraft(e.target.value)}
             placeholder={t("files.renameTarget")}
           />
+          {modalError && (
+            <div className="text-[12px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={() => setRenameTarget(null)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setRenameTarget(null);
+                setModalError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button type="submit" variant="primary" size="sm" disabled={!renameDraft.trim()}>

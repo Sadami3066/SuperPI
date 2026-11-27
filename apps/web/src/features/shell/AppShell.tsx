@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { HostBotDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import {
@@ -13,6 +13,7 @@ import { useConnectionStore } from "../../stores/connectionStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useStreamStore } from "../../stores/streamStore";
+import { useSuperStore } from "../../stores/superStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Button, NoticeBar } from "../../ui";
 import { WorkbenchDock } from "../../workbench/WorkbenchDock";
@@ -20,12 +21,15 @@ import { BotSettingsDialog } from "../bots/BotSettingsDialog";
 import { CreateBotDialog } from "../bots/CreateBotDialog";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { SettingsModal, type SettingsTabId } from "../settings/SettingsModal";
+import { SuperTeamDialog } from "../super/SuperTeamDialog";
 import { SuperWorkspace } from "../super/SuperWorkspace";
+import { WorkerDetailDialog } from "../super/WorkerDetailDialog";
 import { CommandPalette } from "./CommandPalette";
 import { DesktopTitlebar } from "./DesktopTitlebar";
 import { type FeatureViewKind, FeatureWorkspaceView } from "./FeatureWorkspaceView";
 import { Sidebar } from "./Sidebar";
 
+export type AppMode = "pi" | "super";
 export type MainViewId = "chat" | "super" | FeatureViewKind;
 
 export function AppShell() {
@@ -47,6 +51,10 @@ export function AppShell() {
   const flushPendingDeletes = useSessionStore((s) => s.flushPendingDeletes);
   const loadArchivedSessions = useSessionStore((s) => s.loadArchivedSessions);
 
+  const refreshSuperState = useSuperStore((s) => s.refreshState);
+  const refreshSuperTeam = useSuperStore((s) => s.refreshTeam);
+  const setSelectedWorkerId = useSuperStore((s) => s.setSelectedWorkerId);
+
   useEffect(() => {
     const onUnload = () => {
       void flushPendingDeletes();
@@ -54,6 +62,7 @@ export function AppShell() {
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
   }, [flushPendingDeletes]);
+
   const locale = useSettingsStore((s) => s.locale);
   const refreshSettingsData = useSettingsStore((s) => s.refreshSettingsData);
   const workbenchOpen = useWorkbenchStore((s) => s.open);
@@ -68,14 +77,8 @@ export function AppShell() {
     };
   }, [isElectron]);
 
+  const [appMode, setAppMode] = useState<AppMode>("pi");
   const [activeView, setActiveView] = useState<MainViewId>("chat");
-  const lastChatViewRef = useRef<"chat" | "super">("chat");
-  const selectMainView = (next: MainViewId) => {
-    if (next === "chat" || next === "super") {
-      lastChatViewRef.current = next;
-    }
-    setActiveView(next);
-  };
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
@@ -87,10 +90,39 @@ export function AppShell() {
     deviceName: string;
   } | null>(null);
   const [settingsBot, setSettingsBot] = useState<HostBotDto | null>(null);
+  const [superTeamDialogOpen, setSuperTeamDialogOpen] = useState(false);
 
   const activeSummary = useSessionStore((s) => s.summariesById[s.activeSessionId]);
   const summariesById = useSessionStore((s) => s.summariesById);
   const activeRunsBySession = useStreamStore((s) => s.activeBySession);
+
+  const switchAppMode = useCallback(
+    (nextMode: AppMode) => {
+      setAppMode(nextMode);
+      setActiveView(nextMode === "super" ? "super" : "chat");
+      if (nextMode === "super" && client) {
+        void refreshSuperState(client);
+        void refreshSuperTeam(client);
+      }
+    },
+    [client, refreshSuperState, refreshSuperTeam],
+  );
+
+  const selectMainView = useCallback(
+    (next: MainViewId) => {
+      if (next === "super") {
+        setAppMode("super");
+        if (client) {
+          void refreshSuperState(client);
+          void refreshSuperTeam(client);
+        }
+      } else if (next === "chat") {
+        setAppMode("pi");
+      }
+      setActiveView(next);
+    },
+    [client, refreshSuperState, refreshSuperTeam],
+  );
 
   useEffect(() => {
     if (activeView === "super") {
@@ -98,11 +130,7 @@ export function AppShell() {
       return;
     }
     if (activeView === "timers") {
-      document.title = `${t("nav.timers")} — Super PI`;
-      return;
-    }
-    if (activeView === "inbox") {
-      document.title = `${t("nav.inbox")} — Super PI`;
+      document.title = `${appMode === "super" ? t("auto.superTimersTitle") : t("auto.piTimersTitle")} — Super PI`;
       return;
     }
     if (activeView === "memory") {
@@ -120,7 +148,7 @@ export function AppShell() {
     const activeBot = bots.find((b) => b.id === (activeSummary?.botId ?? draftBotId ?? bots[0]?.id));
     const titlePart = activeSummary?.title || activeBot?.name;
     document.title = titlePart ? `${titlePart} — Super PI` : "Super PI";
-  }, [activeSummary?.botId, activeSummary?.title, activeView, bots, draftBotId, t]);
+  }, [activeSummary?.botId, activeSummary?.title, activeView, appMode, bots, draftBotId, t]);
 
   const openSettings = useCallback(
     (tab: SettingsTabId = "general") => {
@@ -148,7 +176,7 @@ export function AppShell() {
       }
       if (cmd.kind === "super") {
         setSettingsOpen(false);
-        selectMainView("super");
+        switchAppMode("super");
         return;
       }
       if (cmd.kind === "new_chat") {
@@ -161,7 +189,8 @@ export function AppShell() {
       }
       if (cmd.kind === "feature") {
         setSettingsOpen(false);
-        selectMainView(cmd.view);
+        const mapped: FeatureViewKind = cmd.view === "inbox" ? "timers" : cmd.view;
+        selectMainView(mapped);
         return;
       }
       if (cmd.kind === "settings") {
@@ -171,7 +200,7 @@ export function AppShell() {
         }
       }
     },
-    [bots, client, locale, openSettings, selectSession, startDraftSession],
+    [bots, client, locale, openSettings, selectMainView, selectSession, startDraftSession, switchAppMode],
   );
 
   useEffect(() => {
@@ -201,7 +230,7 @@ export function AppShell() {
       }
       const recentSessions = Object.values(summariesById)
         .filter((s) => !s.archived)
-        .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        .toSorted((a, b) => b.updatedAtMs - a.updatedAtMs)
         .slice(0, 5)
         .map((s) => ({ id: s.id, title: s.title }));
       void updateDesktopTrayState({
@@ -218,14 +247,14 @@ export function AppShell() {
         const state = useSessionStore.getState();
         const ordered = Object.values(state.summariesById)
           .filter((s) => !s.archived)
-          .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+          .toSorted((a, b) => b.updatedAtMs - a.updatedAtMs);
         if (ordered.length > 1 && client) {
           e.preventDefault();
           const curIdx = ordered.findIndex((s) => s.id === state.activeSessionId);
           const step = e.shiftKey ? -1 : 1;
           const next = ordered[(curIdx + step + ordered.length) % ordered.length];
           if (next) {
-            setActiveView("chat");
+            selectMainView("chat");
             void state.selectSession(client, next.id, locale);
           }
         }
@@ -236,7 +265,7 @@ export function AppShell() {
         if (isShortcutBlockedByTarget(e.target, { hasMod: false })) return;
         e.preventDefault();
         setSettingsOpen(false);
-        setActiveView((v) => (v === "super" ? "chat" : "super"));
+        switchAppMode(appMode === "super" ? "pi" : "super");
         return;
       }
 
@@ -286,19 +315,23 @@ export function AppShell() {
       } else if (e.shiftKey && key === "s") {
         e.preventDefault();
         setSettingsOpen(false);
-        setActiveView((v) => (v === "super" ? "chat" : "super"));
+        switchAppMode(appMode === "super" ? "pi" : "super");
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeSessionId,
+    appMode,
     bots,
     client,
     isElectron,
     locale,
+    openSettings,
+    selectMainView,
     settingsOpen,
     startDraftSession,
+    switchAppMode,
     togglePanel,
   ]);
 
@@ -308,6 +341,8 @@ export function AppShell() {
       style={{ background: "var(--pi-chrome)", color: "var(--pi-ink)" }}
     >
       <DesktopTitlebar
+        appMode={appMode}
+        onChangeAppMode={switchAppMode}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         workbenchOpen={workbenchOpen}
@@ -318,8 +353,11 @@ export function AppShell() {
         <Sidebar
           open={sidebarOpen}
           hideHeader={isElectron}
+          appMode={appMode}
           activeView={activeView}
+          onChangeAppMode={switchAppMode}
           onSelectChat={() => selectMainView("chat")}
+          onSelectSuperMain={() => switchAppMode("super")}
           onSelectFeature={(view) => selectMainView(view)}
           onToggleCollapse={() => setSidebarOpen((v) => !v)}
           onOpenSearch={() => setPaletteOpen(true)}
@@ -328,6 +366,8 @@ export function AppShell() {
             setCreateBotOpen(true);
           }}
           onOpenBotSettings={(bot) => setSettingsBot(bot)}
+          onOpenSuperTeam={() => setSuperTeamDialogOpen(true)}
+          onOpenRelay={() => openSettings("relay")}
           onOpenSettings={() => openSettings("general")}
         />
 
@@ -368,28 +408,30 @@ export function AppShell() {
             <div key={activeView} className="pi-view-enter flex min-h-0 min-w-0 flex-1 flex-col">
               {activeView === "super" ? (
                 <SuperWorkspace
-                  activeView={activeView}
-                  onChangeView={(view) => selectMainView(view)}
+                  onOpenTeamDialog={() => setSuperTeamDialogOpen(true)}
                   onOpenProvidersSettings={() => openSettings("providers")}
                 />
               ) : activeView === "timers" ||
-                activeView === "inbox" ||
                 activeView === "memory" ||
                 activeView === "skills" ||
                 activeView === "mcp" ? (
                 <FeatureWorkspaceView
                   kind={activeView}
-                  onBack={() => selectMainView(lastChatViewRef.current)}
+                  timerScope={appMode}
+                  onBack={() => setActiveView(appMode === "super" ? "super" : "chat")}
                   onOpenSession={(sid) => {
                     if (!client) return;
                     selectMainView("chat");
                     void selectSession(client, sid, locale);
                   }}
+                  onOpenSuperMain={() => switchAppMode("super")}
+                  onOpenSuperWorker={(workerId) => {
+                    switchAppMode("super");
+                    setSelectedWorkerId(workerId);
+                  }}
                 />
               ) : (
                 <ChatWorkspace
-                  activeView="chat"
-                  onChangeView={(view) => selectMainView(view)}
                   onOpenBotSettings={(bot) => setSettingsBot(bot)}
                   onOpenProvidersSettings={() => openSettings("providers")}
                 />
@@ -430,7 +472,7 @@ export function AppShell() {
         }}
         onSelectSuperView={() => {
           setSettingsOpen(false);
-          selectMainView("super");
+          switchAppMode("super");
         }}
         onSelectFeatureView={(view) => {
           setSettingsOpen(false);
@@ -451,6 +493,15 @@ export function AppShell() {
 
       <BotSettingsDialog bot={settingsBot} onClose={() => setSettingsBot(null)} />
 
+      <SuperTeamDialog
+        open={superTeamDialogOpen}
+        onOpenChange={setSuperTeamDialogOpen}
+      />
+
+      <WorkerDetailDialog
+        onOpenProvidersSettings={() => openSettings("providers")}
+      />
+
       {pendingDeletes.length > 0 && (
         <div className="fixed right-5 bottom-5 z-50 flex flex-col gap-2">
           {pendingDeletes.map((item) => (
@@ -460,7 +511,7 @@ export function AppShell() {
               style={{
                 background: "var(--pi-paper)",
                 color: "var(--pi-ink)",
-                border: "0.5px solid var(--pi-surface-rim)",
+                border: "1px solid var(--pi-canvas-border)",
               }}
             >
               <span className="max-w-[240px] truncate">

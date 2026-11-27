@@ -742,8 +742,16 @@ export default function DiffWorktreePanel({ context }: { context: WorkbenchPanel
                           void client
                             .applyWorktree(wt.id)
                             .then((res) => {
-                              setFeedback({ tone: "ok", text: res.message });
-                              void refreshSummary();
+                              if (res.ok) {
+                                setFeedback({ tone: "ok", text: res.message });
+                                void refreshSummary();
+                              } else {
+                                setConflicts(res.conflicts ?? []);
+                                setFeedback({
+                                  tone: "err",
+                                  text: res.message || "Apply failed with conflicts",
+                                });
+                              }
                             })
                             .catch((e) =>
                               setFeedback({

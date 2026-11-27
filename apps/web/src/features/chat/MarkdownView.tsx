@@ -179,7 +179,9 @@ const CodeBlock = memo(function CodeBlock({
     void client
       .listTerminals(bot.id)
       .then(async (list) => {
-        const term = list[0] ?? (await client.createTerminal(bot.id, { worktreeId, fresh: false }));
+        const term =
+          list.find((t) => t.alive) ??
+          (await client.createTerminal(bot.id, { worktreeId, fresh: false }));
         const cmd = code.endsWith("\n") ? code : `${code}\n`;
         await client.sendTerminalInput(term.id, cmd);
       })

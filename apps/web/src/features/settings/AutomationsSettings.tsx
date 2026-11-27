@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
-import { formatAutomationSource, formatAutomationStatus } from "../../api/formatters";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconClock } from "@tabler/icons-react";
 import { formatRelativeTime } from "../../api/mappers";
 import type { HostSaveTimerRequest, HostTimerDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSuperStore } from "../../stores/superStore";
-import { IconClock, IconInbox } from "@tabler/icons-react";
 import {
   Badge,
   Button,
@@ -20,34 +20,45 @@ import {
   Select,
   Skeleton,
   Switch,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   Textarea,
 } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
 import { formatTimerSchedule, validateTimerDraft, weekdayLabel } from "./timerSchedule";
 
+const SUPER_ROUTER_SESSION_ID = "super:router";
+const SUPER_WORKER_PREFIX = "super:worker:";
+
+function isSuperSessionId(sessionId: string): boolean {
+  return sessionId === SUPER_ROUTER_SESSION_ID || sessionId.startsWith(SUPER_WORKER_PREFIX);
+}
+
+function parseWorkerIdFromTimerSession(sessionId: string): string | null {
+  return sessionId.startsWith(SUPER_WORKER_PREFIX)
+    ? sessionId.slice(SUPER_WORKER_PREFIX.length)
+    : null;
+}
+
 export function AutomationsSettings({
-  mode,
+  scope = "pi",
   onOpenSession,
+  onOpenSuperMain,
+  onOpenSuperWorker,
 }: {
-  mode?: "timers" | "inbox";
+  scope?: "pi" | "super";
   onOpenSession?: (sessionId: string) => void;
+  onOpenSuperMain?: () => void;
+  onOpenSuperWorker?: (workerId: string) => void;
 }) {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
   const locale = useSettingsStore((s) => s.locale);
   const bots = useBotStore((s) => s.bots);
+  const summariesById = useSessionStore((s) => s.summariesById);
+  const superState = useSuperStore((s) => s.state);
+  const refreshSuperState = useSuperStore((s) => s.refreshState);
 
-  const inbox = useSuperStore((s) => s.inbox);
-  const unreadInboxCount = useSuperStore((s) => s.unreadInboxCount);
-  const refreshInbox = useSuperStore((s) => s.refreshInbox);
-  const setInboxItems = useSuperStore((s) => s.setInboxItems);
-
-  const [tab, setTab] = useState<string>(() => mode ?? (unreadInboxCount > 0 ? "inbox" : "timers"));
   const [timers, setTimers] = useState<HostTimerDto[]>([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,36 +72,107 @@ export function AutomationsSettings({
   const [time, setTime] = useState("09:00");
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [cronExpression, setCronExpression] = useState("0 9 * * 1-5");
-  const [botId, setBotId] = useState("");
+  const [targetValue, setTargetValue] = useState("");
+  const [enabledDraft, setEnabledDraft] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<HostTimerDto | null>(null);
 
-  const localBots = bots.filter((b) => !b.isRemote);
+  const isSuperScope = scope === "super";
+  const localBots = useMemo(() => bots.filter((b) => !b.isRemote), [bots]);
+  const localBotIds = useMemo(() => new Set(localBots.map((b) => b.id)), [localBots]);
+  const botNameById = useMemo(() => new Map(bots.map((b) => [b.id, b.name])), [bots]);
+  const workers = useMemo(() => superState?.workers ?? [], [superState?.workers]);
 
-  const loadAll = useCallback(async () => {
+  const localSessions = useMemo(
+    () =>
+      Object.values(summariesById)
+        .filter((s) => !s.archived && localBotIds.has(s.botId))
+        .toSorted((a, b) => b.updatedAtMs - a.updatedAtMs),
+    [localBotIds, summariesById],
+  );
+
+  const loadTimers = useCallback(async () => {
     if (!client) return;
     setLoading(true);
     setError(null);
     try {
-      if (mode === "timers") {
-        const timerList = await client.listTimers();
-        setTimers(timerList);
-      } else if (mode === "inbox") {
-        await refreshInbox(client);
-      } else {
-        const [timerList] = await Promise.all([client.listTimers(), refreshInbox(client)]);
-        setTimers(timerList);
-      }
+      const [timerList] = await Promise.all([
+        client.listTimers(scope),
+        isSuperScope ? refreshSuperState(client) : Promise.resolve(),
+      ]);
+      const scoped = timerList.filter((item) =>
+        isSuperScope ? isSuperSessionId(item.sessionId) : !isSuperSessionId(item.sessionId),
+      );
+      setTimers(scoped);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load automations");
+      setError(err instanceof Error ? err.message : "Failed to load timers");
     } finally {
       setLoading(false);
     }
-  }, [client, mode, refreshInbox]);
+  }, [client, isSuperScope, refreshSuperState, scope]);
 
   useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+    void loadTimers();
+  }, [loadTimers]);
+
+  const targetOptions = useMemo(() => {
+    if (isSuperScope) {
+      const opts = [{ value: `sess:${SUPER_ROUTER_SESSION_ID}`, label: t("auto.targetSuperMain") }];
+      for (const w of workers.toSorted((a, b) => b.updatedAt - a.updatedAt)) {
+        opts.push({
+          value: `sess:${SUPER_WORKER_PREFIX}${w.workerId}`,
+          label: `${w.botName} · ${w.title || w.workerId}`,
+        });
+      }
+      return opts;
+    }
+    const opts: Array<{ value: string; label: string }> = [];
+    for (const s of localSessions.slice(0, 30)) {
+      const botName = botNameById.get(s.botId);
+      const title = s.title || t("nav.untitledChat");
+      opts.push({
+        value: `sess:${s.id}`,
+        label: botName ? `${botName} · ${title}` : title,
+      });
+    }
+    for (const b of localBots) {
+      opts.push({
+        value: `bot:${b.id}`,
+        label: `${b.name} (${t("nav.newChat")})`,
+      });
+    }
+    return opts;
+  }, [botNameById, isSuperScope, localBots, localSessions, t, workers]);
+
+  const resolveTimerTargetLabel = useCallback(
+    (timer: HostTimerDto): string | null => {
+      if (!timer.sessionId) return null;
+      if (timer.sessionId === SUPER_ROUTER_SESSION_ID) {
+        return t("auto.targetSuperMain");
+      }
+      const workerId = parseWorkerIdFromTimerSession(timer.sessionId);
+      if (workerId) {
+        const w = workers.find((x) => x.workerId === workerId);
+        return w ? `${w.botName} · ${w.title || workerId}` : workerId;
+      }
+      const sess = summariesById[timer.sessionId];
+      if (sess) {
+        const botName = botNameById.get(sess.botId);
+        const title = sess.title || t("nav.untitledChat");
+        return botName ? `${botName} · ${title}` : title;
+      }
+      return null;
+    },
+    [botNameById, summariesById, t, workers],
+  );
+
+  const formatTimerError = (code: string): string => {
+    const upper = code.trim().toUpperCase();
+    if (upper === "SESSION_MISSING") return t("auto.errorSessionMissing");
+    if (upper === "OPEN_FAILED") return t("auto.errorOpenFailed");
+    if (upper === "DELIVERY_FAILED") return t("auto.errorDeliveryFailed");
+    return code;
+  };
 
   const openEditor = (existing?: HostTimerDto) => {
     setEditingTimer(existing ?? null);
@@ -101,29 +183,60 @@ export function AutomationsSettings({
     setTime(existing?.time || "09:00");
     setDays(existing?.days.length ? existing.days : [1, 2, 3, 4, 5]);
     setCronExpression(existing?.cronExpression || "0 9 * * 1-5");
-    setBotId(localBots[0]?.id ?? "");
+    setEnabledDraft(existing ? existing.enabled : true);
+    if (existing?.sessionId) {
+      const candidate = `sess:${existing.sessionId}`;
+      const matched = targetOptions.some((o) => o.value === candidate);
+      setTargetValue(matched ? candidate : (targetOptions[0]?.value ?? ""));
+    } else {
+      setTargetValue(targetOptions[0]?.value ?? "");
+    }
     setFormError(null);
     setEditorOpen(true);
   };
 
   const handleSaveTimer = async () => {
     if (!client) return;
+    const trimmedPrompt = prompt.trim();
+    const trimmedName =
+      name.trim() ||
+      (trimmedPrompt ? trimmedPrompt.replace(/\s+/g, " ").slice(0, 28) : "");
+
+    const isSessionTarget = targetValue.startsWith("sess:");
+    const isBotTarget = targetValue.startsWith("bot:");
+    const targetSessionId = isSessionTarget
+      ? targetValue.slice("sess:".length)
+      : isSuperScope
+        ? SUPER_ROUTER_SESSION_ID
+        : undefined;
+    const targetBotId = isBotTarget ? targetValue.slice("bot:".length) : undefined;
+
     const payload: HostSaveTimerRequest = {
-      name: name.trim(),
-      prompt: prompt.trim(),
+      name: trimmedName,
+      prompt: trimmedPrompt,
       triggerType,
       date: triggerType === "once" ? date.trim() : undefined,
       time: triggerType !== "cron" ? time.trim() : undefined,
       days: triggerType === "weekly" ? days : undefined,
       cronExpression: triggerType === "cron" ? cronExpression.trim() : undefined,
-      enabled: editingTimer ? editingTimer.enabled : true,
-      botId: botId || undefined,
+      enabled: enabledDraft,
+      sessionId: targetSessionId,
+      botId: targetBotId,
     };
+
     const issue = validateTimerDraft(payload);
     if (issue) {
       setFormError(t("auto.invalidSchedule"));
       return;
     }
+    if (triggerType === "once" && enabledDraft) {
+      const scheduled = new Date(`${date.trim()}T${time.trim()}`);
+      if (!Number.isNaN(scheduled.getTime()) && scheduled.getTime() <= Date.now()) {
+        setFormError(t("auto.pastTimeError"));
+        return;
+      }
+    }
+
     setBusy(true);
     setFormError(null);
     try {
@@ -133,7 +246,7 @@ export function AutomationsSettings({
         await client.createTimer(payload);
       }
       setEditorOpen(false);
-      await loadAll();
+      await loadTimers();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to save timer");
     } finally {
@@ -141,9 +254,171 @@ export function AutomationsSettings({
     }
   };
 
-  const timersSection = (
-    <div className="space-y-3">
-      <div className="flex justify-end">
+  const handleOpenTimerTarget = (timer: HostTimerDto) => {
+    if (!timer.sessionId) return;
+    if (timer.sessionId === SUPER_ROUTER_SESSION_ID) {
+      onOpenSuperMain?.();
+      return;
+    }
+    const workerId = parseWorkerIdFromTimerSession(timer.sessionId);
+    if (workerId) {
+      onOpenSuperWorker?.(workerId);
+      return;
+    }
+    onOpenSession?.(timer.sessionId);
+  };
+
+  const filteredTimers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return timers;
+    return timers.filter((timer) => {
+      const targetLabel = (resolveTimerTargetLabel(timer) ?? "").toLowerCase();
+      return (
+        timer.name.toLowerCase().includes(q) ||
+        timer.prompt.toLowerCase().includes(q) ||
+        targetLabel.includes(q)
+      );
+    });
+  }, [query, resolveTimerTargetLabel, timers]);
+
+  const activeTimers = useMemo(
+    () =>
+      filteredTimers
+        .filter((x) => x.enabled)
+        .toSorted((a, b) => (a.nextRunAt ?? Number.MAX_SAFE_INTEGER) - (b.nextRunAt ?? Number.MAX_SAFE_INTEGER)),
+    [filteredTimers],
+  );
+
+  const inactiveTimers = useMemo(
+    () => filteredTimers.filter((x) => !x.enabled),
+    [filteredTimers],
+  );
+
+  const renderTimerCard = (timer: HostTimerDto) => {
+    const targetLabel = resolveTimerTargetLabel(timer);
+    return (
+      <Card key={timer.id} className={`space-y-2 p-4 transition-opacity ${timer.enabled ? "" : "opacity-65"}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
+                {timer.name}
+              </span>
+              <Badge tone="neutral">{formatTimerSchedule(timer, locale)}</Badge>
+              {targetLabel && <Badge tone="accent">{targetLabel}</Badge>}
+              {timer.lastError && <Badge tone="danger">{formatTimerError(timer.lastError)}</Badge>}
+            </div>
+            <p className="line-clamp-2 text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
+              {timer.prompt}
+            </p>
+            <div className="flex flex-wrap gap-3 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+              {timer.nextRunAt && (
+                <span>
+                  {t("auto.nextRun", {
+                    time: formatRelativeTime(timer.nextRunAt, locale),
+                  })}
+                </span>
+              )}
+              {timer.lastDeliveredAt && (
+                <span>
+                  {t("auto.lastRun", {
+                    time: formatRelativeTime(timer.lastDeliveredAt, locale),
+                  })}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <Switch
+            checked={timer.enabled}
+            disabled={busy}
+            onCheckedChange={(checked) => {
+              if (!client) return;
+              setBusy(true);
+              void client
+                .toggleTimer(timer.id, checked)
+                .then(() => loadTimers())
+                .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                .finally(() => setBusy(false));
+            }}
+          />
+        </div>
+
+        <div
+          className="flex flex-wrap items-center justify-end gap-1.5 pt-2"
+          style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
+        >
+          {timer.sessionId && (
+            <Button variant="ghost" size="sm" onClick={() => handleOpenTimerTarget(timer)}>
+              <BrandIcon name="navigation/external_link" size={13.5} />
+              <span>{t("auto.openSession")}</span>
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              if (!client) return;
+              setBusy(true);
+              void client
+                .runTimerNow(timer.id)
+                .then(() => loadTimers())
+                .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                .finally(() => setBusy(false));
+            }}
+          >
+            <BrandIcon name="action/play" size={13.5} />
+            <span>{t("auto.runNow")}</span>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => openEditor(timer)}>
+            {t("common.edit")}
+          </Button>
+          <IconButton
+            size="sm"
+            label={t("common.delete")}
+            onClick={() => setDeleteTarget(timer)}
+          >
+            <BrandIcon name="action/delete" size={14} />
+          </IconButton>
+        </div>
+      </Card>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div
+          className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2 text-[12.5px]"
+          style={{
+            background: "var(--pi-paper)",
+            border: "1px solid var(--pi-canvas-border)",
+            color: "var(--pi-danger)",
+          }}
+        >
+          <span className="truncate">{error}</span>
+          <Button variant="ghost" size="sm" onClick={() => void loadTimers()}>
+            {t("conn.retry")}
+          </Button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <div className="relative min-w-[200px] flex-1">
+          <BrandIcon
+            name="action/search"
+            size={14}
+            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
+            style={{ color: "var(--pi-ink-tertiary)" }}
+          />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("auto.searchPlaceholder")}
+            className="h-8.5 pl-8.5 text-[12.5px]"
+          />
+        </div>
         <Button variant="secondary" size="sm" onClick={() => openEditor()}>
           <BrandIcon name="action/add" size={14} />
           <span>{t("auto.newTimer")}</span>
@@ -166,6 +441,7 @@ export function AutomationsSettings({
         <EmptyState
           icon={<IconClock size={20} stroke={1.65} />}
           title={t("auto.emptyTimers")}
+          description={isSuperScope ? t("auto.superEmptyDesc") : undefined}
           action={
             <Button variant="secondary" size="sm" onClick={() => openEditor()}>
               <BrandIcon name="action/add" size={14} />
@@ -173,272 +449,30 @@ export function AutomationsSettings({
             </Button>
           }
         />
+      ) : filteredTimers.length === 0 ? (
+        <EmptyState
+          icon={<BrandIcon name="action/search" size={18} />}
+          title={t("files.searchEmpty")}
+        />
       ) : (
-        <div className="space-y-2.5">
-          {timers.map((timer) => (
-            <Card key={timer.id} className="space-y-2 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[14px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                      {timer.name}
-                    </span>
-                    <Badge tone="neutral">{formatTimerSchedule(timer, locale)}</Badge>
-                    {timer.lastError && <Badge tone="danger">{timer.lastError}</Badge>}
-                  </div>
-                  <p className="line-clamp-2 text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
-                    {timer.prompt}
-                  </p>
-                  <div className="flex flex-wrap gap-3 text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                    {timer.nextRunAt && (
-                      <span>
-                        {t("auto.nextRun", {
-                          time: formatRelativeTime(timer.nextRunAt, locale),
-                        })}
-                      </span>
-                    )}
-                    {timer.lastDeliveredAt && (
-                      <span>
-                        {t("auto.lastRun", {
-                          time: formatRelativeTime(timer.lastDeliveredAt, locale),
-                        })}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <Switch
-                  checked={timer.enabled}
-                  disabled={busy}
-                  onCheckedChange={(checked) => {
-                    if (!client) return;
-                    setBusy(true);
-                    void client
-                      .toggleTimer(timer.id, checked)
-                      .then(() => loadAll())
-                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                      .finally(() => setBusy(false));
-                  }}
-                />
+        <div className="space-y-5">
+          {activeTimers.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="px-0.5 text-[11.5px] font-semibold" style={{ color: "var(--pi-ink-tertiary)" }}>
+                {t("auto.groupActive")} ({activeTimers.length})
               </div>
-
-              <div
-                className="flex items-center justify-end gap-1.5 pt-2"
-                style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
-              >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    if (!client) return;
-                    setBusy(true);
-                    void client
-                      .runTimerNow(timer.id)
-                      .then(() => loadAll())
-                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                      .finally(() => setBusy(false));
-                  }}
-                >
-                  <BrandIcon name="action/play" size={13.5} />
-                  <span>{t("auto.runNow")}</span>
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => openEditor(timer)}>
-                  {t("common.edit")}
-                </Button>
-                <IconButton
-                  size="sm"
-                  label={t("common.delete")}
-                  onClick={() => setDeleteTarget(timer)}
-                >
-                  <BrandIcon name="action/delete" size={14} />
-                </IconButton>
+              {activeTimers.map(renderTimerCard)}
+            </div>
+          )}
+          {inactiveTimers.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="px-0.5 text-[11.5px] font-semibold" style={{ color: "var(--pi-ink-tertiary)" }}>
+                {t("auto.groupInactive")} ({inactiveTimers.length})
               </div>
-            </Card>
-          ))}
+              {inactiveTimers.map(renderTimerCard)}
+            </div>
+          )}
         </div>
-      )}
-    </div>
-  );
-
-  const inboxSection = (
-    <div className="space-y-3">
-      {inbox.some((item) => item.status !== "unread") && (
-        <div className="flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={() => {
-              if (!client) return;
-              setBusy(true);
-              void client
-                .clearSettledInbox()
-                .then(setInboxItems)
-                .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                .finally(() => setBusy(false));
-            }}
-          >
-            {t("auto.clearSettled")}
-          </Button>
-        </div>
-      )}
-
-      {inbox.length === 0 ? (
-        loading ? (
-          <div className="space-y-2.5" aria-busy="true">
-            <Card className="space-y-2.5 p-4">
-              <Skeleton className="h-4 w-48" />
-              <Skeleton className="h-3 w-3/4" />
-            </Card>
-          </div>
-        ) : (
-          <EmptyState
-            icon={<IconInbox size={20} stroke={1.65} />}
-            title={t("auto.emptyInbox")}
-          />
-        )
-      ) : (
-        <div className="space-y-2.5">
-          {inbox.map((item) => (
-            <Card key={item.id} className="space-y-2 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <Badge tone={item.status === "unread" ? "accent" : "neutral"}>
-                      {formatAutomationSource(item.source, t)}
-                    </Badge>
-                    <span className="text-[13.5px] font-semibold" style={{ color: "var(--pi-ink)" }}>
-                      {item.title}
-                    </span>
-                    <span className="text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-                      {formatRelativeTime(item.createdAt, locale)}
-                    </span>
-                  </div>
-                  {item.summary && (
-                    <p className="text-[12.5px] leading-[1.5]" style={{ color: "var(--pi-ink-secondary)" }}>
-                      {item.summary}
-                    </p>
-                  )}
-                </div>
-
-                <Badge
-                  tone={
-                    item.status === "approved"
-                      ? "success"
-                      : item.status === "unread"
-                        ? "accent"
-                        : "neutral"
-                  }
-                >
-                  {formatAutomationStatus(item.status, t)}
-                </Badge>
-              </div>
-
-              <div
-                className="flex flex-wrap items-center justify-end gap-1.5 pt-2"
-                style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
-              >
-                {item.sessionId && onOpenSession && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenSession(item.sessionId!)}
-                  >
-                    <BrandIcon name="navigation/external_link" size={13.5} />
-                    <span>{t("auto.openSession")}</span>
-                  </Button>
-                )}
-                {item.status === "unread" && (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        if (!client) return;
-                        setBusy(true);
-                        void client
-                          .updateInboxStatus(item.id, "approved")
-                          .then(() => refreshInbox(client))
-                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                          .finally(() => setBusy(false));
-                      }}
-                    >
-                      <BrandIcon name="status/confirm" size={13.5} />
-                      <span>{t("auto.approve")}</span>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        if (!client) return;
-                        setBusy(true);
-                        void client
-                          .updateInboxStatus(item.id, "dismissed")
-                          .then(() => refreshInbox(client))
-                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                          .finally(() => setBusy(false));
-                      }}
-                    >
-                      <BrandIcon name="navigation/close" size={13.5} />
-                      <span>{t("auto.dismiss")}</span>
-                    </Button>
-                  </>
-                )}
-                <IconButton
-                  size="sm"
-                  label={t("common.delete")}
-                  onClick={() => {
-                    if (!client) return;
-                    void client
-                      .deleteInboxItem(item.id)
-                      .then(() => refreshInbox(client))
-                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
-                  }}
-                >
-                  <BrandIcon name="action/delete" size={14} />
-                </IconButton>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  return (
-    <div className="space-y-4">
-      {error && (
-        <div
-          className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2 text-[12.5px]"
-          style={{ background: "var(--pi-paper)", color: "var(--pi-danger)" }}
-        >
-          <span className="truncate">{error}</span>
-          <Button variant="ghost" size="sm" onClick={() => void loadAll()}>
-            {t("conn.retry")}
-          </Button>
-        </div>
-      )}
-
-      {mode === "timers" ? (
-        timersSection
-      ) : mode === "inbox" ? (
-        inboxSection
-      ) : (
-        <Tabs value={tab} onValueChange={setTab} className="space-y-3">
-          <TabsList>
-            <TabsTrigger value="timers">{t("auto.tabTimers")}</TabsTrigger>
-            <TabsTrigger value="inbox">
-              {t("auto.tabInbox")}
-              {unreadInboxCount > 0 ? ` (${unreadInboxCount})` : ""}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="timers">{timersSection}</TabsContent>
-          <TabsContent value="inbox">{inboxSection}</TabsContent>
-        </Tabs>
       )}
 
       <Dialog
@@ -461,15 +495,15 @@ export function AutomationsSettings({
             <Textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
           </div>
 
-          {!editingTimer && localBots.length > 0 && (
+          {targetOptions.length > 0 && (
             <div className="space-y-1">
               <label className="block text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
-                {t("auto.targetBot")}
+                {t("auto.targetSession")}
               </label>
               <Select
-                value={botId || localBots[0].id}
-                onValueChange={setBotId}
-                options={localBots.map((b) => ({ value: b.id, label: b.name }))}
+                value={targetValue || targetOptions[0].value}
+                onValueChange={setTargetValue}
+                options={targetOptions}
                 className="w-full"
               />
             </div>
@@ -521,9 +555,9 @@ export function AutomationsSettings({
                       }
                       className="rounded-[8px] px-2.5 py-1 text-[12px] font-medium transition-colors"
                       style={{
-                        background: selected ? "var(--pi-accent-soft)" : "var(--pi-paper)",
+                        background: selected ? "var(--pi-accent-soft)" : "var(--pi-chrome)",
                         color: selected ? "var(--pi-accent)" : "var(--pi-ink-secondary)",
-                        border: "0.5px solid var(--pi-hairline)",
+                        border: "1px solid var(--pi-canvas-border)",
                       }}
                     >
                       {weekdayLabel(d, locale)}
@@ -543,6 +577,13 @@ export function AutomationsSettings({
               style={{ fontFamily: "var(--pi-font-mono)" }}
             />
           )}
+
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[12.5px]" style={{ color: "var(--pi-ink-secondary)" }}>
+              {t("auto.enabledLabel")}
+            </span>
+            <Switch checked={enabledDraft} onCheckedChange={setEnabledDraft} />
+          </div>
 
           {formError && (
             <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
@@ -567,17 +608,20 @@ export function AutomationsSettings({
           if (!v) setDeleteTarget(null);
         }}
         title={t("auto.deleteTimerTitle")}
-        description={deleteTarget?.name || ""}
+        description={deleteTarget?.name ?? ""}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
+        danger
         onConfirm={() => {
           if (!client || !deleteTarget) return;
-          const id = deleteTarget.id;
+          const targetId = deleteTarget.id;
           setDeleteTarget(null);
+          setBusy(true);
           void client
-            .deleteTimer(id)
-            .then(() => loadAll())
-            .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+            .deleteTimer(targetId)
+            .then(() => loadTimers())
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+            .finally(() => setBusy(false));
         }}
       />
     </div>

@@ -109,4 +109,30 @@ describe("UI hygiene guardrails", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("never passes empty-string option values into Radix Select and forwards refs on Popover trigger controls", () => {
+    const files = collectSourceFiles(srcRoot);
+    const violations: string[] = [];
+    const emptyOptionRe = /\{\s*value:\s*["']["']\s*,\s*label:/;
+    for (const file of files) {
+      const content = fs.readFileSync(file, "utf8");
+      const rel = path.relative(srcRoot, file);
+      if (emptyOptionRe.test(content)) {
+        violations.push(`${rel}: empty-string Select option value (Radix Select treats "" as placeholder)`);
+      }
+    }
+
+    for (const relPath of [
+      "features/chat/ContextMeter.tsx",
+      "ui/Button.tsx",
+      "ui/IconButton.tsx",
+    ]) {
+      const content = fs.readFileSync(path.join(srcRoot, relPath), "utf8");
+      if (!content.includes("forwardRef") || !content.includes("...rest")) {
+        violations.push(`${relPath}: must use forwardRef and spread ...rest for Radix asChild triggers`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
 });

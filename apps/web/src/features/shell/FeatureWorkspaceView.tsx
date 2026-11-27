@@ -6,29 +6,35 @@ import { MemorySettings } from "../settings/MemorySettings";
 import { SkillsSettings } from "../settings/SkillsSettings";
 import { BrandIcon } from "../shared/BrandAssets";
 
-export type FeatureViewKind = "timers" | "inbox" | "memory" | "skills" | "mcp";
+export type FeatureViewKind = "timers" | "memory" | "skills" | "mcp";
 
 export function FeatureWorkspaceView({
   kind,
+  timerScope = "pi",
   onBack,
   onOpenSession,
+  onOpenSuperWorker,
+  onOpenSuperMain,
 }: {
   kind: FeatureViewKind;
+  timerScope?: "pi" | "super";
   onBack: () => void;
   onOpenSession: (sessionId: string) => void;
+  onOpenSuperWorker?: (workerId: string) => void;
+  onOpenSuperMain?: () => void;
 }) {
   const { t } = useI18n();
 
   const title =
     kind === "timers"
-      ? t("nav.timers")
-      : kind === "inbox"
-        ? t("nav.inbox")
-        : kind === "memory"
-          ? t("settings.navMemory")
-          : kind === "skills"
-            ? t("nav.skills")
-            : t("nav.mcp");
+      ? timerScope === "super"
+        ? t("auto.superTimersTitle")
+        : t("auto.piTimersTitle")
+      : kind === "memory"
+        ? t("settings.navMemory")
+        : kind === "skills"
+          ? t("nav.skills")
+          : t("nav.mcp");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--pi-canvas)" }}>
@@ -51,8 +57,14 @@ export function FeatureWorkspaceView({
 
       <div className="pi-scroll-shadow min-h-0 flex-1">
         <div className="mx-auto w-full max-w-[820px] px-6 py-6">
-          {kind === "timers" && <AutomationsSettings mode="timers" onOpenSession={onOpenSession} />}
-          {kind === "inbox" && <AutomationsSettings mode="inbox" onOpenSession={onOpenSession} />}
+          {kind === "timers" && (
+            <AutomationsSettings
+              scope={timerScope}
+              onOpenSession={onOpenSession}
+              onOpenSuperMain={onOpenSuperMain}
+              onOpenSuperWorker={onOpenSuperWorker}
+            />
+          )}
           {kind === "memory" && <MemorySettings />}
           {kind === "skills" && <SkillsSettings />}
           {kind === "mcp" && <McpSettings />}

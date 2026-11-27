@@ -235,6 +235,8 @@ select:focus-visible,
 .group\/row:focus-within .pi-hover-reveal,
 .group\/bot:hover .pi-hover-reveal,
 .group\/bot:focus-within .pi-hover-reveal,
+.group\/worker:hover .pi-hover-reveal,
+.group\/worker:focus-within .pi-hover-reveal,
 .pi-hover-reveal:focus-visible {
   opacity: 1;
 }
@@ -477,7 +479,7 @@ select:focus-visible,
   display: none;
 }
 
-@container chat (min-width: 840px) {
+@container chat (min-width: 680px) {
   .pi-anchor-rail {
     display: flex;
   }

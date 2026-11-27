@@ -74,7 +74,7 @@ export function GeneralSettings() {
   );
 
   const titleModelOptions = useMemo(() => {
-    const opts = [{ value: "", label: t("settings.autoTitleModelAuto") }];
+    const opts = [{ value: "__auto__", label: t("settings.autoTitleModelAuto") }];
     for (const p of providers) {
       if (!p.configured) continue;
       for (const m of p.models) {
@@ -200,9 +200,13 @@ export function GeneralSettings() {
                     </div>
                   </div>
                   <Select
-                    value={hostSettings.sessionTitleModel ?? ""}
+                    value={hostSettings.sessionTitleModel || "__auto__"}
                     onValueChange={(v) => {
-                      if (client) void patchHostSettings(client, { sessionTitleModel: v });
+                      if (client) {
+                        void patchHostSettings(client, {
+                          sessionTitleModel: v === "__auto__" ? "" : v,
+                        });
+                      }
                     }}
                     options={titleModelOptions}
                     className="w-[220px]"

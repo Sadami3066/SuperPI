@@ -16,6 +16,8 @@ export function PersonalizationSettings() {
   );
   const [nicknameSaved, setNicknameSaved] = useState(false);
   const [instructionSaved, setInstructionSaved] = useState(false);
+  const [savingNickname, setSavingNickname] = useState(false);
+  const [savingInstruction, setSavingInstruction] = useState(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
@@ -69,15 +71,18 @@ export function PersonalizationSettings() {
           <Button
             variant="secondary"
             size="sm"
-            disabled={!client || !nicknameDirty}
+            disabled={!client || !nicknameDirty || savingNickname}
             onClick={() => {
-              if (!client) return;
-              void patchHostSettings(client, { userNickname: nicknameDraft.trim() }).then((ok) => {
-                if (!ok) return;
-                setNicknameSaved(true);
-                const id = setTimeout(() => setNicknameSaved(false), 1600);
-                timersRef.current.push(id);
-              });
+              if (!client || savingNickname) return;
+              setSavingNickname(true);
+              void patchHostSettings(client, { userNickname: nicknameDraft.trim() })
+                .then((ok) => {
+                  if (!ok) return;
+                  setNicknameSaved(true);
+                  const id = setTimeout(() => setNicknameSaved(false), 1600);
+                  timersRef.current.push(id);
+                })
+                .finally(() => setSavingNickname(false));
             }}
           >
             {nicknameSaved ? t("bot.saved") : t("common.save")}
@@ -109,17 +114,20 @@ export function PersonalizationSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={!client || !instructionDirty}
+            disabled={!client || !instructionDirty || savingInstruction}
             onClick={() => {
-              if (!client) return;
+              if (!client || savingInstruction) return;
+              setSavingInstruction(true);
               void patchHostSettings(client, {
                 customSystemInstruction: instructionDraft.trim(),
-              }).then((ok) => {
-                if (!ok) return;
-                setInstructionSaved(true);
-                const id = setTimeout(() => setInstructionSaved(false), 1600);
-                timersRef.current.push(id);
-              });
+              })
+                .then((ok) => {
+                  if (!ok) return;
+                  setInstructionSaved(true);
+                  const id = setTimeout(() => setInstructionSaved(false), 1600);
+                  timersRef.current.push(id);
+                })
+                .finally(() => setSavingInstruction(false));
             }}
           >
             {instructionSaved ? t("bot.saved") : t("common.save")}

@@ -7,8 +7,10 @@ import { useSuperStore } from "../../stores/superStore";
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Dialog,
   Input,
+  NoticeBar,
   Switch,
   Tabs,
   TabsContent,
@@ -17,6 +19,19 @@ import {
   Textarea,
 } from "../../ui";
 import { BotAvatar } from "../shared/BrandAssets";
+
+const DEFAULT_SUPER_SETTINGS: HostSuperSettingsDto = {
+  maxConcurrentWorkers: 3,
+  workerMaxSlotsPerBot: 2,
+  workerIdleCleanupMinutes: 60,
+  workerStallTimeoutMinutes: 10,
+  questionTimeoutMinutes: 30,
+  coalesceWindowMs: 1500,
+  receiptMaxChars: 4000,
+  workerJobWake: true,
+  workerCompactionOverrideEnabled: false,
+  workerCompactionTriggerPercent: 75,
+};
 
 export function SuperTeamDialog({
   open,
@@ -37,9 +52,11 @@ export function SuperTeamDialog({
   const updateSuperSettings = useSuperStore((s) => s.updateSuperSettings);
 
   const [tab, setTab] = useState("team");
+  const [teamLoading, setTeamLoading] = useState(false);
   const [agentsDoc, setAgentsDoc] = useState("");
   const [settingsDraft, setSettingsDraft] = useState<HostSuperSettingsDto | null>(null);
   const [showAdvancedLimits, setShowAdvancedLimits] = useState(false);
+  const [confirmResetDefaults, setConfirmResetDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +72,11 @@ export function SuperTeamDialog({
     if (!open || !client) return;
     setError(null);
     setSavedNotice(false);
-    void refreshTeam(client);
-    void refreshSuperSettings(client).catch(() => void 0);
+    setTeamLoading(true);
+    void refreshTeam(client).finally(() => setTeamLoading(false));
+    void refreshSuperSettings(client).catch((err) =>
+      setError(err instanceof Error ? err.message : "Failed to load settings"),
+    );
     void client
       .getSuperAgentsDoc()
       .then((doc) => setAgentsDoc(doc.content ?? ""))
@@ -141,7 +161,7 @@ export function SuperTeamDialog({
         <TabsContent value="team" className="max-h-[420px] space-y-4 overflow-y-auto pr-1">
           {team.length === 0 ? (
             <div className="py-8 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
-              {t("common.loading")}
+              {teamLoading ? t("common.loading") : t("super.teamEmpty")}
             </div>
           ) : (
             groupedTeam.map((group) => (
@@ -354,6 +374,57 @@ export function SuperTeamDialog({
                         }
                       />
                     </div>
+                    <div className="space-y-1">
+                      <label className="block text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                        {t("super.questionTimeout")}
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={180}
+                        value={settingsDraft.questionTimeoutMinutes}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            questionTimeoutMinutes: Number(e.target.value) || 30,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                        {t("super.coalesceWindow")}
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={30000}
+                        value={settingsDraft.coalesceWindowMs}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            coalesceWindowMs: Number(e.target.value) || 0,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                        {t("super.receiptMaxChars")}
+                      </label>
+                      <Input
+                        type="number"
+                        min={500}
+                        max={32000}
+                        value={settingsDraft.receiptMaxChars}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            receiptMaxChars: Number(e.target.value) || 4000,
+                          })
+                        }
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between gap-3 pt-1">
@@ -407,18 +478,7 @@ export function SuperTeamDialog({
                   variant="ghost"
                   size="sm"
                   disabled={busy}
-                  onClick={() =>
-                    setSettingsDraft({
-                      ...settingsDraft,
-                      maxConcurrentWorkers: 3,
-                      workerMaxSlotsPerBot: 2,
-                      workerIdleCleanupMinutes: 60,
-                      workerStallTimeoutMinutes: 10,
-                      workerJobWake: true,
-                      workerCompactionOverrideEnabled: false,
-                      workerCompactionTriggerPercent: 75,
-                    })
-                  }
+                  onClick={() => setConfirmResetDefaults(true)}
                 >
                   {t("super.teamResetDefaults")}
                 </Button>
@@ -449,10 +509,31 @@ export function SuperTeamDialog({
       </Tabs>
 
       {error && (
-        <div className="mt-3 text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
-          {error}
+        <div className="mt-3">
+          <NoticeBar tone="danger" message={error} />
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmResetDefaults}
+        onOpenChange={setConfirmResetDefaults}
+        title={t("super.teamResetDefaults")}
+        description={t("super.resetDefaultsConfirm")}
+        confirmLabel={t("super.teamResetDefaults")}
+        cancelLabel={t("common.cancel")}
+        danger={false}
+        onConfirm={() => {
+          setConfirmResetDefaults(false);
+          setSettingsDraft({ ...DEFAULT_SUPER_SETTINGS });
+          if (!client) return;
+          setBusy(true);
+          setError(null);
+          void updateSuperSettings(client, DEFAULT_SUPER_SETTINGS)
+            .then(() => showSaved())
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+            .finally(() => setBusy(false));
+        }}
+      />
     </Dialog>
   );
 }

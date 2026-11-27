@@ -1,15 +1,14 @@
+import { type ButtonHTMLAttributes, forwardRef } from "react";
 import type { HostUsageDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 
-export function ContextMeter({
-  percent,
-  usage,
-  onClick,
-}: {
-  percent: number;
-  usage: HostUsageDto | null | undefined;
-  onClick?: () => void;
-}) {
+export const ContextMeter = forwardRef<
+  HTMLButtonElement,
+  Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
+    percent: number;
+    usage: HostUsageDto | null | undefined;
+  }
+>(function ContextMeter({ percent, usage, className = "", style, ...rest }, ref) {
   const { t } = useI18n();
   const fraction = Math.min(1, Math.max(0, percent / 100));
   const radius = 6.8;
@@ -27,12 +26,13 @@ export function ContextMeter({
 
   return (
     <button
-      type="button"
-      onClick={onClick}
-      title={t("usage.title")}
-      aria-label={`${t("usage.title")} ${percent}%`}
-      className="pi-no-drag inline-flex h-7 items-center gap-1.5 rounded-[8px] px-2 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-[var(--pi-hover)]"
-      style={{ color: "var(--pi-ink-secondary)" }}
+      ref={ref}
+      type={rest.type ?? "button"}
+      title={rest.title ?? t("usage.title")}
+      aria-label={rest["aria-label"] ?? `${t("usage.title")} ${percent}%`}
+      className={`pi-no-drag inline-flex h-7 items-center gap-1.5 rounded-[8px] px-2 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-[var(--pi-hover)] ${className}`}
+      style={{ color: "var(--pi-ink-secondary)", ...style }}
+      {...rest}
     >
       <svg
         width={16}
@@ -66,4 +66,4 @@ export function ContextMeter({
       {hasUsage && <span>{percent}%</span>}
     </button>
   );
-}
+});

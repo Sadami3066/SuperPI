@@ -1,19 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { IconArrowDown } from "@tabler/icons-react";
 import { formatWorkerStatus } from "../../api/formatters";
-import { mapHostMessageToTurn, normalizeThinkingLevel } from "../../api/mappers";
+import {
+  computeContextPercent,
+  mapHostMessageToTurn,
+  normalizeThinkingLevel,
+} from "../../api/mappers";
+import { extractLatestTodosFromTurns } from "../../api/todo";
 import type { HostWorkerDetailDto } from "../../api/types";
 import { useI18n } from "../../i18n";
+import { useBotStore } from "../../stores/botStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSuperStore } from "../../stores/superStore";
-import { Badge, Button, ConfirmDialog, Dialog } from "../../ui";
+import { Badge, Button, ConfirmDialog, Dialog, NoticeBar, Popover } from "../../ui";
 import { AskQuestionCard } from "../chat/AskQuestionCard";
+import { ContextMeter } from "../chat/ContextMeter";
 import { ModelPicker } from "../chat/ModelPicker";
 import { useChatScroll } from "../chat/scrollPolicy";
+import { TodoPanel } from "../chat/TodoPanel";
 import { ToolApprovalCard } from "../chat/ToolApprovalCard";
 import { TurnItem } from "../chat/TurnItem";
-import { BrandIcon, PiActivityIcon } from "../shared/BrandAssets";
+import { UsageSheet } from "../chat/UsageSheet";
+import { BotAvatar, BrandIcon, PiActivityIcon } from "../shared/BrandAssets";
 
 export function WorkerDetailDialog({
   onOpenProvidersSettings,
@@ -26,6 +35,7 @@ export function WorkerDetailDialog({
   const locale = useSettingsStore((s) => s.locale);
   const hostSettings = useSettingsStore((s) => s.hostSettings);
   const providers = useSettingsStore((s) => s.providers);
+  const bots = useBotStore((s) => s.bots);
 
   const selectedWorkerId = useSuperStore((s) => s.selectedWorkerId);
   const setSelectedWorkerId = useSuperStore((s) => s.setSelectedWorkerId);
@@ -73,6 +83,8 @@ export function WorkerDetailDialog({
     return detail.messages.map((m) => mapHostMessageToTurn(m, locale));
   }, [detail, locale]);
 
+  const latestTodos = useMemo(() => extractLatestTodosFromTurns(turns), [turns]);
+
   const lastAssistantIdx = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {
       if (turns[i].role === "assistant") return i;
@@ -81,11 +93,17 @@ export function WorkerDetailDialog({
   }, [turns]);
 
   const worker = detail?.worker;
-  const currentModel = detail?.providerId && detail?.modelId
-    ? `${detail.providerId}/${detail.modelId}`
-    : "";
+  const matchedBot = useMemo(
+    () => (worker ? bots.find((b) => b.id === worker.botId) : undefined),
+    [bots, worker],
+  );
+  const currentModel =
+    detail?.providerId && detail?.modelId ? `${detail.providerId}/${detail.modelId}` : "";
   const currentThinking = normalizeThinkingLevel(detail?.thinkingLevel);
   const compactProcess = hostSettings?.processDetail === "compact";
+  const usage = detail?.usage ?? null;
+  const ctxPct = computeContextPercent(usage);
+  const workerArtifactSessionId = selectedWorkerId ? `worker:${selectedWorkerId}` : "";
 
   const { scrollRef, contentRef, showJumpToBottom, snapToBottom } = useChatScroll(
     selectedWorkerId || "",
@@ -96,6 +114,7 @@ export function WorkerDetailDialog({
   const handleSend = async () => {
     if (!client || !selectedWorkerId || !prompt.trim() || sending) return;
     setSending(true);
+    setError(null);
     try {
       await client.sendSuperWorkerPrompt(selectedWorkerId, { text: prompt.trim() });
       setPrompt("");
@@ -124,48 +143,89 @@ export function WorkerDetailDialog({
               style={{ borderBottom: "0.5px solid var(--pi-hairline)" }}
             >
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={worker.status === "failed" ? "danger" : worker.status === "running" || worker.status === "working" ? "accent" : "neutral"}>
+                <BotAvatar
+                  avatar={matchedBot?.avatar}
+                  name={worker.botName}
+                  isHome={matchedBot?.isHome}
+                  isRemote={worker.isRemote}
+                  dark={dark}
+                  size={20}
+                />
+                <Badge
+                  tone={
+                    worker.status === "failed"
+                      ? "danger"
+                      : worker.status === "running" || worker.status === "working"
+                        ? "accent"
+                        : "neutral"
+                  }
+                >
                   {formatWorkerStatus(worker.status, t)}
                 </Badge>
-                <ModelPicker
-                  providers={providers}
-                  currentModel={currentModel}
-                  currentThinking={currentThinking}
-                  dark={dark}
-                  onSelect={(modelSpec, thinking) => {
-                    if (!client || !selectedWorkerId) return;
-                    const slash = modelSpec.indexOf("/");
-                    if (slash < 1) return;
-                    void client.setSuperWorkerModel(
-                      selectedWorkerId,
-                      modelSpec.slice(0, slash),
-                      modelSpec.slice(slash + 1),
-                      thinking.toUpperCase(),
-                    );
-                  }}
-                  onOpenProvidersSettings={onOpenProvidersSettings}
-                />
+                {worker.isRemote && worker.deviceName && (
+                  <Badge tone="neutral">{worker.deviceName}</Badge>
+                )}
+                {!worker.isRemote && (
+                  <ModelPicker
+                    providers={providers}
+                    currentModel={currentModel}
+                    currentThinking={currentThinking}
+                    dark={dark}
+                    onSelect={(modelSpec, thinking) => {
+                      if (!client || !selectedWorkerId) return;
+                      const slash = modelSpec.indexOf("/");
+                      if (slash < 1) return;
+                      setError(null);
+                      void client
+                        .setSuperWorkerModel(
+                          selectedWorkerId,
+                          modelSpec.slice(0, slash),
+                          modelSpec.slice(slash + 1),
+                          thinking.toUpperCase(),
+                        )
+                        .catch((err) =>
+                          setError(err instanceof Error ? err.message : t("chat.switchFailed")),
+                        );
+                    }}
+                    onOpenProvidersSettings={onOpenProvidersSettings}
+                  />
+                )}
               </div>
 
               <div className="flex items-center gap-1.5">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={compacting || Boolean(detail?.streaming)}
-                  onClick={() => {
-                    if (!client || !selectedWorkerId) return;
-                    setCompacting(true);
-                    void client.compactSuperWorker(selectedWorkerId).finally(() => setCompacting(false));
-                  }}
+                <Popover
+                  align="end"
+                  className="w-[272px] p-3.5"
+                  trigger={<ContextMeter percent={ctxPct} usage={usage} />}
                 >
-                  {compacting ? t("usage.compacting") : t("usage.compactNow")}
-                </Button>
+                  <UsageSheet
+                    percent={ctxPct}
+                    usage={usage}
+                    compacting={compacting}
+                    busy={Boolean(detail?.streaming) || !client}
+                    onCompact={() => {
+                      if (!client || !selectedWorkerId) return;
+                      setCompacting(true);
+                      setError(null);
+                      void client
+                        .compactSuperWorker(selectedWorkerId)
+                        .catch((err) =>
+                          setError(err instanceof Error ? err.message : "Failed to compact"),
+                        )
+                        .finally(() => setCompacting(false));
+                    }}
+                  />
+                </Popover>
                 {(worker.status === "running" || worker.status === "working" || detail?.streaming) && (
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={() => {
-                      if (client && selectedWorkerId) void stopWorker(client, selectedWorkerId);
+                      if (!client || !selectedWorkerId) return;
+                      setError(null);
+                      void stopWorker(client, selectedWorkerId).catch((err) =>
+                        setError(err instanceof Error ? err.message : "Failed to stop worker"),
+                      );
                     }}
                   >
                     <BrandIcon name="action/stop" size={14} />
@@ -184,11 +244,7 @@ export function WorkerDetailDialog({
             </div>
           )}
 
-          {error && (
-            <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
-              {error}
-            </div>
-          )}
+          {error && <NoticeBar tone="danger" message={error} />}
 
           <div className="relative flex min-h-[260px] flex-1 flex-col">
             <div
@@ -208,16 +264,13 @@ export function WorkerDetailDialog({
                       <TurnItem
                         key={turn.id}
                         turn={turn}
-                        sessionId={selectedWorkerId || ""}
+                        sessionId={workerArtifactSessionId}
                         isLastAssistant={idx === lastAssistantIdx}
                         compactProcess={compactProcess}
                         dark={dark}
+                        canRetry={false}
                         onQuote={(q) => setPrompt((prev) => (prev ? `${prev}\n> ${q}` : `> ${q}`))}
-                        onRetry={() => {
-                          if (client && selectedWorkerId) {
-                            void client.getSuperWorker(selectedWorkerId).then(setDetail);
-                          }
-                        }}
+                        onRetry={() => void 0}
                       />
                     ))}
 
@@ -274,6 +327,8 @@ export function WorkerDetailDialog({
             )}
           </div>
 
+          <TodoPanel todos={latestTodos} sessionKey={workerArtifactSessionId} />
+
           <div
             className="pi-composer-shell flex items-end gap-2 rounded-[18px] px-3 py-2"
             data-streaming={detail?.streaming ? "true" : "false"}
@@ -283,13 +338,14 @@ export function WorkerDetailDialog({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   void handleSend();
                 }
               }}
               placeholder={t("super.workerPromptPlaceholder")}
-              className="max-h-[120px] min-h-[38px] flex-1 resize-none bg-transparent py-0.5 text-[13.5px] leading-[1.5] outline-none placeholder:text-[var(--pi-ink-tertiary)]"
+              className="pi-composer-textarea max-h-[120px] min-h-[38px] flex-1 resize-none bg-transparent py-0.5 text-[13.5px] leading-[1.5] placeholder:text-[var(--pi-ink-tertiary)]"
               style={{ color: "var(--pi-ink)" }}
             />
             <button
@@ -319,7 +375,10 @@ export function WorkerDetailDialog({
         onConfirm={() => {
           if (!client || !selectedWorkerId) return;
           setConfirmDelete(false);
-          void deleteWorker(client, selectedWorkerId);
+          setError(null);
+          void deleteWorker(client, selectedWorkerId).catch((err) =>
+            setError(err instanceof Error ? err.message : "Failed to delete worker"),
+          );
         }}
       />
     </>

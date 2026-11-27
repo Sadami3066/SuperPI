@@ -1703,8 +1703,9 @@ export class HostClient {
     });
   }
 
-  listTimers(): Promise<HostTimerDto[]> {
-    return this.request("/api/v1/timers");
+  listTimers(scope?: "pi" | "super"): Promise<HostTimerDto[]> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return this.request(`/api/v1/timers${query}`);
   }
 
   createTimer(body: HostSaveTimerRequest): Promise<HostTimerDto> {
@@ -1792,7 +1793,7 @@ export class HostClient {
     });
   }
 
-  deleteSessionGoal(sessionId: string): Promise<HostHealthDto> {
+  deleteSessionGoal(sessionId: string): Promise<{ goal?: HostGoalDto | null }> {
     return this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/goal`, {
       method: "DELETE",
     });

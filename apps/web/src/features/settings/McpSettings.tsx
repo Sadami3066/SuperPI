@@ -65,6 +65,7 @@ export function McpSettings() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingEnabled, setEditingEnabled] = useState(true);
   const [nameDraft, setNameDraft] = useState("");
   const [transport, setTransport] = useState<"http" | "stdio">("http");
   const [urlDraft, setUrlDraft] = useState("");
@@ -78,11 +79,13 @@ export function McpSettings() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [importJson, setImportJson] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<HostMcpServerDto | null>(null);
 
   const [oauthServerName, setOauthServerName] = useState<string | null>(null);
   const [oauthState, setOauthState] = useState<HostOAuthStatusDto | null>(null);
   const [oauthInput, setOauthInput] = useState("");
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopOAuthPolling = useCallback(() => {
@@ -126,19 +129,20 @@ export function McpSettings() {
         args,
         env: parseKeyValueLines(envDraft, "="),
         cwd: cwdDraft.trim() || undefined,
-        enabled: true,
+        enabled: editingEnabled,
       };
     }
     return {
       transport: "http",
       url: urlDraft.trim(),
       headers: parseKeyValueLines(headersDraft, ":"),
-      enabled: true,
+      enabled: editingEnabled,
     };
   };
 
   const openEditor = (existing?: HostMcpServerDto) => {
     setEditingName(existing ? existing.name : null);
+    setEditingEnabled(existing ? existing.enabled : true);
     setNameDraft(existing?.name ?? "");
     setTransport(existing?.transport === "stdio" ? "stdio" : "http");
     setUrlDraft(existing?.url ?? "");
@@ -157,6 +161,7 @@ export function McpSettings() {
     stopOAuthPolling();
     setOauthServerName(serverName);
     setOauthInput("");
+    setOauthError(null);
     try {
       const initial = await client.startMcpOAuth(serverName);
       setOauthState(initial);
@@ -598,7 +603,14 @@ export function McpSettings() {
         </div>
       </Dialog>
 
-      <Dialog open={importOpen} onOpenChange={setImportOpen} title={t("mcp.importJson")}>
+      <Dialog
+        open={importOpen}
+        onOpenChange={(v) => {
+          setImportOpen(v);
+          if (!v) setImportError(null);
+        }}
+        title={t("mcp.importJson")}
+      >
         <div className="space-y-3">
           <Textarea
             rows={8}
@@ -607,8 +619,20 @@ export function McpSettings() {
             placeholder='{"mcpServers": {...}}'
             style={{ fontFamily: "var(--pi-font-mono)" }}
           />
+          {importError && (
+            <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+              {importError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setImportOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setImportOpen(false);
+                setImportError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button
@@ -617,14 +641,14 @@ export function McpSettings() {
               onClick={() => {
                 if (!client) return;
                 setBusy(true);
-                setError(null);
+                setImportError(null);
                 void client
                   .importMcpRaw(importJson.trim())
                   .then(() => {
                     setImportOpen(false);
                     return loadServers();
                   })
-                  .catch((err) => setError(err instanceof Error ? err.message : "Import failed"))
+                  .catch((err) => setImportError(err instanceof Error ? err.message : "Import failed"))
                   .finally(() => setBusy(false));
               }}
             >
@@ -644,6 +668,7 @@ export function McpSettings() {
             }
             setOauthServerName(null);
             setOauthState(null);
+            setOauthError(null);
           }
         }}
         title={oauthServerName ? `OAuth · ${oauthServerName}` : "OAuth"}
@@ -675,10 +700,11 @@ export function McpSettings() {
                   size="sm"
                   onClick={() => {
                     if (!client || !oauthInput.trim()) return;
+                    setOauthError(null);
                     void client
                       .submitMcpOAuth(oauthServerName, oauthInput.trim())
                       .then(setOauthState)
-                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+                      .catch((err) => setOauthError(err instanceof Error ? err.message : "Failed"));
                   }}
                 >
                   {t("common.confirm")}
@@ -688,8 +714,8 @@ export function McpSettings() {
             {oauthState?.status === "completed" && (
               <Badge tone="success">{t("providers.configured")}</Badge>
             )}
-            {oauthState?.error && (
-              <div style={{ color: "var(--pi-danger)" }}>{oauthState.error}</div>
+            {(oauthError || oauthState?.error) && (
+              <div style={{ color: "var(--pi-danger)" }}>{oauthError || oauthState?.error}</div>
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button
@@ -697,13 +723,14 @@ export function McpSettings() {
                 size="sm"
                 onClick={() => {
                   if (!client) return;
+                  setOauthError(null);
                   void client
                     .logoutMcpOAuth(oauthServerName)
                     .then(() => {
                       setOauthServerName(null);
                       void loadServers();
                     })
-                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+                    .catch((err) => setOauthError(err instanceof Error ? err.message : "Failed"));
                 }}
               >
                 {t("providers.oauthLogout")}

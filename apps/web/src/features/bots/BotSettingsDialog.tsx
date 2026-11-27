@@ -10,6 +10,7 @@ import {
   ConfirmDialog,
   Dialog,
   Input,
+  NoticeBar,
   Select,
   Switch,
   Tabs,
@@ -76,6 +77,7 @@ export function BotSettingsDialog({
   const [permissionMode, setPermMode] = useState<PermissionMode>("workspace_auto");
   const [agentsDoc, setAgentsDoc] = useState("");
   const [policy, setPolicy] = useState<HostBotPolicyDto | null>(null);
+  const [detailsStatus, setDetailsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState(false);
   const [savedFlag, setSavedFlag] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -88,6 +90,20 @@ export function BotSettingsDialog({
     };
   }, []);
 
+  const fetchDetails = (targetBot: HostBotDto) => {
+    if (!client) return;
+    setDetailsStatus("loading");
+    void loadBotDetails(client, targetBot.id)
+      .then((res) => {
+        setAgentsDoc(res.doc.content ?? "");
+        setPolicy(res.policy);
+        setDetailsStatus("ready");
+      })
+      .catch(() => {
+        setDetailsStatus("error");
+      });
+  };
+
   useEffect(() => {
     if (!bot || !client) return;
     setTab("identity");
@@ -99,15 +115,8 @@ export function BotSettingsDialog({
     setPermMode((bot.permissionMode as PermissionMode) || "workspace_auto");
     setSavedFlag(false);
     setSaveError(null);
-    void loadBotDetails(client, bot.id)
-      .then((res) => {
-        setAgentsDoc(res.doc.content ?? "");
-        setPolicy(res.policy);
-      })
-      .catch(() => {
-        setAgentsDoc("");
-        setPolicy(null);
-      });
+    setPolicy(null);
+    fetchDetails(bot);
   }, [bot, client, loadBotDetails]);
 
   const modelOptions = useMemo(() => {
@@ -142,7 +151,7 @@ export function BotSettingsDialog({
   if (!bot) return null;
 
   const handleSave = async () => {
-    if (!client) return;
+    if (!client || detailsStatus !== "ready") return;
     setBusy(true);
     setSaveError(null);
     try {
@@ -303,13 +312,29 @@ export function BotSettingsDialog({
           </TabsContent>
 
           <TabsContent value="instructions" className="space-y-2">
-            <Textarea
-              rows={10}
-              value={agentsDoc}
-              onChange={(e) => setAgentsDoc(e.target.value)}
-              placeholder={t("bot.instructionsPlaceholder")}
-              style={{ fontFamily: "var(--pi-font-mono)" }}
-            />
+            {detailsStatus === "error" ? (
+              <NoticeBar
+                tone="danger"
+                message={t("bot.detailsLoadFailed")}
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => fetchDetails(bot)}>
+                    {t("conn.retry")}
+                  </Button>
+                }
+              />
+            ) : detailsStatus === "loading" ? (
+              <div className="py-6 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                {t("common.loading")}
+              </div>
+            ) : (
+              <Textarea
+                rows={10}
+                value={agentsDoc}
+                onChange={(e) => setAgentsDoc(e.target.value)}
+                placeholder={t("bot.instructionsPlaceholder")}
+                style={{ fontFamily: "var(--pi-font-mono)" }}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="capabilities" className="space-y-4">
@@ -429,6 +454,16 @@ export function BotSettingsDialog({
                   </div>
                 )}
               </>
+            ) : detailsStatus === "error" ? (
+              <NoticeBar
+                tone="danger"
+                message={t("bot.detailsLoadFailed")}
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => fetchDetails(bot)}>
+                    {t("conn.retry")}
+                  </Button>
+                }
+              />
             ) : (
               <div className="py-6 text-center text-[13px]" style={{ color: "var(--pi-ink-tertiary)" }}>
                 {t("common.loading")}
@@ -436,6 +471,20 @@ export function BotSettingsDialog({
             )}
           </TabsContent>
         </Tabs>
+
+        {detailsStatus === "error" && tab === "identity" && (
+          <div className="mt-3">
+            <NoticeBar
+              tone="danger"
+              message={t("bot.detailsLoadFailed")}
+              action={
+                <Button variant="secondary" size="sm" onClick={() => fetchDetails(bot)}>
+                  {t("conn.retry")}
+                </Button>
+              }
+            />
+          </div>
+        )}
 
         {saveError && (
           <div className="mt-3 text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
@@ -447,7 +496,11 @@ export function BotSettingsDialog({
           <Button variant="ghost" onClick={onClose}>
             {t("common.close")}
           </Button>
-          <Button variant="primary" disabled={busy} onClick={() => void handleSave()}>
+          <Button
+            variant="primary"
+            disabled={busy || detailsStatus !== "ready"}
+            onClick={() => void handleSave()}
+          >
             {savedFlag ? t("bot.saved") : t("bot.save")}
           </Button>
         </div>

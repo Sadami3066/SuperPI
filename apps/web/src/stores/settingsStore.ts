@@ -85,7 +85,12 @@ export interface SettingsStoreState {
   logoutOAuth: (client: HostClient, providerId: string) => Promise<void>;
 
   generatePairCode: (client: HostClient) => Promise<{ link: string; expiresAt?: number | null }>;
-  pairRelay: (client: HostClient, link: string) => Promise<void>;
+  pairRelay: (
+    client: HostClient,
+    link: string,
+    deviceName?: string,
+    loginSecret?: string,
+  ) => Promise<void>;
   logoutRelay: (client: HostClient) => Promise<void>;
   renameRelayDevice: (client: HostClient, deviceId: string, name: string) => Promise<void>;
   revokeRelayDevice: (client: HostClient, deviceId: string) => Promise<void>;
@@ -272,10 +277,14 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
 
   generatePairCode: (client) => client.generatePairCode(),
 
-  pairRelay: async (client, link) => {
-    const status = await client.pairRelay({ link });
+  pairRelay: async (client, link, deviceName, loginSecret) => {
+    const status = await client.pairRelay({
+      link,
+      deviceName: deviceName?.trim() || undefined,
+      loginSecret: loginSecret?.trim() || undefined,
+    });
     set({ relayStatus: status });
-    await get().refreshRelay(client);
+    await Promise.all([get().refreshRelay(client), get().refreshSettingsData(client)]);
   },
 
   logoutRelay: async (client) => {
@@ -285,7 +294,7 @@ export const useSettingsStore = create<SettingsStoreState>((set, get) => ({
 
   renameRelayDevice: async (client, deviceId, name) => {
     await client.renameRelayDevice(deviceId, name);
-    await get().refreshRelay(client);
+    await Promise.all([get().refreshRelay(client), get().refreshSettingsData(client)]);
   },
 
   revokeRelayDevice: async (client, deviceId) => {

@@ -57,9 +57,11 @@ const MEMORY_EVENT_KIND_MAP: Record<string, I18nKey> = {
   PREFERENCE: "enum.eventKind.preference",
   DECISION: "enum.eventKind.decision",
   MILESTONE: "enum.eventKind.milestone",
-  COMMITMENT: "enum.eventKind.commitment",
-  GOAL: "enum.eventKind.goal",
-  NOTE: "enum.eventKind.note",
+  COMMITMENT: "memory.eventCommitment",
+  EPISODE: "memory.eventEpisode",
+  GOAL: "memory.eventGoal",
+  BOUNDARY: "memory.eventBoundary",
+  NOTE: "memory.eventNote",
 };
 
 const MEMORY_STATUS_MAP: Record<string, I18nKey> = {

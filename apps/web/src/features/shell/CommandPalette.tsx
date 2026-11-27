@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { IconInbox, IconMessage, IconPlugConnected, IconWorld } from "@tabler/icons-react";
+import { IconMessage, IconPlugConnected, IconWorld } from "@tabler/icons-react";
 import { useI18n } from "../../i18n";
 import { formatShortcut } from "../../platform/shortcuts";
 import { useBotStore } from "../../stores/botStore";
@@ -131,15 +131,6 @@ function CommandPaletteBody({
         run: () => {
           onOpenChange(false);
           onSelectFeatureView("timers");
-        },
-      },
-      {
-        id: "act-inbox",
-        label: t("nav.inbox"),
-        icon: <IconInbox size={15} stroke={1.7} />,
-        run: () => {
-          onOpenChange(false);
-          onSelectFeatureView("inbox");
         },
       },
       {

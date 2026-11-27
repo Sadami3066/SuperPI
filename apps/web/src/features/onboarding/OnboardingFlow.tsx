@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck, IconFolderPlus, IconKey } from "@tabler/icons-react";
-import type { HostOAuthStatusDto, HostProviderDto } from "../../api/types";
+import type { HostOAuthStatusDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { openExternalUrl, pickWorkspaceDirectory } from "../../platform/bridge";
 import { useBotStore } from "../../stores/botStore";
@@ -49,24 +49,39 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
   const [pickingFolder, setPickingFolder] = useState(false);
 
   const [query, setQuery] = useState("");
-  const [selectedProvider, setSelectedProvider] = useState<HostProviderDto | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [savingKey, setSavingKey] = useState(false);
   const [oauthState, setOauthState] = useState<HostOAuthStatusDto | null>(null);
   const [oauthInput, setOauthInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeOAuthProviderRef = useRef<string | null>(null);
 
-  const stopOAuthPolling = () => {
+  const selectedProvider = useMemo(
+    () => (selectedProviderId ? providers.find((p) => p.id === selectedProviderId) ?? null : null),
+    [providers, selectedProviderId],
+  );
+
+  const stopOAuthPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-  };
+  }, []);
+
+  const cancelInFlightOAuth = useCallback(() => {
+    stopOAuthPolling();
+    const pid = activeOAuthProviderRef.current;
+    activeOAuthProviderRef.current = null;
+    if (client && pid) {
+      void client.cancelOAuth(pid).catch(() => void 0);
+    }
+  }, [client, stopOAuthPolling]);
 
   useEffect(() => {
-    return () => stopOAuthPolling();
-  }, []);
+    return () => cancelInFlightOAuth();
+  }, [cancelInFlightOAuth]);
 
   const hasConfiguredProvider = useMemo(
     () => providers.some((p) => p.configured),
@@ -124,8 +139,9 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
 
   const handleStartOAuth = async (providerId: string) => {
     if (!client) return;
-    stopOAuthPolling();
+    cancelInFlightOAuth();
     setError(null);
+    activeOAuthProviderRef.current = providerId;
     try {
       const st = await client.startOAuth(providerId);
       setOauthState(st);
@@ -138,17 +154,28 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
           .then((next) => {
             setOauthState(next);
             if (next.status === "completed") {
+              activeOAuthProviderRef.current = null;
               stopOAuthPolling();
               void refreshSettingsData(client);
             } else if (next.status === "failed" || next.status === "cancelled") {
+              activeOAuthProviderRef.current = null;
               stopOAuthPolling();
             }
           })
-          .catch(() => stopOAuthPolling());
+          .catch(() => {
+            activeOAuthProviderRef.current = null;
+            stopOAuthPolling();
+          });
       }, 1200);
     } catch (err) {
+      activeOAuthProviderRef.current = null;
       setError(err instanceof Error ? err.message : "Failed to start sign in");
     }
+  };
+
+  const finishOnboarding = () => {
+    cancelInFlightOAuth();
+    onComplete();
   };
 
   return (
@@ -171,7 +198,7 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
         </div>
 
         <div className="pi-no-drag flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onComplete}>
+          <Button variant="ghost" size="sm" onClick={finishOnboarding}>
             {t("onboarding.skip")}
           </Button>
           {isFrameless && <WindowControls />}
@@ -270,12 +297,12 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
                       key={p.id}
                       type="button"
                       onClick={() => {
-                        stopOAuthPolling();
+                        cancelInFlightOAuth();
                         setOauthState(null);
                         setOauthInput("");
                         setApiKeyDraft("");
                         setError(null);
-                        setSelectedProvider(p);
+                        setSelectedProviderId(p.id);
                       }}
                       className="flex items-center justify-between gap-2 rounded-[10px] px-3 py-2.5 text-left transition-colors hover:bg-[var(--pi-hover)]"
                       style={{
@@ -365,11 +392,37 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
                               if (!client || !oauthInput.trim()) return;
                               void client
                                 .submitOAuth(selectedProvider.id, oauthInput.trim())
-                                .then(setOauthState);
+                                .then(setOauthState)
+                                .catch((err) =>
+                                  setError(err instanceof Error ? err.message : "Failed"),
+                                );
                             }}
                           >
                             {t("common.confirm")}
                           </Button>
+                        </div>
+                      )}
+                      {oauthState?.status === "awaiting_select" && oauthState.options.length > 0 && (
+                        <div className="space-y-1">
+                          {oauthState.options.map((opt) => (
+                            <Button
+                              key={opt.id}
+                              variant="secondary"
+                              size="sm"
+                              className="w-full justify-start"
+                              onClick={() => {
+                                if (!client) return;
+                                void client
+                                  .submitOAuth(selectedProvider.id, opt.id)
+                                  .then(setOauthState)
+                                  .catch((err) =>
+                                    setError(err instanceof Error ? err.message : "Failed"),
+                                  );
+                              }}
+                            >
+                              {opt.label}
+                            </Button>
+                          ))}
                         </div>
                       )}
                       {oauthState?.error && (
@@ -389,10 +442,10 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
               )}
 
               <div className="flex items-center justify-between gap-2 pt-2">
-                <Button variant="ghost" onClick={onComplete}>
+                <Button variant="ghost" onClick={finishOnboarding}>
                   {t("onboarding.modelLater")}
                 </Button>
-                <Button variant="primary" disabled={!hasConfiguredProvider} onClick={onComplete}>
+                <Button variant="primary" disabled={!hasConfiguredProvider} onClick={finishOnboarding}>
                   {t("onboarding.modelFinish")}
                 </Button>
               </div>

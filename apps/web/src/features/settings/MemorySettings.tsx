@@ -63,6 +63,7 @@ export function MemorySettings() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const [editingBlock, setEditingBlock] = useState<HostMemoryBlockDto | null>(null);
   const [createBlockOpen, setCreateBlockOpen] = useState(false);
@@ -138,6 +139,21 @@ export function MemorySettings() {
       await loadSnapshot();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Operation failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runModalAction = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setModalError(null);
+    try {
+      await fn();
+      await loadSnapshot();
+      return true;
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : "Operation failed");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -652,8 +668,8 @@ export function MemorySettings() {
                 onValueChange={setPrefsMode}
                 options={[
                   { value: "AUTO", label: t("memory.modeAuto") },
-                  { value: "CUSTOM", label: t("memory.modeCustom") },
-                  { value: "OFF", label: t("memory.modeOff") },
+                  { value: "FIXED", label: t("memory.modeFixed") },
+                  { value: "PAUSED", label: t("memory.modePaused") },
                 ]}
                 className="w-full"
               />
@@ -743,6 +759,7 @@ export function MemorySettings() {
           if (!v) {
             setCreateBlockOpen(false);
             setEditingBlock(null);
+            setModalError(null);
           }
         }}
         title={editingBlock ? t("memory.editBlock") : t("memory.newBlock")}
@@ -775,12 +792,19 @@ export function MemorySettings() {
             placeholder={t("memory.blockContentPlaceholder")}
             style={{ fontFamily: "var(--pi-font-mono)" }}
           />
+          {modalError && (
+            <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
+              disabled={busy}
               onClick={() => {
                 setCreateBlockOpen(false);
                 setEditingBlock(null);
+                setModalError(null);
               }}
             >
               {t("common.cancel")}
@@ -790,7 +814,7 @@ export function MemorySettings() {
               disabled={busy || !blockTitle.trim()}
               onClick={() => {
                 if (!client) return;
-                void runAction(async () => {
+                void runModalAction(async () => {
                   if (editingBlock) {
                     await client.updateMemoryBlock(editingBlock.id, {
                       title: blockTitle.trim(),
@@ -819,7 +843,10 @@ export function MemorySettings() {
 
       <Dialog
         open={entityModalOpen}
-        onOpenChange={setEntityModalOpen}
+        onOpenChange={(v) => {
+          setEntityModalOpen(v);
+          if (!v) setModalError(null);
+        }}
         title={t("memory.newEntity")}
       >
         <div className="space-y-3">
@@ -846,8 +873,20 @@ export function MemorySettings() {
             onChange={(e) => setEntitySummary(e.target.value)}
             placeholder={t("memory.entitySummaryPlaceholder")}
           />
+          {modalError && (
+            <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setEntityModalOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setEntityModalOpen(false);
+                setModalError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button
@@ -855,7 +894,7 @@ export function MemorySettings() {
               disabled={busy || !entityName.trim()}
               onClick={() => {
                 if (!client) return;
-                void runAction(async () => {
+                void runModalAction(async () => {
                   await client.createMemoryEntity({
                     canonicalName: entityName.trim(),
                     entityType,
@@ -873,7 +912,10 @@ export function MemorySettings() {
 
       <Dialog
         open={relationModalOpen}
-        onOpenChange={setRelationModalOpen}
+        onOpenChange={(v) => {
+          setRelationModalOpen(v);
+          if (!v) setModalError(null);
+        }}
         title={t("memory.newRelation")}
       >
         <div className="space-y-3">
@@ -892,8 +934,20 @@ export function MemorySettings() {
             onChange={(e) => setRelTo(e.target.value)}
             placeholder={t("memory.relationTo")}
           />
+          {modalError && (
+            <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setRelationModalOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setRelationModalOpen(false);
+                setModalError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button
@@ -901,7 +955,7 @@ export function MemorySettings() {
               disabled={busy || !relFrom.trim() || !relTo.trim()}
               onClick={() => {
                 if (!client) return;
-                void runAction(async () => {
+                void runModalAction(async () => {
                   await client.createMemoryRelation({
                     fromEntityName: relFrom.trim(),
                     relationType: relType.trim() || "related_to",
@@ -919,7 +973,10 @@ export function MemorySettings() {
 
       <Dialog
         open={eventModalOpen}
-        onOpenChange={setEventModalOpen}
+        onOpenChange={(v) => {
+          setEventModalOpen(v);
+          if (!v) setModalError(null);
+        }}
         title={t("memory.newEvent")}
       >
         <div className="space-y-3">
@@ -929,8 +986,11 @@ export function MemorySettings() {
             options={[
               { value: "FACT", label: formatEventKind("FACT", t) },
               { value: "PREFERENCE", label: formatEventKind("PREFERENCE", t) },
-              { value: "DECISION", label: formatEventKind("DECISION", t) },
-              { value: "MILESTONE", label: formatEventKind("MILESTONE", t) },
+              { value: "COMMITMENT", label: formatEventKind("COMMITMENT", t) },
+              { value: "EPISODE", label: formatEventKind("EPISODE", t) },
+              { value: "GOAL", label: formatEventKind("GOAL", t) },
+              { value: "BOUNDARY", label: formatEventKind("BOUNDARY", t) },
+              { value: "NOTE", label: formatEventKind("NOTE", t) },
             ]}
             className="w-full"
           />
@@ -945,8 +1005,20 @@ export function MemorySettings() {
             onChange={(e) => setEventTags(e.target.value)}
             placeholder={t("memory.eventTagsPlaceholder")}
           />
+          {modalError && (
+            <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+              {modalError}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setEventModalOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setEventModalOpen(false);
+                setModalError(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
             <Button
@@ -958,7 +1030,7 @@ export function MemorySettings() {
                   .split(",")
                   .map((s) => s.trim())
                   .filter(Boolean);
-                void runAction(async () => {
+                void runModalAction(async () => {
                   await client.createMemoryEvent({
                     eventKind,
                     content: eventContent.trim(),

@@ -166,7 +166,20 @@ export const Composer = memo(function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [queueCollapsed, setQueueCollapsed] = useState(false);
+  const prevQueueLenRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const prev = prevQueueLenRef.current;
+    const cur = queuedInputs.length;
+    prevQueueLenRef.current = cur;
+    if (cur === 0) {
+      setQueueCollapsed(false);
+    } else if (prev <= 3 && cur > 3) {
+      setQueueCollapsed(true);
+    }
+  }, [queuedInputs.length]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -428,47 +441,89 @@ export const Composer = memo(function Composer({
         )}
 
         {queuedInputs.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5 px-1">
-            {queuedInputs.map((q, i) => (
-              <span
-                key={`${q.kind}-${i}-${q.text.slice(0, 12)}`}
-                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px]"
+          <div
+            className="mb-2 overflow-hidden rounded-[12px]"
+            style={{
+              background: "var(--pi-chrome)",
+              border: "1px solid var(--pi-canvas-border)",
+            }}
+          >
+            {queuedInputs.length > 1 && (
+              <button
+                type="button"
+                aria-expanded={!queueCollapsed}
+                onClick={() => setQueueCollapsed((v) => !v)}
+                className="flex h-7 w-full items-center justify-between gap-2 px-3 text-[11.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
                 style={{
-                  background: "var(--pi-paper)",
                   color: "var(--pi-ink-secondary)",
-                  border: "0.5px solid var(--pi-surface-rim)",
+                  borderBottom: queueCollapsed ? "none" : "1px solid var(--pi-canvas-border)",
                 }}
               >
-                <span
-                  className="rounded px-1.5 py-0.2 text-[10.5px] font-medium"
-                  style={{ background: "var(--pi-wash)", color: "var(--pi-ink)" }}
-                >
-                  {q.kind === "steer" ? t("chat.steerTag") : t("chat.followUpTag")}
-                </span>
-                <span className="max-w-[200px] truncate">{q.text}</span>
-                {q.kind === "follow_up" && onPromoteQueued && (
-                  <button
-                    type="button"
-                    onClick={() => void onPromoteQueued(q.text)}
-                    title={t("chat.steerQueue")}
-                    aria-label={t("chat.steerQueue")}
-                    className="rounded-full p-0.5 hover:bg-[var(--pi-hover)]"
+                <span>{t("chat.queueTrayTitle", { count: queuedInputs.length })}</span>
+                <BrandIcon
+                  name="navigation/chevron_down"
+                  size={12}
+                  className="transition-transform duration-150"
+                  style={{
+                    color: "var(--pi-ink-tertiary)",
+                    transform: queueCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                  }}
+                />
+              </button>
+            )}
+            {!queueCollapsed && (
+              <div className="max-h-[132px] divide-y divide-[var(--pi-hairline)] overflow-y-auto">
+                {queuedInputs.map((q, i) => (
+                  <div
+                    key={`${q.kind}-${i}-${q.text.slice(0, 12)}`}
+                    className="flex items-center gap-2 px-3 py-1.5 text-[12px]"
                   >
-                    <BrandIcon name="navigation/arrow_up" size={12} />
-                  </button>
-                )}
-                {onRemoveQueued && (
-                  <button
-                    type="button"
-                    onClick={() => void onRemoveQueued(q.kind, q.text)}
-                    aria-label={t("chat.cancelQueue")}
-                    className="rounded-full p-0.5 hover:bg-[var(--pi-hover)]"
-                  >
-                    <BrandIcon name="navigation/close" size={12} />
-                  </button>
-                )}
-              </span>
-            ))}
+                    <span
+                      className="shrink-0 rounded-[6px] px-1.5 py-0.5 text-[10.5px] font-medium"
+                      style={{
+                        background: q.kind === "steer" ? "var(--pi-accent-soft)" : "var(--pi-wash)",
+                        color: q.kind === "steer" ? "var(--pi-accent)" : "var(--pi-ink-secondary)",
+                      }}
+                    >
+                      {q.kind === "steer" ? t("chat.steerTag") : t("chat.followUpTag")}
+                    </span>
+                    <span
+                      className="min-w-0 flex-1 truncate"
+                      style={{ color: "var(--pi-ink)" }}
+                      title={q.text}
+                    >
+                      {q.text}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {q.kind === "follow_up" && onPromoteQueued && (
+                        <button
+                          type="button"
+                          onClick={() => void onPromoteQueued(q.text)}
+                          title={t("chat.steerQueue")}
+                          aria-label={t("chat.steerQueue")}
+                          className="flex h-5 w-5 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                          style={{ color: "var(--pi-ink-secondary)" }}
+                        >
+                          <BrandIcon name="navigation/arrow_up" size={12} />
+                        </button>
+                      )}
+                      {onRemoveQueued && (
+                        <button
+                          type="button"
+                          onClick={() => void onRemoveQueued(q.kind, q.text)}
+                          title={t("chat.cancelQueue")}
+                          aria-label={t("chat.cancelQueue")}
+                          className="flex h-5 w-5 items-center justify-center rounded-md transition-colors hover:bg-[var(--pi-hover)]"
+                          style={{ color: "var(--pi-ink-tertiary)" }}
+                        >
+                          <BrandIcon name="navigation/close" size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

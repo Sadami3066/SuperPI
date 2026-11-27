@@ -1,20 +1,19 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { type ButtonHTMLAttributes, forwardRef, type ReactNode } from "react";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md";
 
-export function Button({
-  variant = "secondary",
-  size = "md",
-  className = "",
-  children,
-  style,
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  children: ReactNode;
-}) {
+export const Button = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: ButtonVariant;
+    size?: ButtonSize;
+    children: ReactNode;
+  }
+>(function Button(
+  { variant = "secondary", size = "md", className = "", children, style, ...rest },
+  ref,
+) {
   const heightCls = size === "sm" ? "h-8 px-3 text-[12.5px]" : "h-9 px-4 text-[13.5px]";
 
   const variantCls =
@@ -50,6 +49,7 @@ export function Button({
 
   return (
     <button
+      ref={ref}
       type={rest.type ?? "button"}
       className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[10px] font-medium transition-[background-color,border-color,color,opacity,transform] duration-150 motion-safe:active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 ${heightCls} ${variantCls} ${className}`}
       style={{ ...variantStyle, ...style }}
@@ -58,4 +58,4 @@ export function Button({
       {children}
     </button>
   );
-}
+});

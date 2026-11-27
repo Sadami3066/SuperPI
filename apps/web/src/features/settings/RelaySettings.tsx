@@ -5,12 +5,18 @@ import type { HostRelayDeviceDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { Badge, Button, Card, ConfirmDialog, Dialog, Input, Switch } from "../../ui";
+import { Badge, Button, Card, ConfirmDialog, Dialog, Input, NoticeBar, Switch } from "../../ui";
 import { BrandIcon } from "../shared/BrandAssets";
+
+type RenameTarget = {
+  deviceId: string;
+  name: string;
+};
 
 export function RelaySettings() {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
+  const hostSettings = useSettingsStore((s) => s.hostSettings);
   const relayStatus = useSettingsStore((s) => s.relayStatus);
   const relayDevices = useSettingsStore((s) => s.relayDevices);
   const generatePairCode = useSettingsStore((s) => s.generatePairCode);
@@ -21,15 +27,26 @@ export function RelaySettings() {
   const setRelayAllowRemote = useSettingsStore((s) => s.setRelayAllowRemote);
 
   const [pairLink, setPairLink] = useState("");
+  const [deviceNameInput, setDeviceNameInput] = useState(() => hostSettings?.deviceName ?? "");
+  const [deviceNameDirty, setDeviceNameDirty] = useState(false);
+  const [loginSecret, setLoginSecret] = useState("");
   const [qrLink, setQrLink] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [renameTarget, setRenameTarget] = useState<HostRelayDeviceDto | null>(null);
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<HostRelayDeviceDto | null>(null);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!deviceNameDirty && hostSettings?.deviceName) {
+      setDeviceNameInput(hostSettings.deviceName);
+    }
+  }, [deviceNameDirty, hostSettings?.deviceName]);
 
   useEffect(() => {
     return () => {
@@ -52,6 +69,44 @@ export function RelaySettings() {
   }, [qrLink]);
 
   const enrolled = Boolean(relayStatus?.enrolled);
+  const stateRaw = (relayStatus?.state || "").toLowerCase();
+  const statusTone: "success" | "accent" | "warning" | "danger" | "neutral" = !enrolled
+    ? "neutral"
+    : stateRaw === "connected" || stateRaw === "online"
+      ? "success"
+      : stateRaw === "connecting" || stateRaw === "reconnecting"
+        ? "accent"
+        : stateRaw === "unauthorized"
+          ? "danger"
+          : "warning";
+  const statusLabel = !enrolled
+    ? t("relay.statusDisconnected")
+    : stateRaw === "connected" || stateRaw === "online"
+      ? t("relay.statusConnected")
+      : stateRaw === "connecting" || stateRaw === "reconnecting"
+        ? t("relay.stateConnecting")
+        : stateRaw === "unauthorized"
+          ? t("relay.stateUnauthorized")
+          : t("relay.stateOffline");
+
+  const selfDeviceId = relayStatus?.deviceId ?? "";
+  const selfDeviceName =
+    relayStatus?.deviceName?.trim() || hostSettings?.deviceName?.trim() || t("relay.thisDevice");
+
+  const submitRename = () => {
+    if (!client || !renameTarget || !renameDraft.trim() || busy) return;
+    setBusy(true);
+    setRenameError(null);
+    void renameRelayDevice(client, renameTarget.deviceId, renameDraft.trim())
+      .then(() => {
+        setRenameTarget(null);
+        setRenameError(null);
+      })
+      .catch((err) => {
+        setRenameError(err instanceof Error ? err.message : "Failed to rename device");
+      })
+      .finally(() => setBusy(false));
+  };
 
   return (
     <div className="space-y-5">
@@ -67,10 +122,47 @@ export function RelaySettings() {
               </div>
             )}
           </div>
-          <Badge tone={enrolled ? "success" : "neutral"}>
-            {enrolled ? t("relay.statusConnected") : t("relay.statusDisconnected")}
-          </Badge>
+          <Badge tone={statusTone}>{statusLabel}</Badge>
         </div>
+
+        {enrolled && selfDeviceId && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-[10px] px-3 py-2.5"
+            style={{ background: "var(--pi-paper)", border: "1px solid var(--pi-canvas-border)" }}
+          >
+            <div className="flex min-w-0 items-center gap-2.5">
+              <BrandIcon
+                name="system/desktop"
+                size={16}
+                style={{ color: "var(--pi-ink-secondary)" }}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                    {selfDeviceName}
+                  </span>
+                  <Badge tone="accent">{t("relay.selfTag")}</Badge>
+                </div>
+                <div className="text-[11.5px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                  {t("relay.thisDevice")}
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setRenameError(null);
+                setRenameTarget({ deviceId: selfDeviceId, name: selfDeviceName });
+                setRenameDraft(selfDeviceName);
+              }}
+            >
+              <BrandIcon name="action/pen" size={14} />
+              <span>{t("nav.rename")}</span>
+            </Button>
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-3">
           <span className="text-[13.5px]" style={{ color: "var(--pi-ink)" }}>
@@ -78,9 +170,15 @@ export function RelaySettings() {
           </span>
           <Switch
             checked={Boolean(relayStatus?.allowRemote)}
+            disabled={busy}
             ariaLabel={t("relay.allowRemote")}
             onCheckedChange={(checked) => {
-              if (client) void setRelayAllowRemote(client, checked);
+              if (!client) return;
+              setBusy(true);
+              setError(null);
+              void setRelayAllowRemote(client, checked)
+                .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                .finally(() => setBusy(false));
             }}
           />
         </div>
@@ -109,11 +207,7 @@ export function RelaySettings() {
                 variant="ghost"
                 size="sm"
                 disabled={busy}
-                onClick={() => {
-                  if (!client) return;
-                  setBusy(true);
-                  void logoutRelay(client).finally(() => setBusy(false));
-                }}
+                onClick={() => setConfirmLogout(true)}
               >
                 {t("relay.logout")}
               </Button>
@@ -153,40 +247,72 @@ export function RelaySettings() {
             )}
           </div>
         ) : (
-          <div className="space-y-2.5 pt-1">
+          <div className="space-y-3 pt-1">
             <div className="text-[13px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
               {t("relay.joinExisting")}
             </div>
-            <div className="flex gap-2">
+            <div className="space-y-2.5">
               <Input
                 value={pairLink}
                 onChange={(e) => setPairLink(e.target.value)}
                 placeholder={t("relay.joinPlaceholder")}
               />
-              <Button
-                variant="primary"
-                disabled={busy || !pairLink.trim()}
-                onClick={() => {
-                  if (!client || !pairLink.trim()) return;
-                  setBusy(true);
-                  setError(null);
-                  void pairRelay(client, pairLink.trim())
-                    .then(() => setPairLink(""))
-                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
-                    .finally(() => setBusy(false));
-                }}
-              >
-                {t("relay.joinBtn")}
-              </Button>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="block text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                    {t("relay.deviceName")}
+                  </label>
+                  <Input
+                    value={deviceNameInput}
+                    onChange={(e) => {
+                      setDeviceNameDirty(true);
+                      setDeviceNameInput(e.target.value);
+                    }}
+                    placeholder={t("relay.deviceNamePlaceholder")}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[12px] font-medium" style={{ color: "var(--pi-ink-secondary)" }}>
+                    {t("relay.loginSecret")}
+                  </label>
+                  <Input
+                    type="password"
+                    value={loginSecret}
+                    onChange={(e) => setLoginSecret(e.target.value)}
+                    placeholder={t("relay.loginSecretPlaceholder")}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  variant="primary"
+                  disabled={busy || !pairLink.trim()}
+                  onClick={() => {
+                    if (!client || !pairLink.trim()) return;
+                    setBusy(true);
+                    setError(null);
+                    void pairRelay(
+                      client,
+                      pairLink.trim(),
+                      deviceNameInput.trim() || undefined,
+                      loginSecret.trim() || undefined,
+                    )
+                      .then(() => {
+                        setPairLink("");
+                        setLoginSecret("");
+                      })
+                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  {t("relay.joinBtn")}
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
-        {error && (
-          <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
-            {error}
-          </div>
-        )}
+        {error && <NoticeBar tone="danger" message={error} />}
       </Card>
 
       {relayDevices.length > 0 && (
@@ -230,15 +356,17 @@ export function RelaySettings() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    disabled={busy}
                     onClick={() => {
-                      setRenameTarget(dev);
+                      setRenameError(null);
+                      setRenameTarget({ deviceId: dev.deviceId, name: dev.name });
                       setRenameDraft(dev.name);
                     }}
                   >
                     <BrandIcon name="action/pen" size={14} />
                   </Button>
                   {!dev.isSelf && (
-                    <Button variant="ghost" size="sm" onClick={() => setRevokeTarget(dev)}>
+                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRevokeTarget(dev)}>
                       <BrandIcon name="action/delete" size={14} />
                     </Button>
                   )}
@@ -252,25 +380,35 @@ export function RelaySettings() {
       <Dialog
         open={Boolean(renameTarget)}
         onOpenChange={(v) => {
-          if (!v) setRenameTarget(null);
+          if (!v && !busy) {
+            setRenameTarget(null);
+            setRenameError(null);
+          }
         }}
         title={t("relay.renameDevice")}
       >
         <div className="space-y-4">
-          <Input value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} />
+          <Input
+            autoFocus
+            value={renameDraft}
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitRename();
+              }
+            }}
+          />
+          {renameError && <NoticeBar tone="danger" message={renameError} />}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setRenameTarget(null)}>
+            <Button variant="ghost" disabled={busy} onClick={() => setRenameTarget(null)}>
               {t("common.cancel")}
             </Button>
             <Button
               variant="primary"
-              onClick={() => {
-                if (client && renameTarget && renameDraft.trim()) {
-                  void renameRelayDevice(client, renameTarget.deviceId, renameDraft.trim()).then(
-                    () => setRenameTarget(null),
-                  );
-                }
-              }}
+              disabled={busy || !renameDraft.trim()}
+              onClick={submitRename}
             >
               {t("common.save")}
             </Button>
@@ -288,10 +426,33 @@ export function RelaySettings() {
         confirmLabel={t("relay.revokeDevice")}
         cancelLabel={t("common.cancel")}
         onConfirm={() => {
-          if (client && revokeTarget) {
-            void revokeRelayDevice(client, revokeTarget.deviceId);
-          }
+          if (!client || !revokeTarget) return;
+          const targetId = revokeTarget.deviceId;
           setRevokeTarget(null);
+          setBusy(true);
+          setError(null);
+          void revokeRelayDevice(client, targetId)
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+            .finally(() => setBusy(false));
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmLogout}
+        onOpenChange={setConfirmLogout}
+        title={t("relay.logoutConfirmTitle")}
+        description={t("relay.logoutConfirmDesc")}
+        confirmLabel={t("relay.logout")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => {
+          if (!client) return;
+          setConfirmLogout(false);
+          setBusy(true);
+          setError(null);
+          void logoutRelay(client)
+            .then(() => setQrLink(null))
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+            .finally(() => setBusy(false));
         }}
       />
     </div>

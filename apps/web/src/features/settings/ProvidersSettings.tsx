@@ -11,7 +11,7 @@ import { useI18n } from "../../i18n";
 import { openExternalUrl } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { Badge, Button, Card, Dialog, Input, Select } from "../../ui";
+import { Badge, Button, Card, ConfirmDialog, Dialog, Input, Select } from "../../ui";
 import { BrandIcon, ProviderIcon } from "../shared/BrandAssets";
 
 export function ProvidersSettings() {
@@ -46,6 +46,7 @@ export function ProvidersSettings() {
   const [searchProviders, setSearchProviders] = useState<HostWebSearchProviderDto[]>([]);
   const [editingSearch, setEditingSearch] = useState<HostWebSearchProviderDto | null>(null);
   const [searchKeyDraft, setSearchKeyDraft] = useState("");
+  const [deleteCustomTarget, setDeleteCustomTarget] = useState<HostCustomProviderDto | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -199,9 +200,8 @@ export function ProvidersSettings() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      if (client) void deleteCustomProvider(client, cp.id);
-                    }}
+                    disabled={busy}
+                    onClick={() => setDeleteCustomTarget(cp)}
                   >
                     <BrandIcon name="action/delete" size={14} />
                   </Button>
@@ -347,8 +347,10 @@ export function ProvidersSettings() {
                       onClick={() => {
                         if (!client) return;
                         setBusy(true);
+                        setError(null);
                         void clearProviderKey(client, editingProvider.id)
                           .then(() => setEditingProvider(null))
+                          .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                           .finally(() => setBusy(false));
                       }}
                     >
@@ -401,9 +403,12 @@ export function ProvidersSettings() {
                         size="sm"
                         onClick={() => {
                           if (!client) return;
-                          void logoutOAuth(client, editingProvider.id).then(() =>
-                            setEditingProvider(null),
-                          );
+                          setBusy(true);
+                          setError(null);
+                          void logoutOAuth(client, editingProvider.id)
+                            .then(() => setEditingProvider(null))
+                            .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+                            .finally(() => setBusy(false));
                         }}
                       >
                         {t("providers.oauthLogout")}
@@ -508,6 +513,7 @@ export function ProvidersSettings() {
               onValueChange={setCustomProtocol}
               options={[
                 { value: "openai-completions", label: "OpenAI Compatible" },
+                { value: "openai-responses", label: "OpenAI Responses" },
                 { value: "anthropic-messages", label: "Anthropic Messages" },
               ]}
               className="w-full"
@@ -580,18 +586,27 @@ export function ProvidersSettings() {
               disabled={busy}
               onClick={() => {
                 if (!client) return;
+                const prevModelsById = new Map(
+                  (editingCustom?.models ?? []).map((m) => [m.id, m]),
+                );
                 const models = customModelsText
                   .split(",")
                   .map((s) => s.trim())
                   .filter(Boolean)
-                  .map((id) => ({
-                    id,
-                    name: id,
-                    supportsImages: false,
-                    reasoning: false,
-                    thinkingLevels: ["OFF"],
-                  }));
+                  .map((id) => {
+                    const prev = prevModelsById.get(id);
+                    return prev
+                      ? { ...prev, id }
+                      : {
+                          id,
+                          name: id,
+                          supportsImages: false,
+                          reasoning: false,
+                          thinkingLevels: ["OFF"],
+                        };
+                  });
                 setBusy(true);
+                setError(null);
                 void saveCustomProvider(client, {
                   id: editingCustom?.id,
                   name: customName.trim(),
@@ -614,7 +629,10 @@ export function ProvidersSettings() {
       <Dialog
         open={Boolean(editingSearch)}
         onOpenChange={(v) => {
-          if (!v) setEditingSearch(null);
+          if (!v) {
+            setEditingSearch(null);
+            setError(null);
+          }
         }}
         title={editingSearch?.name}
       >
@@ -626,6 +644,11 @@ export function ProvidersSettings() {
               onChange={(e) => setSearchKeyDraft(e.target.value)}
               placeholder={editingSearch.keyHint || t("providers.keyPlaceholder")}
             />
+            {error && (
+              <div className="text-[12.5px]" style={{ color: "var(--pi-danger)" }}>
+                {error}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               {editingSearch.configured && (
                 <Button
@@ -635,6 +658,7 @@ export function ProvidersSettings() {
                   onClick={() => {
                     if (!client) return;
                     setBusy(true);
+                    setError(null);
                     void client
                       .deleteWebSearchKey(editingSearch.id)
                       .then(() => client.listWebSearchProviders())
@@ -642,6 +666,7 @@ export function ProvidersSettings() {
                         setSearchProviders(list);
                         setEditingSearch(null);
                       })
+                      .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                       .finally(() => setBusy(false));
                   }}
                 >
@@ -655,6 +680,7 @@ export function ProvidersSettings() {
                 onClick={() => {
                   if (!client || !searchKeyDraft.trim()) return;
                   setBusy(true);
+                  setError(null);
                   void client
                     .saveWebSearchKey(editingSearch.id, searchKeyDraft.trim())
                     .then(() => client.listWebSearchProviders())
@@ -662,6 +688,7 @@ export function ProvidersSettings() {
                       setSearchProviders(list);
                       setEditingSearch(null);
                     })
+                    .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -671,6 +698,27 @@ export function ProvidersSettings() {
           </div>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteCustomTarget)}
+        onOpenChange={(v) => {
+          if (!v) setDeleteCustomTarget(null);
+        }}
+        title={t("common.delete")}
+        description={t("providers.deleteCustomConfirm", { name: deleteCustomTarget?.name ?? "" })}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => {
+          if (!client || !deleteCustomTarget) return;
+          const id = deleteCustomTarget.id;
+          setDeleteCustomTarget(null);
+          setBusy(true);
+          setError(null);
+          void deleteCustomProvider(client, id)
+            .catch((err) => setError(err instanceof Error ? err.message : "Failed"))
+            .finally(() => setBusy(false));
+        }}
+      />
     </div>
   );
 }

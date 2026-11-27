@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconInbox,
   IconLayoutGrid,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconLoader2,
   IconPinnedOff,
   IconPlugConnected,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { formatRelativeTime } from "../../api/mappers";
-import type { HostBotDto, SessionSummary } from "../../api/types";
+import type { HostBotDto, HostWorkerDto, SessionSummary } from "../../api/types";
 import { useI18n } from "../../i18n";
 import type { FeatureViewKind } from "./FeatureWorkspaceView";
 import { revealInFileManager, windowToggleMaximize } from "../../platform/bridge";
@@ -19,6 +20,7 @@ import { useSessionStore } from "../../stores/sessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSuperStore } from "../../stores/superStore";
 import {
+  ConfirmDialog,
   ContextMenu,
   ContextMenuItem,
   ContextMenuSeparator,
@@ -29,14 +31,37 @@ import {
   Input,
 } from "../../ui";
 import { BotAvatar, BrandIcon, PiBrandMark } from "../shared/BrandAssets";
+import { ModeSwitcher } from "./ModeSwitcher";
 
 const SIDEBAR_WIDTH_KEY = "superpi:sidebarWidth";
 const SIDEBAR_TOOLS_OPEN_KEY = "superpi:sidebarToolsOpen";
 const DEFAULT_SIDEBAR_WIDTH = 256;
 const MIN_SIDEBAR_WIDTH = 210;
 const MAX_SIDEBAR_WIDTH = 380;
-const SNAP_COLLAPSE_PX = 150;
+const COLLAPSED_SIDEBAR_WIDTH = 52;
 const VISIBLE_SESSIONS_LIMIT = 20;
+
+function isWorkerActiveStatus(status: string): boolean {
+  return (
+    status === "running" ||
+    status === "working" ||
+    status === "waiting_input" ||
+    status === "waiting_approval" ||
+    status === "waiting" ||
+    status === "queued" ||
+    status === "stalled"
+  );
+}
+
+function isWorkerWaiting(w: HostWorkerDto): boolean {
+  return (
+    w.status === "waiting_input" ||
+    w.status === "waiting_approval" ||
+    w.status === "waiting" ||
+    Boolean(w.pendingQuestion) ||
+    Boolean(w.pendingApproval)
+  );
+}
 
 function readStoredToolsOpen(): boolean {
   if (typeof window === "undefined") return false;
@@ -93,24 +118,34 @@ function downloadText(filename: string, content: string): void {
 export function Sidebar({
   open,
   hideHeader = false,
+  appMode,
   activeView,
+  onChangeAppMode,
   onSelectChat,
+  onSelectSuperMain,
   onSelectFeature,
   onToggleCollapse,
   onOpenSearch,
   onOpenCreateBot,
   onOpenBotSettings,
+  onOpenSuperTeam,
+  onOpenRelay,
   onOpenSettings,
 }: {
   open: boolean;
   hideHeader?: boolean;
+  appMode: "pi" | "super";
   activeView: "chat" | "super" | FeatureViewKind;
+  onChangeAppMode: (mode: "pi" | "super") => void;
   onSelectChat: () => void;
+  onSelectSuperMain: () => void;
   onSelectFeature: (view: FeatureViewKind) => void;
   onToggleCollapse: () => void;
   onOpenSearch: () => void;
   onOpenCreateBot: (target?: { deviceId: string; deviceName: string }) => void;
   onOpenBotSettings: (bot: HostBotDto) => void;
+  onOpenSuperTeam: () => void;
+  onOpenRelay: () => void;
   onOpenSettings: () => void;
 }) {
   const { t } = useI18n();
@@ -120,7 +155,12 @@ export function Sidebar({
   const locale = useSettingsStore((s) => s.locale);
   const relayDevices = useSettingsStore((s) => s.relayDevices);
 
-  const unreadInboxCount = useSuperStore((s) => s.unreadInboxCount);
+  const superState = useSuperStore((s) => s.state);
+  const superTeam = useSuperStore((s) => s.team);
+  const selectedWorkerId = useSuperStore((s) => s.selectedWorkerId);
+  const setSelectedWorkerId = useSuperStore((s) => s.setSelectedWorkerId);
+  const deleteWorker = useSuperStore((s) => s.deleteWorker);
+
   const bots = useBotStore((s) => s.bots);
   const collapsedBotIds = useBotStore((s) => s.collapsedBotIds);
   const toggleBotCollapse = useBotStore((s) => s.toggleBotCollapse);
@@ -147,6 +187,7 @@ export function Sidebar({
   const [expandedBots, setExpandedBots] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [workerDeleteTarget, setWorkerDeleteTarget] = useState<HostWorkerDto | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
 
   const toggleToolsOpen = () => {
@@ -172,6 +213,43 @@ export function Sidebar({
     if (current && (!current.isRemote || current.online)) return current.id;
     return bots.find((b) => !b.isRemote || b.online)?.id ?? bots[0]?.id;
   }, [activeBotId, bots]);
+
+  const botsById = useMemo(() => {
+    const map = new Map<string, HostBotDto>();
+    for (const b of bots) map.set(b.id, b);
+    return map;
+  }, [bots]);
+
+  const teamByBotId = useMemo(() => {
+    const map = new Map<string, (typeof superTeam)[number]>();
+    for (const m of superTeam) map.set(m.botId, m);
+    return map;
+  }, [superTeam]);
+
+  const enabledSuperTeamCount = useMemo(
+    () => superTeam.filter((m) => m.enabledInSuper).length,
+    [superTeam],
+  );
+
+  const superWorkers = useMemo(() => {
+    const list = superState?.workers ?? [];
+    return list.toSorted((a, b) => {
+      const aAct = isWorkerActiveStatus(a.status) ? 0 : 1;
+      const bAct = isWorkerActiveStatus(b.status) ? 0 : 1;
+      if (aAct !== bAct) return aAct - bAct;
+      return b.updatedAt - a.updatedAt;
+    });
+  }, [superState?.workers]);
+
+  const activeSuperWorkers = useMemo(
+    () => superWorkers.filter((w) => isWorkerActiveStatus(w.status)),
+    [superWorkers],
+  );
+
+  const savedSuperWorkers = useMemo(
+    () => superWorkers.filter((w) => !isWorkerActiveStatus(w.status)),
+    [superWorkers],
+  );
 
   const pendingSessionIds = useMemo(() => {
     const ids = new Set(pendingQuestions.map((q) => q.sessionId));
@@ -235,7 +313,6 @@ export function Sidebar({
     const startW = sidebarWidth;
     let latestX = startX;
     let moveRaf: number | null = null;
-    let snappedClosed = false;
     setResizing(true);
 
     const onMove = (ev: MouseEvent) => {
@@ -243,14 +320,7 @@ export function Sidebar({
       if (moveRaf !== null) return;
       moveRaf = requestAnimationFrame(() => {
         moveRaf = null;
-        const delta = latestX - startX;
-        const candidate = startW + delta;
-        if (candidate < SNAP_COLLAPSE_PX) {
-          snappedClosed = true;
-          onToggleCollapse();
-          cleanup();
-          return;
-        }
+        const candidate = startW + (latestX - startX);
         const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(candidate)));
         setSidebarWidth(clamped);
       });
@@ -262,14 +332,12 @@ export function Sidebar({
         moveRaf = null;
       }
       setResizing(false);
-      if (!snappedClosed) {
-        const finalW = Math.min(
-          MAX_SIDEBAR_WIDTH,
-          Math.max(MIN_SIDEBAR_WIDTH, Math.round(startW + (latestX - startX))),
-        );
-        setSidebarWidth(finalW);
-        saveStoredSidebarWidth(finalW);
-      }
+      const finalW = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(MIN_SIDEBAR_WIDTH, Math.round(startW + (latestX - startX))),
+      );
+      setSidebarWidth(finalW);
+      saveStoredSidebarWidth(finalW);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", cleanup);
       dragCleanupRef.current = null;
@@ -280,208 +348,294 @@ export function Sidebar({
     window.addEventListener("mouseup", cleanup);
   };
 
-  if (!open) {
-    return (
-      <aside
-        className="flex h-full w-[52px] shrink-0 flex-col items-center justify-between py-2 select-none sm:border-r-0"
-        style={{
-          background: "var(--pi-chrome)",
-          borderRight: "1px solid var(--pi-canvas-border)",
-        }}
-      >
-        <div className="flex flex-col items-center gap-1.5">
-          {!hideHeader && (
-            <>
-              {isMacOverlay && <div className="pi-drag-region h-[32px] w-full" />}
-              <IconButton
-                size="md"
-                label={t("nav.expandSidebar")}
-                onClick={onToggleCollapse}
-              >
-                <IconLayoutSidebarLeftExpand size={17} stroke={1.65} />
-              </IconButton>
+  const renderCompactRail = () => (
+    <div className="flex h-full w-[52px] shrink-0 flex-col items-center justify-between py-2">
+      <div className="flex flex-col items-center gap-1.5">
+        {!hideHeader && (
+          <>
+            {isMacOverlay && <div className="pi-drag-region h-[32px] w-full" />}
+            <IconButton
+              size="md"
+              label={t("nav.expandSidebar")}
+              onClick={onToggleCollapse}
+            >
+              <IconLayoutSidebarLeftExpand size={17} stroke={1.65} />
+            </IconButton>
 
-              <button
-                type="button"
-                onClick={onToggleCollapse}
-                title={t("app.name")}
-                className="my-0.5 flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-              >
-                <PiBrandMark size={20} dark={dark} />
-              </button>
-            </>
-          )}
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              title={t("app.name")}
+              className="my-0.5 flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+            >
+              <PiBrandMark size={20} dark={dark} />
+            </button>
+          </>
+        )}
 
-          <IconButton
-            size="md"
-            label={t("nav.newChat")}
-            onClick={() => {
-              onSelectChat();
-              if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
-            }}
-          >
-            <BrandIcon name="chat/new_chat" size={16} />
-          </IconButton>
+        {appMode === "super" ? (
+          <>
+            <button
+              type="button"
+              title={t("super.title")}
+              onClick={onSelectSuperMain}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "super" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <IconSparkles size={16} stroke={1.7} />
+            </button>
+            <button
+              type="button"
+              title={t("super.drawerTeam")}
+              onClick={onOpenSuperTeam}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{ color: "var(--pi-ink-secondary)" }}
+            >
+              <BrandIcon name="ai/agent" size={16} />
+            </button>
+            <button
+              type="button"
+              title={t("settings.navMemory")}
+              onClick={() => onSelectFeature("memory")}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <BrandIcon name="ai/memory" size={15.5} />
+            </button>
+            <button
+              type="button"
+              title={t("settings.navRelay")}
+              onClick={onOpenRelay}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{ color: "var(--pi-ink-secondary)" }}
+            >
+              <BrandIcon name="system/device" size={15.5} />
+            </button>
+            <button
+              type="button"
+              title={t("auto.superTimersTitle")}
+              onClick={() => onSelectFeature("timers")}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <BrandIcon name="system/timer" size={15.5} />
+            </button>
 
-          <IconButton
-            size="md"
-            label={t("nav.searchPlaceholder")}
-            onClick={onOpenSearch}
-          >
-            <BrandIcon name="action/search" size={15} />
-          </IconButton>
-
-          <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
-
-          <button
-            type="button"
-            title={t("nav.timers")}
-            onClick={() => onSelectFeature("timers")}
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="system/timer" size={15.5} />
-          </button>
-          <button
-            type="button"
-            title={t("nav.inbox")}
-            onClick={() => onSelectFeature("inbox")}
-            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "inbox" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "inbox" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <IconInbox size={16} stroke={1.65} />
-            {unreadInboxCount > 0 && (
-              <span
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
-                style={{ background: "var(--pi-accent)" }}
-              />
-            )}
-          </button>
-          <button
-            type="button"
-            title={t("settings.navMemory")}
-            onClick={() => onSelectFeature("memory")}
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/memory" size={15.5} />
-          </button>
-          <button
-            type="button"
-            title={t("nav.skills")}
-            onClick={() => onSelectFeature("skills")}
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <BrandIcon name="ai/skills" size={15.5} />
-          </button>
-          <button
-            type="button"
-            title={t("nav.mcp")}
-            onClick={() => onSelectFeature("mcp")}
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{
-              background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
-              color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-            }}
-          >
-            <IconPlugConnected size={16} stroke={1.65} />
-          </button>
-
-          <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
-
-          <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
-            {bots.slice(0, 10).map((bot) => {
-              const selected = activeView === "chat" && bot.id === activeBotId;
-              const offline = Boolean(bot.isRemote && !bot.online);
-              return (
-                <ContextMenu
-                  key={bot.id}
-                  trigger={
-                    <button
-                      type="button"
-                      title={bot.name}
-                      onClick={() => {
-                        onSelectChat();
-                        const firstSess = sessionsForBot(bot.id)[0];
-                        if (firstSess && client) {
-                          void selectSession(client, firstSess.id, locale);
-                        } else if (!offline) {
-                          startDraftSession(bot.id);
-                        }
-                      }}
-                      className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
-                      style={{
-                        background: selected ? "var(--pi-wash)" : "transparent",
-                      }}
-                    >
-                      <BotAvatar
-                        avatar={bot.avatar}
-                        name={bot.name}
-                        isHome={bot.isHome}
-                        isRemote={bot.isRemote}
-                        dark={dark}
-                        size={20}
-                      />
-                      {bot.isRemote && (
-                        <span
-                          className="absolute right-0.5 bottom-0.5 h-1.5 w-1.5 rounded-full"
-                          style={{
-                            background: bot.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
-                          }}
+            {superWorkers.length > 0 && (
+              <>
+                <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+                <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
+                  {superWorkers.slice(0, 10).map((w) => {
+                    const matchedBot = botsById.get(w.botId);
+                    const waiting = isWorkerWaiting(w);
+                    const active = isWorkerActiveStatus(w.status);
+                    const selected = selectedWorkerId === w.workerId;
+                    return (
+                      <button
+                        key={w.workerId}
+                        type="button"
+                        title={`${w.title || w.botName} · ${w.botName}`}
+                        onClick={() => {
+                          onSelectSuperMain();
+                          setSelectedWorkerId(w.workerId);
+                        }}
+                        className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+                        style={{ background: selected ? "var(--pi-wash)" : "transparent" }}
+                      >
+                        <BotAvatar
+                          avatar={matchedBot?.avatar}
+                          name={w.botName}
+                          isHome={matchedBot?.isHome}
+                          isRemote={w.isRemote}
+                          dark={dark}
+                          size={20}
                         />
-                      )}
-                    </button>
-                  }
-                >
-                  <ContextMenuItem
-                    icon={<BrandIcon name="chat/new_chat" size={14} />}
-                    label={t("nav.newChat")}
-                    disabled={offline}
-                    onSelect={() => {
-                      onSelectChat();
-                      startDraftSession(bot.id);
-                    }}
-                  />
-                  <ContextMenuItem
-                    icon={<BrandIcon name="system/settings" size={14} />}
-                    label={t("nav.botSettings")}
-                    onSelect={() => onOpenBotSettings(bot)}
-                  />
-                  {!bot.isRemote && isElectron && bot.cwd && (
-                    <ContextMenuItem
-                      icon={<BrandIcon name="file/folder_open" size={14} />}
-                      label={t("nav.revealFolder")}
-                      onSelect={() => void revealInFileManager(bot.cwd)}
-                    />
-                  )}
-                </ContextMenu>
-              );
-            })}
-          </div>
-        </div>
+                        {(active || w.status === "failed") && (
+                          <span
+                            className={`absolute right-0.5 bottom-0.5 h-1.5 w-1.5 rounded-full ${
+                              active && !waiting ? "animate-pulse" : ""
+                            }`}
+                            style={{
+                              background:
+                                w.status === "failed"
+                                  ? "var(--pi-danger)"
+                                  : waiting
+                                    ? "var(--pi-warning)"
+                                    : "var(--pi-accent)",
+                            }}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <IconButton
+              size="md"
+              label={t("nav.newChat")}
+              onClick={() => {
+                onSelectChat();
+                if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
+              }}
+            >
+              <BrandIcon name="chat/new_chat" size={16} />
+            </IconButton>
 
-        <div className="flex flex-col items-center gap-1">
-          <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
-          <IconButton size="md" label={t("nav.settings")} onClick={onOpenSettings}>
-            <BrandIcon name="system/settings" size={16} />
-          </IconButton>
-        </div>
-      </aside>
-    );
-  }
+            <IconButton
+              size="md"
+              label={t("nav.searchPlaceholder")}
+              onClick={onOpenSearch}
+            >
+              <BrandIcon name="action/search" size={15} />
+            </IconButton>
+
+            <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+
+            <button
+              type="button"
+              title={t("nav.timers")}
+              onClick={() => onSelectFeature("timers")}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <BrandIcon name="system/timer" size={15.5} />
+            </button>
+            <button
+              type="button"
+              title={t("settings.navMemory")}
+              onClick={() => onSelectFeature("memory")}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <BrandIcon name="ai/memory" size={15.5} />
+            </button>
+            <button
+              type="button"
+              title={t("nav.skills")}
+              onClick={() => onSelectFeature("skills")}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <BrandIcon name="ai/skills" size={15.5} />
+            </button>
+            <button
+              type="button"
+              title={t("nav.mcp")}
+              onClick={() => onSelectFeature("mcp")}
+              className="flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+              style={{
+                background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
+                color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+              }}
+            >
+              <IconPlugConnected size={16} stroke={1.65} />
+            </button>
+
+            <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+
+            <div className="flex max-h-[260px] flex-col items-center gap-1.5 overflow-y-auto py-0.5">
+              {bots.slice(0, 10).map((bot) => {
+                const selected = activeView === "chat" && bot.id === activeBotId;
+                const offline = Boolean(bot.isRemote && !bot.online);
+                return (
+                  <ContextMenu
+                    key={bot.id}
+                    trigger={
+                      <button
+                        type="button"
+                        title={bot.name}
+                        onClick={() => {
+                          onSelectChat();
+                          const firstSess = sessionsForBot(bot.id)[0];
+                          if (firstSess && client) {
+                            void selectSession(client, firstSess.id, locale);
+                          } else if (!offline) {
+                            startDraftSession(bot.id);
+                          }
+                        }}
+                        className="relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-colors hover:bg-[var(--pi-hover)]"
+                        style={{
+                          background: selected ? "var(--pi-wash)" : "transparent",
+                        }}
+                      >
+                        <BotAvatar
+                          avatar={bot.avatar}
+                          name={bot.name}
+                          isHome={bot.isHome}
+                          isRemote={bot.isRemote}
+                          dark={dark}
+                          size={20}
+                        />
+                        {bot.isRemote && (
+                          <span
+                            className="absolute right-0.5 bottom-0.5 h-1.5 w-1.5 rounded-full"
+                            style={{
+                              background: bot.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                            }}
+                          />
+                        )}
+                      </button>
+                    }
+                  >
+                    <ContextMenuItem
+                      icon={<BrandIcon name="chat/new_chat" size={14} />}
+                      label={t("nav.newChat")}
+                      disabled={offline}
+                      onSelect={() => {
+                        onSelectChat();
+                        startDraftSession(bot.id);
+                      }}
+                    />
+                    <ContextMenuItem
+                      icon={<BrandIcon name="system/settings" size={14} />}
+                      label={t("nav.botSettings")}
+                      onSelect={() => onOpenBotSettings(bot)}
+                    />
+                    {!bot.isRemote && isElectron && bot.cwd && (
+                      <ContextMenuItem
+                        icon={<BrandIcon name="file/folder_open" size={14} />}
+                        label={t("nav.revealFolder")}
+                        onSelect={() => void revealInFileManager(bot.cwd)}
+                      />
+                    )}
+                  </ContextMenu>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-col items-center gap-1">
+        <div className="my-0.5 h-[0.5px] w-6" style={{ background: "var(--pi-hairline)" }} />
+        <IconButton size="md" label={t("nav.settings")} onClick={onOpenSettings}>
+          <BrandIcon name="system/settings" size={16} />
+        </IconButton>
+      </div>
+    </div>
+  );
 
   const renderSessionRow = (session: SessionSummary, isRemoteBot: boolean) => {
     const isCurrent = activeView === "chat" && session.id === activeSessionId;
@@ -498,16 +652,18 @@ export function Sidebar({
             value={renameDraft}
             onChange={(e) => setRenameDraft(e.target.value)}
             onBlur={() => {
-              if (client && renameDraft.trim()) {
-                void renameSession(client, session.id, renameDraft);
+              const trimmed = renameDraft.trim();
+              if (client && trimmed && trimmed !== displayTitle) {
+                void renameSession(client, session.id, trimmed);
               }
               setRenamingId(null);
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter") {
-                if (client && renameDraft.trim()) {
-                  void renameSession(client, session.id, renameDraft);
+                const trimmed = renameDraft.trim();
+                if (client && trimmed && trimmed !== displayTitle) {
+                  void renameSession(client, session.id, trimmed);
                 }
                 setRenamingId(null);
               } else if (e.key === "Escape") {
@@ -876,323 +1032,562 @@ export function Sidebar({
     );
   };
 
+  const renderWorkerRow = (w: HostWorkerDto) => {
+    const matchedBot = botsById.get(w.botId);
+    const matchedTeam = teamByBotId.get(w.botId);
+    const active = isWorkerActiveStatus(w.status);
+    const waiting = isWorkerWaiting(w);
+    const selected = selectedWorkerId === w.workerId;
+    const deviceLabel = w.isRemote && w.deviceName ? w.deviceName : t("super.teamGroupLocal");
+    const slotText =
+      matchedTeam && matchedTeam.maxWorkerSlots > 0
+        ? ` · ${matchedTeam.usedWorkerSlots}/${matchedTeam.maxWorkerSlots}`
+        : "";
+    const relTime = formatRelativeTime(w.updatedAt, locale);
+
+    return (
+      <div
+        key={w.workerId}
+        className="group/worker flex items-center gap-2 rounded-[9px] px-2 py-1.5 transition-[background-color,border-color,box-shadow] duration-150 hover:bg-[var(--pi-hover)]"
+        style={{
+          background: selected ? "var(--pi-canvas)" : "transparent",
+          border: selected ? "1px solid var(--pi-canvas-border)" : "1px solid transparent",
+          boxShadow: selected ? "0 1px 2px rgba(0, 0, 0, 0.04)" : "none",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            onSelectSuperMain();
+            setSelectedWorkerId(w.workerId);
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
+        >
+          <BotAvatar
+            avatar={matchedBot?.avatar ?? matchedTeam?.avatar}
+            name={w.botName}
+            isHome={matchedBot?.isHome}
+            isRemote={w.isRemote}
+            dark={dark}
+            size={20}
+          />
+          <div className="min-w-0 flex-1">
+            <div
+              className="truncate text-[12.5px]"
+              style={{
+                color: selected ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                fontWeight: selected || active ? 550 : 450,
+              }}
+            >
+              {w.title || w.botName}
+            </div>
+            <div className="truncate text-[11px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+              {w.botName} · {deviceLabel}
+              {slotText}
+            </div>
+          </div>
+        </button>
+
+        <div className="relative flex shrink-0 items-center justify-end gap-1">
+          {active ? (
+            waiting ? (
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ background: "var(--pi-warning)" }}
+              />
+            ) : (
+              <IconLoader2
+                size={13}
+                className="animate-spin"
+                style={{ color: "var(--pi-accent)" }}
+              />
+            )
+          ) : (
+            <>
+              <span
+                className="text-[11px] tabular-nums transition-opacity group-hover/worker:opacity-0"
+                style={{
+                  color: w.status === "failed" ? "var(--pi-danger)" : "var(--pi-ink-tertiary)",
+                }}
+              >
+                {relTime}
+              </span>
+              <button
+                type="button"
+                aria-label={t("super.drawerWorkerDelete")}
+                title={t("super.drawerWorkerDelete")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setWorkerDeleteTarget(w);
+                }}
+                className="pi-hover-reveal absolute right-0 flex h-5 w-5 items-center justify-center rounded-md hover:bg-[var(--pi-hover)]"
+                style={{ color: "var(--pi-ink-tertiary)" }}
+              >
+                <BrandIcon name="action/delete" size={12.5} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       {resizing && <div className="fixed inset-0 z-40 cursor-col-resize" />}
 
       <aside
-        className="relative flex h-full shrink-0 flex-col select-none border-r border-[var(--pi-canvas-border)] sm:border-r-0"
+        className={`relative flex h-full shrink-0 flex-col overflow-hidden select-none border-r border-[var(--pi-canvas-border)] sm:border-r-0 ${
+          resizing ? "" : "transition-[width] duration-200 ease-out"
+        }`}
         style={{
-          width: sidebarWidth,
+          width: open ? sidebarWidth : COLLAPSED_SIDEBAR_WIDTH,
           background: "var(--pi-chrome)",
         }}
       >
-        <div
-          onMouseDown={startResize}
-          onDoubleClick={() => {
-            setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-            saveStoredSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-          }}
-          role="separator"
-          aria-orientation="vertical"
-          className="absolute top-0 right-0 bottom-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
-        />
-
-        {!hideHeader && (
+        {open && (
           <div
-            className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between px-3"
-            style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
+            onMouseDown={startResize}
             onDoubleClick={() => {
-              if (isFrameless) void windowToggleMaximize();
+              setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+              saveStoredSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
             }}
-          >
-            <div className="pi-no-drag flex items-center gap-2">
-              {!isMacOverlay && <PiBrandMark size={19} dark={dark} />}
-              <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
-                {t("app.name")}
-              </span>
-            </div>
-
-            <div className="pi-no-drag flex items-center gap-0.5">
-              <IconButton size="sm" label={t("nav.collapseSidebar")} onClick={onToggleCollapse}>
-                <IconLayoutSidebarLeftCollapse size={16} stroke={1.7} />
-              </IconButton>
-            </div>
-          </div>
+            role="separator"
+            aria-orientation="vertical"
+            className="absolute top-0 right-0 bottom-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[var(--pi-accent)]/35"
+          />
         )}
 
-        <div className={`space-y-1.5 px-2.5 pb-2 ${hideHeader ? "pt-1.5" : "pt-0.5"}`}>
-          <button
-            type="button"
-            onClick={() => {
-              onSelectChat();
-              if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
-            }}
-            className="flex h-[34px] w-full items-center gap-2 rounded-[10px] px-2.5 text-[13px] font-medium transition-[background-color,transform] duration-150 hover:bg-[var(--pi-hover)] motion-safe:active:scale-[0.985]"
-            style={{
-              background: "var(--pi-canvas)",
-              border: "1px solid var(--pi-canvas-border)",
-              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-              color: "var(--pi-ink)",
-            }}
-          >
-            <BrandIcon name="chat/new_chat" size={15} />
-            <span className="flex-1 text-left">{t("nav.newChat")}</span>
-            <kbd
-              className="rounded px-1.5 py-0.5 text-[10px]"
-              style={{
-                background: "var(--pi-wash)",
-                color: "var(--pi-ink-tertiary)",
-                fontFamily: "var(--pi-font-mono)",
-              }}
-            >
-              {formatShortcut(["mod", "n"], desktopEnv?.platform)}
-            </kbd>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenSearch}
-            className="flex h-8 w-full items-center gap-2 rounded-[9px] px-2.5 text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-secondary)" }}
-          >
-            <BrandIcon name="action/search" size={14} />
-            <span className="flex-1 truncate text-left">{t("nav.searchShort")}</span>
-            <kbd
-              className="rounded px-1.5 py-0.5 text-[10px]"
-              style={{
-                background: "var(--pi-wash)",
-                color: "var(--pi-ink-tertiary)",
-                fontFamily: "var(--pi-font-mono)",
-              }}
-            >
-              {formatShortcut(["mod", "k"], desktopEnv?.platform)}
-            </kbd>
-          </button>
-
-          <div>
-            <button
-              type="button"
-              aria-expanded={toolsOpen}
-              onClick={toggleToolsOpen}
-              className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-              style={{
-                background:
-                  !toolsOpen &&
-                  (activeView === "timers" ||
-                    activeView === "inbox" ||
-                    activeView === "memory" ||
-                    activeView === "skills" ||
-                    activeView === "mcp")
-                    ? "var(--pi-wash)"
-                    : "transparent",
-                color:
-                  toolsOpen ||
-                  activeView === "timers" ||
-                  activeView === "inbox" ||
-                  activeView === "memory" ||
-                  activeView === "skills" ||
-                  activeView === "mcp"
-                    ? "var(--pi-ink)"
-                    : "var(--pi-ink-secondary)",
-              }}
-            >
-              <IconLayoutGrid size={14.5} stroke={1.65} className="shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-left">{t("nav.tools")}</span>
-              {!toolsOpen && unreadInboxCount > 0 && (
-                <span
-                  className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
-                  style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-                >
-                  {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
-                </span>
-              )}
-              <BrandIcon
-                name="navigation/chevron_down"
-                size={12}
-                className="shrink-0 transition-transform duration-150"
-                style={{
-                  color: "var(--pi-ink-tertiary)",
-                  transform: toolsOpen ? "rotate(0deg)" : "rotate(-90deg)",
+        {!open ? (
+          renderCompactRail()
+        ) : (
+          <div className="flex h-full flex-col" style={{ width: sidebarWidth }}>
+            {!hideHeader && (
+              <div
+                className="pi-drag-region flex h-[44px] shrink-0 items-center justify-between px-3"
+                style={{ paddingLeft: isMacOverlay ? 76 : 12 }}
+                onDoubleClick={() => {
+                  if (isFrameless) void windowToggleMaximize();
                 }}
-              />
-            </button>
+              >
+                <div className="pi-no-drag flex items-center gap-2">
+                  {!isMacOverlay && <PiBrandMark size={19} dark={dark} />}
+                  <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: "var(--pi-ink)" }}>
+                    {t("app.name")}
+                  </span>
+                </div>
 
-            <div className="pi-collapse" data-open={toolsOpen ? "true" : "false"} aria-hidden={!toolsOpen}>
-              <div className="pi-collapse-inner">
-                <div className="mt-0.5 space-y-0.5 pl-2">
+                <div className="pi-no-drag flex items-center gap-0.5">
+                  <IconButton size="sm" label={t("nav.collapseSidebar")} onClick={onToggleCollapse}>
+                    <IconLayoutSidebarLeftCollapse size={16} stroke={1.7} />
+                  </IconButton>
+                </div>
+              </div>
+            )}
+
+            {!hideHeader && (
+              <div className="px-2.5 pb-2">
+                <ModeSwitcher
+                  activeView={appMode === "super" ? "super" : "chat"}
+                  onChange={(v) => onChangeAppMode(v === "super" ? "super" : "pi")}
+                  className="w-full max-w-none"
+                />
+              </div>
+            )}
+
+            {appMode === "super" ? (
+              <>
+                <div className={`space-y-0.5 px-2.5 pb-2 ${hideHeader ? "pt-1.5" : "pt-0.5"}`}>
                   <button
                     type="button"
-                    tabIndex={toolsOpen ? 0 : -1}
-                    onClick={() => onSelectFeature("timers")}
-                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    onClick={onSelectSuperMain}
+                    className="flex h-[32px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
                     style={{
-                      background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
-                      color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                      background: activeView === "super" ? "var(--pi-canvas)" : "transparent",
+                      border:
+                        activeView === "super"
+                          ? "1px solid var(--pi-canvas-border)"
+                          : "1px solid transparent",
+                      color: activeView === "super" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
                     }}
                   >
-                    <BrandIcon name="system/timer" size={14} />
-                    <span className="min-w-0 flex-1 truncate text-left">{t("nav.timers")}</span>
+                    <IconSparkles size={14.5} stroke={1.7} style={{ color: "var(--pi-accent)" }} />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("super.title")}</span>
                   </button>
 
                   <button
                     type="button"
-                    tabIndex={toolsOpen ? 0 : -1}
-                    onClick={() => onSelectFeature("inbox")}
-                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{
-                      background: activeView === "inbox" ? "var(--pi-wash)" : "transparent",
-                      color: activeView === "inbox" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-                    }}
+                    onClick={onOpenSuperTeam}
+                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{ color: "var(--pi-ink-secondary)" }}
                   >
-                    <IconInbox size={14.5} stroke={1.65} className="shrink-0" />
-                    <span className="min-w-0 flex-1 truncate text-left">{t("nav.inbox")}</span>
-                    {unreadInboxCount > 0 && (
-                      <span
-                        className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums"
-                        style={{ background: "var(--pi-accent)", color: "var(--pi-on-accent)" }}
-                      >
-                        {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
-                      </span>
-                    )}
+                    <BrandIcon name="ai/agent" size={14.5} />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("super.drawerTeam")}</span>
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums"
+                      style={{ background: "var(--pi-wash)", color: "var(--pi-ink-secondary)" }}
+                    >
+                      {enabledSuperTeamCount}
+                    </span>
                   </button>
 
                   <button
                     type="button"
-                    tabIndex={toolsOpen ? 0 : -1}
                     onClick={() => onSelectFeature("memory")}
-                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
                     style={{
                       background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
                       color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
                     }}
                   >
-                    <BrandIcon name="ai/memory" size={14} />
-                    <span className="truncate">{t("settings.navMemory")}</span>
+                    <BrandIcon name="ai/memory" size={14.5} />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("settings.navMemory")}</span>
                   </button>
 
                   <button
                     type="button"
-                    tabIndex={toolsOpen ? 0 : -1}
-                    onClick={() => onSelectFeature("skills")}
-                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-                    style={{
-                      background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
-                      color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
-                    }}
+                    onClick={onOpenRelay}
+                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{ color: "var(--pi-ink-secondary)" }}
                   >
-                    <BrandIcon name="ai/skills" size={14} />
-                    <span className="truncate">{t("nav.skills")}</span>
+                    <BrandIcon name="system/device" size={14.5} />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("settings.navRelay")}</span>
                   </button>
 
                   <button
                     type="button"
-                    tabIndex={toolsOpen ? 0 : -1}
-                    onClick={() => onSelectFeature("mcp")}
-                    className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                    onClick={() => onSelectFeature("timers")}
+                    className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
                     style={{
-                      background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
-                      color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                      background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+                      color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
                     }}
                   >
-                    <IconPlugConnected size={14.5} stroke={1.65} className="shrink-0" />
-                    <span className="truncate">{t("nav.mcp")}</span>
+                    <BrandIcon name="system/timer" size={14.5} />
+                    <span className="min-w-0 flex-1 truncate text-left">{t("auto.superTimersTitle")}</span>
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <div
-          className="pi-scroll-shadow min-h-0 flex-1"
-          style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
-        >
-          <div className="space-y-4 px-2.5 py-2">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between px-1.5">
-                <span
-                  className="text-[11px] font-semibold tracking-wide"
-                  style={{ color: "var(--pi-ink-tertiary)" }}
+                <div
+                  className="pi-scroll-shadow min-h-0 flex-1"
+                  style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
                 >
-                  {t("nav.localBots")}
-                </span>
-                <IconButton size="sm" label={t("nav.createBot")} onClick={() => onOpenCreateBot()}>
-                  <BrandIcon name="action/add" size={13.5} />
-                </IconButton>
-              </div>
-              <div className="space-y-1">{localBots.map(renderBotGroup)}</div>
-            </div>
-
-            {remoteGroups.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="px-1.5">
-                  <span
-                    className="text-[11px] font-semibold tracking-wide"
-                    style={{ color: "var(--pi-ink-tertiary)" }}
-                  >
-                    {t("nav.remoteBots")}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {remoteGroups.map((group) => (
-                    <div key={group.deviceId} className="space-y-1">
-                      <div
-                        className="flex items-center justify-between gap-1.5 px-2 text-[11.5px] font-medium"
+                  <div className="space-y-3.5 px-2.5 py-2.5">
+                    <div className="flex items-center justify-between px-1.5">
+                      <span
+                        className="text-[11px] font-semibold tracking-wide"
                         style={{ color: "var(--pi-ink-tertiary)" }}
                       >
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <BrandIcon
-                            name={group.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
-                            size={12.5}
-                          />
-                          <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full"
-                            style={{
-                              background: group.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
-                            }}
-                          />
-                          <span className="truncate">{group.deviceName}</span>
-                        </div>
-                        {group.online && (
-                          <IconButton
-                            size="sm"
-                            label={t("nav.createBot")}
-                            onClick={() =>
-                              onOpenCreateBot({
-                                deviceId: group.deviceId,
-                                deviceName: group.deviceName,
-                              })
-                            }
-                          >
-                            <BrandIcon name="action/add" size={12} />
-                          </IconButton>
-                        )}
-                      </div>
-                      {group.bots.map(renderBotGroup)}
+                        {t("super.workersDrawerTitle")}
+                      </span>
+                      {superWorkers.length > 0 && (
+                        <span className="text-[11px] tabular-nums" style={{ color: "var(--pi-ink-tertiary)" }}>
+                          {superWorkers.length}
+                        </span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
 
-        <div
-          className="shrink-0 px-2.5 py-2"
-          style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
-        >
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
-            style={{ color: "var(--pi-ink-secondary)" }}
-          >
-            <BrandIcon name="system/settings" size={15} />
-            <span>{t("nav.settings")}</span>
-          </button>
-        </div>
+                    {superWorkers.length === 0 ? (
+                      <div
+                        className="px-2 py-4 text-[12px] leading-[1.6]"
+                        style={{ color: "var(--pi-ink-tertiary)" }}
+                      >
+                        {t("super.drawerWorkersEmpty")}
+                      </div>
+                    ) : (
+                      <>
+                        {activeSuperWorkers.length > 0 && (
+                          <div className="space-y-1">
+                            <div
+                              className="px-1.5 text-[10.5px] font-medium"
+                              style={{ color: "var(--pi-ink-tertiary)" }}
+                            >
+                              {t("super.workersActiveGroup")}
+                            </div>
+                            <div className="space-y-0.5">{activeSuperWorkers.map(renderWorkerRow)}</div>
+                          </div>
+                        )}
+                        {savedSuperWorkers.length > 0 && (
+                          <div className="space-y-1">
+                            <div
+                              className="px-1.5 text-[10.5px] font-medium"
+                              style={{ color: "var(--pi-ink-tertiary)" }}
+                            >
+                              {t("super.workersSavedGroup")}
+                            </div>
+                            <div className="space-y-0.5">{savedSuperWorkers.map(renderWorkerRow)}</div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className={`space-y-1.5 px-2.5 pb-2 ${hideHeader ? "pt-1.5" : "pt-0.5"}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectChat();
+                      if (newChatTargetBotId) startDraftSession(newChatTargetBotId);
+                    }}
+                    className="flex h-[34px] w-full items-center gap-2 rounded-[10px] px-2.5 text-[13px] font-medium transition-[background-color,transform] duration-150 hover:bg-[var(--pi-hover)] motion-safe:active:scale-[0.985]"
+                    style={{
+                      background: "var(--pi-canvas)",
+                      border: "1px solid var(--pi-canvas-border)",
+                      boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+                      color: "var(--pi-ink)",
+                    }}
+                  >
+                    <BrandIcon name="chat/new_chat" size={15} />
+                    <span className="flex-1 text-left">{t("nav.newChat")}</span>
+                    <kbd
+                      className="rounded px-1.5 py-0.5 text-[10px]"
+                      style={{
+                        background: "var(--pi-wash)",
+                        color: "var(--pi-ink-tertiary)",
+                        fontFamily: "var(--pi-font-mono)",
+                      }}
+                    >
+                      {formatShortcut(["mod", "n"], desktopEnv?.platform)}
+                    </kbd>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={onOpenSearch}
+                    className="flex h-8 w-full items-center gap-2 rounded-[9px] px-2.5 text-[13px] transition-colors hover:bg-[var(--pi-hover)]"
+                    style={{ color: "var(--pi-ink-secondary)" }}
+                  >
+                    <BrandIcon name="action/search" size={14} />
+                    <span className="flex-1 truncate text-left">{t("nav.searchShort")}</span>
+                    <kbd
+                      className="rounded px-1.5 py-0.5 text-[10px]"
+                      style={{
+                        background: "var(--pi-wash)",
+                        color: "var(--pi-ink-tertiary)",
+                        fontFamily: "var(--pi-font-mono)",
+                      }}
+                    >
+                      {formatShortcut(["mod", "k"], desktopEnv?.platform)}
+                    </kbd>
+                  </button>
+
+                  <div>
+                    <button
+                      type="button"
+                      aria-expanded={toolsOpen}
+                      onClick={toggleToolsOpen}
+                      className="flex h-[30px] w-full items-center gap-2 rounded-[9px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                      style={{
+                        background:
+                          !toolsOpen &&
+                          (activeView === "timers" ||
+                            activeView === "memory" ||
+                            activeView === "skills" ||
+                            activeView === "mcp")
+                            ? "var(--pi-wash)"
+                            : "transparent",
+                        color:
+                          toolsOpen ||
+                          activeView === "timers" ||
+                          activeView === "memory" ||
+                          activeView === "skills" ||
+                          activeView === "mcp"
+                            ? "var(--pi-ink)"
+                            : "var(--pi-ink-secondary)",
+                      }}
+                    >
+                      <IconLayoutGrid size={14.5} stroke={1.65} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate text-left">{t("nav.tools")}</span>
+                      <BrandIcon
+                        name="navigation/chevron_down"
+                        size={12}
+                        className="shrink-0 transition-transform duration-150"
+                        style={{
+                          color: "var(--pi-ink-tertiary)",
+                          transform: toolsOpen ? "rotate(0deg)" : "rotate(-90deg)",
+                        }}
+                      />
+                    </button>
+
+                    <div className="pi-collapse" data-open={toolsOpen ? "true" : "false"} aria-hidden={!toolsOpen}>
+                      <div className="pi-collapse-inner">
+                        <div className="mt-0.5 space-y-0.5 pl-2">
+                          <button
+                            type="button"
+                            tabIndex={toolsOpen ? 0 : -1}
+                            onClick={() => onSelectFeature("timers")}
+                            className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                            style={{
+                              background: activeView === "timers" ? "var(--pi-wash)" : "transparent",
+                              color: activeView === "timers" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                            }}
+                          >
+                            <BrandIcon name="system/timer" size={14} />
+                            <span className="min-w-0 flex-1 truncate text-left">{t("nav.timers")}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            tabIndex={toolsOpen ? 0 : -1}
+                            onClick={() => onSelectFeature("memory")}
+                            className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                            style={{
+                              background: activeView === "memory" ? "var(--pi-wash)" : "transparent",
+                              color: activeView === "memory" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                            }}
+                          >
+                            <BrandIcon name="ai/memory" size={14} />
+                            <span className="truncate">{t("settings.navMemory")}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            tabIndex={toolsOpen ? 0 : -1}
+                            onClick={() => onSelectFeature("skills")}
+                            className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                            style={{
+                              background: activeView === "skills" ? "var(--pi-wash)" : "transparent",
+                              color: activeView === "skills" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                            }}
+                          >
+                            <BrandIcon name="ai/skills" size={14} />
+                            <span className="truncate">{t("nav.skills")}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            tabIndex={toolsOpen ? 0 : -1}
+                            onClick={() => onSelectFeature("mcp")}
+                            className="flex h-[29px] w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                            style={{
+                              background: activeView === "mcp" ? "var(--pi-wash)" : "transparent",
+                              color: activeView === "mcp" ? "var(--pi-ink)" : "var(--pi-ink-secondary)",
+                            }}
+                          >
+                            <IconPlugConnected size={14.5} stroke={1.65} className="shrink-0" />
+                            <span className="truncate">{t("nav.mcp")}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className="pi-scroll-shadow min-h-0 flex-1"
+                  style={{ borderTop: "1px solid var(--pi-canvas-border)" }}
+                >
+                  <div className="space-y-4 px-2.5 py-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between px-1.5">
+                        <span
+                          className="text-[11px] font-semibold tracking-wide"
+                          style={{ color: "var(--pi-ink-tertiary)" }}
+                        >
+                          {t("nav.localBots")}
+                        </span>
+                        <IconButton size="sm" label={t("nav.createBot")} onClick={() => onOpenCreateBot()}>
+                          <BrandIcon name="action/add" size={13.5} />
+                        </IconButton>
+                      </div>
+                      <div className="space-y-1">{localBots.map(renderBotGroup)}</div>
+                    </div>
+
+                    {remoteGroups.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="px-1.5">
+                          <span
+                            className="text-[11px] font-semibold tracking-wide"
+                            style={{ color: "var(--pi-ink-tertiary)" }}
+                          >
+                            {t("nav.remoteBots")}
+                          </span>
+                        </div>
+                        <div className="space-y-2.5">
+                          {remoteGroups.map((group) => (
+                            <div key={group.deviceId} className="space-y-1">
+                              <div
+                                className="flex items-center justify-between gap-1.5 px-2 text-[11.5px] font-medium"
+                                style={{ color: "var(--pi-ink-tertiary)" }}
+                              >
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <BrandIcon
+                                    name={group.platform.toLowerCase().includes("android") ? "system/device" : "system/desktop"}
+                                    size={12.5}
+                                  />
+                                  <span
+                                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                    style={{
+                                      background: group.online ? "var(--pi-success)" : "var(--pi-ink-tertiary)",
+                                    }}
+                                  />
+                                  <span className="truncate">{group.deviceName}</span>
+                                </div>
+                                {group.online && (
+                                  <IconButton
+                                    size="sm"
+                                    label={t("nav.createBot")}
+                                    onClick={() =>
+                                      onOpenCreateBot({
+                                        deviceId: group.deviceId,
+                                        deviceName: group.deviceName,
+                                      })
+                                    }
+                                  >
+                                    <BrandIcon name="action/add" size={12} />
+                                  </IconButton>
+                                )}
+                              </div>
+                              {group.bots.map(renderBotGroup)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div
+              className="shrink-0 px-2.5 py-2"
+              style={{ borderTop: "0.5px solid var(--pi-hairline)" }}
+            >
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--pi-hover)]"
+                style={{ color: "var(--pi-ink-secondary)" }}
+              >
+                <BrandIcon name="system/settings" size={15} />
+                <span>{t("nav.settings")}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </aside>
+
+      <ConfirmDialog
+        open={Boolean(workerDeleteTarget)}
+        onOpenChange={(v) => {
+          if (!v) setWorkerDeleteTarget(null);
+        }}
+        title={t("super.drawerWorkerDelete")}
+        description={t("super.drawerWorkerDeleteConfirm", {
+          title: workerDeleteTarget?.title || workerDeleteTarget?.botName || "",
+        })}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => {
+          if (!client || !workerDeleteTarget) return;
+          const id = workerDeleteTarget.workerId;
+          setWorkerDeleteTarget(null);
+          void deleteWorker(client, id).catch(() => void 0);
+        }}
+      />
     </>
   );
 }

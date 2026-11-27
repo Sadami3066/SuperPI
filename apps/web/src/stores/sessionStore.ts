@@ -26,6 +26,7 @@ import type {
 } from "../api/types";
 import { translate } from "../i18n";
 import { useBotStore } from "./botStore";
+import { useSettingsStore } from "./settingsStore";
 import { type LiveRunState, useStreamStore } from "./streamStore";
 import { useSuperStore } from "./superStore";
 
@@ -991,6 +992,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
 
   toggleArchiveSession: async (client, sessionId, archived) => {
     set({ actionError: null });
+    const prevActiveId = get().activeSessionId;
+    let fallbackToLoad = "";
     try {
       await client.updateSession(sessionId, { archived });
       set((s) => {
@@ -1010,7 +1013,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
           s.activeSessionId === sessionId
             ? pickMostRecentFallbackSessionId(nextSummaries)
             : s.activeSessionId;
-        if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+        if (fallbackId !== s.activeSessionId && fallbackId) {
+          saveStoredSessionId(fallbackId);
+          fallbackToLoad = fallbackId;
+        }
         const nextDraftBotId =
           !fallbackId ? removed?.botId ?? useBotStore.getState().bots[0]?.id ?? s.draftBotId : null;
         return {
@@ -1022,6 +1028,12 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       });
       if (!archived) {
         await get().refreshSessionLists(client, useBotStore.getState().bots);
+      } else if (
+        fallbackToLoad &&
+        fallbackToLoad !== prevActiveId &&
+        !get().transcriptsById[fallbackToLoad]
+      ) {
+        void get().loadSession(client, fallbackToLoad, useSettingsStore.getState().locale);
       }
     } catch (err) {
       set({ actionError: err instanceof Error ? err.message : "Failed to archive session" });
@@ -1061,6 +1073,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       throw err;
     }
     useStreamStore.getState().clearRun(sessionId);
+    const prevActiveId = get().activeSessionId;
+    let fallbackToLoad = "";
     set((s) => {
       const nextSummaries = { ...s.summariesById };
       const removed = nextSummaries[sessionId];
@@ -1075,7 +1089,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         s.activeSessionId === sessionId
           ? pickMostRecentFallbackSessionId(nextSummaries)
           : s.activeSessionId;
-      if (fallbackId !== s.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+      if (fallbackId !== s.activeSessionId && fallbackId) {
+        saveStoredSessionId(fallbackId);
+        fallbackToLoad = fallbackId;
+      }
       const nextDraftBotId =
         !fallbackId ? removed?.botId ?? useBotStore.getState().bots[0]?.id ?? s.draftBotId : null;
       return {
@@ -1088,6 +1105,13 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         draftBotId: nextDraftBotId,
       };
     });
+    if (
+      fallbackToLoad &&
+      fallbackToLoad !== prevActiveId &&
+      !get().transcriptsById[fallbackToLoad]
+    ) {
+      void get().loadSession(client, fallbackToLoad, useSettingsStore.getState().locale);
+    }
   },
 
   scheduleDeleteSession: (client, sessionId) => {
@@ -1113,6 +1137,8 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       wasArchived,
       timer,
     });
+    const prevActiveId = s.activeSessionId;
+    let fallbackToLoad = "";
     set((cur) => {
       const nextSummaries = { ...cur.summariesById };
       delete nextSummaries[sessionId];
@@ -1126,7 +1152,10 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         cur.activeSessionId === sessionId
           ? pickMostRecentFallbackSessionId(nextSummaries)
           : cur.activeSessionId;
-      if (fallbackId !== cur.activeSessionId && fallbackId) saveStoredSessionId(fallbackId);
+      if (fallbackId !== cur.activeSessionId && fallbackId) {
+        saveStoredSessionId(fallbackId);
+        fallbackToLoad = fallbackId;
+      }
       const nextDraftBotId =
         !fallbackId ? target.botId ?? useBotStore.getState().bots[0]?.id ?? cur.draftBotId : null;
       return {
@@ -1144,6 +1173,13 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         ],
       };
     });
+    if (
+      fallbackToLoad &&
+      fallbackToLoad !== prevActiveId &&
+      !get().transcriptsById[fallbackToLoad]
+    ) {
+      void get().loadSession(client, fallbackToLoad, useSettingsStore.getState().locale);
+    }
   },
 
   undoDeleteSession: (sessionId) => {
