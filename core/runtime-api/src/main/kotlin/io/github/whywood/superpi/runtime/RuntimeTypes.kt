@@ -50,6 +50,7 @@ data class RemoteBotRef(
     val botId: String,
     val botName: String,
     val online: Boolean,
+    val devicePlatform: String = "",
 )
 
 data class RuntimeWorkspace(

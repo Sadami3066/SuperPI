@@ -544,16 +544,19 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
                 checkpoints.firstOrNull { it.turnIndex == req.turnIndex }
             }
             if (cp == null) {
-                call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Checkpoint not found for turn ${req.turnIndex}"))
-                return@post
+                if (mode == "files_only") {
+                    call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Checkpoint not found for turn ${req.turnIndex}"))
+                    return@post
+                }
+            } else {
+                val res = controller.checkpointStore.restoreFiles(sessionId, cp.id)
+                if (!res.ok) {
+                    call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(res.message))
+                    return@post
+                }
+                restoredFiles = res.restoredFiles
+                backupCheckpointId = res.backupCheckpointId
             }
-            val res = controller.checkpointStore.restoreFiles(sessionId, cp.id)
-            if (!res.ok) {
-                call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(res.message))
-                return@post
-            }
-            restoredFiles = res.restoredFiles
-            backupCheckpointId = res.backupCheckpointId
         }
         if (mode == "chat_only" || mode == "files_and_chat") {
             val summary = controller.runtimeHost.allSessions().firstOrNull { it.id == sessionId }

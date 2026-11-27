@@ -80,6 +80,7 @@ class RelayLive(
     private val localWorkerPool: LocalWorkerPool? = null,
     private val onRemoteMemoryChanged: (Long) -> Unit = {},
     private val platform: String = "android",
+    private val osTag: String = "",
 ) {
     private val socket = RelaySocket(scope, io)
     private val mutex = Mutex()
@@ -132,6 +133,7 @@ class RelayLive(
                     capabilities = device.capabilities,
                     intro = bot.intro,
                     botCapabilities = bot.capabilities,
+                    platform = device.platform,
                 )
             }
         }
@@ -614,12 +616,8 @@ class RelayLive(
         }
     }
 
-    private suspend fun helloFrame(current: RelayAccount): JsonObject = RelayFrames.hello(
-        deviceId = current.deviceId,
-        platform = platform,
-        appVersion = appVersion,
-        bots = if (_allowRemote.value) bots() else emptyList(),
-        capabilities = if (_allowRemote.value) {
+    private suspend fun helloFrame(current: RelayAccount): JsonObject {
+        val baseCaps = if (_allowRemote.value) {
             if (localWorkerPool != null) {
                 RELAY_CAPABILITIES
             } else {
@@ -627,8 +625,21 @@ class RelayLive(
             }
         } else {
             RELAY_CAPABILITIES_READONLY
-        },
-    )
+        }
+        val normalizedOs = osTag.trim().lowercase()
+        val caps = if (normalizedOs.isNotEmpty()) {
+            baseCaps + "os:$normalizedOs"
+        } else {
+            baseCaps
+        }
+        return RelayFrames.hello(
+            deviceId = current.deviceId,
+            platform = platform,
+            appVersion = appVersion,
+            bots = if (_allowRemote.value) bots() else emptyList(),
+            capabilities = caps,
+        )
+    }
 
     private suspend fun resendHelloLocked(current: RelayAccount) {
         socket.send(helloFrame(current).toString())

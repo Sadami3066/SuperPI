@@ -14,7 +14,27 @@ data class RemoteBot(
     val capabilities: List<String> = emptyList(),
     val intro: String = "",
     val botCapabilities: RelayBotCapabilities? = null,
+    val platform: String = "",
 )
+
+fun resolveDeviceOs(platform: String, capabilities: List<String> = emptyList()): String {
+    val capOs = capabilities
+        .firstOrNull { it.startsWith("os:", ignoreCase = true) }
+        ?.substringAfter(':')
+        ?.trim()
+        ?.lowercase()
+        .orEmpty()
+    val raw = capOs.ifEmpty { platform.trim().lowercase() }
+    return when {
+        raw.contains("mac") || raw.contains("darwin") || raw.contains("apple") -> "macos"
+        raw.contains("win") -> "windows"
+        raw.contains("android") -> "android"
+        raw.contains("ios") || raw.contains("iphone") || raw.contains("ipad") -> "ios"
+        raw.contains("linux") -> "linux"
+        raw.contains("desktop") || raw.contains("cli") -> "desktop"
+        else -> raw
+    }
+}
 
 object RemoteWorkspaces {
     private const val ID_PREFIX = "remote:"
@@ -36,6 +56,7 @@ object RemoteWorkspaces {
             botId = bot.botId,
             botName = bot.botName,
             online = bot.online,
+            devicePlatform = resolveDeviceOs(bot.platform, bot.capabilities),
         ),
     )
 

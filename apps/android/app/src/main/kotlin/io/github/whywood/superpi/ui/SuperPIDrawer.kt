@@ -140,6 +140,7 @@ internal sealed interface DrawerEntry {
         val online: Boolean,
         val expanded: Boolean,
         val canCreateBot: Boolean,
+        val devicePlatform: String = "",
     ) : DrawerEntry {
         override val key: String = "remote_device_$deviceId"
     }
@@ -221,6 +222,7 @@ internal fun buildDrawerEntries(
     data class RemoteGroup(
         val deviceId: String,
         val deviceName: String,
+        val devicePlatform: String,
         val online: Boolean,
         val bots: List<RuntimeWorkspace>,
     )
@@ -231,10 +233,14 @@ internal fun buildDrawerEntries(
             val name = bots.firstNotNullOfOrNull { bot ->
                 bot.remote?.deviceName?.takeIf { it.isNotBlank() }
             } ?: deviceId
+            val platform = bots.firstNotNullOfOrNull { bot ->
+                bot.remote?.devicePlatform?.takeIf { it.isNotBlank() }
+            }.orEmpty()
             val groupOnline = relayOnline && bots.any { it.remote?.online == true }
             RemoteGroup(
                 deviceId = deviceId,
                 deviceName = name,
+                devicePlatform = platform,
                 online = groupOnline,
                 bots = bots,
             )
@@ -258,6 +264,7 @@ internal fun buildDrawerEntries(
                 online = group.online,
                 expanded = expanded,
                 canCreateBot = canCreateBot,
+                devicePlatform = group.devicePlatform,
             ),
         )
         if (!expanded) return@forEach
@@ -884,6 +891,16 @@ private fun DrawerWorkspacesHeader(
     }
 }
 
+private fun remoteDevicePlatformIcon(platform: String): DdIcon {
+    val p = platform.trim().lowercase()
+    return when {
+        p.contains("mac") || p.contains("darwin") || p.contains("apple") -> DdIcons.Apple
+        p.contains("win") -> DdIcons.Windows
+        p.contains("android") || p.contains("ios") || p.contains("phone") || p.contains("mobile") -> DdIcons.Mobile
+        else -> DdIcons.Desktop
+    }
+}
+
 @Composable
 private fun DrawerRemoteDeviceHeaderRow(
     entry: DrawerEntry.RemoteDeviceHeader,
@@ -910,9 +927,9 @@ private fun DrawerRemoteDeviceHeaderRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             DdIcon(
-                icon = if (entry.expanded) DdIcons.ChevronDown else DdIcons.ChevronRight,
-                tint = colors.inkTertiary,
-                size = 13.dp,
+                icon = remoteDevicePlatformIcon(entry.devicePlatform),
+                tint = if (entry.online && entry.expanded) colors.inkSecondary else colors.inkTertiary,
+                size = 15.dp,
             )
             Spacer(Modifier.width(6.dp))
             if (entry.online) {

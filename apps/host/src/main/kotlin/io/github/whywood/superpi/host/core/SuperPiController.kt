@@ -809,6 +809,7 @@ class SuperPiController(
             localWorkerPool = localWorkerPool,
             onRemoteMemoryChanged = { version -> relayMemorySync.onRemoteVersionHint(version) },
             platform = AppBrand.RELAY_PLATFORM_CLI,
+            osTag = platform.profile.os.id,
         ).also { live ->
             scope.launch {
                 live.remoteBots.collect { bots ->

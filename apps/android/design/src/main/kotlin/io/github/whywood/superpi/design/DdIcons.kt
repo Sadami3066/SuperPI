@@ -1,6 +1,7 @@
 package io.github.whywood.superpi.design
 
 object DdIcons {
+    val Apple = DdIcon(R.drawable.ic_device_apple)
     val Apps = DdIcon(R.drawable.ic_ai_mini_apps)
     val Archive = DdIcon(R.drawable.ic_action_archive)
     val ArrowLeft = DdIcon(R.drawable.ic_navigation_back)
@@ -40,6 +41,7 @@ object DdIcons {
     val Menu = DdIcon(R.drawable.ic_navigation_menu)
     val Message = DdIcon(R.drawable.ic_chat_unread)
     val Mic = DdIcon(R.drawable.ic_chat_microphone)
+    val Mobile = DdIcon(R.drawable.ic_device_mobile)
     val Monitor = DdIcon(R.drawable.ic_system_device)
     val Moon = DdIcon(R.drawable.ic_system_appearance)
     val More = DdIcon(R.drawable.ic_navigation_more)
@@ -74,5 +76,6 @@ object DdIcons {
     val Trash = DdIcon(R.drawable.ic_action_delete)
     val Volume = DdIcon(R.drawable.ic_chat_audio_high)
     val VolumeX = DdIcon(R.drawable.ic_chat_audio_muted)
+    val Windows = DdIcon(R.drawable.ic_device_windows)
     val Workspace = DdIcon(R.drawable.ic_file_workspace)
 }

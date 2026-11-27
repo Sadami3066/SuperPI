@@ -905,6 +905,25 @@ class LocalControlServerApiTest {
         assertEquals("false", page3["hasMore"]!!.jsonPrimitive.content)
         assertEquals("0", page3["userTurnOffset"]!!.jsonPrimitive.content)
         assertEquals("u1", page3["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+
+        // 4. Direct files_and_chat rewind succeeds gracefully even when a turn has no file checkpoint
+        val rewindResp = http.newCall(
+            authReq(port, "/api/v1/sessions/$sid/rewind")
+                .post("""{"turnIndex":1,"mode":"files_and_chat"}""".toRequestBody("application/json".toMediaType()))
+                .build(),
+        ).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        assertEquals("true", rewindResp["ok"]!!.jsonPrimitive.content)
+        assertEquals("0", rewindResp["restoredFiles"]!!.jsonPrimitive.content)
+
+        val afterRewind = http.newCall(authReq(port, "/api/v1/sessions/$sid").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        assertEquals(2, afterRewind["messages"]!!.jsonArray.size)
+        assertEquals("u1", afterRewind["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
     }
 
     @Test
