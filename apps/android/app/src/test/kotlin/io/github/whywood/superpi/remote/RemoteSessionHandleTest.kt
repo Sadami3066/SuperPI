@@ -88,7 +88,9 @@ class RemoteSessionHandleTest {
                 history = RemoteHistoryDto(peerSessionId, null, false, emptyList(), null),
             ),
         )
-        val transport = FakeRemoteTransport()
+        val transport = FakeRemoteTransport().apply {
+            result = { buildJsonObject { put("sessionId", peerSessionId) } }
+        }
         val handle = engine(transport, backgroundScope).create(summary.filePath, ModelConfig())
         try {
             assertEquals(summary.id, handle.sessionId)

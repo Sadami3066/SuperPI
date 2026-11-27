@@ -119,6 +119,9 @@ val verifyDocFacts = tasks.register("verifyDocFacts") {
 }
 
 gradle.projectsEvaluated {
+    // The monorepo root owns boundary checks when Android is a subproject.
+    if (project != rootProject) return@projectsEvaluated
+
     val allowed = mapOf(
         ":app" to setOf(":runtime", ":shell", ":design", ":plugin-api"),
         ":runtime" to setOf(":runtime-api"),
