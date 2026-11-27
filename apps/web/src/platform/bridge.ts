@@ -89,6 +89,8 @@ interface ElectronPreloadBridge {
   windowToggleMaximize(): Promise<boolean>;
   windowClose(): Promise<void>;
   windowIsMaximized(): Promise<boolean>;
+  getCloseToTray(): Promise<boolean>;
+  setCloseToTray(enabled: boolean): Promise<boolean>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
   browserMount(bounds: BrowserBounds, url?: string, tabId?: string): Promise<BrowserNavState>;
   browserSetBounds(bounds: BrowserBounds, tabId?: string): Promise<void>;
@@ -279,6 +281,18 @@ export async function windowIsMaximized(): Promise<boolean> {
   const native = getElectronBridge();
   if (!native) return false;
   return native.windowIsMaximized();
+}
+
+export async function getDesktopCloseToTray(): Promise<boolean> {
+  const native = getElectronBridge();
+  if (!native) return false;
+  return native.getCloseToTray();
+}
+
+export async function setDesktopCloseToTray(enabled: boolean): Promise<boolean> {
+  const native = getElectronBridge();
+  if (!native) return false;
+  return native.setCloseToTray(enabled);
 }
 
 export function subscribeWindowMaximized(cb: (maximized: boolean) => void): () => void {

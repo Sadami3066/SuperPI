@@ -74,6 +74,8 @@ export interface DesktopBridge {
   windowToggleMaximize(): Promise<boolean>;
   windowClose(): Promise<void>;
   windowIsMaximized(): Promise<boolean>;
+  getCloseToTray(): Promise<boolean>;
+  setCloseToTray(enabled: boolean): Promise<boolean>;
   onWindowMaximizedChange(cb: (maximized: boolean) => void): () => void;
   browserMount(bounds: BrowserBounds, url?: string, tabId?: string): Promise<BrowserNavState>;
   browserSetBounds(bounds: BrowserBounds, tabId?: string): Promise<void>;
@@ -110,6 +112,8 @@ export const DESKTOP_IPC_CHANNELS = {
   windowToggleMaximize: "superpi:window-toggle-maximize",
   windowClose: "superpi:window-close",
   windowIsMaximized: "superpi:window-is-maximized",
+  getCloseToTray: "superpi:get-close-to-tray",
+  setCloseToTray: "superpi:set-close-to-tray",
   windowMaximizedChanged: "superpi:window-maximized-changed",
   browserMount: "superpi:browser-mount",
   browserSetBounds: "superpi:browser-set-bounds",

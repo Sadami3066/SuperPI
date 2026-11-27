@@ -9,6 +9,7 @@ export interface WindowBoundsState {
   y?: number;
   maximized?: boolean;
   backgroundColor?: string;
+  closeToTray?: boolean;
 }
 
 const DEFAULT_WIDTH = 1280;
@@ -59,25 +60,59 @@ export function loadWindowState(homeDir: string): WindowBoundsState {
         typeof parsed.backgroundColor === "string" && parsed.backgroundColor.startsWith("#")
           ? parsed.backgroundColor
           : undefined,
+      closeToTray: typeof parsed.closeToTray === "boolean" ? parsed.closeToTray : undefined,
     };
   } catch {
     return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
   }
 }
 
+function readRawWindowState(file: string): Partial<WindowBoundsState> {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as Partial<WindowBoundsState>;
+  } catch {
+    return {};
+  }
+}
+
+export function loadCloseToTray(homeDir: string): boolean {
+  const prev = readRawWindowState(statePath(homeDir));
+  return typeof prev.closeToTray === "boolean" ? prev.closeToTray : true;
+}
+
+export function saveCloseToTray(homeDir: string, enabled: boolean): boolean {
+  try {
+    const file = statePath(homeDir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const prev = readRawWindowState(file);
+    const next: WindowBoundsState = {
+      width: typeof prev.width === "number" ? prev.width : DEFAULT_WIDTH,
+      height: typeof prev.height === "number" ? prev.height : DEFAULT_HEIGHT,
+      x: typeof prev.x === "number" ? prev.x : undefined,
+      y: typeof prev.y === "number" ? prev.y : undefined,
+      maximized: Boolean(prev.maximized),
+      backgroundColor:
+        typeof prev.backgroundColor === "string" && prev.backgroundColor.startsWith("#")
+          ? prev.backgroundColor
+          : undefined,
+      closeToTray: Boolean(enabled),
+    };
+    fs.writeFileSync(file, JSON.stringify(next), "utf8");
+  } catch {
+    return Boolean(enabled);
+  }
+  return Boolean(enabled);
+}
+
 export function saveWindowState(homeDir: string, win: BrowserWindow): void {
   try {
     const file = statePath(homeDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    let existingBackground: string | undefined;
-    try {
-      const prev = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<WindowBoundsState>;
-      if (typeof prev.backgroundColor === "string" && prev.backgroundColor.startsWith("#")) {
-        existingBackground = prev.backgroundColor;
-      }
-    } catch {
-      existingBackground = undefined;
-    }
+    const prev = readRawWindowState(file);
+    const existingBackground =
+      typeof prev.backgroundColor === "string" && prev.backgroundColor.startsWith("#")
+        ? prev.backgroundColor
+        : undefined;
     const maximized = win.isMaximized();
     const bounds = maximized ? win.getNormalBounds() : win.getBounds();
     const next: WindowBoundsState = {
@@ -87,6 +122,7 @@ export function saveWindowState(homeDir: string, win: BrowserWindow): void {
       y: bounds.y,
       maximized,
       backgroundColor: existingBackground,
+      closeToTray: typeof prev.closeToTray === "boolean" ? prev.closeToTray : undefined,
     };
     fs.writeFileSync(file, JSON.stringify(next), "utf8");
   } catch {
@@ -99,12 +135,7 @@ export function saveWindowBackgroundColor(homeDir: string, color: string): void 
   try {
     const file = statePath(homeDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    let prev: Partial<WindowBoundsState> = {};
-    try {
-      prev = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<WindowBoundsState>;
-    } catch {
-      prev = {};
-    }
+    const prev = readRawWindowState(file);
     const next: WindowBoundsState = {
       width: typeof prev.width === "number" ? prev.width : DEFAULT_WIDTH,
       height: typeof prev.height === "number" ? prev.height : DEFAULT_HEIGHT,
@@ -112,6 +143,7 @@ export function saveWindowBackgroundColor(homeDir: string, color: string): void 
       y: typeof prev.y === "number" ? prev.y : undefined,
       maximized: Boolean(prev.maximized),
       backgroundColor: color,
+      closeToTray: typeof prev.closeToTray === "boolean" ? prev.closeToTray : undefined,
     };
     fs.writeFileSync(file, JSON.stringify(next), "utf8");
   } catch {

@@ -21,7 +21,14 @@ import {
 } from "../shared/bridge.js";
 import { EmbeddedBrowserManager } from "./browser-view.js";
 import { HostManager } from "./host-manager.js";
-import { loadWindowState, saveWindowBackgroundColor, saveWindowState } from "./window-state.js";
+import { APP_CSP_HEADER, isAllowedAppNavigation } from "./security.js";
+import {
+  loadCloseToTray,
+  loadWindowState,
+  saveCloseToTray,
+  saveWindowBackgroundColor,
+  saveWindowState,
+} from "./window-state.js";
 
 const APP_SCHEME = "superpi";
 const APP_ORIGIN = `${APP_SCHEME}://app`;
@@ -120,6 +127,7 @@ function registerAppProtocol(webDistDir: string): void {
         status: 200,
         headers: {
           "Content-Type": MIME_BY_EXT[ext] ?? "application/octet-stream",
+          ...(ext === ".html" ? { "Content-Security-Policy": APP_CSP_HEADER } : {}),
         },
       });
     } catch {
@@ -132,6 +140,8 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let allowWindowClose = false;
 let shutdownStarted = false;
+let quitConfirmationInFlight = false;
+let quitConfirmed = false;
 let currentLocale: "zh-CN" | "en" = "zh-CN";
 
 const repoRoot = resolveRepoRoot();
@@ -139,6 +149,7 @@ const hostManager = new HostManager({
   resourceDir: app.isPackaged ? process.resourcesPath : null,
   repoRoot,
 });
+let closeToTrayEnabled = loadCloseToTray(hostManager.homeDir);
 const browserManager = new EmbeddedBrowserManager();
 
 function focusMainWindow(): void {
@@ -146,6 +157,43 @@ function focusMainWindow(): void {
   if (!mainWindow.isVisible()) mainWindow.show();
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
+}
+
+async function requestGracefulQuit(): Promise<void> {
+  if (quitConfirmationInFlight || quitConfirmed || shutdownStarted) return;
+  quitConfirmationInFlight = true;
+  try {
+    const activeCount = await hostManager.queryActiveRunCount();
+    if (activeCount > 0) {
+      const isEn = currentLocale === "en";
+      const message = isEn
+        ? `${activeCount} conversation task${activeCount > 1 ? "s are" : " is"} still running. Quitting now will stop active tasks.`
+        : `当前仍有 ${activeCount} 个对话任务正在运行，立即退出将中断这些任务。`;
+      const detail = isEn
+        ? "Are you sure you want to quit Super PI?"
+        : "确认要退出 Super PI 吗？";
+      const options: Electron.MessageBoxOptions = {
+        type: "question",
+        title: isEn ? "Quit Super PI" : "退出 Super PI",
+        message,
+        detail,
+        buttons: isEn ? ["Cancel", "Quit"] : ["取消", "仍然退出"],
+        defaultId: 0,
+        cancelId: 0,
+      };
+      const parentWin =
+        mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ? mainWindow : undefined;
+      const { response } = parentWin
+        ? await dialog.showMessageBox(parentWin, options)
+        : await dialog.showMessageBox(options);
+      if (response !== 1) return;
+    }
+    quitConfirmed = true;
+    allowWindowClose = true;
+    app.quit();
+  } finally {
+    quitConfirmationInFlight = false;
+  }
 }
 
 function buildTrayMenu(): Menu {
@@ -159,8 +207,7 @@ function buildTrayMenu(): Menu {
     {
       label: isEn ? "Quit Super PI" : "退出 Super PI",
       click: () => {
-        allowWindowClose = true;
-        app.quit();
+        void requestGracefulQuit();
       },
     },
   ]);
@@ -277,9 +324,13 @@ function createMainWindow(): void {
   win.on("close", (event) => {
     if (saveTimer) clearTimeout(saveTimer);
     saveWindowState(hostManager.homeDir, win);
-    if (!allowWindowClose && tray && process.platform === "darwin") {
+    if (!allowWindowClose) {
       event.preventDefault();
-      win.hide();
+      if (tray && closeToTrayEnabled) {
+        win.hide();
+      } else {
+        void requestGracefulQuit();
+      }
     }
   });
   win.on("closed", () => {
@@ -299,8 +350,8 @@ function createMainWindow(): void {
   });
 
   win.webContents.on("will-navigate", (event, url) => {
-    const allowedPrefix = devUrl ? devUrl.replace(/\/+$/, "") : APP_ORIGIN;
-    if (!url.startsWith(allowedPrefix)) {
+    const allowedOrigin = devUrl || APP_ORIGIN;
+    if (!isAllowedAppNavigation(url, allowedOrigin)) {
       event.preventDefault();
       if (isAllowedExternalUrl(url)) {
         void shell.openExternal(url);
@@ -455,6 +506,15 @@ function registerIpcHandlers(): void {
     return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized());
   });
 
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.getCloseToTray, async () => {
+    return closeToTrayEnabled;
+  });
+
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.setCloseToTray, async (_event, enabled: boolean) => {
+    closeToTrayEnabled = saveCloseToTray(hostManager.homeDir, Boolean(enabled));
+    return closeToTrayEnabled;
+  });
+
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.browserMount,
     async (_event, bounds: BrowserBounds, url?: string, tabId?: string) => {
@@ -560,8 +620,16 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on("before-quit", (event) => {
+    if (shutdownStarted) {
+      event.preventDefault();
+      return;
+    }
+    if (!quitConfirmed) {
+      event.preventDefault();
+      void requestGracefulQuit();
+      return;
+    }
     allowWindowClose = true;
-    if (shutdownStarted) return;
     shutdownStarted = true;
     event.preventDefault();
     void browserManager

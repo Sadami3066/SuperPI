@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n, type AppLanguagePreference } from "../../i18n";
+import { getDesktopCloseToTray, setDesktopCloseToTray } from "../../platform/bridge";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Select, Slider, Switch } from "../../ui";
@@ -7,6 +8,7 @@ import { Select, Slider, Switch } from "../../ui";
 export function GeneralSettings() {
   const { t } = useI18n();
   const client = useConnectionStore((s) => s.client);
+  const isElectron = useConnectionStore((s) => Boolean(s.desktopEnv?.isElectron));
 
   const languagePref = useSettingsStore((s) => s.languagePref);
   const hostSettings = useSettingsStore((s) => s.hostSettings);
@@ -14,6 +16,13 @@ export function GeneralSettings() {
   const patchHostSettings = useSettingsStore((s) => s.patchHostSettings);
 
   const [compactDraft, setCompactDraft] = useState(hostSettings?.compactionTriggerPercent ?? 75);
+  const [closeToTray, setCloseToTray] = useState(true);
+
+  useEffect(() => {
+    if (isElectron) {
+      void getDesktopCloseToTray().then(setCloseToTray).catch(() => void 0);
+    }
+  }, [isElectron]);
 
   useEffect(() => {
     if (hostSettings) {
@@ -214,6 +223,27 @@ export function GeneralSettings() {
                 }}
               />
             </div>
+
+            {isElectron && (
+              <div className="flex items-center justify-between gap-3 py-4">
+                <div className="min-w-0">
+                  <div className="text-[13.5px] font-medium" style={{ color: "var(--pi-ink)" }}>
+                    {t("settings.closeToTray")}
+                  </div>
+                  <div className="mt-0.5 text-[12px]" style={{ color: "var(--pi-ink-tertiary)" }}>
+                    {t("settings.closeToTrayDesc")}
+                  </div>
+                </div>
+                <Switch
+                  checked={closeToTray}
+                  ariaLabel={t("settings.closeToTray")}
+                  onCheckedChange={(checked) => {
+                    setCloseToTray(checked);
+                    void setDesktopCloseToTray(checked).then(setCloseToTray);
+                  }}
+                />
+              </div>
+            )}
           </div>
         </section>
       )}

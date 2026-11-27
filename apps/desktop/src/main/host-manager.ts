@@ -115,6 +115,57 @@ export async function requestShutdown(port: number, token: string): Promise<bool
   return status !== null && status >= 200 && status <= 204;
 }
 
+export function fetchActiveRunCount(port: number, token: string, timeoutMs = 1500): Promise<number> {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/api/v1/status",
+        method: "GET",
+        timeout: timeoutMs,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      (res) => {
+        if ((res.statusCode ?? 0) !== 200) {
+          res.resume();
+          resolve(0);
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+              busySessionsCount?: unknown;
+            };
+            const count =
+              typeof parsed.busySessionsCount === "number" && Number.isFinite(parsed.busySessionsCount)
+                ? parsed.busySessionsCount
+                : 0;
+            resolve(count > 0 ? count : 0);
+          } catch {
+            resolve(0);
+          }
+        });
+        res.on("error", () => resolve(0));
+      },
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(0);
+    });
+    req.on("error", () => resolve(0));
+    req.end();
+  });
+}
+
+export function hasChildExited(child: Pick<ChildProcess, "exitCode" | "signalCode">): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 export function isValidSidecarDir(dir: string, platform: NodeJS.Platform = process.platform): boolean {
   const javaBin =
     platform === "win32"
@@ -233,7 +284,7 @@ function killChildTree(child: ChildProcess): void {
   }
   setTimeout(() => {
     try {
-      if (child.exitCode === null && !child.killed) {
+      if (!hasChildExited(child)) {
         child.kill("SIGKILL");
       }
     } catch {
@@ -303,7 +354,7 @@ export class HostManager {
       return dto;
     }
 
-    if (this.child && this.child.exitCode !== null) {
+    if (this.child && hasChildExited(this.child)) {
       this.child = null;
       this.owned = false;
     }
@@ -333,11 +384,14 @@ export class HostManager {
       if (!this.child) {
         throw new Error("Super PI host exited unexpectedly during startup.");
       }
-      if (this.child.exitCode !== null) {
-        const code = this.child.exitCode;
+      if (hasChildExited(this.child)) {
+        const reason =
+          this.child.exitCode !== null
+            ? `code ${this.child.exitCode}`
+            : `signal ${this.child.signalCode}`;
         this.child = null;
         this.owned = false;
-        throw new Error(`Super PI host exited early with code ${code}`);
+        throw new Error(`Super PI host exited early with ${reason}`);
       }
       const lock = readServeLock(lockFile);
       if (lock && (await probeHealth(lock.port, lock.token))) {
@@ -391,6 +445,12 @@ export class HostManager {
     return child;
   }
 
+  async queryActiveRunCount(): Promise<number> {
+    const conn = this.connection ?? readServeLock(serveLockPath(this.homeDir));
+    if (!conn) return 0;
+    return fetchActiveRunCount(conn.port, conn.token);
+  }
+
   async shutdownIfOwned(): Promise<void> {
     this.shuttingDown = true;
     const isOwned = this.owned;
@@ -404,11 +464,11 @@ export class HostManager {
     if (conn) {
       await requestShutdown(conn.port, conn.token);
     }
-    if (!proc || proc.exitCode !== null) return;
+    if (!proc || hasChildExited(proc)) return;
 
     const deadline = Date.now() + SHUTDOWN_WAIT_MS;
     while (Date.now() < deadline) {
-      if (proc.exitCode !== null) return;
+      if (hasChildExited(proc)) return;
       await sleep(100);
     }
     killChildTree(proc);

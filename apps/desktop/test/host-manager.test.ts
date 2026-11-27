@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  fetchActiveRunCount,
+  hasChildExited,
   HostManager,
   locateHostLaunchSpec,
   normalizePathForJvm,
@@ -128,5 +130,33 @@ describe("host-manager", () => {
     expect(spec?.kind).toBe("sidecar");
     expect(spec?.command).toBe(javaBin);
     expect(spec?.args).toContain("serve");
+  });
+
+  it("detects exited children across both exitCode and signalCode", () => {
+    expect(hasChildExited({ exitCode: null, signalCode: null })).toBe(false);
+    expect(hasChildExited({ exitCode: 0, signalCode: null })).toBe(true);
+    expect(hasChildExited({ exitCode: null, signalCode: "SIGTERM" })).toBe(true);
+  });
+
+  it("queries active run count from host status and falls back to zero on error", async () => {
+    const server = http.createServer((req, res) => {
+      if (req.url === "/api/v1/status" && req.headers.authorization === "Bearer status-tok") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ busySessionsCount: 3 }));
+      } else {
+        res.writeHead(401);
+        res.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("Expected TCP address");
+
+    try {
+      expect(await fetchActiveRunCount(addr.port, "status-tok")).toBe(3);
+      expect(await fetchActiveRunCount(addr.port, "wrong-tok")).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

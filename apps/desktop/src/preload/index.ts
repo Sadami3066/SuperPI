@@ -22,6 +22,9 @@ const bridge: DesktopBridge = {
   windowToggleMaximize: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowToggleMaximize),
   windowClose: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowClose),
   windowIsMaximized: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.windowIsMaximized),
+  getCloseToTray: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getCloseToTray),
+  setCloseToTray: (enabled: boolean) =>
+    ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setCloseToTray, Boolean(enabled)),
   onWindowMaximizedChange: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => {
       cb(Boolean(maximized));
