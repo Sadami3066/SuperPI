@@ -106,6 +106,7 @@ composeCompiler {
 
 dependencies {
     implementation(project(":core:runtime"))
+    implementation(project(":core:relay"))
     implementation(project(":apps:android:shell"))
     implementation(project(":apps:android:design"))
     implementation(project(":apps:android:plugin-api"))

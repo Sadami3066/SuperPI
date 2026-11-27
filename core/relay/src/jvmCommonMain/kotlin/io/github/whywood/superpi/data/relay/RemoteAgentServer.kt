@@ -1529,10 +1529,6 @@ class RemoteAgentServer(
             reject(frame, "bot_not_found", if (botId.isEmpty()) "botId is required" else "bot $botId is not available")
             return
         }
-        if (botId == HOME_BOT_ID) {
-            reject(frame, "permission_denied", "Default bot cannot be modified")
-            return
-        }
         val existingWorkspace = localWorkspaceById(botId)
         val hasName = frame.params.containsKey("name")
         val nextName = if (hasName) {

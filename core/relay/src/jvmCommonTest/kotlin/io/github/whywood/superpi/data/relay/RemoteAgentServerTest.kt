@@ -649,6 +649,22 @@ class RemoteAgentServerTest {
 
         server.handle(
             RelayServerFrame.Route(
+                id = "b-rename-home",
+                from = "dev-2",
+                method = "bot.update",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("name", "Phone Assistant")
+                },
+            ),
+        )
+        val renamedHome = sent.last().getValue("result").jsonObject.getValue("bot").jsonObject
+        assertEquals("Phone Assistant", renamedHome.getValue("name").jsonPrimitive.content)
+        assertEquals("Phone Assistant", host.workspaces().first { it.isHome }.name)
+        assertEquals(3, botsChanged)
+
+        server.handle(
+            RelayServerFrame.Route(
                 id = "b-del-home",
                 from = "dev-2",
                 method = "bot.delete",
@@ -734,7 +750,7 @@ class RemoteAgentServerTest {
             ),
         )
         assertEquals(true, sent.last().getValue("result").jsonObject.getValue("deleted").jsonPrimitive.boolean)
-        assertEquals(3, botsChanged)
+        assertEquals(4, botsChanged)
     }
 
     @Test

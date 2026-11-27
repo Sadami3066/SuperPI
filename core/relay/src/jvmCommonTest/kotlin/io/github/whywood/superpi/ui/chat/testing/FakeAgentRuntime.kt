@@ -51,6 +51,7 @@ class FakeAgentRuntime : AgentRuntime {
     val delivered = mutableListOf<Triple<String, String, String?>>()
     val stopped = mutableListOf<String>()
     private var createdCount = 0
+    private var home = RuntimeWorkspace(HOME_ID, "Home", HOME_CWD, isHome = true)
     private val extraProjects = mutableListOf<RuntimeWorkspace>()
     val newSessionCalls = mutableListOf<String>()
 
@@ -68,8 +69,7 @@ class FakeAgentRuntime : AgentRuntime {
         dismissedRuns += sessionId
     }
 
-    override suspend fun workspaces(): List<RuntimeWorkspace> =
-        listOf(RuntimeWorkspace(HOME_ID, "Home", HOME_CWD, isHome = true)) + extraProjects
+    override suspend fun workspaces(): List<RuntimeWorkspace> = listOf(home) + extraProjects
 
     val createdWorkspaceDirectories = mutableListOf<String?>()
 
@@ -93,7 +93,10 @@ class FakeAgentRuntime : AgentRuntime {
     }
 
     override suspend fun renameWorkspace(id: String, name: String) {
-        if (id == HOME_ID) return
+        if (id == HOME_ID) {
+            home = home.copy(name = name)
+            return
+        }
         val idx = extraProjects.indexOfFirst { it.id == id }
         if (idx >= 0) extraProjects[idx] = extraProjects[idx].copy(name = name)
     }

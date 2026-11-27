@@ -37,7 +37,7 @@ object RemoteSessionBrowser {
             preservePinned = existing.pinned
             runCatching { runtime.deleteSession(existing.id) }
         }
-        val mirror = RemoteMirrorSession.create(File(workspace.cwd), agentDir)
+        val mirror = RemoteMirrorSession.create(File(workspace.cwd), agentDir, persistEmpty = true)
         try {
             mirror.hydrateRemoteHistory(remote.deviceId, remote.botId, history, digest)
             val filePath = mirror.sessionFile ?: error("mirror session file is unavailable")
