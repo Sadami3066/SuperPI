@@ -789,7 +789,8 @@ class LocalWorkerPool(
         val entries = withContext(ioDispatcher) {
             loadSessionEntries(workerSessionFile(botId, workerId), workerWorkspaceDir(botId, workerId))
         }
-        return if (entries.isNullOrEmpty()) emptyList() else HistoryMapper.mapEntries(entries)
+        return if (entries.isNullOrEmpty()) emptyList()
+        else HistoryMapper.mapEntries(entries, settleUnfinishedTools = true)
     }
 
     suspend fun loadSession(workerId: String) {
@@ -2688,7 +2689,8 @@ class LocalWorkerPool(
         val entries = withContext(ioDispatcher) {
             loadSessionEntries(workerSessionFile(botId, workerId), workerWorkspaceDir(botId, workerId))
         }
-        return if (entries.isNullOrEmpty()) null else HistoryMapper.mapEntries(entries)
+        return if (entries.isNullOrEmpty()) null
+        else HistoryMapper.mapEntries(entries, settleUnfinishedTools = true)
     }
 
     private fun sessionFlowFor(workerId: String): MutableStateFlow<WorkerSessionSnapshot> =

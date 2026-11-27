@@ -4,11 +4,14 @@ import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.AssistantStep
 import io.github.whywood.superpi.runtime.ModelConfig
 import io.github.whywood.superpi.data.relay.RemoteCallError
+import io.github.whywood.superpi.data.relay.RemoteHistoryDto
 import io.github.whywood.superpi.data.relay.RouteImagePart
 import io.github.whywood.superpi.runtime.BackgroundTurnStarted
 import io.github.whywood.superpi.runtime.ImagePart
+import io.github.whywood.superpi.runtime.RemoteBotRef
 import io.github.whywood.superpi.runtime.RunStatus
 import io.github.whywood.superpi.runtime.RuntimeEvent
+import io.github.whywood.superpi.runtime.RuntimeWorkspace
 import io.github.whywood.superpi.runtime.SessionHandle
 import io.github.whywood.superpi.runtime.SessionRuntimeEvent
 import io.github.whywood.superpi.sdk.agent.AgentEvent
@@ -25,6 +28,7 @@ import io.github.whywood.superpi.sdk.ai.ToolResultMessage
 import io.github.whywood.superpi.sdk.ai.UserMessage
 import io.github.whywood.superpi.sdk.coding.session.QueueBehavior
 import io.github.whywood.superpi.sdk.coding.session.SessionEvent
+import io.github.whywood.superpi.ui.chat.testing.FakeAgentRuntime
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.CoroutineScope
@@ -66,6 +70,46 @@ class RemoteSessionHandleTest {
     @After
     fun tearDown() {
         root.deleteRecursively()
+    }
+
+    @Test
+    fun emptyRemoteHistoryKeepsSessionIdentityForFirstPromptAfterReopening() = runTest {
+        val peerSessionId = "peer-new"
+        val summary = checkNotNull(
+            RemoteSessionBrowser.materializeHistory(
+                runtime = FakeAgentRuntime(),
+                agentDir = agentDir,
+                workspace = RuntimeWorkspace(
+                    id = "remote-pi",
+                    name = "Pi",
+                    cwd = cwd.absolutePath,
+                    remote = RemoteBotRef(FakeRemoteTransport.DEVICE_ID, "Phone", "pi", "Pi", online = true),
+                ),
+                history = RemoteHistoryDto(peerSessionId, null, false, emptyList(), null),
+            ),
+        )
+        val transport = FakeRemoteTransport()
+        val handle = engine(transport, backgroundScope).create(summary.filePath, ModelConfig())
+        try {
+            assertEquals(summary.id, handle.sessionId)
+            assertTrue(handle.history().isEmpty())
+
+            val job = launch { handle.prompt("first message") }
+            runCurrent()
+            val call = transport.calls.single()
+            assertEquals("bot.prompt", call.method)
+            assertEquals(peerSessionId, call.params.getValue("sessionId").jsonPrimitive.content)
+
+            transport.emit(call.routeId, 0, FakeEvents.agentStart())
+            transport.emit(call.routeId, 1, FakeEvents.textDelta("Ready"))
+            transport.emit(call.routeId, 2, FakeEvents.agentEnd("done"))
+            transport.emit(call.routeId, 3, FakeEvents.settled())
+            runCurrent()
+            assertTrue(job.isCompleted)
+            assertEquals("Ready", handle.lastAssistantText())
+        } finally {
+            handle.close()
+        }
     }
 
     @Test

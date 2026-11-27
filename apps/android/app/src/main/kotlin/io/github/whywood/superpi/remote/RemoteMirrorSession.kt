@@ -19,6 +19,7 @@ import io.github.whywood.superpi.sdk.ai.UserMessage
 import io.github.whywood.superpi.sdk.coding.paths.AgentPaths
 import io.github.whywood.superpi.sdk.coding.session.CustomEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionEntry
+import io.github.whywood.superpi.sdk.coding.session.SessionHeader
 import io.github.whywood.superpi.sdk.coding.session.SessionManager
 import io.github.whywood.superpi.sdk.coding.session.SessionMessageEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionStats
@@ -279,10 +280,28 @@ class RemoteMirrorSession internal constructor(
         internal const val CUSTOM_TYPE = "superpi.remote"
         private const val MAX_MIRROR_IMAGE_CHARS = 8_000_000
         private val ALLOWED_IMAGE_MIMES = setOf("image/jpeg", "image/png", "image/webp", "image/gif")
+        private val sessionHeaderJson = Json { encodeDefaults = true }
 
-        suspend fun create(cwd: File, agentDir: File): RemoteMirrorSession {
+        suspend fun create(
+            cwd: File,
+            agentDir: File,
+            persistEmpty: Boolean = false,
+        ): RemoteMirrorSession {
             val paths = AgentPaths(cwd.absolutePath.toPath(), agentDir.absolutePath.toPath())
-            return RemoteMirrorSession(SessionManager.create(paths, FileSystem.SYSTEM))
+            val fs = FileSystem.SYSTEM
+            val manager = SessionManager.create(paths, fs)
+            if (!persistEmpty) return RemoteMirrorSession(manager)
+
+            // The SDK normally writes a file with the first message. A remote
+            // history snapshot can contain only the peer mapping and title.
+            val file = checkNotNull(manager.sessionFile)
+            fs.createDirectories(checkNotNull(file.parent))
+            fs.write(file, mustCreate = true) {
+                writeUtf8(sessionHeaderJson.encodeToString(SessionHeader.serializer(), manager.getHeader()))
+                writeByte('\n'.code)
+            }
+            manager.close()
+            return RemoteMirrorSession(SessionManager.open(file, fs))
         }
 
         suspend fun open(file: File): RemoteMirrorSession =

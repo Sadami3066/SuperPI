@@ -507,7 +507,7 @@ class PiSessionEngine(
     }
 
     fun history(session: AgentSession): List<AssistantMessage> =
-        HistoryMapper.mapEntries(session.sessionManager.getBranch())
+        HistoryMapper.mapEntries(session.sessionManager.getBranch(), settleUnfinishedTools = !session.isStreaming)
 
     suspend fun deleteSessionFile(filePath: String) {
         runCatching { fs.delete(filePath.toPath()) }

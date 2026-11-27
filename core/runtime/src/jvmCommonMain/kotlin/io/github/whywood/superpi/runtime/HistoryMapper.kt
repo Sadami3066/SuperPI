@@ -21,7 +21,10 @@ private const val REMINDER_PREFIX = "[Reminder]"
 private const val WORKER_UPDATE_PREFIX = "[Worker update]"
 
 object HistoryMapper {
-    fun mapEntries(entries: List<SessionEntry>): List<AssistantMessage> {
+    fun mapEntries(
+        entries: List<SessionEntry>,
+        settleUnfinishedTools: Boolean = false,
+    ): List<AssistantMessage> {
         val omittedEntryIds = entries.asSequence()
             .filterIsInstance<ContextEditEntry>()
             .filter { it.replacement == null }
@@ -29,6 +32,7 @@ object HistoryMapper {
         val result = mutableListOf<AssistantMessage>()
         val traces = mutableMapOf<String, ToolTrace>()
         val toolOwners = mutableMapOf<String, Int>()
+        val hiddenToolResults = mutableMapOf<String, ToolActivityStatus>()
         var current: AssistantMessage? = null
         var messageId = 0L
         var stepId = 0L
@@ -46,7 +50,14 @@ object HistoryMapper {
         }
 
         for ((entryIndex, entry) in entries.withIndex()) {
-            if (entry.id in omittedEntryIds) continue
+            if (entry.id in omittedEntryIds) {
+                val toolResult = (entry as? SessionMessageEntry)?.message as? ToolResultMessage
+                if (toolResult != null) {
+                    hiddenToolResults[toolResult.toolCallId] =
+                        if (toolResult.isError) ToolActivityStatus.FAILED else ToolActivityStatus.DONE
+                }
+                continue
+            }
             when (entry) {
                 is CustomMessageEntry -> {
                     if (!entry.display) continue
@@ -243,6 +254,16 @@ object HistoryMapper {
             }
         }
         flush()
+        if (settleUnfinishedTools) {
+            // A saved tool call can survive a process restart without its result.
+            for ((callId, trace) in traces) {
+                if (trace.status != ToolActivityStatus.RUNNING) continue
+                val ownerIndex = toolOwners[callId] ?: continue
+                val status = hiddenToolResults[callId] ?: ToolActivityStatus.FAILED
+                val message = result[ownerIndex]
+                result[ownerIndex] = message.replaceTool(trace.copy(status = status), message.finishedAt ?: 0L)
+            }
+        }
         return result
     }
 

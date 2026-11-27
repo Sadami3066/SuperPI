@@ -37,6 +37,31 @@ class HistoryMapperTest {
     private var entryId = 0
 
     @Test
+    fun settledHistoryStopsOnlyToolsMissingTheirResults() {
+        val hidden = toolResult("hidden", "redacted", 4L)
+        val entries = listOf(
+            user("check", 1L),
+            assistant(
+                content = listOf(toolCall("finished", "bash"), toolCall("hidden", "bash"), toolCall("pending", "bash")),
+                stopReason = StopReason.ToolUse,
+                timestamp = 2L,
+            ),
+            toolResult("finished", "ok", 3L),
+            hidden,
+            contextEdit(hidden.id),
+        )
+        val live = HistoryMapper.mapEntries(entries).last().steps.filterIsInstance<AssistantStep.Tool>()
+        assertEquals(ToolActivityStatus.RUNNING, live.last().trace.status)
+
+        val settled = HistoryMapper.mapEntries(entries, settleUnfinishedTools = true)
+            .last().steps.filterIsInstance<AssistantStep.Tool>().map { it.trace }
+        assertEquals(listOf(ToolActivityStatus.DONE, ToolActivityStatus.DONE, ToolActivityStatus.FAILED), settled.map { it.status })
+        assertEquals("ok", settled.first().output)
+        assertNull(settled[1].output)
+        assertNull(settled[2].resultPayload)
+    }
+
+    @Test
     fun errorAssistantMarksTurnFailedWithPartialText() {
         val messages = HistoryMapper.mapEntries(
             listOf(
