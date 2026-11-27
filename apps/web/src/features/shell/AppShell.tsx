@@ -70,6 +70,7 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("general");
+  const [autoCheckUpdateTick, setAutoCheckUpdateTick] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createBotOpen, setCreateBotOpen] = useState(false);
   const [createBotTargetDevice, setCreateBotTargetDevice] = useState<{
@@ -156,6 +157,9 @@ export function AppShell() {
       }
       if (cmd.kind === "settings") {
         openSettings((cmd.tab as SettingsTabId) || "general");
+        if (cmd.autoCheckUpdate) {
+          setAutoCheckUpdateTick((n) => n + 1);
+        }
       }
     },
     [bots, client, locale, openSettings, selectSession, startDraftSession],
@@ -378,6 +382,7 @@ export function AppShell() {
       <SettingsModal
         open={settingsOpen}
         tab={settingsTab}
+        autoCheckUpdateTick={autoCheckUpdateTick}
         onSelectTab={(tab) => openSettings(tab)}
         onOpenChange={setSettingsOpen}
         onOpenSession={() => {

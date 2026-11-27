@@ -39,12 +39,14 @@ interface SettingsNavItem {
 export function SettingsModal({
   open,
   tab,
+  autoCheckUpdateTick = 0,
   onSelectTab,
   onOpenChange,
   onOpenSession,
 }: {
   open: boolean;
   tab: SettingsTabId;
+  autoCheckUpdateTick?: number;
   onSelectTab: (tab: SettingsTabId) => void;
   onOpenChange: (open: boolean) => void;
   onOpenSession?: () => void;
@@ -139,9 +141,9 @@ export function SettingsModal({
       {
         id: "diagnostics",
         group: "dataSystem",
-        label: t("settings.aboutDiagnostics"),
-        desc: t("settings.diagnosticsDesc"),
-        keywords: `diagnostics version status about health 诊断 关于 状态`,
+        label: t("settings.navAboutSystem"),
+        desc: t("settings.aboutSystemDesc"),
+        keywords: `about update version crash license privacy diagnostics status health 关于 更新 版本 崩溃 许可 隐私 诊断 状态`,
         icon: <BrandIcon name="status/info" size={15} />,
       },
     ],
@@ -326,7 +328,9 @@ export function SettingsModal({
                     }}
                   />
                 )}
-                {tab === "diagnostics" && <DiagnosticsSettings />}
+                {tab === "diagnostics" && (
+                  <DiagnosticsSettings autoCheckUpdateTick={autoCheckUpdateTick} />
+                )}
               </div>
             </div>
           </div>

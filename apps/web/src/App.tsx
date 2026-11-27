@@ -1,4 +1,4 @@
-import { Component, lazy, type ReactNode, useEffect, useMemo } from "react";
+import { Component, lazy, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   IconFolder,
   IconGitBranch,
@@ -6,9 +6,11 @@ import {
   IconUsersGroup,
   IconWorld,
 } from "@tabler/icons-react";
+import { OnboardingFlow } from "./features/onboarding/OnboardingFlow";
 import { AppShell } from "./features/shell/AppShell";
 import { ConnectionScreen } from "./features/shell/ConnectionScreen";
 import { I18nContext, translate } from "./i18n";
+import { isElectronApp } from "./platform/bridge";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { Button, TooltipProvider } from "./ui";
@@ -106,9 +108,30 @@ class AppErrorBoundary extends Component<
   }
 }
 
+const ONBOARDING_STORAGE_KEY = "superpi:onboardingCompleted:v1";
+
+function readOnboardingCompleted(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+function writeOnboardingCompleted(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
+  } catch {
+    return;
+  }
+}
+
 export default function App() {
   const status = useConnectionStore((s) => s.status);
   const error = useConnectionStore((s) => s.error);
+  const desktopEnv = useConnectionStore((s) => s.desktopEnv);
   const bootstrap = useConnectionStore((s) => s.bootstrap);
   const reconnect = useConnectionStore((s) => s.reconnect);
   const disconnect = useConnectionStore((s) => s.disconnect);
@@ -118,6 +141,23 @@ export default function App() {
   const dark = useSettingsStore((s) => s.dark);
   const appearance = useSettingsStore((s) => s.appearance);
   const applyLocalTheme = useSettingsStore((s) => s.applyLocalTheme);
+  const providers = useSettingsStore((s) => s.providers);
+  const settingsLoaded = useSettingsStore((s) => s.hostSettings !== null);
+
+  const [onboardingDone, setOnboardingDone] = useState<boolean>(readOnboardingCompleted);
+
+  const isElectron = Boolean(desktopEnv?.isElectron) || isElectronApp();
+  const hasConfiguredProvider = useMemo(
+    () => providers.some((p) => p.configured),
+    [providers],
+  );
+
+  useEffect(() => {
+    if (status === "live" && settingsLoaded && hasConfiguredProvider && !onboardingDone) {
+      writeOnboardingCompleted();
+      setOnboardingDone(true);
+    }
+  }, [hasConfiguredProvider, onboardingDone, settingsLoaded, status]);
 
   useEffect(() => {
     applyLocalTheme();
@@ -149,11 +189,21 @@ export default function App() {
       <TooltipProvider>
         <I18nContext.Provider value={i18nValue}>
           {status === "live" ? (
-            <AppShell />
+            settingsLoaded && !onboardingDone && !hasConfiguredProvider ? (
+              <OnboardingFlow
+                onComplete={() => {
+                  writeOnboardingCompleted();
+                  setOnboardingDone(true);
+                }}
+              />
+            ) : (
+              <AppShell />
+            )
           ) : (
             <ConnectionScreen
               phase={status}
               dark={dark}
+              isElectron={isElectron}
               error={error}
               onRetry={() => void reconnect()}
               onSubmitToken={(tok) => void submitBrowserToken(tok)}

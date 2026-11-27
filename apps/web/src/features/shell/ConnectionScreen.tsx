@@ -9,12 +9,14 @@ import { WindowControls } from "./WindowControls";
 export function ConnectionScreen({
   phase,
   dark,
+  isElectron = false,
   error,
   onRetry,
   onSubmitToken,
 }: {
   phase: Exclude<ConnectionPhase, "live">;
   dark: boolean;
+  isElectron?: boolean;
   error: string | null;
   onRetry: () => void;
   onSubmitToken: (token: string) => void;
@@ -54,7 +56,7 @@ export function ConnectionScreen({
                   className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-[1.75px] border-current border-t-transparent"
                   style={{ color: "var(--pi-accent)" }}
                 />
-                <span>{t("conn.connecting")}</span>
+                <span>{isElectron ? t("conn.electronStarting") : t("conn.connecting")}</span>
               </div>
             </div>
           )}
@@ -62,12 +64,14 @@ export function ConnectionScreen({
           {phase === "error" && (
             <div className="space-y-4">
               <div>
-                <div className="text-[15.5px] font-semibold">{t("conn.failedTitle")}</div>
+                <div className="text-[15.5px] font-semibold">
+                  {isElectron ? t("conn.electronFailedTitle") : t("conn.failedTitle")}
+                </div>
                 <p
                   className="mt-1.5 text-[13px] leading-[1.55]"
                   style={{ color: "var(--pi-ink-tertiary)" }}
                 >
-                  {error || t("conn.failedHint")}
+                  {isElectron ? t("conn.electronFailedHint") : error || t("conn.failedHint")}
                 </p>
               </div>
               <Button variant="primary" onClick={onRetry} className="w-full">
@@ -77,7 +81,7 @@ export function ConnectionScreen({
             </div>
           )}
 
-          {phase === "needs_token" && (
+          {phase === "needs_token" && !isElectron && (
             <form
               className="space-y-3.5 text-left"
               onSubmit={(e) => {
