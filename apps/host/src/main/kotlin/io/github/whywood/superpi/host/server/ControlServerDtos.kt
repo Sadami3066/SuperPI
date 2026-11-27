@@ -1178,7 +1178,7 @@ internal fun List<ImageAttachmentDto>.toImageParts(): List<ImagePart> {
 }
 
 private fun formatTurnNotice(notice: TurnNotice): String = when (notice) {
-    is TurnNotice.Compacted -> "已压缩上下文（原 ${notice.tokensBefore} tokens）"
+    is TurnNotice.Compacted -> "已整理较早上下文"
     is TurnNotice.GoalRound -> "目标推进第 ${notice.round}/${notice.maxRounds} 轮：${notice.objective}"
     is TurnNotice.GoalFinished -> if (notice.completed) "目标已完成" else "目标已结束"
     is TurnNotice.JobFinished -> if (notice.failed) "后台任务失败：${notice.label}" else "后台任务完成：${notice.label}"

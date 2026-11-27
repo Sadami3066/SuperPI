@@ -279,8 +279,8 @@ export function ChatWorkspace({
       onChangePermissionMode={async (mode) => {
         if (client) await setPermissionMode(client, activeBot.id, mode);
       }}
-      onModelChange={(model, thinking) => {
-        if (client) void updateSessionModel(client, activeSessionId, model, thinking, locale);
+      onModelChange={async (model, thinking) => {
+        if (client) await updateSessionModel(client, activeSessionId, model, thinking, locale);
       }}
       onOpenProvidersSettings={onOpenProvidersSettings}
       onSend={(overrideText, atts) => {

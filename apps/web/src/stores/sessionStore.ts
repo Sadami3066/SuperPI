@@ -673,18 +673,38 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     if (slash < 1) return;
     const providerId = model.slice(0, slash);
     const modelId = model.slice(slash + 1);
+    const prevTr = get().transcriptsById[sessionId];
     set((s) => {
       const tr = s.transcriptsById[sessionId];
       if (!tr) return s;
       return {
+        actionError: null,
         transcriptsById: {
           ...s.transcriptsById,
           [sessionId]: { ...tr, model, thinking },
         },
       };
     });
-    await client.setSessionModel(sessionId, providerId, modelId, thinking.toUpperCase());
-    void get().loadSession(client, sessionId, locale);
+    try {
+      await client.setSessionModel(sessionId, providerId, modelId, thinking.toUpperCase());
+      void get().loadSession(client, sessionId, locale);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to switch model";
+      set((s) => {
+        const cur = s.transcriptsById[sessionId];
+        return {
+          actionError: msg,
+          transcriptsById:
+            cur && prevTr
+              ? {
+                  ...s.transcriptsById,
+                  [sessionId]: { ...cur, model: prevTr.model, thinking: prevTr.thinking },
+                }
+              : s.transcriptsById,
+        };
+      });
+      throw err;
+    }
   },
 
   compactSession: async (client, sessionId, locale) => {

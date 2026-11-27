@@ -92,7 +92,7 @@ export const Composer = memo(function Composer({
   sendWhileRunning: "steer" | "queue";
   planFirst: boolean;
   onChangePermissionMode: (mode: PermissionMode) => Promise<void>;
-  onModelChange: (model: string, thinking: ThinkingLevel) => void;
+  onModelChange: (model: string, thinking: ThinkingLevel) => Promise<void> | void;
   onOpenProvidersSettings: () => void;
   onSend: (overrideText?: string, attachments?: ComposerAttachment[]) => void;
   onStop: () => void;
@@ -183,6 +183,12 @@ export const Composer = memo(function Composer({
     setSlashIndex(0);
   }, [composerText]);
 
+  const showWarning = (message: string) => {
+    setWarning(message);
+    if (warningTimerRef.current !== null) clearTimeout(warningTimerRef.current);
+    warningTimerRef.current = setTimeout(() => setWarning(null), 3200);
+  };
+
   const appendFiles = async (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
     const remaining = Math.max(0, 8 - attachmentsCountRef.current);
@@ -191,9 +197,7 @@ export const Composer = memo(function Composer({
     const results = await Promise.all(slice.map(readFileAsComposerAttachment));
     const loaded = results.filter((x): x is ComposerAttachment => x !== null);
     if (loaded.length < slice.length) {
-      setWarning(t("chat.attachmentTooLarge"));
-      if (warningTimerRef.current !== null) clearTimeout(warningTimerRef.current);
-      warningTimerRef.current = setTimeout(() => setWarning(null), 3200);
+      showWarning(t("chat.attachmentTooLarge"));
     }
     if (loaded.length > 0) {
       setAttachments((prev) => [...prev, ...loaded].slice(0, 8));
@@ -555,7 +559,11 @@ export const Composer = memo(function Composer({
                 currentModel={currentModel}
                 currentThinking={currentThinking}
                 dark={dark}
-                onSelect={onModelChange}
+                onSelect={(model, thinking) => {
+                  void Promise.resolve(onModelChange(model, thinking)).catch((err) => {
+                    showWarning(err instanceof Error ? err.message : t("chat.switchFailed"));
+                  });
+                }}
                 onOpenProvidersSettings={onOpenProvidersSettings}
               />
 
@@ -570,7 +578,11 @@ export const Composer = memo(function Composer({
                     size="sm"
                     ariaLabel={t("perm.label")}
                     value={permissionMode}
-                    onValueChange={(v) => void onChangePermissionMode(v as PermissionMode)}
+                    onValueChange={(v) => {
+                      void onChangePermissionMode(v as PermissionMode).catch((err) => {
+                        showWarning(err instanceof Error ? err.message : t("chat.switchFailed"));
+                      });
+                    }}
                     options={permissionOptions}
                   />
                 </div>
