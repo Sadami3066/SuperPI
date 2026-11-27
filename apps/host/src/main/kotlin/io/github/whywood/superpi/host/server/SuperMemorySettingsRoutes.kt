@@ -555,6 +555,8 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                 processDetail = s.processDetail,
                 autoRetry = s.autoRetry,
                 backgroundJobWake = s.backgroundJobWake,
+                autoSessionTitle = s.autoSessionTitle,
+                sessionTitleModel = s.sessionTitleModel,
                 userNickname = s.userNickname,
                 userAvatar = s.userAvatar,
                 customSystemInstruction = s.customSystemInstruction,
@@ -586,6 +588,8 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                 processDetail = req.processDetail?.trim()?.takeIf { it.isNotEmpty() } ?: cur.processDetail,
                 autoRetry = req.autoRetry ?: cur.autoRetry,
                 backgroundJobWake = req.backgroundJobWake ?: cur.backgroundJobWake,
+                autoSessionTitle = req.autoSessionTitle ?: cur.autoSessionTitle,
+                sessionTitleModel = req.sessionTitleModel?.trim()?.take(128) ?: cur.sessionTitleModel,
                 userNickname = req.userNickname?.trim()?.take(64) ?: cur.userNickname,
                 userAvatar = when {
                     req.clearUserAvatar -> ""
@@ -621,6 +625,8 @@ internal fun Route.installSuperMemoryAndSettingsRoutes(
                 processDetail = updated.processDetail,
                 autoRetry = updated.autoRetry,
                 backgroundJobWake = updated.backgroundJobWake,
+                autoSessionTitle = updated.autoSessionTitle,
+                sessionTitleModel = updated.sessionTitleModel,
                 userNickname = updated.userNickname,
                 userAvatar = updated.userAvatar,
                 customSystemInstruction = updated.customSystemInstruction,

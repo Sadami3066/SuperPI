@@ -8,11 +8,23 @@ import io.github.whywood.superpi.runtime.logWarn
 class PcSessionTitleNamer(
     private val catalog: ProviderCatalog,
     private val configuredProviders: () -> Set<String>,
+    private val isEnabled: () -> Boolean = { true },
+    private val preferredModelSpec: () -> String = { "" },
 ) : SessionTitleNamer {
     override suspend fun title(firstUserText: String): String? {
+        if (!isEnabled()) return null
         val configured = configuredProviders()
         val models = configured.flatMap { providerId -> catalog.models(providerId) }
-        val candidates = rank(models).ifEmpty { models.take(1) }
+        val heuristic = rank(models).ifEmpty { models.take(1) }
+        val preferred = resolvePreferred(configured)
+        val candidates = buildList {
+            if (preferred != null) add(preferred)
+            for (item in heuristic) {
+                if (preferred == null || item.providerId != preferred.providerId || item.id != preferred.id) {
+                    add(item)
+                }
+            }
+        }
         if (candidates.isEmpty()) return null
         val prompt = buildString {
             append("Write a short session title for the user message below, at most 6 words. ")
@@ -28,6 +40,16 @@ class PcSessionTitleNamer(
             if (sanitized != null) return sanitized
         }
         return null
+    }
+
+    private fun resolvePreferred(configured: Set<String>): ModelOption? {
+        val raw = preferredModelSpec().trim()
+        val slash = raw.indexOf('/')
+        if (slash <= 0 || slash >= raw.lastIndex) return null
+        val providerId = raw.substring(0, slash).trim()
+        val modelId = raw.substring(slash + 1).trim()
+        if (providerId !in configured) return null
+        return catalog.models(providerId).firstOrNull { it.id == modelId }
     }
 
     private fun rank(models: List<ModelOption>): List<ModelOption> = models.sortedWith(

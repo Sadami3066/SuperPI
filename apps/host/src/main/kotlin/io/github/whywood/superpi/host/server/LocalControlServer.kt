@@ -291,6 +291,7 @@ class LocalControlServer(
                         installMemoryRoutes(controller)
                         installProviderExtensionRoutes(controller, activeScope)
                         installSkillMcpTimerRoutes(controller, activeScope)
+                        installMarketRoutes(controller)
                         installSuperMemoryAndSettingsRoutes(controller, activeScope)
                     }
 

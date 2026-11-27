@@ -3,6 +3,7 @@ package io.github.whywood.superpi.host.server
 import io.github.whywood.superpi.host.core.SuperPiController
 import io.github.whywood.superpi.remote.RemoteControlResult
 import io.github.whywood.superpi.remote.RemoteSessionRegistry
+import io.github.whywood.superpi.runtime.AssistantRole
 import io.github.whywood.superpi.runtime.BackgroundTurnStarted
 import io.github.whywood.superpi.runtime.CompactionOutcome
 import io.github.whywood.superpi.runtime.GoalView
@@ -445,6 +446,19 @@ internal fun Route.installSessionRoutes(
             return@get
         }
         val history = runCatching { controller.runtimeHost.historySnapshot(sessionId) }.getOrDefault(emptyList())
+        val limitParam = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 500)
+        val beforeParam = call.request.queryParameters["before"]?.toIntOrNull()
+        val total = history.size
+        val sliceEnd = if (limitParam == null && beforeParam == null) total else (beforeParam ?: total).coerceIn(0, total)
+        val sliceStart = if (limitParam == null && beforeParam == null) {
+            0
+        } else {
+            (sliceEnd - (limitParam ?: 40)).coerceAtLeast(0)
+        }
+        val page = history.subList(sliceStart, sliceEnd)
+        val userTurnOffset = history.subList(0, sliceStart).count {
+            it.role == AssistantRole.USER && it.summary == null
+        }
         val model = runCatching { controller.runtimeHost.sessionModel(sessionId) }.getOrNull()
         val usage = runCatching { controller.runtimeHost.usage(sessionId) }.getOrNull()
         val title = runCatching { controller.runtimeHost.sessionTitle(sessionId) }.getOrNull()
@@ -469,7 +483,11 @@ internal fun Route.installSessionRoutes(
                     SessionModelDto(it.providerId, it.modelId, it.thinkingLevel.name)
                 },
                 usage = usage?.toDto(triggerPct),
-                messages = history.map { it.toDto() },
+                messages = page.map { it.toDto() },
+                totalMessages = total,
+                hasMore = sliceStart > 0,
+                nextBefore = if (sliceStart > 0) sliceStart else null,
+                userTurnOffset = userTurnOffset,
                 queuedInputs = queued,
                 pendingQuestion = pendingQuestion,
                 pendingApprovals = pendingApprovals,

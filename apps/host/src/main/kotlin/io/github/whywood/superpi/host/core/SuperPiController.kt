@@ -27,6 +27,7 @@ import io.github.whywood.superpi.host.brand.AppBrand
 import io.github.whywood.superpi.host.config.BotRegistry
 import io.github.whywood.superpi.host.config.HostSettingsStore
 import io.github.whywood.superpi.host.extensions.ExtensionRegistry
+import io.github.whywood.superpi.host.market.HostMarketService
 import io.github.whywood.superpi.host.platform.HostPlatform
 import io.github.whywood.superpi.runtime.WorkerOutcome
 import io.github.whywood.superpi.runtime.WorkerProgressEvent
@@ -219,6 +220,15 @@ class SuperPiController(
         mcpServerProbe = mcpServerProbe,
         skillCatalog = skillCatalog,
     )
+    val marketService: HostMarketService by lazy {
+        HostMarketService(
+            marketDir = File(paths.homeDir, "market"),
+            http = sharedHttpClient,
+            skillRepository = skillRepository,
+            mcpConfigStore = mcpConfigStore,
+            onInstalled = { reloadAll() },
+        )
+    }
 
     private val sessionMetaKvStore = JsonFileKeyValueStore(paths.sessionMetaFile)
     val sessionMetaStore = SessionMetaStore(sessionMetaKvStore)
@@ -437,7 +447,12 @@ class SuperPiController(
             providers = providerCatalog,
             backgroundScope = scope,
             goalDriver = goalService,
-            titleNamer = PcSessionTitleNamer(providerCatalog, ::configuredProviderIds),
+            titleNamer = PcSessionTitleNamer(
+                catalog = providerCatalog,
+                configuredProviders = ::configuredProviderIds,
+                isEnabled = { settingsStore.current().autoSessionTitle },
+                preferredModelSpec = { settingsStore.current().sessionTitleModel },
+            ),
             sessionCleaner = { sessionId ->
                 toolApprovalCenter.cancelForSession(sessionId)
                 toolApprovalCenter.clearSessionGrants(sessionId)

@@ -10,16 +10,20 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.utils.io.readAvailable
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.nio.file.AtomicMoveNotSupportedException
@@ -480,29 +484,37 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                 return@get
             }
             if (entry != null && entry.size > MAX_RAW_SERVE_BYTES) {
-                call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("File exceeds 50 MB limit"))
+                call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("File exceeds 100 MB limit"))
                 return@get
             }
-            val buffer = ByteArrayOutputStream()
-            when (
-                val dl = controller.remoteFileClient.downloadToStream(
-                    deviceId = remote.deviceId,
-                    botId = remote.botId,
-                    remotePath = reqPath,
-                    outputStream = buffer,
-                    maxBytes = MAX_RAW_SERVE_BYTES + 1L,
-                )
-            ) {
-                is RemoteFileResult.Error -> call.respond(HttpStatusCode.BadGateway, ApiErrorResponse(dl.message))
-                is RemoteFileResult.Ok -> {
-                    val bytes = buffer.toByteArray()
-                    if (bytes.size.toLong() > MAX_RAW_SERVE_BYTES) {
-                        call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("File exceeds 50 MB limit"))
-                        return@get
+            val tmpFile = withContext(Dispatchers.IO) {
+                Files.createTempFile("superpi-remote-raw-", ".part").toFile()
+            }
+            try {
+                val dl = withContext(Dispatchers.IO) {
+                    tmpFile.outputStream().buffered().use { out ->
+                        controller.remoteFileClient.downloadToStream(
+                            deviceId = remote.deviceId,
+                            botId = remote.botId,
+                            remotePath = reqPath,
+                            outputStream = out,
+                            maxBytes = MAX_RAW_SERVE_BYTES + 1L,
+                        )
                     }
-                    val fileName = reqPath.substringAfterLast('/').ifBlank { "file" }
-                    respondSafeRawBytes(call, bytes, fileName, download)
                 }
+                when (dl) {
+                    is RemoteFileResult.Error -> call.respond(HttpStatusCode.BadGateway, ApiErrorResponse(dl.message))
+                    is RemoteFileResult.Ok -> {
+                        if (tmpFile.length() > MAX_RAW_SERVE_BYTES) {
+                            call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("File exceeds 100 MB limit"))
+                            return@get
+                        }
+                        val fileName = reqPath.substringAfterLast('/').ifBlank { "file" }
+                        respondSafeRawFile(call, tmpFile, fileName, download)
+                    }
+                }
+            } finally {
+                runCatching { tmpFile.delete() }
             }
             return@get
         }
@@ -526,16 +538,14 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                     return@get
                 }
                 if (file.length() > MAX_RAW_SERVE_BYTES) {
-                    call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("File exceeds 50 MB limit"))
+                    call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("File exceeds 100 MB limit"))
                     return@get
                 }
-                val bytes = withContext(Dispatchers.IO) { runCatching { file.readBytes() } }
-                bytes.fold(
-                    onSuccess = { data -> respondSafeRawBytes(call, data, file.name, download) },
-                    onFailure = { err ->
-                        call.respond(HttpStatusCode.Forbidden, ApiErrorResponse(err.message ?: "Unable to read file"))
-                    },
-                )
+                if (!file.canRead()) {
+                    call.respond(HttpStatusCode.Forbidden, ApiErrorResponse("Unable to read file"))
+                    return@get
+                }
+                respondSafeRawFile(call, file, file.name, download)
             }
         }
     }
@@ -565,16 +575,10 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
             return@get
         }
         if (resolved.length() > MAX_RAW_SERVE_BYTES) {
-            call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("Artifact exceeds 50 MB limit"))
+            call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("Artifact exceeds 100 MB limit"))
             return@get
         }
-        val bytes = withContext(Dispatchers.IO) { runCatching { resolved.readBytes() } }
-        bytes.fold(
-            onSuccess = { data -> respondSafeRawBytes(call, data, resolved.name, download) },
-            onFailure = { err ->
-                call.respond(HttpStatusCode.Forbidden, ApiErrorResponse(err.message ?: "Unable to read artifact"))
-            },
-        )
+        respondSafeRawFile(call, resolved, resolved.name, download)
     }
 
     post("/v1/bots/{id}/attachments") {
@@ -675,6 +679,174 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
                 call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(err.message ?: "Failed to stage attachment"))
             },
         )
+    }
+
+    post("/v1/bots/{id}/attachments/stream") {
+        val botId = call.parameters["id"].orEmpty()
+        val rawName = call.request.queryParameters["name"].orEmpty().ifBlank { "attachment" }
+        val cleanName = sanitizeAttachmentFileName(rawName)
+        val mime = call.request.queryParameters["mime"]?.trim()?.takeIf { it.isNotEmpty() }
+            ?: guessMimeForFileName(cleanName)
+        val kind = classifyAttachmentKind(mime, cleanName)
+        val contentLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (contentLength != null && contentLength > MAX_STREAM_ATTACHMENT_BYTES) {
+            call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("Attachment exceeds 100 MB limit"))
+            return@post
+        }
+
+        val remote = controller.findRemoteBotByWorkspaceId(botId)
+        val bot = if (remote == null) controller.botRegistry.findBotById(botId) else null
+        if (remote == null && bot == null) {
+            call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Bot not found: $botId"))
+            return@post
+        }
+
+        val uniqueName = "${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(6)}-$cleanName"
+        val relativePath = "$ATTACHMENTS_DIR_NAME/$uniqueName"
+        val channel = call.receiveChannel()
+
+        if (remote != null) {
+            val tmpFile = withContext(Dispatchers.IO) {
+                Files.createTempFile("superpi-remote-stage-", ".part").toFile()
+            }
+            try {
+                var totalBytes = 0L
+                var exceeded = false
+                withContext(Dispatchers.IO) {
+                    tmpFile.outputStream().buffered().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = channel.readAvailable(buf, 0, buf.size)
+                            if (read < 0) break
+                            if (read == 0) continue
+                            totalBytes += read
+                            if (totalBytes > MAX_STREAM_ATTACHMENT_BYTES) {
+                                exceeded = true
+                                break
+                            }
+                            out.write(buf, 0, read)
+                        }
+                    }
+                }
+                if (exceeded) {
+                    call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("Attachment exceeds 100 MB limit"))
+                    return@post
+                }
+                val uploadRes = withContext(Dispatchers.IO) {
+                    FileInputStream(tmpFile).use { input ->
+                        controller.remoteFileClient.uploadFromStream(
+                            deviceId = remote.deviceId,
+                            botId = remote.botId,
+                            remotePath = relativePath,
+                            inputStream = input,
+                            totalBytes = totalBytes,
+                            overwrite = true,
+                        )
+                    }
+                }
+                when (uploadRes) {
+                    is RemoteFileResult.Error -> call.respond(HttpStatusCode.BadGateway, ApiErrorResponse(uploadRes.message))
+                    is RemoteFileResult.Ok -> {
+                        call.respond(
+                            HttpStatusCode.Created,
+                            StagedAttachmentDto(
+                                id = uniqueName,
+                                name = cleanName,
+                                mime = mime,
+                                size = totalBytes,
+                                path = relativePath,
+                                relativePath = relativePath,
+                                kind = kind,
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                runCatching { tmpFile.delete() }
+            }
+            return@post
+        }
+
+        val localBot = bot!!
+        val prepared = withContext(Dispatchers.IO) {
+            runCatching {
+                val rootReal = File(localBot.cwd).toPath().toRealPath()
+                val attachDir = rootReal.resolve(ATTACHMENTS_DIR_NAME).toFile()
+                if (!attachDir.exists()) attachDir.mkdirs()
+                val attachDirReal = attachDir.toPath().toRealPath()
+                if (!attachDirReal.startsWith(rootReal)) {
+                    throw SecurityException("Attachments directory escapes workspace root")
+                }
+                val targetPath = attachDirReal.resolve(uniqueName).normalize()
+                if (!targetPath.startsWith(attachDirReal)) {
+                    throw SecurityException("Attachment path escapes attachments directory")
+                }
+                val tmpPath = Files.createTempFile(attachDirReal, ".tmp-stream-", ".part")
+                Triple(rootReal, targetPath, tmpPath)
+            }
+        }
+        val (rootReal, targetPath, tmpPath) = prepared.getOrElse { err ->
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(err.message ?: "Failed to prepare attachment"))
+            return@post
+        }
+        var totalBytes = 0L
+        var exceeded = false
+        try {
+            withContext(Dispatchers.IO) {
+                tmpPath.toFile().outputStream().buffered().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = channel.readAvailable(buf, 0, buf.size)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        totalBytes += read
+                        if (totalBytes > MAX_STREAM_ATTACHMENT_BYTES) {
+                            exceeded = true
+                            break
+                        }
+                        out.write(buf, 0, read)
+                    }
+                }
+            }
+            if (exceeded) {
+                call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorResponse("Attachment exceeds 100 MB limit"))
+                return@post
+            }
+            val finalReal = withContext(Dispatchers.IO) {
+                try {
+                    Files.move(
+                        tmpPath,
+                        targetPath,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE,
+                    )
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(tmpPath, targetPath, StandardCopyOption.REPLACE_EXISTING)
+                }
+                val resolved = targetPath.toRealPath()
+                if (!resolved.startsWith(rootReal)) {
+                    runCatching { Files.deleteIfExists(targetPath) }
+                    throw SecurityException("Attachment target escapes workspace root")
+                }
+                resolved
+            }
+            call.respond(
+                HttpStatusCode.Created,
+                StagedAttachmentDto(
+                    id = uniqueName,
+                    name = cleanName,
+                    mime = mime,
+                    size = totalBytes,
+                    path = finalReal.toString(),
+                    relativePath = relativePath,
+                    kind = kind,
+                ),
+            )
+        } catch (err: SecurityException) {
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(err.message ?: "Failed to stage attachment"))
+        } finally {
+            runCatching { Files.deleteIfExists(tmpPath) }
+        }
     }
 
     post("/v1/bots/{id}/attachments/folder") {
@@ -1134,17 +1306,17 @@ internal fun Route.installWorkspaceFileRoutes(controller: SuperPiController) {
     }
 }
 
-private const val MAX_RAW_SERVE_BYTES = 50L * 1024L * 1024L
+private const val MAX_RAW_SERVE_BYTES = 100L * 1024L * 1024L
+private const val MAX_STREAM_ATTACHMENT_BYTES = 100L * 1024L * 1024L
 private const val MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 private const val ATTACHMENTS_DIR_NAME = ".superpi-attachments"
 private val ALLOWED_HOME_ARTIFACT_SUBDIRS = setOf("remote-artifacts", "artifacts", "attachments")
 
-internal suspend fun respondSafeRawBytes(
+private fun applyRawFileHeaders(
     call: ApplicationCall,
-    bytes: ByteArray,
     fileName: String,
     download: Boolean,
-) {
+): ContentType {
     val mime = guessMimeForFileName(fileName)
     call.response.header("X-Content-Type-Options", "nosniff")
     if (mime == "text/html") {
@@ -1168,8 +1340,31 @@ internal suspend fun respondSafeRawBytes(
             ).toString(),
         )
     }
-    val contentType = runCatching { ContentType.parse(mime) }.getOrDefault(ContentType.Application.OctetStream)
+    return runCatching { ContentType.parse(mime) }.getOrDefault(ContentType.Application.OctetStream)
+}
+
+internal suspend fun respondSafeRawBytes(
+    call: ApplicationCall,
+    bytes: ByteArray,
+    fileName: String,
+    download: Boolean,
+) {
+    val contentType = applyRawFileHeaders(call, fileName, download)
     call.respondBytes(bytes = bytes, contentType = contentType)
+}
+
+internal suspend fun respondSafeRawFile(
+    call: ApplicationCall,
+    file: File,
+    fileName: String,
+    download: Boolean,
+) {
+    val contentType = applyRawFileHeaders(call, fileName, download)
+    call.respondOutputStream(contentType = contentType) {
+        file.inputStream().buffered().use { input ->
+            input.copyTo(this, 64 * 1024)
+        }
+    }
 }
 
 private suspend fun resolveAuthorizedArtifactFile(

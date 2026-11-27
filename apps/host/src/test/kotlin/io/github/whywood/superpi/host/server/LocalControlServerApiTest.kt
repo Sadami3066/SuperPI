@@ -795,4 +795,100 @@ class LocalControlServerApiTest {
         }
         assertTrue(controller.ptySessionManager.kill(termId))
     }
+
+    @Test
+    fun streamAttachmentsSessionPaginationAndTitleSettingsWorkEndToEnd(): Unit = runBlocking {
+        val port = server.start()
+
+        // 1. Streaming binary attachment endpoint
+        val payloadBytes = ByteArray(128 * 1024) { (it % 251).toByte() }
+        val streamReq = authReq(port, "/api/v1/bots/home/attachments/stream?name=../../evil%20report.bin&mime=application/octet-stream")
+            .post(payloadBytes.toRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        val stagedObj = http.newCall(streamReq).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        assertEquals(payloadBytes.size.toLong(), stagedObj["size"]!!.jsonPrimitive.content.toLong())
+        val stagedFile = File(stagedObj["path"]!!.jsonPrimitive.content)
+        assertTrue(stagedFile.isFile)
+        assertTrue(stagedFile.parentFile.name == ".superpi-attachments")
+        assertTrue(stagedFile.readBytes().contentEquals(payloadBytes))
+
+        http.newCall(
+            authReq(port, "/api/v1/bots/missing-bot/attachments/stream?name=a.bin")
+                .post("abc".toByteArray().toRequestBody("application/octet-stream".toMediaType()))
+                .build(),
+        ).execute().use { resp ->
+            assertEquals(404, resp.code)
+        }
+
+        // 2. Settings autoSessionTitle & sessionTitleModel persistence
+        http.newCall(
+            authReq(port, "/api/v1/settings")
+                .patch("""{"autoSessionTitle":false,"sessionTitleModel":"openai/gpt-4o-mini"}""".toRequestBody("application/json".toMediaType()))
+                .build(),
+        ).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val obj = json.parseToJsonElement(resp.body.string()).jsonObject
+            assertEquals("false", obj["autoSessionTitle"]!!.jsonPrimitive.content)
+            assertEquals("openai/gpt-4o-mini", obj["sessionTitleModel"]!!.jsonPrimitive.content)
+        }
+
+        // 3. Session pagination (?limit=2&before=...) and userTurnOffset
+        val created = http.newCall(
+            authReq(port, "/api/v1/bots/home/sessions")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build(),
+        ).execute().use { resp ->
+            assertEquals(201, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        val sid = created["sessionId"]!!.jsonPrimitive.content
+        val cwd = created["cwd"]!!.jsonPrimitive.content.replace("\\", "\\\\")
+        val sFile = File(created["filePath"]!!.jsonPrimitive.content)
+        sFile.parentFile?.mkdirs()
+        val lines = buildString {
+            appendLine("""{"type":"session","version":3,"id":"$sid","timestamp":"2026-11-27T00:00:00Z","cwd":"$cwd"}""")
+            var prevId: String? = null
+            for (i in 1..3) {
+                val uParent = prevId?.let { "\"$it\"" } ?: "null"
+                val uId = "u$i"
+                appendLine("""{"type":"message","id":"$uId","parentId":$uParent,"timestamp":"2026-11-27T00:00:0${i}Z","message":{"role":"user","content":[{"type":"text","text":"u$i"}]}}""")
+                val aId = "a$i"
+                appendLine("""{"type":"message","id":"$aId","parentId":"$uId","timestamp":"2026-11-27T00:00:1${i}Z","message":{"role":"assistant","content":[{"type":"text","text":"a$i"}],"api":"openai-completions","provider":"openai","model":"gpt-4o","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":170000000000$i}}""")
+                prevId = aId
+            }
+        }
+        sFile.writeText(lines, Charsets.UTF_8)
+        controller.runtimeHost.closeSession(sid)
+
+        val page1 = http.newCall(authReq(port, "/api/v1/sessions/$sid?limit=2").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        assertEquals("6", page1["totalMessages"]!!.jsonPrimitive.content)
+        assertEquals("true", page1["hasMore"]!!.jsonPrimitive.content)
+        assertEquals("4", page1["nextBefore"]!!.jsonPrimitive.content)
+        assertEquals("2", page1["userTurnOffset"]!!.jsonPrimitive.content)
+        assertEquals(2, page1["messages"]!!.jsonArray.size)
+        assertEquals("u3", page1["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+
+        val page2 = http.newCall(authReq(port, "/api/v1/sessions/$sid?limit=2&before=4").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        assertEquals("true", page2["hasMore"]!!.jsonPrimitive.content)
+        assertEquals("2", page2["nextBefore"]!!.jsonPrimitive.content)
+        assertEquals("1", page2["userTurnOffset"]!!.jsonPrimitive.content)
+        assertEquals("u2", page2["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+
+        val page3 = http.newCall(authReq(port, "/api/v1/sessions/$sid?limit=2&before=2").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            json.parseToJsonElement(resp.body.string()).jsonObject
+        }
+        assertEquals("false", page3["hasMore"]!!.jsonPrimitive.content)
+        assertEquals("0", page3["userTurnOffset"]!!.jsonPrimitive.content)
+        assertEquals("u1", page3["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+    }
 }
