@@ -17,8 +17,8 @@ function resolveSuperPillTheme(preset: ThemePresetId, customAccent: string | nul
 } {
   if (customAccent) {
     return {
-      bg: `linear-gradient(105deg, color-mix(in srgb, ${customAccent} 62%, #0b0b12) 0%, ${customAccent} 55%, color-mix(in srgb, ${customAccent} 78%, #f5d0fe) 100%)`,
-      glow: `0 2px 12px -2px color-mix(in srgb, ${customAccent} 52%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.22)`,
+      bg: `linear-gradient(105deg, color-mix(in srgb, ${customAccent} 38%, #0b0b12) 0%, color-mix(in srgb, ${customAccent} 58%, #0b0b12) 55%, color-mix(in srgb, ${customAccent} 66%, #141422) 100%)`,
+      glow: `0 2px 12px -2px color-mix(in srgb, ${customAccent} 48%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.22)`,
     };
   }
   switch (preset) {
@@ -26,26 +26,26 @@ function resolveSuperPillTheme(preset: ThemePresetId, customAccent: string | nul
     case "catppuccin":
     case "dracula":
       return {
-        bg: "linear-gradient(105deg, #1e1b4b 0%, #5b21b6 48%, #9333ea 84%, #c084fc 100%)",
-        glow: "0 2px 14px -2px rgba(147, 51, 234, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.24)",
+        bg: "linear-gradient(105deg, #1e1b4b 0%, #4c1d95 48%, #6d28d9 82%, #7e22ce 100%)",
+        glow: "0 2px 14px -2px rgba(126, 34, 206, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.24)",
       };
     case "night-owl":
     case "solarized":
     case "nord":
       return {
-        bg: "linear-gradient(105deg, #0b2942 0%, #0369a1 48%, #0d9488 86%, #2dd4bf 100%)",
-        glow: "0 2px 14px -2px rgba(13, 148, 136, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.24)",
+        bg: "linear-gradient(105deg, #0b2942 0%, #035388 48%, #0f6d66 84%, #0b7a75 100%)",
+        glow: "0 2px 14px -2px rgba(15, 118, 110, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.24)",
       };
     case "gruvbox":
     case "rose-pine":
       return {
-        bg: "linear-gradient(105deg, #431407 0%, #9f1239 46%, #d94646 84%, #fb7185 100%)",
-        glow: "0 2px 14px -2px rgba(225, 29, 72, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.22)",
+        bg: "linear-gradient(105deg, #431407 0%, #881337 46%, #b43434 82%, #b91c3c 100%)",
+        glow: "0 2px 14px -2px rgba(185, 28, 60, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.22)",
       };
     default:
       return {
-        bg: "linear-gradient(105deg, #111116 0%, #7f1d3a 46%, #be123c 82%, #f43f5e 100%)",
-        glow: "0 2px 14px -2px rgba(225, 29, 72, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.22)",
+        bg: "linear-gradient(105deg, #111116 0%, #7f1d3a 46%, #a91038 82%, #be123c 100%)",
+        glow: "0 2px 14px -2px rgba(190, 18, 60, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.22)",
       };
   }
 }

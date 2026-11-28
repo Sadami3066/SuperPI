@@ -366,21 +366,33 @@ export const useStreamStore = create<StreamStoreState>((set, get) => ({
       const cur = ensureTargetRun(s.activeBySession, sessionId, runId);
       if (runId && cur.runId !== runId) return s;
       const card: CustomCardItem = {
-        id: `cc-live-${cur.blocks.length}`,
+        id: customType === "todo_write" ? "cc-live-todo" : `cc-live-${cur.blocks.length}`,
         customType,
         payload,
         text,
       };
       const cardBlock: TurnBlock = {
-        key: `cc-${cur.blocks.length}`,
+        key: customType === "todo_write" ? "cc-todo" : `cc-${cur.blocks.length}`,
         kind: "custom_card",
         card,
       };
-      const last = cur.blocks[cur.blocks.length - 1];
-      const nextBlocks =
-        customType === "todo_write" && last?.kind === "activity"
-          ? [...cur.blocks.slice(0, -1), cardBlock, last]
-          : [...cur.blocks, cardBlock];
+      let nextBlocks: TurnBlock[];
+      if (customType === "todo_write") {
+        const existingIdx = cur.blocks.findIndex(
+          (b) => b.kind === "custom_card" && b.card.customType === "todo_write",
+        );
+        if (existingIdx >= 0) {
+          nextBlocks = cur.blocks.map((b, i) => (i === existingIdx ? cardBlock : b));
+        } else {
+          const last = cur.blocks[cur.blocks.length - 1];
+          nextBlocks =
+            last?.kind === "activity"
+              ? [...cur.blocks.slice(0, -1), cardBlock, last]
+              : [...cur.blocks, cardBlock];
+        }
+      } else {
+        nextBlocks = [...cur.blocks, cardBlock];
+      }
       return {
         activeBySession: {
           ...s.activeBySession,

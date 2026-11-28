@@ -29,7 +29,10 @@ internal class SessionListController(
             ?: workspaces.firstOrNull { it.isHome }
             ?: workspaces.firstOrNull()
         val sessions = withContext(ioDispatcher) { runtime.allSessions() }
-        val archived = withContext(ioDispatcher) { runtime.archivedSessions() }
+        val remoteCwds = workspaces.filter { it.remote != null }.mapTo(HashSet()) { it.cwd }
+        val archived = withContext(ioDispatcher) {
+            runtime.archivedSessions().filterNot { it.cwd in remoteCwds }
+        }
         update {
             it.copy(
                 ready = true,

@@ -13,7 +13,7 @@ export const zhCN = {
 
   "nav.searchPlaceholder": "搜索对话、助理或操作…",
   "nav.searchShort": "搜索",
-  "nav.tools": "工具箱",
+  "nav.tools": "功能",
   "nav.capabilities": "能力",
   "nav.capabilitiesSkills": "技能",
   "nav.capabilitiesConnectors": "MCP",

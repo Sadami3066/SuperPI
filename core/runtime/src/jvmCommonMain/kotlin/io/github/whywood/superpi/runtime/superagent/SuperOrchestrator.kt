@@ -32,9 +32,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -168,7 +170,7 @@ class SuperOrchestrator(
         registerTimerHandler()
     }
 
-    override suspend fun ensureStarted() {
+    override suspend fun ensureStarted() = withContext(Dispatchers.IO) {
         if (!started.get()) {
             initMutex.withLock {
                 if (!started.get()) {

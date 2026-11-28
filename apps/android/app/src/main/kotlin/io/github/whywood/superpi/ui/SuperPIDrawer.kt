@@ -1,9 +1,14 @@
 package io.github.whywood.superpi.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -289,6 +294,9 @@ internal fun buildDrawerEntries(
     }
 }
 
+private fun normalizeDrawerCwd(raw: String): String =
+    if (raw.isBlank()) raw else runCatching { java.io.File(raw).canonicalPath }.getOrDefault(raw)
+
 private fun MutableList<DrawerEntry>.appendWorkspaceEntries(
     workspace: RuntimeWorkspace,
     first: Boolean,
@@ -306,17 +314,15 @@ private fun MutableList<DrawerEntry>.appendWorkspaceEntries(
     val remote = workspace.remote
     if (remote != null) {
         val remoteState = remoteDrawerStates[workspace.id]
-        val localFallback = sessionsByCwd[workspace.cwd].orEmpty()
+        val localFallback = sessionsByCwd[normalizeDrawerCwd(workspace.cwd)].orEmpty()
             .filterNot { it.archived }
             .sortedWith(
                 compareByDescending<ConversationSummary> { it.pinned }
                     .thenByDescending { it.updatedAt },
             )
         if (remote.online) {
-            val canToggleArchived = workspace.id in remoteSessionManageWorkspaceIds &&
-                remoteState != null &&
-                remoteState.status == null
             val remoteSessions = remoteState?.sessions.orEmpty()
+                .filterNot { it.archived }
                 .distinctBy { it.id }
                 .sortedByDescending { it.pinned }
             if (remoteSessions.isNotEmpty()) {
@@ -329,9 +335,6 @@ private fun MutableList<DrawerEntry>.appendWorkspaceEntries(
                         remoteSessions.take(limit).forEach { add(DrawerEntry.RemoteSession(workspace, it)) }
                     },
                 )
-                if (canToggleArchived) {
-                    add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
-                }
                 return
             }
             when (val status = remoteState?.status) {
@@ -343,9 +346,6 @@ private fun MutableList<DrawerEntry>.appendWorkspaceEntries(
                     }
                 } else {
                     add(DrawerEntry.WorkspaceEmpty(workspace.id))
-                    if (canToggleArchived) {
-                        add(DrawerEntry.RemoteArchivedToggle(workspace, workspace.id in remoteShowArchivedWorkspaceIds))
-                    }
                 }
 
                 RemoteDrawerStatus.Loading -> if (relayOnline) {
@@ -373,7 +373,7 @@ private fun MutableList<DrawerEntry>.appendWorkspaceEntries(
         }
         return
     }
-    val workspaceSessions = sessionsByCwd[workspace.cwd].orEmpty()
+    val workspaceSessions = sessionsByCwd[normalizeDrawerCwd(workspace.cwd)].orEmpty()
         .filterNot { it.archived }
         .sortedWith(
             compareByDescending<ConversationSummary> { it.pinned }
@@ -501,7 +501,7 @@ fun SuperPIDrawer(
         if (isSuperMode) {
             emptyMap()
         } else {
-            sessions.filterNot { it.archived }.groupBy { it.cwd }
+            sessions.filterNot { it.archived }.groupBy { normalizeDrawerCwd(it.cwd) }
         }
     }
     val expandedSessionsSaver = remember {
@@ -607,11 +607,14 @@ fun SuperPIDrawer(
             )
         } else {
         val newChatWorkspaceId = preferredNewChatWorkspaceId(workspaces, activeWorkspaceId)
+        var featuresExpanded by rememberSaveable { mutableStateOf(false) }
         DrawerNewChatButton(
             onClick = { newChatWorkspaceId?.let(onNewSessionInWorkspace) },
         )
         Spacer(Modifier.height(DdSpacing.Sm))
-        DrawerShortcutsGrid(
+        DrawerFeaturesSection(
+            expanded = featuresExpanded,
+            onToggle = { featuresExpanded = !featuresExpanded },
             onOpenMiniapp = onOpenMiniapp,
             onOpenSkills = onOpenSkills,
             onOpenPlugins = onOpenPlugins,
@@ -1516,6 +1519,103 @@ private fun DrawerRemoteSessionRow(
                 onDismissRequest = onDismissMenu,
                 onAction = onAction,
                 anchor = menuAnchor,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DrawerFeaturesSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onOpenMiniapp: () -> Unit,
+    onOpenSkills: () -> Unit,
+    onOpenPlugins: () -> Unit,
+    onOpenMemory: () -> Unit,
+    onOpenRelay: () -> Unit,
+    onOpenMcp: () -> Unit,
+    onOpenTimers: () -> Unit,
+) {
+    val colors = superPiColors()
+    val motionEnabled = LocalDdMotionEnabled.current
+    val featuresLabel = stringResource(R.string.drawer_nav_features)
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 0f else -90f,
+        animationSpec = if (motionEnabled) tween(180) else snap(),
+        label = "drawer_features_chevron",
+    )
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        DdPressable(
+            onClick = onToggle,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .border(0.5.dp, colors.surfaceRim, DdShapes.Medium)
+                .testTag("drawer_features_toggle"),
+            shape = DdShapes.Medium,
+            background = colors.surface,
+            contentDescription = featuresLabel,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DdIcon(
+                    icon = DdIcons.Apps,
+                    tint = colors.inkSecondary,
+                    size = 17.dp,
+                )
+                Text(
+                    text = featuresLabel,
+                    modifier = Modifier.weight(1f),
+                    style = DdType.label.copy(fontSize = 14.sp, lineHeight = 18.sp),
+                    color = colors.ink,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                DdIcon(
+                    icon = DdIcons.ChevronDown,
+                    tint = colors.inkTertiary,
+                    size = 15.dp,
+                    modifier = Modifier.graphicsLayer { rotationZ = chevronRotation },
+                )
+            }
+        }
+
+        if (motionEnabled) {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(animationSpec = tween(200)) + fadeIn(animationSpec = tween(180)),
+                exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(140)),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.height(6.dp))
+                    DrawerShortcutsGrid(
+                        onOpenMiniapp = onOpenMiniapp,
+                        onOpenSkills = onOpenSkills,
+                        onOpenPlugins = onOpenPlugins,
+                        onOpenMemory = onOpenMemory,
+                        onOpenRelay = onOpenRelay,
+                        onOpenMcp = onOpenMcp,
+                        onOpenTimers = onOpenTimers,
+                    )
+                }
+            }
+        } else if (expanded) {
+            Spacer(Modifier.height(6.dp))
+            DrawerShortcutsGrid(
+                onOpenMiniapp = onOpenMiniapp,
+                onOpenSkills = onOpenSkills,
+                onOpenPlugins = onOpenPlugins,
+                onOpenMemory = onOpenMemory,
+                onOpenRelay = onOpenRelay,
+                onOpenMcp = onOpenMcp,
+                onOpenTimers = onOpenTimers,
             )
         }
     }

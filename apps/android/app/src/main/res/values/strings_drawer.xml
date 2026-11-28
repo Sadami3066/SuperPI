@@ -1,5 +1,6 @@
 <resources>
     <string name="drawer_new_chat">新对话</string>
+    <string name="drawer_nav_features">功能</string>
     <string name="drawer_nav_miniapp">小程序</string>
     <string name="drawer_nav_skills">技能</string>
     <string name="drawer_nav_mcp">连接器</string>
@@ -109,6 +110,7 @@
     <string name="drawer_remote_hide_archived">隐藏已归档</string>
     <string name="drawer_remote_archived_badge">已归档</string>
     <string name="drawer_remote_action_failed">操作未完成，请重试</string>
+    <string name="drawer_remote_session_deleted">该对话已在对方设备删除</string>
     <string name="drawer_remote_device_offline_badge">离线</string>
     <string name="drawer_remote_device_add_bot">在 %1$s 上新建 Bot</string>
     <string name="drawer_remote_device_toggle">展开或收起 %1$s</string>

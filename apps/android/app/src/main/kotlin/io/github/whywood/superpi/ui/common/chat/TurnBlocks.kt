@@ -49,6 +49,10 @@ internal sealed interface TurnBlock {
     data class LiveQuestion(val question: PendingQuestion) : TurnBlock {
         override val key: String get() = "live-${question.requestId}"
     }
+
+    data class TodoCard(val messageId: Long, val payload: String, val todos: List<TodoItem>) : TurnBlock {
+        override val key: String get() = "todo-$messageId"
+    }
 }
 
 internal fun turnBlocks(
@@ -56,6 +60,9 @@ internal fun turnBlocks(
     pendingQuestions: List<PendingQuestion> = emptyList(),
 ): List<TurnBlock> {
     val blocks = mutableListOf<TurnBlock>()
+    val latestTodoStep = message.steps.lastOrNull { step ->
+        step is AssistantStep.CustomCard && step.customType == TodoWriteCustomType
+    } as? AssistantStep.CustomCard
     val steps = message.steps.filterNot { step ->
         step is AssistantStep.CustomCard && step.customType in HiddenCustomCardTypes
     }
@@ -98,6 +105,18 @@ internal fun turnBlocks(
         }
     }
     flushActivity()
+    if (latestTodoStep != null) {
+        val todos = parseTodos(latestTodoStep.payload)
+        if (todos.isNotEmpty()) {
+            val todoBlock = TurnBlock.TodoCard(message.id, latestTodoStep.payload, todos)
+            val firstTextIndex = blocks.indexOfFirst { it is TurnBlock.Text }
+            if (firstTextIndex >= 0) {
+                blocks.add(firstTextIndex, todoBlock)
+            } else {
+                blocks += todoBlock
+            }
+        }
+    }
     if (blocks.isEmpty() && message.streaming) {
         blocks += TurnBlock.Activity(emptyList())
     }

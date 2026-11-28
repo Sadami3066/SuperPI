@@ -63,8 +63,14 @@ internal class RuntimePool(
         return opened
     }
 
-    suspend fun close(sessionId: String) {
-        mutex.withLock { detach(sessionId, reason = SessionCloseReason.Closed) }
+    suspend fun close(sessionId: String, captureMemory: Boolean = true) {
+        mutex.withLock {
+            detach(
+                sessionId = sessionId,
+                reason = SessionCloseReason.Closed,
+                captureMemory = captureMemory,
+            )
+        }
     }
 
     suspend fun detachForget(sessionId: String) {
@@ -255,9 +261,10 @@ internal class RuntimePool(
         forget: Boolean = false,
         keepReconfigure: Boolean = false,
         reason: SessionCloseReason = SessionCloseReason.Closed,
+        captureMemory: Boolean = true,
     ): RuntimeHandle? {
         val handle = detachLocked(sessionId, forget, keepReconfigure) ?: return null
-        closeHandle(handle, reason)
+        closeHandle(handle, reason, captureMemory)
         publishBusy()
         clearActiveRun(sessionId)
         return handle
@@ -275,11 +282,19 @@ internal class RuntimePool(
         return handle
     }
 
-    private suspend fun closeHandle(handle: RuntimeHandle, reason: SessionCloseReason) {
+    private suspend fun closeHandle(
+        handle: RuntimeHandle,
+        reason: SessionCloseReason,
+        captureMemory: Boolean = true,
+    ) {
         handle.unsubscribe?.invoke()
         handle.unsubscribe = null
         val sessionId = handle.session.sessionId
-        handle.session.close()
+        if (captureMemory) {
+            handle.session.close()
+        } else {
+            handle.session.closeWithoutMemory()
+        }
         runCatching { onSessionClosed(sessionId, reason) }
     }
 

@@ -22,6 +22,7 @@ import io.github.whywood.superpi.runtime.RuntimeActivity
 import io.github.whywood.superpi.runtime.RuntimeEvent
 import io.github.whywood.superpi.runtime.SessionBinding
 import io.github.whywood.superpi.runtime.SessionHandle
+import io.github.whywood.superpi.runtime.SessionUsage
 import io.github.whywood.superpi.runtime.StorageMountInfo
 import io.github.whywood.superpi.runtime.SuperRuntime
 import io.github.whywood.superpi.runtime.SuperThreadState
@@ -474,31 +475,36 @@ class SuperThreadEngine(
     }
 
     private suspend fun openFreshOrExistingHandle() {
-        val (fallbackConfig, hasOverride) = withContext(ioDispatcher) {
+        val (opened, history, usage, archivedCount) = withContext(ioDispatcher) {
             routerDir.mkdirs()
             workspaceDir.mkdirs()
             archiveDir.mkdirs()
             val override = readModelOverride()
-            (override ?: initialModelConfig()) to (override != null)
-        }
-        val opened = sessionFactory.open(
-            workspaceDir = workspaceDir,
-            sessionFile = sessionFile,
-            config = fallbackConfig,
-            questionCenter = questionCenter,
-            extraSectionsProvider = { buildSystemSections() },
-        )
-        val history = opened.history()
-        if (!hasOverride &&
-            (opened.model.provider != fallbackConfig.providerId || opened.model.id != fallbackConfig.modelId)
-        ) {
-            val resolved = providers.resolveConfig(fallbackConfig)
-            val sdkModel = providers.sdkModel(resolved.providerId, resolved.modelId)
-            if (sdkModel != null) {
-                withContext(ioDispatcher) {
-                    opened.setModel(sdkModel, resolved.thinkingLevel.runtimeValue())
+            val fallbackConfig = override ?: initialModelConfig()
+            val hasOverride = override != null
+            val session = sessionFactory.open(
+                workspaceDir = workspaceDir,
+                sessionFile = sessionFile,
+                config = fallbackConfig,
+                questionCenter = questionCenter,
+                extraSectionsProvider = { buildSystemSections() },
+            )
+            val loadedHistory = session.history()
+            if (!hasOverride &&
+                (session.model.provider != fallbackConfig.providerId || session.model.id != fallbackConfig.modelId)
+            ) {
+                val resolved = providers.resolveConfig(fallbackConfig)
+                val sdkModel = providers.sdkModel(resolved.providerId, resolved.modelId)
+                if (sdkModel != null) {
+                    session.setModel(sdkModel, resolved.thinkingLevel.runtimeValue())
                 }
             }
+            OpenHandleSnapshot(
+                handle = session,
+                history = loadedHistory,
+                usage = session.usage(),
+                archivedCount = countArchivedFiles(),
+            )
         }
         val unsub = opened.subscribe { event ->
             onSessionEvent(opened, event)
@@ -520,13 +526,20 @@ class SuperThreadEngine(
                 streamingReasoning = "",
                 streamingSteps = emptyList(),
                 activeToolText = null,
-                usage = opened.usage(),
+                usage = usage,
                 ready = true,
                 error = null,
-                archivedCount = countArchivedFiles(),
+                archivedCount = archivedCount,
             )
         }
     }
+
+    private data class OpenHandleSnapshot(
+        val handle: SessionHandle,
+        val history: List<AssistantMessage>,
+        val usage: SessionUsage?,
+        val archivedCount: Int,
+    )
 
     private suspend fun launchTurn(
         promptText: String,

@@ -1,17 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconLayoutSidebarRight, IconSparkles } from "@tabler/icons-react";
 import {
   computeContextPercent,
   mapHostMessageToTurn,
   normalizeThinkingLevel,
 } from "../../api/mappers";
-import { extractLatestTodosFromTurns } from "../../api/todo";
 import type {
-  ChatTurn,
   ComposerAttachment,
   HostWorkerDto,
   QuestionAnswerInput,
-  TurnBlock,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -23,7 +20,6 @@ import { Badge, Button, ConfirmDialog, IconButton, NoticeBar, Popover } from "..
 import { Composer } from "../chat/Composer";
 import { ContextMeter } from "../chat/ContextMeter";
 import { MessageList } from "../chat/MessageList";
-import { TodoPanel } from "../chat/TodoPanel";
 import { UsageSheet } from "../chat/UsageSheet";
 import { BrandIcon, PiActivityIcon, PiMascot } from "../shared/BrandAssets";
 
@@ -61,27 +57,6 @@ const SUPER_NAMED_GREETINGS = [
   "super.greetingNamed3",
   "super.greetingNamed4",
 ] as const;
-
-const SuperTodoPanel = memo(function SuperTodoPanel({ turns }: { turns: ChatTurn[] }) {
-  const liveTodoBlock = useStreamStore((s): TurnBlock | null => {
-    const blocks = s.activeBySession[SUPER_SESSION_ID]?.blocks;
-    if (!blocks) return null;
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if (b.kind === "custom_card" && b.card.customType === "todo_write") {
-        return b;
-      }
-    }
-    return null;
-  });
-
-  const latestTodos = useMemo(
-    () => extractLatestTodosFromTurns(turns, liveTodoBlock ? [liveTodoBlock] : undefined),
-    [turns, liveTodoBlock],
-  );
-
-  return <TodoPanel todos={latestTodos} sessionKey={SUPER_SESSION_ID} />;
-});
 
 export function SuperWorkspace({
   onOpenTeamDialog,
@@ -604,8 +579,6 @@ export function SuperWorkspace({
                 />
               </div>
             )}
-
-            <SuperTodoPanel turns={turns} />
           </div>
           {composerElement("docked")}
         </>

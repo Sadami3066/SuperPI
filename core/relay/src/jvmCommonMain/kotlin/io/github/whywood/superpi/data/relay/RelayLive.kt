@@ -181,24 +181,27 @@ class RelayLive(
             val parent = SupervisorJob(scope.coroutineContext[Job])
             collectorJob = parent
             val collectorScope = CoroutineScope(scope.coroutineContext + parent)
-            collectorScope.launch {
-                val cached = runCatching { accounts.readDevices() }.getOrDefault(emptyList())
-                devicesMutex.withLock {
-                    if (_devices.value.isEmpty() && cached.isNotEmpty() && started && account != null) {
-                        _devices.value = cached
-                    }
-                }
-                launchCollectors(collectorScope)
-            }
+            launchCollectors(collectorScope)
         }
     }
 
     private fun launchCollectors(collectorScope: CoroutineScope) {
         collectorScope.launch {
+            var hydrated = false
             accounts.account.collect { value ->
                 val previous = account
                 account = value
-                if (value == null && previous != null) {
+                if (value != null && !hydrated) {
+                    hydrated = true
+                    val cached = runCatching { accounts.readDevices() }.getOrDefault(emptyList())
+                    if (cached.isNotEmpty()) {
+                        devicesMutex.withLock {
+                            if (_devices.value.isEmpty() && started && account != null) {
+                                _devices.value = cached
+                            }
+                        }
+                    }
+                } else if (value == null && previous != null) {
                     devicesMutex.withLock {
                         _devices.value = emptyList()
                     }

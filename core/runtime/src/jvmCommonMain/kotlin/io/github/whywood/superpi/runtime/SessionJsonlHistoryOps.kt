@@ -6,6 +6,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.time.Instant
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -18,27 +20,69 @@ import kotlinx.serialization.json.put
  * for turn rewind (truncating before a 0-based user turn) and conversation branching/forking.
  */
 object SessionJsonlHistoryOps {
+    private const val WORKER_UPDATE_PREFIX = "[Worker update]"
     private val lineJson = Json { ignoreUnknownKeys = true }
 
-    fun isUserMessageEntry(line: String): Boolean {
-        val obj = runCatching { lineJson.parseToJsonElement(line).jsonObject }.getOrNull() ?: return false
-        if ((obj["type"] as? JsonPrimitive)?.contentOrNull != "message") return false
-        val msg = obj["message"] as? JsonObject ?: return false
-        return (msg["role"] as? JsonPrimitive)?.contentOrNull == "user"
+    private fun parseLineObject(line: String): JsonObject? =
+        runCatching { lineJson.parseToJsonElement(line).jsonObject }.getOrNull()
+
+    private fun collectOmittedEntryIds(parsed: List<JsonObject?>): Set<String> {
+        val omitted = HashSet<String>()
+        for (obj in parsed) {
+            if (obj == null) continue
+            if ((obj["type"] as? JsonPrimitive)?.contentOrNull != "context_edit") continue
+            val replacement = obj["replacement"]
+            if (replacement == null || replacement is JsonNull) {
+                val targetId = (obj["targetId"] as? JsonPrimitive)?.contentOrNull
+                if (!targetId.isNullOrBlank()) {
+                    omitted.add(targetId)
+                }
+            }
+        }
+        return omitted
     }
+
+    private fun isVisibleUserMessage(obj: JsonObject?, omittedEntryIds: Set<String>): Boolean {
+        if (obj == null) return false
+        if ((obj["type"] as? JsonPrimitive)?.contentOrNull != "message") return false
+        val entryId = (obj["id"] as? JsonPrimitive)?.contentOrNull
+        if (entryId != null && entryId in omittedEntryIds) return false
+        val msg = obj["message"] as? JsonObject ?: return false
+        if ((msg["role"] as? JsonPrimitive)?.contentOrNull != "user") return false
+        val content = msg["content"] ?: return false
+        val text = when (content) {
+            is JsonPrimitive -> content.contentOrNull.orEmpty()
+            is JsonArray -> content.mapNotNull { block ->
+                val bObj = block as? JsonObject ?: return@mapNotNull null
+                if ((bObj["type"] as? JsonPrimitive)?.contentOrNull == "text") {
+                    (bObj["text"] as? JsonPrimitive)?.contentOrNull
+                } else {
+                    null
+                }
+            }.joinToString("\n")
+            else -> ""
+        }
+        if (text.trimStart().startsWith(WORKER_UPDATE_PREFIX)) return false
+        val hasBlocks = (content as? JsonArray)?.isNotEmpty() == true
+        return text.isNotBlank() || hasBlocks
+    }
+
+    fun isUserMessageEntry(line: String): Boolean =
+        isVisibleUserMessage(parseLineObject(line), emptySet())
 
     fun hasUserTurnAtIndex(file: File, targetTurnIndex: Int): Boolean {
         if (!file.isFile || targetTurnIndex < 0) return false
+        val lines = file.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
+        val parsed = lines.map(::parseLineObject)
+        val omitted = collectOmittedEntryIds(parsed)
         var seenUsers = 0
-        return file.useLines(Charsets.UTF_8) { lines ->
-            for (line in lines) {
-                if (line.isNotBlank() && isUserMessageEntry(line)) {
-                    if (seenUsers == targetTurnIndex) return@useLines true
-                    seenUsers++
-                }
+        for (obj in parsed) {
+            if (isVisibleUserMessage(obj, omitted)) {
+                if (seenUsers == targetTurnIndex) return true
+                seenUsers++
             }
-            false
         }
+        return false
     }
 
     /**
@@ -50,18 +94,20 @@ object SessionJsonlHistoryOps {
         if (!file.isFile || targetTurnIndex < 0) return false
         val lines = file.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
         if (lines.isEmpty()) return false
+        val parsed = lines.map(::parseLineObject)
+        val omitted = collectOmittedEntryIds(parsed)
         var seenUsers = 0
         var foundTarget = false
         val kept = ArrayList<String>(lines.size)
-        for (line in lines) {
-            if (isUserMessageEntry(line)) {
+        for (i in lines.indices) {
+            if (isVisibleUserMessage(parsed[i], omitted)) {
                 if (seenUsers >= targetTurnIndex) {
                     foundTarget = true
                     break
                 }
                 seenUsers++
             }
-            kept.add(line)
+            kept.add(lines[i])
         }
         if (!foundTarget) return false
         runCatching {
@@ -100,12 +146,15 @@ object SessionJsonlHistoryOps {
         newSessionId: String,
         cwd: String,
     ): List<String> {
-        val out = ArrayList<String>(lines.size + 1)
+        val nonBlank = lines.filter { it.isNotBlank() }
+        val parsed = nonBlank.map(::parseLineObject)
+        val omitted = collectOmittedEntryIds(parsed)
+        val out = ArrayList<String>(nonBlank.size + 1)
         var seenUsers = 0
         var wroteHeader = false
-        for (line in lines) {
-            if (line.isBlank()) continue
-            val obj = runCatching { lineJson.parseToJsonElement(line).jsonObject }.getOrNull()
+        for (i in nonBlank.indices) {
+            val line = nonBlank[i]
+            val obj = parsed[i]
             if (obj != null && (obj["type"] as? JsonPrimitive)?.contentOrNull == "session") {
                 val rewritten = buildJsonObject {
                     for ((k, v) in obj) {
@@ -116,7 +165,7 @@ object SessionJsonlHistoryOps {
                 wroteHeader = true
                 continue
             }
-            if (upToUserTurn != null && isUserMessageEntry(line)) {
+            if (upToUserTurn != null && isVisibleUserMessage(obj, omitted)) {
                 if (seenUsers > upToUserTurn) break
                 seenUsers++
             }

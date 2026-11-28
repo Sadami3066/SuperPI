@@ -160,15 +160,32 @@ class TurnBlocksTest {
     }
 
     @Test
-    fun todoCardIsHiddenFromBlocks() {
-        val blocks = turnBlocks(
+    fun todoCardFoldsLatestNonEmptySnapshotWithoutSplittingActivity() {
+        val emptyBlocks = turnBlocks(
             assistant(
-                AssistantStep.CustomCard(1, TodoWriteCustomType, "{\"items\":[]}", "待办"),
+                AssistantStep.CustomCard(1, TodoWriteCustomType, """{"todos":[]}""", "待办"),
                 AssistantStep.Text(2, "答案"),
             ),
         )
-        assertEquals(1, blocks.size)
-        assertTrue(blocks.single() is TurnBlock.Text)
+        assertEquals(1, emptyBlocks.size)
+        assertTrue(emptyBlocks.single() is TurnBlock.Text)
+
+        val blocks = turnBlocks(
+            assistant(
+                AssistantStep.Reasoning(1, "先规划"),
+                AssistantStep.CustomCard(2, TodoWriteCustomType, """{"todos":[{"content":"A","status":"in_progress"}]}""", ""),
+                AssistantStep.Reasoning(3, "再执行"),
+                AssistantStep.CustomCard(4, TodoWriteCustomType, """{"todos":[{"content":"A","status":"completed"},{"content":"B","status":"in_progress"}]}""", ""),
+                AssistantStep.Text(5, "完成"),
+            ),
+        )
+        assertEquals(3, blocks.size)
+        assertTrue(blocks[0] is TurnBlock.Activity)
+        assertEquals(2, (blocks[0] as TurnBlock.Activity).steps.size)
+        val todo = blocks[1] as TurnBlock.TodoCard
+        assertEquals(2, todo.todos.size)
+        assertEquals("completed", todo.todos[0].status)
+        assertTrue(blocks[2] is TurnBlock.Text)
     }
 
     @Test

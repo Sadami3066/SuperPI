@@ -12,6 +12,8 @@ import type {
 export const SUPER_SESSION_ID = "__super__";
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let inFlightStateRefresh: Promise<void> | null = null;
+let inFlightTeamRefresh: Promise<void> | null = null;
 let superSendInFlight = false;
 
 export interface SuperStoreState {
@@ -83,18 +85,25 @@ export const useSuperStore = create<SuperStoreState>((set, get) => ({
   error: null,
 
   refreshState: async (client) => {
+    if (inFlightStateRefresh) return inFlightStateRefresh;
     if (!get().state) {
       set({ loading: true });
     }
-    try {
-      const next = await client.getSuperState();
-      set({ state: next, loading: false, error: null });
-    } catch (err) {
-      set({
-        loading: false,
-        error: err instanceof Error ? err.message : "Failed to load Super state",
-      });
-    }
+    const task = (async () => {
+      try {
+        const next = await client.getSuperState();
+        set({ state: next, loading: false, error: null });
+      } catch (err) {
+        set({
+          loading: false,
+          error: err instanceof Error ? err.message : "Failed to load Super state",
+        });
+      } finally {
+        inFlightStateRefresh = null;
+      }
+    })();
+    inFlightStateRefresh = task;
+    return task;
   },
 
   scheduleRefreshState: (client) => {
@@ -108,12 +117,19 @@ export const useSuperStore = create<SuperStoreState>((set, get) => ({
   },
 
   refreshTeam: async (client) => {
-    try {
-      const team = await client.getSuperTeam();
-      set({ team });
-    } catch {
-      void 0;
-    }
+    if (inFlightTeamRefresh) return inFlightTeamRefresh;
+    const task = (async () => {
+      try {
+        const team = await client.getSuperTeam();
+        set({ team });
+      } catch {
+        void 0;
+      } finally {
+        inFlightTeamRefresh = null;
+      }
+    })();
+    inFlightTeamRefresh = task;
+    return task;
   },
 
   setTeamBot: async (client, botRef, enabled) => {

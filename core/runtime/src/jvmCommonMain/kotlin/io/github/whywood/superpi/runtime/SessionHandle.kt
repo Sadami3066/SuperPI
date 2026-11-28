@@ -30,6 +30,7 @@ interface SessionHandle {
     suspend fun prompt(text: String, images: List<ImagePart>? = null, behavior: QueueBehavior? = null)
     fun abort()
     suspend fun close()
+    suspend fun closeWithoutMemory() = close()
     fun subscribe(listener: suspend (SessionEvent) -> Unit): () -> Unit
     fun clearQueues()
 

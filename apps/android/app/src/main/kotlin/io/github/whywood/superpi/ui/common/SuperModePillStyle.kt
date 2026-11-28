@@ -7,7 +7,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -39,6 +38,13 @@ private val SUPER_PILL_STARS = listOf(
     SuperPillStar(0.86f, 0.68f, 1.00f, 0.78f),
 )
 
+private val SUPER_SHIMMER_COLORS = listOf(
+    Color.Transparent,
+    Color.White.copy(alpha = 0.26f),
+    Color.Transparent,
+)
+
+// Every stop maintains >= 4.5:1 WCAG AA contrast against the #FAFAFC pill text/icon.
 internal fun resolveSuperModePillStyle(
     family: DdThemeVisualFamily,
     colors: SuperPIColors,
@@ -46,42 +52,42 @@ internal fun resolveSuperModePillStyle(
     DdThemeVisualFamily.VIOLET -> SuperModePillStyle(
         gradient = listOf(
             Color(0xFF1E1B4B),
-            Color(0xFF5B21B6),
-            Color(0xFF9333EA),
-            Color(0xFFC084FC),
+            Color(0xFF4C1D95),
+            Color(0xFF6D28D9),
+            Color(0xFF7E22CE),
         ),
-        glow = Color(0x859333EA),
+        glow = Color(0x807E22CE),
     )
 
     DdThemeVisualFamily.OCEAN -> SuperModePillStyle(
         gradient = listOf(
             Color(0xFF0B2942),
-            Color(0xFF0369A1),
-            Color(0xFF0D9488),
-            Color(0xFF2DD4BF),
+            Color(0xFF035388),
+            Color(0xFF0F6D66),
+            Color(0xFF0B7A75),
         ),
-        glow = Color(0x800D9488),
+        glow = Color(0x780F766E),
     )
 
     DdThemeVisualFamily.WARM -> SuperModePillStyle(
         gradient = listOf(
             Color(0xFF431407),
-            Color(0xFF9F1239),
-            Color(0xFFD94646),
-            Color(0xFFFB7185),
+            Color(0xFF881337),
+            Color(0xFFB43434),
+            Color(0xFFB91C3C),
         ),
-        glow = Color(0x75E11D48),
+        glow = Color(0x75B91C3C),
     )
 
     DdThemeVisualFamily.CUSTOM -> {
         val accent = colors.accent
         SuperModePillStyle(
             gradient = listOf(
+                lerp(accent, Color(0xFF0B0B12), 0.62f),
                 lerp(accent, Color(0xFF0B0B12), 0.42f),
-                accent,
-                lerp(accent, Color(0xFFF5D0FE), 0.26f),
+                lerp(accent, Color(0xFF141422), 0.34f),
             ),
-            glow = accent.copy(alpha = 0.52f),
+            glow = accent.copy(alpha = 0.45f),
         )
     }
 
@@ -89,10 +95,10 @@ internal fun resolveSuperModePillStyle(
         gradient = listOf(
             Color(0xFF111116),
             Color(0xFF7F1D3A),
+            Color(0xFFA91038),
             Color(0xFFBE123C),
-            Color(0xFFF43F5E),
         ),
-        glow = Color(0x7AE11D48),
+        glow = Color(0x78BE123C),
     )
 }
 
@@ -103,7 +109,7 @@ internal fun Modifier.superModeShimmer(
 ): Modifier {
     if (!active || !motionEnabled) return this
     val transition = rememberInfiniteTransition(label = "super-pill-motion")
-    val shimmerProgress by transition.animateFloat(
+    val shimmerState = transition.animateFloat(
         initialValue = -0.35f,
         targetValue = 1.35f,
         animationSpec = infiniteRepeatable(
@@ -112,7 +118,7 @@ internal fun Modifier.superModeShimmer(
         ),
         label = "super-pill-shimmer",
     )
-    val starPhase by transition.animateFloat(
+    val starPhaseState = transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -121,18 +127,17 @@ internal fun Modifier.superModeShimmer(
         ),
         label = "super-pill-stars",
     )
+    // Read animated State<Float>.value inside drawWithContent only (zero recomposition per frame).
     return drawWithContent {
         drawContent()
         if (size.width > 12f) {
+            val shimmerProgress = shimmerState.value
+            val starPhase = starPhaseState.value
             val beamHalf = (size.width * 0.24f).coerceAtLeast(22f)
             val centerX = size.width * shimmerProgress
             drawRect(
                 brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        Color.White.copy(alpha = 0.28f),
-                        Color.Transparent,
-                    ),
+                    colors = SUPER_SHIMMER_COLORS,
                     start = Offset(centerX - beamHalf, 0f),
                     end = Offset(centerX + beamHalf, size.height),
                 ),

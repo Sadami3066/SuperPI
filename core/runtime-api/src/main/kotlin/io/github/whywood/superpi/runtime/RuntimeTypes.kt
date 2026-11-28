@@ -382,6 +382,8 @@ interface SessionCommands {
 
     suspend fun closeSession(sessionId: String)
 
+    suspend fun closeSessionWithoutMemory(sessionId: String) = closeSession(sessionId)
+
     suspend fun reloadSession(sessionId: String): String
 
     suspend fun send(sessionId: String, text: String, images: List<ImagePart> = emptyList())

@@ -1455,6 +1455,9 @@ class RemoteAgentServer(
         val includeArchived = frame.params.booleanOrNull("includeArchived") == true
         val ordered = allSessionsForBot(botId, includeArchived)
             .sortedWith(compareByDescending<ConversationSummary> { it.pinned }.thenByDescending { it.updatedAt })
+        for (session in ordered) {
+            sessionBots[session.id] = botId
+        }
         val botCount = bots().size
         val listedIds = ordered.map { it.id }.toSet()
         val extraActive = mutableListOf<Pair<String, Long>>()
@@ -1995,6 +1998,7 @@ class RemoteAgentServer(
                         if (wasCapped) truncated = true
                         entries += buildJsonObject {
                             put("role", "user")
+                            if (message.startedAt > 0L) put("timestamp", message.startedAt)
                             put(
                                 "content",
                                 buildJsonArray {
@@ -2075,11 +2079,22 @@ class RemoteAgentServer(
                                             MAX_HISTORY_TOOL_RESULT_CHARS,
                                         )
                                         if (resultCapped) truncated = true
+                                        val toolTimestamp = (
+                                            if (trace.startedAt > 0L && trace.durationMs != null) {
+                                                trace.startedAt + trace.durationMs!!
+                                            } else {
+                                                null
+                                            }
+                                            ) ?: trace.startedAt.takeIf { it > 0L }
+                                            ?: message.finishedAt?.takeIf { it > 0L }
+                                            ?: message.startedAt.takeIf { it > 0L }
                                         toolResults += buildJsonObject {
                                             put("role", "toolResult")
                                             put("toolCallId", callId)
                                             put("toolName", trace.name)
                                             put("isError", trace.status == ToolActivityStatus.FAILED)
+                                            toolTimestamp?.let { put("timestamp", it) }
+                                            trace.durationMs?.let { put("durationMs", it) }
                                             put(
                                                 "content",
                                                 buildJsonArray {
@@ -2105,8 +2120,11 @@ class RemoteAgentServer(
                         }
                     }
                     if (contentBlocks.isNotEmpty() || message.error != null || message.status == MessageStatus.FAILED) {
+                        val assistantTimestamp = message.startedAt.takeIf { it > 0L }
+                            ?: message.finishedAt?.takeIf { it > 0L }
                         entries += buildJsonObject {
                             put("role", "assistant")
+                            assistantTimestamp?.let { put("timestamp", it) }
                             put("content", JsonArray(contentBlocks))
                             message.error?.takeIf { it.isNotBlank() }?.let { err ->
                                 val (cappedErr, errCapped) = capHistoryText(err, MAX_HISTORY_TOOL_RESULT_CHARS)
@@ -2140,6 +2158,7 @@ class RemoteAgentServer(
             val liveThinking = StringBuilder()
             val liveText = StringBuilder()
             val liveBlocks = mutableListOf<JsonObject>()
+            var liveAssistantTimestamp: Long? = null
             fun stripCommittedPrefix(live: String, committed: String): String {
                 if (!dedupeAgainstLastCommitted || committed.isEmpty() || live.isEmpty()) return live
                 if (committed.startsWith(live)) return ""
@@ -2173,11 +2192,14 @@ class RemoteAgentServer(
                     }
                 }
                 if (liveBlocks.isNotEmpty()) {
+                    val ts = liveAssistantTimestamp
                     entries += buildJsonObject {
                         put("role", "assistant")
+                        ts?.takeIf { it > 0L }?.let { put("timestamp", it) }
                         put("content", JsonArray(liveBlocks.toList()))
                     }
                     liveBlocks.clear()
+                    liveAssistantTimestamp = null
                     dedupeAgainstLastCommitted = false
                 }
             }
@@ -2186,6 +2208,9 @@ class RemoteAgentServer(
                 val ev = entry.event
                 when ((ev["type"] as? JsonPrimitive)?.contentOrNull) {
                     "message_update" -> {
+                        if (liveAssistantTimestamp == null && entry.timestamp > 0L) {
+                            liveAssistantTimestamp = entry.timestamp
+                        }
                         val sub = ev["assistantMessageEvent"] as? JsonObject ?: continue
                         val delta = (sub["delta"] as? JsonPrimitive)?.contentOrNull.orEmpty()
                         when ((sub["type"] as? JsonPrimitive)?.contentOrNull) {
@@ -2195,6 +2220,9 @@ class RemoteAgentServer(
                     }
 
                     "tool_call" -> {
+                        if (liveAssistantTimestamp == null && entry.timestamp > 0L) {
+                            liveAssistantTimestamp = entry.timestamp
+                        }
                         val callId = (ev["callId"] as? JsonPrimitive)?.contentOrNull.orEmpty()
                         val toolName = (ev["name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
                         if (callId.isNotBlank() && toolName.isNotBlank()) {
@@ -2258,6 +2286,7 @@ class RemoteAgentServer(
                                 put("toolCallId", callId)
                                 put("toolName", toolName)
                                 if (isError) put("isError", true)
+                                if (entry.timestamp > 0L) put("timestamp", entry.timestamp)
                                 put("content", content)
                                 details?.let { put("details", it) }
                             }
@@ -2393,9 +2422,24 @@ class RemoteAgentServer(
         }
         if (session.event is RuntimeEvent.SessionRemoved || session.event is RuntimeEvent.SessionArchived) {
             if (session.sessionId.isNotBlank() && !isRemoteMirrorSession(session.sessionId) && !consumeSuppressedSync(session.sessionId)) {
-                val botId = sessionBots[session.sessionId] ?: resolveSessionBotId(session.sessionId)
+                val isRemoved = session.event is RuntimeEvent.SessionRemoved
+                if (isRemoved) {
+                    cleanupFeedAndQuestions(session.sessionId)
+                }
+                val botId = if (isRemoved) {
+                    sessionBots.remove(session.sessionId) ?: resolveSessionBotId(session.sessionId)
+                } else {
+                    sessionBots[session.sessionId] ?: resolveSessionBotId(session.sessionId)
+                }
                 if (!botId.isNullOrBlank()) {
                     onSyncEvent(RelaySyncEvent(kind = "sessions_changed", botId = botId, sessionId = session.sessionId))
+                } else {
+                    // File was already removed from disk before SessionRemoved fired and sessionBots
+                    // did not cache this local session yet; notify peers across all local bots so
+                    // stale remote mirrors are pruned immediately.
+                    bots().forEach { localBot ->
+                        onSyncEvent(RelaySyncEvent(kind = "sessions_changed", botId = localBot.id, sessionId = session.sessionId))
+                    }
                 }
             }
             return
@@ -2800,6 +2844,7 @@ class RemoteAgentServer(
     private data class BufferedEvent(
         val seq: Long,
         val event: JsonObject,
+        val timestamp: Long = System.currentTimeMillis(),
     )
 
     private class Feed(

@@ -79,6 +79,31 @@ class RuntimeWorkspacesTest {
     }
 
     @Test
+    fun visibleCwdsIncludesCanonicalPathForSymlinkedHome() = runBlocking {
+        val realHome = File(root, "real-user-0-home").apply { mkdirs() }
+        val symlinkHome = File(root, "data-data-home")
+        Files.createSymbolicLink(symlinkHome.toPath(), realHome.toPath())
+        val symlinkedWorkspaces = RuntimeWorkspaces(
+            mutex = Mutex(),
+            homeDir = symlinkHome,
+            workspacesDir = workspacesDir,
+            directories = directories,
+            catalog = EmptySessionDirectory(),
+            emitListChanged = {},
+            emitRemoved = {},
+            stopTurn = { emptyList() },
+            detachForget = {},
+            sessionCleaner = null,
+        )
+        val homeWs = symlinkedWorkspaces.list().first { it.isHome }
+        val visible = symlinkedWorkspaces.visibleCwds()
+        val homeCwds = symlinkedWorkspaces.cwdsFor(AgentRuntimeHost.HOME_ID)
+        assertTrue("visibleCwds must contain canonical homeWorkspace.cwd", homeWs.cwd in visible)
+        assertTrue("cwdsFor(home) must contain canonical homeWorkspace.cwd", homeWs.cwd in homeCwds)
+        assertTrue("visibleCwds must also keep raw symlink path for legacy sessions", symlinkHome.absolutePath in visible)
+    }
+
+    @Test
     fun createMakesMissingCustomDirectory() = runBlocking {
         val custom = File(root, "shared/missing")
 

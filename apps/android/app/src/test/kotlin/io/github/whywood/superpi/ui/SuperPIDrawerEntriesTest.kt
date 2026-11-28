@@ -227,8 +227,7 @@ class SuperPIDrawerEntriesTest {
         )
 
         val rows = result.filterIsInstance<DrawerEntry.RemoteSession>()
-        assertEquals(listOf("r2", "r1", "r3"), rows.map { it.session.id })
-        val toggle = result.filterIsInstance<DrawerEntry.RemoteArchivedToggle>().single()
-        assertTrue(toggle.showingArchived)
+        assertEquals(listOf("r2", "r1"), rows.map { it.session.id })
+        assertTrue(result.filterIsInstance<DrawerEntry.RemoteArchivedToggle>().isEmpty())
     }
 }

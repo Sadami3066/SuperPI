@@ -16,21 +16,29 @@ export function GoalBar({ sessionId }: { sessionId: string }) {
   const [goal, setGoal] = useState<HostGoalDto | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = useCallback(async () => {
-    if (!client || !sessionId) {
-      setGoal(null);
-      return;
-    }
-    try {
-      const res = await client.getSessionGoal(sessionId);
-      setGoal(res.goal ?? null);
-    } catch {
-      setGoal(null);
-    }
-  }, [client, sessionId]);
+  const refresh = useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!client || !sessionId) {
+        if (!isCancelled?.()) setGoal(null);
+        return;
+      }
+      try {
+        const res = await client.getSessionGoal(sessionId);
+        if (!isCancelled?.()) setGoal(res.goal ?? null);
+      } catch {
+        if (!isCancelled?.()) setGoal(null);
+      }
+    },
+    [client, sessionId],
+  );
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    setGoal(null);
+    void refresh(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [goalVersion, refresh]);
 
   if (!goal || goal.phase === "completed" || goal.phase === "complete") {

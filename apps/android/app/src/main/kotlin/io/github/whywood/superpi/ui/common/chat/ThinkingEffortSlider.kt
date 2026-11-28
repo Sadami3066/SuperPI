@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
@@ -57,6 +59,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.whywood.superpi.R
@@ -321,19 +324,23 @@ internal fun ThinkingEffortSlider(
     val hapticsEnabled = LocalHapticsEnabled.current
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
 
-    val activeIndex = remember(ordered, value) {
+    val committedIndex = remember(ordered, value) {
         ordered.indexOf(value).takeIf { it >= 0 } ?: 0
     }
+    var dragging by remember { mutableStateOf(false) }
+    var dragPreviewIndex by remember { mutableStateOf<Int?>(null) }
+    val activeIndex = if (dragging) (dragPreviewIndex ?: committedIndex).coerceIn(0, ordered.lastIndex) else committedIndex
     val activeLevel = ordered[activeIndex]
     val maxIndex = (ordered.size - 1).coerceAtLeast(1)
     val targetFraction = if (ordered.size <= 1) 1f else activeIndex.toFloat() / maxIndex.toFloat()
-    var dragging by remember { mutableStateOf(false) }
 
     val latestOrdered by rememberUpdatedState(ordered)
-    val latestActiveIndex by rememberUpdatedState(activeIndex)
+    val latestCommittedIndex by rememberUpdatedState(committedIndex)
     val latestOnChange by rememberUpdatedState(onChange)
     val latestHapticsEnabled by rememberUpdatedState(hapticsEnabled)
+    val latestIsRtl by rememberUpdatedState(isRtl)
 
     val visual = remember(family, activeLevel, colors) {
         resolveEffortVisual(family, activeLevel, colors)
@@ -359,7 +366,7 @@ internal fun ThinkingEffortSlider(
     )
 
     val shimmerActive = motionEnabled && activeLevel != ThinkingLevel.OFF && visual.shimmerAlpha > 0f
-    val shimmerProgress = if (shimmerActive) {
+    val shimmerState: State<Float>? = if (shimmerActive) {
         val transition = rememberInfiniteTransition(label = "effort-shimmer")
         transition.animateFloat(
             initialValue = -0.35f,
@@ -369,12 +376,12 @@ internal fun ThinkingEffortSlider(
                 repeatMode = RepeatMode.Restart,
             ),
             label = "effort-shimmer-x",
-        ).value
+        )
     } else {
-        -1f
+        null
     }
 
-    val starPhase = if (motionEnabled && visual.stars) {
+    val starPhaseState: State<Float>? = if (motionEnabled && visual.stars) {
         val transition = rememberInfiniteTransition(label = "effort-stars")
         transition.animateFloat(
             initialValue = 0f,
@@ -384,17 +391,42 @@ internal fun ThinkingEffortSlider(
                 repeatMode = RepeatMode.Restart,
             ),
             label = "effort-star-phase",
-        ).value
+        )
     } else {
-        0f
+        null
+    }
+
+    val shimmerColors = remember(visual.shimmerAlpha) {
+        listOf(
+            Color.Transparent,
+            Color.White.copy(alpha = visual.shimmerAlpha),
+            Color.Transparent,
+        )
     }
 
     val currentLabel = thinkingLabel(activeLevel)
 
-    fun selectIndex(index: Int) {
+    fun indexFromX(xPx: Float, widthPx: Float): Int {
+        val usable = widthPx.coerceAtLeast(1f)
+        val raw = (xPx / usable).coerceIn(0f, 1f)
+        val ratio = if (latestIsRtl) 1f - raw else raw
+        return (ratio * (latestOrdered.size - 1)).roundToInt().coerceIn(0, latestOrdered.lastIndex)
+    }
+
+    fun updatePreviewIndex(index: Int) {
         val clamped = index.coerceIn(0, latestOrdered.lastIndex)
-        if (clamped != latestActiveIndex) {
+        if (clamped != (dragPreviewIndex ?: latestCommittedIndex)) {
             if (latestHapticsEnabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            dragPreviewIndex = clamped
+        }
+    }
+
+    fun commitIndex(index: Int) {
+        val clamped = index.coerceIn(0, latestOrdered.lastIndex)
+        if (clamped != latestCommittedIndex) {
+            if (!dragging && latestHapticsEnabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             }
             latestOnChange(latestOrdered[clamped])
@@ -440,26 +472,34 @@ internal fun ThinkingEffortSlider(
                 .height(36.dp)
                 .pointerInput(ordered.size) {
                     detectTapGestures { offset ->
-                        val usable = size.width.toFloat().coerceAtLeast(1f)
-                        val ratio = (offset.x / usable).coerceIn(0f, 1f)
-                        selectIndex((ratio * (latestOrdered.size - 1)).roundToInt())
+                        commitIndex(indexFromX(offset.x, size.width.toFloat()))
                     }
                 }
                 .pointerInput(ordered.size) {
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
                             dragging = true
-                            val usable = size.width.toFloat().coerceAtLeast(1f)
-                            val ratio = (offset.x / usable).coerceIn(0f, 1f)
-                            selectIndex((ratio * (latestOrdered.size - 1)).roundToInt())
+                            val idx = indexFromX(offset.x, size.width.toFloat())
+                            dragPreviewIndex = idx
+                            if (idx != latestCommittedIndex && latestHapticsEnabled) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
                         },
-                        onDragEnd = { dragging = false },
-                        onDragCancel = { dragging = false },
+                        onDragEnd = {
+                            val finalIdx = dragPreviewIndex
+                            dragging = false
+                            dragPreviewIndex = null
+                            if (finalIdx != null) {
+                                commitIndex(finalIdx)
+                            }
+                        },
+                        onDragCancel = {
+                            dragging = false
+                            dragPreviewIndex = null
+                        },
                         onHorizontalDrag = { change, _ ->
                             change.consume()
-                            val usable = size.width.toFloat().coerceAtLeast(1f)
-                            val ratio = (change.position.x / usable).coerceIn(0f, 1f)
-                            selectIndex((ratio * (latestOrdered.size - 1)).roundToInt())
+                            updatePreviewIndex(indexFromX(change.position.x, size.width.toFloat()))
                         },
                     )
                 },
@@ -484,7 +524,7 @@ internal fun ThinkingEffortSlider(
                     .background(colors.hairline.copy(alpha = if (colors.dark) 0.72f else 0.85f)),
             )
 
-            // Active gradient fill + shimmer + twinkling stars
+            // Active gradient fill + shimmer + twinkling stars (state reads deferred into Canvas)
             Box(
                 modifier = Modifier
                     .size(width = fillWidthDp, height = trackHeight)
@@ -504,24 +544,22 @@ internal fun ThinkingEffortSlider(
                     .clip(CircleShape)
                     .background(Brush.horizontalGradient(visual.trackColors)),
             ) {
-                if (shimmerActive || (motionEnabled && visual.stars)) {
+                if (shimmerState != null || starPhaseState != null) {
                     Canvas(Modifier.fillMaxSize()) {
-                        if (shimmerActive && size.width > 12f) {
+                        val shimmerProgress = shimmerState?.value
+                        if (shimmerProgress != null && size.width > 12f) {
                             val beamHalf = (size.width * 0.24f).coerceAtLeast(24f)
                             val centerX = size.width * shimmerProgress
                             drawRect(
                                 brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Color.White.copy(alpha = visual.shimmerAlpha),
-                                        Color.Transparent,
-                                    ),
+                                    colors = shimmerColors,
                                     start = Offset(centerX - beamHalf, 0f),
                                     end = Offset(centerX + beamHalf, size.height),
                                 ),
                             )
                         }
-                        if (motionEnabled && visual.stars && size.width > 28f) {
+                        val starPhase = starPhaseState?.value
+                        if (starPhase != null && size.width > 28f) {
                             EFFORT_STARS.forEach { star ->
                                 val wave = (sin((starPhase + star.phaseOffset) * 2.0 * PI) * 0.5 + 0.5).toFloat()
                                 val alpha = 0.22f + wave * 0.78f
@@ -539,7 +577,7 @@ internal fun ThinkingEffortSlider(
                 }
             }
 
-            // Subtle step ticks on the inactive side
+            // Subtle step ticks on the inactive side (RTL-aware)
             if (ordered.size > 2) {
                 Canvas(
                     modifier = Modifier
@@ -549,7 +587,8 @@ internal fun ThinkingEffortSlider(
                     val stepSpan = (size.width - thumbSizePx).coerceAtLeast(1f)
                     ordered.indices.forEach { idx ->
                         if (idx > activeIndex) {
-                            val cx = thumbSizePx * 0.5f + stepSpan * (idx.toFloat() / maxIndex.toFloat())
+                            val ltrX = thumbSizePx * 0.5f + stepSpan * (idx.toFloat() / maxIndex.toFloat())
+                            val cx = if (isRtl) size.width - ltrX else ltrX
                             drawCircle(
                                 color = colors.inkTertiary.copy(alpha = 0.45f),
                                 radius = 1.6.dp.toPx(),
@@ -601,7 +640,7 @@ internal fun ThinkingEffortSlider(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ) { selectIndex(index) }
+                        ) { commitIndex(index) }
                         .padding(horizontal = 4.dp, vertical = 4.dp)
                         .testTag("assistant_thinking_${level.name.lowercase()}"),
                     contentAlignment = Alignment.Center,

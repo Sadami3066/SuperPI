@@ -37,9 +37,21 @@ export function normalizeThinkingLevel(raw?: string | null): ThinkingLevel {
   return "off";
 }
 
-export function formatClockTime(ts?: number | null, locale: "zh-CN" | "en" = "zh-CN"): string {
+export function formatClockTime(
+  ts?: number | null,
+  locale: "zh-CN" | "en" = "zh-CN",
+  nowMs = Date.now(),
+): string {
   if (!ts || ts <= 0) return "";
-  return new Date(ts).toLocaleTimeString(locale === "en" ? "en-US" : "zh-CN", {
+  const date = new Date(ts);
+  const now = new Date(nowMs);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const msgDayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const daysAgo = Math.round((todayStart - msgDayStart) / 86_400_000);
+  if (daysAgo >= 1) {
+    return locale === "en" ? `${daysAgo}d ago` : `${daysAgo} 天前`;
+  }
+  return date.toLocaleTimeString(locale === "en" ? "en-US" : "zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -364,7 +376,15 @@ export function mapHostMessageToTurn(
     }
   }
   flushActivity();
-  blocks.push(...deferredTodoCards);
+  const latestTodoCard = deferredTodoCards[deferredTodoCards.length - 1];
+  if (latestTodoCard) {
+    const firstTextIdx = blocks.findIndex((b) => b.kind === "text");
+    if (firstTextIdx >= 0) {
+      blocks.splice(firstTextIdx, 0, latestTodoCard);
+    } else {
+      blocks.push(latestTodoCard);
+    }
+  }
 
   if (!blocks.some((b) => b.kind === "text") && dto.text && dto.text.trim()) {
     blocks.push({ key: `txt-top-${dto.id}`, kind: "text", text: dto.text });

@@ -705,23 +705,24 @@ class LocalControlServerApiTest {
     }
 
     @Test
-    fun `newly created sessions appear immediately in bot session listing before first message`() = runBlocking {
+    fun `newly created sessions stay hidden before first message and appear once populated`() = runBlocking {
         val port = server.start()
 
         val createHomeReq = authReq(port, "/api/v1/bots/home/sessions")
             .post("{}".toRequestBody("application/json".toMediaType()))
             .build()
-        val homeSessionId = http.newCall(createHomeReq).execute().use { resp ->
+        val homeCreated = http.newCall(createHomeReq).execute().use { resp ->
             assertEquals(201, resp.code)
-            json.parseToJsonElement(resp.body.string()).jsonObject["sessionId"]!!.jsonPrimitive.content
+            json.parseToJsonElement(resp.body.string()).jsonObject
         }
+        val homeSessionId = homeCreated["sessionId"]!!.jsonPrimitive.content
 
         http.newCall(authReq(port, "/api/v1/bots/home/sessions").get().build()).execute().use { resp ->
             assertEquals(200, resp.code)
             val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
                 it.jsonObject["id"]!!.jsonPrimitive.content
             }
-            assertTrue("Expected home session $homeSessionId in $ids", homeSessionId in ids)
+            assertFalse("Empty home session $homeSessionId must stay hidden before first message", homeSessionId in ids)
         }
 
         val createBotReq = authReq(port, "/api/v1/bots")
@@ -735,17 +736,38 @@ class LocalControlServerApiTest {
         val createBot2SessReq = authReq(port, "/api/v1/bots/$bot2Id/sessions")
             .post("{}".toRequestBody("application/json".toMediaType()))
             .build()
-        val bot2SessionId = http.newCall(createBot2SessReq).execute().use { resp ->
+        val bot2Created = http.newCall(createBot2SessReq).execute().use { resp ->
             assertEquals(201, resp.code)
-            json.parseToJsonElement(resp.body.string()).jsonObject["sessionId"]!!.jsonPrimitive.content
+            json.parseToJsonElement(resp.body.string()).jsonObject
         }
+        val bot2SessionId = bot2Created["sessionId"]!!.jsonPrimitive.content
 
         http.newCall(authReq(port, "/api/v1/bots/$bot2Id/sessions").get().build()).execute().use { resp ->
             assertEquals(200, resp.code)
             val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
                 it.jsonObject["id"]!!.jsonPrimitive.content
             }
-            assertTrue("Expected second bot session $bot2SessionId in $ids", bot2SessionId in ids)
+            assertFalse("Empty second bot session $bot2SessionId must stay hidden before first message", bot2SessionId in ids)
+        }
+
+        // Once the session has a persisted first user message, it appears in its owning bot's list.
+        val bot2Cwd = bot2Created["cwd"]!!.jsonPrimitive.content.replace("\\", "\\\\")
+        val bot2File = File(bot2Created["filePath"]!!.jsonPrimitive.content)
+        bot2File.parentFile?.mkdirs()
+        bot2File.writeText(
+            """{"type":"session","version":3,"id":"$bot2SessionId","timestamp":"2026-11-27T00:00:00Z","cwd":"$bot2Cwd"}""" + "\n",
+            Charsets.UTF_8,
+        )
+        val mgr = SessionManager.open(bot2File.absolutePath.toPath(), FileSystem.SYSTEM)
+        mgr.appendMessage(UserMessage(PlainTextContent("hello workbot"), 100L))
+        controller.runtimeHost.closeSession(bot2SessionId)
+
+        http.newCall(authReq(port, "/api/v1/bots/$bot2Id/sessions").get().build()).execute().use { resp ->
+            assertEquals(200, resp.code)
+            val ids = json.parseToJsonElement(resp.body.string()).jsonArray.map {
+                it.jsonObject["id"]!!.jsonPrimitive.content
+            }
+            assertTrue("Populated second bot session $bot2SessionId must appear in $ids", bot2SessionId in ids)
         }
     }
 
@@ -924,6 +946,38 @@ class LocalControlServerApiTest {
         }
         assertEquals(2, afterRewind["messages"]!!.jsonArray.size)
         assertEquals("u1", afterRewind["messages"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+
+        // 5. Invalid turnIndex in files_and_chat mode must fail BEFORE restoring/overwriting workspace files,
+        //    and repeated rewind must pick the latest non-backup checkpoint for a turn.
+        val wsDir = File(created["cwd"]!!.jsonPrimitive.content).apply { mkdirs() }
+        val demoFile = File(wsDir, "rewind-guard.txt").apply { writeText("v0") }
+        val cpOld = controller.checkpointStore.capture(sid, wsDir, turnIndex = 0, label = "turn0-old", messageCount = 0)
+        assertTrue(cpOld != null)
+        demoFile.writeText("v1")
+        val cpNew = controller.checkpointStore.capture(sid, wsDir, turnIndex = 0, label = "turn0-new", messageCount = 0)
+        assertTrue(cpNew != null)
+        demoFile.writeText("v2-current")
+
+        // Out-of-bounds turnIndex (99) must return 400 and leave demoFile untouched ("v2-current")
+        http.newCall(
+            authReq(port, "/api/v1/sessions/$sid/rewind")
+                .post("""{"turnIndex":99,"mode":"files_and_chat"}""".toRequestBody("application/json".toMediaType()))
+                .build(),
+        ).execute().use { resp ->
+            assertEquals(400, resp.code)
+        }
+        assertEquals("v2-current", demoFile.readText())
+
+        // Rewind to turn 0 must pick "turn0-new" ("v1") rather than obsolete "turn0-old" ("v0")
+        http.newCall(
+            authReq(port, "/api/v1/sessions/$sid/rewind")
+                .post("""{"turnIndex":0,"mode":"files_and_chat"}""".toRequestBody("application/json".toMediaType()))
+                .build(),
+        ).execute().use { resp ->
+            assertEquals(200, resp.code)
+        }
+        assertEquals("v1", demoFile.readText())
+        assertTrue(controller.checkpointStore.list(sid).any { it.isBackup && it.turnIndex == -1 })
     }
 
     @Test

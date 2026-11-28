@@ -134,13 +134,22 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
     };
   }, []);
 
+  const lastKnownUrlRef = useRef<string>("");
+  const addressFocusedRef = useRef(false);
+
   const syncFromNavSnapshot = useCallback(
     (snapshot: { tabs?: BrowserTabState[] } | null) => {
       if (!snapshot?.tabs) return;
       const mine = snapshot.tabs.find((x) => x.id === myTabId);
       if (!mine) return;
       setTabState(mine);
-      setUrlInput(mine.url || "");
+      const nextUrl = mine.url || "";
+      if (nextUrl) {
+        lastKnownUrlRef.current = nextUrl;
+      }
+      if (!addressFocusedRef.current) {
+        setUrlInput(nextUrl);
+      }
       const label = tabDisplayLabel(mine.title, mine.url, t("wb.browserTitle"));
       if (context.tabId) {
         updateTabTitle(context.tabId, label);
@@ -160,22 +169,6 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
   }, [myTabId, syncFromNavSnapshot]);
 
   useEffect(() => {
-    if (!effectiveInitialUrl || initialNavDoneRef.current || !isTabVisible) return;
-    initialNavDoneRef.current = true;
-    const resolved = resolveUserBrowserInput(effectiveInitialUrl, searchEngine);
-    if (!resolved) return;
-    const bounds = getViewportBounds() ?? { x: 0, y: 0, width: 480, height: 480 };
-    void browserMount(bounds, resolved, myTabId).then(syncFromNavSnapshot);
-  }, [
-    effectiveInitialUrl,
-    getViewportBounds,
-    isTabVisible,
-    myTabId,
-    searchEngine,
-    syncFromNavSnapshot,
-  ]);
-
-  useEffect(() => {
     const el = viewportRef.current;
     if (!el || !shouldShowView) {
       void browserHide(myTabId);
@@ -183,12 +176,21 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
     }
 
     let boundsRaf: number | null = null;
-    const syncBounds = (mountInitially: boolean) => {
+    let mountedOnce = false;
+    const syncBounds = (allowMount: boolean) => {
       const bounds = getViewportBounds();
       if (!bounds) return;
-      if (mountInitially) {
-        void browserMount(bounds, undefined, myTabId).then(syncFromNavSnapshot);
-      } else {
+      if (allowMount && !mountedOnce) {
+        mountedOnce = true;
+        let mountUrl: string | undefined;
+        if (lastKnownUrlRef.current) {
+          mountUrl = lastKnownUrlRef.current;
+        } else if (effectiveInitialUrl && !initialNavDoneRef.current) {
+          initialNavDoneRef.current = true;
+          mountUrl = resolveUserBrowserInput(effectiveInitialUrl, searchEngine) || undefined;
+        }
+        void browserMount(bounds, mountUrl, myTabId).then(syncFromNavSnapshot);
+      } else if (mountedOnce) {
         if (boundsRaf !== null) cancelAnimationFrame(boundsRaf);
         boundsRaf = requestAnimationFrame(() => {
           boundsRaf = null;
@@ -198,7 +200,7 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
     };
 
     syncBounds(true);
-    const ro = new ResizeObserver(() => syncBounds(false));
+    const ro = new ResizeObserver(() => syncBounds(true));
     ro.observe(el);
     const onResize = () => syncBounds(false);
     window.addEventListener("resize", onResize);
@@ -209,17 +211,20 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
       window.removeEventListener("resize", onResize);
       void browserHide(myTabId);
     };
-  }, [getViewportBounds, myTabId, shouldShowView, syncFromNavSnapshot]);
+  }, [effectiveInitialUrl, getViewportBounds, myTabId, searchEngine, shouldShowView, syncFromNavSnapshot]);
 
   const navigateTo = async (raw: string) => {
     const resolved = resolveUserBrowserInput(raw, searchEngine);
     if (!resolved) return;
+    lastKnownUrlRef.current = resolved;
+    initialNavDoneRef.current = true;
     if (shouldShowView) {
       const next = await browserNavigate(resolved, myTabId);
       syncFromNavSnapshot(next);
       return;
     }
-    const bounds = getViewportBounds() ?? { x: 0, y: 0, width: 480, height: 480 };
+    const bounds = getViewportBounds();
+    if (!bounds) return;
     const mounted = await browserMount(bounds, resolved, myTabId);
     syncFromNavSnapshot(mounted);
   };
@@ -298,6 +303,12 @@ export default function BrowserPanel({ context }: { context: WorkbenchPanelConte
           <Input
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
+            onFocus={() => {
+              addressFocusedRef.current = true;
+            }}
+            onBlur={() => {
+              addressFocusedRef.current = false;
+            }}
             placeholder={t("browser.urlPlaceholder")}
             className="h-8 text-[12.5px]"
           />

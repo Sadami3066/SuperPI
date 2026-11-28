@@ -95,9 +95,7 @@ import io.github.whywood.superpi.ui.common.chat.LoadEarlierPill
 import io.github.whywood.superpi.ui.common.chat.rememberChatHistoryWindow
 import io.github.whywood.superpi.ui.common.chat.ChatTurn
 import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
-import io.github.whywood.superpi.ui.common.chat.TodoPanel
 import io.github.whywood.superpi.ui.common.chat.copyToClipboard
-import io.github.whywood.superpi.ui.common.chat.latestTodoPayload
 import io.github.whywood.superpi.ui.common.chat.rememberAttachmentPickers
 import io.github.whywood.superpi.ui.common.chat.rememberChatScrollController
 import java.io.File
@@ -207,7 +205,6 @@ internal fun WorkerMonitorScreen(
         knownMessageCount = ui.messages.size
     }
 
-    val todoPayload = remember(ui.messages) { latestTodoPayload(ui.messages) }
     val isSending = (worker?.status?.isBusyForCommands == true) || ui.session.streaming || ui.stopping
     ChatScrollFollowEffect(
         controller = scrollController,
@@ -447,9 +444,6 @@ internal fun WorkerMonitorScreen(
                                     onRetry = viewModel::retryLastError,
                                     onDismiss = viewModel::dismissError,
                                 )
-                            }
-                            key(workerId) {
-                                TodoPanel(payload = todoPayload)
                             }
                             val inputAllowed = !worker.isRemote || ui.isRemoteOnline
                             ChatComposer(

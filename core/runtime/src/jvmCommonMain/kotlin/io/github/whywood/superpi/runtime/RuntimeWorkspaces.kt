@@ -138,11 +138,35 @@ internal class RuntimeWorkspaces(
         if (workspaceId == AgentRuntimeHost.HOME_ID || workspaceId.isBlank()) homeWorkspace()
         else directories.read().firstOrNull { it.id == workspaceId } ?: homeWorkspace()
 
-    suspend fun visibleCwds(): List<String> =
-        listOf(homeDir.absolutePath) + directories.read().map { it.cwd }
+    suspend fun visibleCwds(): List<String> = buildList {
+        val canonicalHome = canonicalOrAbsolute(homeDir.absolutePath)
+        add(canonicalHome)
+        if (homeDir.absolutePath != canonicalHome) {
+            add(homeDir.absolutePath)
+        }
+        directories.read().forEach { ws ->
+            val canonicalWs = canonicalOrAbsolute(ws.cwd)
+            add(canonicalWs)
+            if (ws.cwd != canonicalWs) {
+                add(ws.cwd)
+            }
+        }
+    }.distinct()
+
+    suspend fun cwdsFor(workspaceId: String): List<String> {
+        val ws = find(workspaceId)
+        return buildList {
+            val canonical = canonicalOrAbsolute(ws.cwd)
+            add(canonical)
+            if (ws.cwd != canonical) add(ws.cwd)
+            if (ws.isHome && homeDir.absolutePath != canonical) {
+                add(homeDir.absolutePath)
+            }
+        }.distinct()
+    }
 
     suspend fun sessionCount(workspaceId: String): Int =
-        catalog.list(find(workspaceId).cwd).size
+        catalog.listAll(cwdsFor(workspaceId)).size
 
     private fun ownsDirectory(cwd: String): Boolean {
         val root = runCatching { workspacesDir.canonicalPath }.getOrElse { workspacesDir.absolutePath }

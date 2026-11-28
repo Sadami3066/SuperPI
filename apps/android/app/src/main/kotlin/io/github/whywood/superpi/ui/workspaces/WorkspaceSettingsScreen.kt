@@ -567,8 +567,15 @@ private fun BotDefaultModelSheet(
                         value = selectedThinking,
                         onChange = { level ->
                             selectedThinking = level
-                            if (current != null && current.providerId == selectedProviderId) {
-                                onSelect(current.copy(thinkingLevel = level))
+                            val nextConfig = if (current != null && current.providerId == selectedProviderId) {
+                                current.copy(thinkingLevel = level)
+                            } else if (selectedProviderId.isNotBlank() && activeModelId.isNotBlank()) {
+                                ModelConfig(selectedProviderId, activeModelId, level)
+                            } else {
+                                null
+                            }
+                            if (nextConfig != null) {
+                                onSelect(nextConfig)
                             }
                         },
                     )

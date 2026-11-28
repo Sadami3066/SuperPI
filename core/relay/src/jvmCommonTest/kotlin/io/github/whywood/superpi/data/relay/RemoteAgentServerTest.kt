@@ -178,6 +178,64 @@ class RemoteAgentServerTest {
     }
 
     @Test
+    fun historySerializationPreservesRealTimestampsAcrossRoles() = runTest {
+        val userTs = 1_700_000_100_000L
+        val assistantTs = 1_700_000_200_000L
+        val host = FakeAgentRuntime().apply {
+            sessions = listOf(
+                ConversationSummary("s-ts", "Timestamps", assistantTs, "/s-ts.jsonl", "/home"),
+            )
+            histories = mapOf(
+                "s-ts" to listOf(
+                    AssistantMessage(id = 1L, role = AssistantRole.USER, text = "Yesterday", startedAt = userTs),
+                    AssistantMessage(
+                        id = 2L,
+                        role = AssistantRole.ASSISTANT,
+                        text = "",
+                        startedAt = assistantTs,
+                        finishedAt = assistantTs + 5_000L,
+                        steps = listOf(
+                            AssistantStep.Tool(
+                                ToolTrace(
+                                    id = 10L,
+                                    name = "bash",
+                                    arguments = mapOf("command" to "pwd"),
+                                    status = ToolActivityStatus.DONE,
+                                    output = "/home",
+                                    toolCallId = "call-ts",
+                                    durationMs = 250L,
+                                ),
+                            ),
+                            AssistantStep.Text(11L, "Done"),
+                        ),
+                    ),
+                ),
+            )
+        }
+        val sent = mutableListOf<JsonObject>()
+        val server = RemoteAgentServer(host, { defaultBots }, { sent.add(it); true }, backgroundScope)
+        runCurrent()
+
+        server.handle(
+            RelayServerFrame.Route(
+                id = "r-ts",
+                from = "dev-2",
+                method = "bot.history",
+                params = buildJsonObject {
+                    put("botId", "home")
+                    put("sessionId", "s-ts")
+                },
+            ),
+        )
+        val messages = sent.single().getValue("result").jsonObject.getValue("messages").jsonArray
+        assertEquals(3, messages.size)
+        assertEquals(userTs, messages[0].jsonObject.getValue("timestamp").jsonPrimitive.long)
+        assertEquals(assistantTs, messages[1].jsonObject.getValue("timestamp").jsonPrimitive.long)
+        assertEquals(assistantTs + 5_000L, messages[2].jsonObject.getValue("timestamp").jsonPrimitive.long)
+        assertEquals(250L, messages[2].jsonObject.getValue("durationMs").jsonPrimitive.long)
+    }
+
+    @Test
     fun promptReopensStoredHistoricalSessionBeforeSending() = runTest {
         val host = FakeAgentRuntime().apply {
             sessions = listOf(

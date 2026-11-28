@@ -154,6 +154,9 @@ class RemoteSessionHandle internal constructor(
     private var peerSessionId: String? = mirror.peerSessionId
 
     @Volatile
+    private var peerSessionGone: Boolean = false
+
+    @Volatile
     private var remoteUsage: SessionUsage? = null
 
     @Volatile
@@ -305,8 +308,12 @@ class RemoteSessionHandle internal constructor(
             when (outcome) {
                 is RemoteCallOutcome.Ok -> rememberPeerSession(outcome.result)
                 is RemoteCallOutcome.Failed -> {
-                    if (outcome.error.code == SESSION_NOT_FOUND) clearPeerSession()
-                    turn.failure = outcomeMessage(outcome.error)
+                    if (outcome.error.code == SESSION_NOT_FOUND) {
+                        markPeerSessionGone()
+                        turn.failure = sessionGoneMessage()
+                    } else {
+                        turn.failure = outcomeMessage(outcome.error)
+                    }
                 }
             }
         }
@@ -473,6 +480,10 @@ class RemoteSessionHandle internal constructor(
             turn.failure = error.message?.takeIf { it.isNotBlank() } ?: FAILED_MESSAGE
             return
         }
+        if (peerSessionGone) {
+            turn.failure = sessionGoneMessage()
+            return
+        }
         val sessionId = peerSessionId
         when (val outcome = callPrompt(turn, preparedText, preparedImages, sessionId)) {
             is RemoteCallOutcome.Ok -> {
@@ -484,20 +495,9 @@ class RemoteSessionHandle internal constructor(
 
             is RemoteCallOutcome.Failed -> {
                 if (sessionId != null && outcome.error.code == SESSION_NOT_FOUND) {
-                    clearPeerSession()
-                    when (val retryOutcome = callPrompt(turn, preparedText, preparedImages, null)) {
-                        is RemoteCallOutcome.Ok -> {
-                            pendingFailedPrompt = null
-                            rememberPeerSession(retryOutcome.result)
-                            if (peerSessionId == null) turn.failure = NO_SESSION_MESSAGE
-                            return
-                        }
-
-                        is RemoteCallOutcome.Failed -> {
-                            turn.failure = outcomeMessage(retryOutcome.error)
-                            return
-                        }
-                    }
+                    markPeerSessionGone()
+                    turn.failure = sessionGoneMessage()
+                    return
                 }
                 turn.failure = outcomeMessage(outcome.error)
             }
@@ -569,9 +569,11 @@ class RemoteSessionHandle internal constructor(
             is RemoteCallOutcome.Failed -> {
                 turn.finishResumeBuffer()
                 if (outcome.error.code == SESSION_NOT_FOUND) {
-                    clearPeerSession()
+                    markPeerSessionGone()
+                    turn.failure = sessionGoneMessage()
+                } else {
+                    turn.connectionLost = true
                 }
-                turn.connectionLost = true
                 turn.settled.complete(Unit)
                 return
             }
@@ -627,17 +629,18 @@ class RemoteSessionHandle internal constructor(
         )
         if (outcome is RemoteCallOutcome.Failed) {
             if (outcome.error.code == SESSION_NOT_FOUND) {
-                clearPeerSession()
+                markPeerSessionGone()
+                val goneMsg = sessionGoneMessage()
                 val turn = activeTurn
                 val passive = passiveTurn
                 if (turn != null) {
-                    turn.failure = SESSION_RESTARTED_MESSAGE
+                    turn.failure = goneMsg
                     turn.settled.complete(Unit)
                 } else if (passive != null) {
-                    passive.failure = SESSION_RESTARTED_MESSAGE
+                    passive.failure = goneMsg
                     finishPassiveTurn(passive)
                 } else {
-                    emit(SessionEvent.SessionError(SESSION_RESTARTED_MESSAGE))
+                    emit(SessionEvent.SessionError(goneMsg))
                 }
                 return
             }
@@ -904,12 +907,13 @@ class RemoteSessionHandle internal constructor(
         }
     }
 
-    private suspend fun clearPeerSession() {
+    private fun markPeerSessionGone() {
+        peerSessionGone = true
         passiveLastSeq = -1L
-        if (peerSessionId == null) return
-        peerSessionId = null
-        mirror.clearRemoteMapping(target.deviceId, target.botId)
     }
+
+    private fun sessionGoneMessage(): String =
+        "This conversation was deleted on ${target.deviceName}."
 
     private fun startPassiveWatchIfNeeded() {
         if (closed || onPassiveRuntimeEvent == null || peerSessionId == null) return
@@ -1008,6 +1012,7 @@ class RemoteSessionHandle internal constructor(
                     result = when (outcome) {
                         is RemoteCallOutcome.Failed -> {
                             if (outcome.error.code == SESSION_NOT_FOUND) {
+                                markPeerSessionGone()
                                 WatchEpochResult.SessionGone
                             } else {
                                 WatchEpochResult.RetryDelay
@@ -1390,7 +1395,7 @@ class RemoteSessionHandle internal constructor(
                 })
             }.getOrNull()
             if (outcome is RemoteCallOutcome.Failed && outcome.error.code == SESSION_NOT_FOUND) {
-                clearPeerSession()
+                markPeerSessionGone()
             }
         }
     }

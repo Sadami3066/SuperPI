@@ -37,8 +37,8 @@ class DesktopPromptHygieneTest {
 
             val opened = controller.runtimeHost.newSession("home")
             val sessions = controller.runtimeHost.sessions("home")
-            assertTrue(
-                "Newly created session must be immediately visible in sessions(botId)",
+            assertFalse(
+                "Empty newly created session must stay hidden from sessions(botId) until first message",
                 sessions.any { it.id == opened.sessionId },
             )
         } finally {

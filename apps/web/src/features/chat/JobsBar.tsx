@@ -18,21 +18,29 @@ export function JobsBar({ sessionId }: { sessionId: string }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [jobOutput, setJobOutput] = useState<{ label: string; detail: HostJobOutputDto } | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!client || !sessionId) {
-      setJobs([]);
-      return;
-    }
-    try {
-      const list = await client.listSessionJobs(sessionId);
-      setJobs(list);
-    } catch {
-      setJobs([]);
-    }
-  }, [client, sessionId]);
+  const refresh = useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!client || !sessionId) {
+        if (!isCancelled?.()) setJobs([]);
+        return;
+      }
+      try {
+        const list = await client.listSessionJobs(sessionId);
+        if (!isCancelled?.()) setJobs(list);
+      } catch {
+        if (!isCancelled?.()) setJobs([]);
+      }
+    },
+    [client, sessionId],
+  );
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    setJobs([]);
+    void refresh(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [jobsVersion, refresh]);
 
   if (jobs.length === 0) return null;

@@ -9,6 +9,7 @@ import { ActivityDisclosure } from "./ActivityDisclosure";
 import { AnsweredAskCard } from "./AskQuestionCard";
 import { MarkdownView } from "./MarkdownView";
 import { PresentCard } from "./PresentCard";
+import { InlineTodoCard } from "./TodoPanel";
 
 function SummaryCard({ summary }: { summary: NonNullable<ChatTurn["summary"]> }) {
   const { t } = useI18n();
@@ -125,7 +126,7 @@ export function renderTurnBlock(
     return <AnsweredAskCard key={block.key} entries={block.entries} />;
   }
   if (block.card.customType === "todo_write") {
-    return null;
+    return <InlineTodoCard key={block.key} payload={block.card.payload} streaming={streaming} />;
   }
   return <CustomCardFallback key={block.key} card={block.card} />;
 }

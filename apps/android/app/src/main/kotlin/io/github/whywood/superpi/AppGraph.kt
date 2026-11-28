@@ -195,6 +195,7 @@ class AppGraph(context: Context) : AppDependencies {
             accounts = dataGraph.relayStore,
             host = host,
             appVersion = BuildConfig.VERSION_NAME,
+            osTag = "android",
             questionCenter = dataGraph.questionCenter,
             avatarStorageDir = File(appContext.filesDir, "bot-avatars"),
             providerCatalog = { dataGraph.providerCatalog },
@@ -558,7 +559,9 @@ class AppGraph(context: Context) : AppDependencies {
         }
         scope.launch {
             dataGraph.credentials.authKinds.collect {
-                runCatching { reconcileModelSelection() }
+                if (dataGraph.credentials.preloaded.value) {
+                    runCatching { reconcileModelSelection() }
+                }
             }
         }
         scope.launch {
@@ -800,6 +803,7 @@ class AppGraph(context: Context) : AppDependencies {
     }
 
     private suspend fun reconcileModelSelection() {
+        if (!dataGraph.credentials.preloaded.value) return
         dataGraph.modelSelection.ensure(configuredProviderIds())
     }
 

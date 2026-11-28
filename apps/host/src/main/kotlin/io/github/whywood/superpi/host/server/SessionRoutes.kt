@@ -313,6 +313,10 @@ internal fun Route.installSessionRoutes(
             call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Bot not found: $botId"))
             return@get
         }
+        if (bot.remote != null) {
+            call.respond(controller.listRemoteBotSessions(bot))
+            return@get
+        }
         val busyIds = controller.runtimeHost.busySessionIds.value
         val botWorktrees = controller.worktreeManager.listForBot(bot.id)
         val wtBySessionId = botWorktrees.mapNotNull { wt -> wt.sessionId?.let { it to wt } }.toMap()
@@ -418,19 +422,21 @@ internal fun Route.installSessionRoutes(
 
     get("/v1/sessions/archived") {
         val busyIds = controller.runtimeHost.busySessionIds.value
-        val archived = controller.runtimeHost.archivedSessions().map { s ->
-            SessionSummaryDto(
-                id = s.id,
-                title = s.title,
-                updatedAt = s.updatedAt,
-                filePath = s.filePath,
-                cwd = s.cwd,
-                pinned = s.pinned,
-                archived = true,
-                memoryExcluded = s.memoryExcluded,
-                busy = s.id in busyIds,
-            )
-        }
+        val archived = controller.runtimeHost.archivedSessions()
+            .filterNot { controller.isRemoteCwd(it.cwd) }
+            .map { s ->
+                SessionSummaryDto(
+                    id = s.id,
+                    title = s.title,
+                    updatedAt = s.updatedAt,
+                    filePath = s.filePath,
+                    cwd = s.cwd,
+                    pinned = s.pinned,
+                    archived = true,
+                    memoryExcluded = s.memoryExcluded,
+                    busy = s.id in busyIds,
+                )
+            }
         call.respond(archived)
     }
 
@@ -438,6 +444,10 @@ internal fun Route.installSessionRoutes(
         val sessionId = call.parameters["sessionId"].orEmpty()
         if (sessionId.isBlank()) {
             call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Missing sessionId"))
+            return@get
+        }
+        if (controller.syncRemoteSessionHistoryIfNeeded(sessionId) == SuperPiController.RemoteSessionSyncResult.Deleted) {
+            call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Remote session was deleted: $sessionId"))
             return@get
         }
         val opened = ensureSessionOpen(controller, sessionId)
@@ -501,17 +511,59 @@ internal fun Route.installSessionRoutes(
     patch("/v1/sessions/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
         val req = call.receive<UpdateSessionRequest>()
-        req.title?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            controller.runtimeHost.renameSession(sessionId, it)
+        val remoteRef = controller.resolveRemoteMirrorRef(sessionId)
+        val remote = remoteRef?.workspace?.remote
+        req.title?.trim()?.takeIf { it.isNotEmpty() }?.let { newTitle ->
+            if (remote != null) {
+                runCatching {
+                    controller.remoteBotAdminClient.renameSession(
+                        remote.deviceId,
+                        remote.botId,
+                        remoteRef.peerSessionId,
+                        newTitle,
+                    )
+                }
+            }
+            controller.runtimeHost.renameSession(sessionId, newTitle)
+        }
+        if (remote != null && (req.pinned != null || req.archived != null)) {
+            runCatching {
+                controller.remoteBotAdminClient.updateSessionMeta(
+                    deviceId = remote.deviceId,
+                    botId = remote.botId,
+                    sessionId = remoteRef.peerSessionId,
+                    pinned = req.pinned,
+                    archived = req.archived,
+                )
+            }
         }
         req.pinned?.let { controller.runtimeHost.setSessionPinned(sessionId, it) }
-        req.archived?.let { controller.runtimeHost.setSessionArchived(sessionId, it) }
+        req.archived?.let { archived ->
+            if (remote != null && archived) {
+                controller.forgetRemoteMirrorRef(sessionId)
+                controller.runtimeHost.deleteSession(sessionId)
+            } else {
+                controller.runtimeHost.setSessionArchived(sessionId, archived)
+            }
+        }
         req.memoryExcluded?.let { controller.runtimeHost.setSessionMemoryExcluded(sessionId, it) }
         call.respond(HealthResponse(ok = true))
     }
 
     delete("/v1/sessions/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
+        val remoteRef = controller.resolveRemoteMirrorRef(sessionId)
+        val remote = remoteRef?.workspace?.remote
+        if (remote != null) {
+            runCatching {
+                controller.remoteBotAdminClient.deleteSession(
+                    remote.deviceId,
+                    remote.botId,
+                    remoteRef.peerSessionId,
+                )
+            }
+        }
+        controller.forgetRemoteMirrorRef(sessionId)
         controller.autoRetryController.cancel(sessionId)
         controller.toolApprovalCenter.cancelForSession(sessionId)
         controller.toolApprovalCenter.clearSessionGrants(sessionId)

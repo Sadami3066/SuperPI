@@ -159,9 +159,8 @@ import io.github.whywood.superpi.ui.common.chat.RemotePresentContext
 import io.github.whywood.superpi.ui.common.chat.ScrollAnchor
 import io.github.whywood.superpi.ui.common.chat.rememberChatScrollController
 import io.github.whywood.superpi.ui.common.chat.rememberNormalEmptyCopy
-import io.github.whywood.superpi.ui.common.chat.TodoPanel
 import io.github.whywood.superpi.ui.common.chat.TodoWriteCustomType
-import io.github.whywood.superpi.ui.common.chat.latestTodoPayload
+import io.github.whywood.superpi.ui.common.chat.parseTodos
 import io.github.whywood.superpi.ui.goal.GoalBar
 import io.github.whywood.superpi.ui.common.chat.AskQuestionCard
 import java.io.File
@@ -320,7 +319,9 @@ fun ChatScreen(
     val modelControlsVisible = remoteControls.modelControlsVisible
     val messages = state.messages
     val presentedCards = remember(messages) { presentedCardLookup(messages) }
-    val streamMessages = remember(messages) { messages.filterNot { it.customType == TodoWriteCustomType } }
+    val streamMessages = remember(messages) {
+        messages.filterNot { it.customType == TodoWriteCustomType && parseTodos(it.customPayload).isEmpty() }
+    }
     val sessionKey = state.conversationId.orEmpty()
     var visibleMessageCount by rememberSaveable(sessionKey) { mutableStateOf(0) }
     var trackedMessageTotal by remember { mutableIntStateOf(streamMessages.size) }
@@ -340,7 +341,6 @@ fun ChatScreen(
         }
     }
     val showMessageNav = userMessageIndices.size > ChatHistoryNavWindowTicks
-    val todoPayload = remember(messages) { latestTodoPayload(messages) }
     val retryActivity = state.activity as? RuntimeActivity.Retrying
     val retryTargetId = messages.lastOrNull { it.streaming || it.retrying }?.id
     val stablePendingQuestions = remember(pendingQuestions) { pendingQuestions }
@@ -777,9 +777,6 @@ fun ChatScreen(
                         onEnd = onEndGoal,
                         modifier = Modifier.padding(horizontal = DdSpacing.Md),
                     )
-                }
-                key(state.conversationId) {
-                    TodoPanel(payload = todoPayload)
                 }
                 state.error?.takeIf { it.isNotBlank() }?.takeIf { messages.isNotEmpty() || state.historyLoaded }?.let { errText ->
                     ChatErrorNoticeBar(

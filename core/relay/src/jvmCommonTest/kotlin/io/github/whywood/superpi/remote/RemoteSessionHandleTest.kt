@@ -115,6 +115,202 @@ class RemoteSessionHandleTest {
     }
 
     @Test
+    fun remoteHistoryPreservesRealTimestampsAndNeverFabricatesCurrentTimeWhenMissing() = runTest {
+        val yesterdayTs = 1_700_000_000_000L
+        val summary = checkNotNull(
+            RemoteSessionBrowser.materializeHistory(
+                runtime = FakeAgentRuntime(),
+                agentDir = agentDir,
+                workspace = RuntimeWorkspace(
+                    id = "remote-pi",
+                    name = "Pi",
+                    cwd = cwd.absolutePath,
+                    remote = RemoteBotRef(FakeRemoteTransport.DEVICE_ID, "Phone", "pi", "Pi", online = true),
+                ),
+                history = RemoteHistoryDto(
+                    sessionId = "peer-ts",
+                    title = "Yesterday chat",
+                    busy = false,
+                    messages = listOf(
+                        buildJsonObject {
+                            put("role", "user")
+                            put("content", "Hi yesterday")
+                            put("timestamp", yesterdayTs)
+                        },
+                        buildJsonObject {
+                            put("role", "assistant")
+                            put("content", "Hello from yesterday")
+                            put("timestamp", yesterdayTs + 1500L)
+                        },
+                        buildJsonObject {
+                            put("role", "assistant")
+                            put("content", "Legacy host without timestamp")
+                        },
+                    ),
+                    seq = null,
+                ),
+            ),
+        )
+        val handle = engine(FakeRemoteTransport(), backgroundScope).create(summary.filePath, ModelConfig())
+        try {
+            val history = handle.history()
+            assertEquals(2, history.size)
+            assertEquals(yesterdayTs, history[0].startedAt)
+            assertEquals(yesterdayTs + 1500L, history[1].startedAt)
+        } finally {
+            handle.close()
+        }
+
+        val legacySummary = checkNotNull(
+            RemoteSessionBrowser.materializeHistory(
+                runtime = FakeAgentRuntime(),
+                agentDir = agentDir,
+                workspace = RuntimeWorkspace(
+                    id = "remote-pi",
+                    name = "Pi",
+                    cwd = cwd.absolutePath,
+                    remote = RemoteBotRef(FakeRemoteTransport.DEVICE_ID, "Phone", "pi", "Pi", online = true),
+                ),
+                history = RemoteHistoryDto(
+                    sessionId = "peer-legacy-ts",
+                    title = "Legacy chat",
+                    busy = false,
+                    messages = listOf(
+                        buildJsonObject {
+                            put("role", "user")
+                            put("content", "Old question")
+                        },
+                        buildJsonObject {
+                            put("role", "assistant")
+                            put("content", "Old reply")
+                        },
+                    ),
+                    seq = null,
+                ),
+            ),
+        )
+        val legacyHandle = engine(FakeRemoteTransport(), backgroundScope).create(legacySummary.filePath, ModelConfig())
+        try {
+            val legacyMessages = legacyHandle.messages.mapNotNull { it.asLlmMessage() }
+            assertEquals(2, legacyMessages.size)
+            assertEquals(0L, (legacyMessages[0] as UserMessage).timestamp)
+            assertEquals(0L, (legacyMessages[1] as AssistantMessage).timestamp)
+        } finally {
+            legacyHandle.close()
+        }
+    }
+
+    @Test
+    fun stubMirrorHydratesInPlacePreservingSessionIdAcrossHistoryUpdates() = runTest {
+        val workspace = RuntimeWorkspace(
+            id = "remote-pi",
+            name = "Pi",
+            cwd = cwd.absolutePath,
+            remote = RemoteBotRef(FakeRemoteTransport.DEVICE_ID, "Phone", "pi", "Pi", online = true),
+        )
+        val runtime = FakeAgentRuntime()
+        val stub = RemoteSessionBrowser.ensureStubMirror(
+            runtime = runtime,
+            agentDir = agentDir,
+            workspace = workspace,
+            peerSessionId = "phone-existing-1",
+            title = "Phone chat",
+            updatedAt = 1_700_000_000_000L,
+        )
+        assertEquals("phone-existing-1", RemoteSessionBrowser.readPeerSessionId(File(stub.filePath)))
+
+        val hydrated1 = RemoteSessionBrowser.materializeHistoryInPlace(
+            runtime = runtime,
+            agentDir = agentDir,
+            workspace = workspace,
+            history = RemoteHistoryDto(
+                sessionId = "phone-existing-1",
+                title = "Phone chat",
+                busy = false,
+                messages = listOf(
+                    buildJsonObject {
+                        put("role", "user")
+                        put("content", "Message 1 from phone")
+                        put("timestamp", 1_700_000_001_000L)
+                    },
+                    buildJsonObject {
+                        put("role", "assistant")
+                        put("content", "Reply 1 from phone")
+                        put("timestamp", 1_700_000_002_000L)
+                    },
+                ),
+                seq = 1L,
+            ),
+            existingSummary = stub,
+        )
+        assertEquals(stub.id, hydrated1.id)
+        assertEquals(stub.filePath, hydrated1.filePath)
+
+        val hydrated2 = RemoteSessionBrowser.materializeHistoryInPlace(
+            runtime = runtime,
+            agentDir = agentDir,
+            workspace = workspace,
+            history = RemoteHistoryDto(
+                sessionId = "phone-existing-1",
+                title = "Phone chat updated",
+                busy = false,
+                messages = listOf(
+                    buildJsonObject {
+                        put("role", "user")
+                        put("content", "Message 1 from phone")
+                        put("timestamp", 1_700_000_001_000L)
+                    },
+                    buildJsonObject {
+                        put("role", "assistant")
+                        put("content", "Reply 1 from phone")
+                        put("timestamp", 1_700_000_002_000L)
+                    },
+                    buildJsonObject {
+                        put("role", "user")
+                        put("content", "Message 2 from phone")
+                        put("timestamp", 1_700_000_003_000L)
+                    },
+                ),
+                seq = 2L,
+            ),
+            existingSummary = hydrated1,
+        )
+        assertEquals(stub.id, hydrated2.id)
+        val handle = engine(FakeRemoteTransport(), backgroundScope).create(hydrated2.filePath, ModelConfig())
+        try {
+            assertEquals(stub.id, handle.sessionId)
+            val texts = handle.history().map { it.text }
+            assertEquals(listOf("Message 1 from phone", "Reply 1 from phone", "Message 2 from phone"), texts)
+        } finally {
+            handle.close()
+        }
+    }
+
+    @Test
+    fun pruneStaleMirrorsRemovesDeletedAndArchivedPeerMirrorsWhileKeepingActiveAndBusy() = runTest {
+        val workspace = RuntimeWorkspace(
+            id = "remote-pi",
+            name = "Pi",
+            cwd = cwd.absolutePath,
+            remote = RemoteBotRef(FakeRemoteTransport.DEVICE_ID, "Phone", "pi", "Pi", online = true),
+        )
+        val runtime = FakeAgentRuntime()
+        val kept = RemoteSessionBrowser.ensureStubMirror(runtime, agentDir, workspace, "peer-keep", "Keep")
+        val deletedOnPeer = RemoteSessionBrowser.ensureStubMirror(runtime, agentDir, workspace, "peer-gone", "Gone")
+        val archivedLocally = RemoteSessionBrowser.ensureStubMirror(runtime, agentDir, workspace, "peer-arch", "Archived")
+            .copy(archived = true)
+        runtime.sessions = listOf(kept, deletedOnPeer, archivedLocally)
+
+        val pruned = RemoteSessionBrowser.pruneStaleMirrors(
+            runtime = runtime,
+            workspace = workspace,
+            authoritativePeerSessionIds = setOf("peer-keep"),
+        )
+        assertEquals(setOf(deletedOnPeer.id, archivedLocally.id), pruned.toSet())
+        assertTrue(kept.id !in pruned)
+    }
+
+    @Test
     fun promptMirrorsStreamingTurnAndSettles() = runTest {
         val transport = FakeRemoteTransport()
         val engine = engine(transport, backgroundScope)
@@ -474,7 +670,7 @@ class RemoteSessionHandleTest {
     }
 
     @Test
-    fun sessionNotFoundClearsMappingAndRetriesOnce() = runTest {
+    fun sessionNotFoundFailsWithoutResurrectingNewSession() = runTest {
         val transport = FakeRemoteTransport()
         val engine = engine(transport, backgroundScope)
         val first = engine.create(null, ModelConfig())
@@ -484,35 +680,27 @@ class RemoteSessionHandleTest {
         transport.calls.clear()
 
         val reopened = engine.create(file, ModelConfig())
-        transport.result = { buildJsonObject { put("sessionId", "peer-2") } }
+        val received = mutableListOf<SessionEvent>()
+        reopened.subscribe { received += it }
         transport.failNext = RemoteCallError("session_not_found", "the session is gone")
 
         val job = launch { reopened.prompt("next") }
         runCurrent()
-
-        val prompts = transport.calls.filter { it.method == "bot.prompt" }
-        assertEquals(2, prompts.size)
-        assertEquals(FakeRemoteTransport.PEER_SESSION_ID, prompts[0].params.getValue("sessionId").jsonPrimitive.content)
-        assertNull(prompts[1].params["sessionId"])
-
-        val retry = prompts[1]
-        transport.emit(retry.routeId, 0, FakeEvents.textDelta("fresh"))
-        transport.emit(retry.routeId, 1, FakeEvents.settled())
-        runCurrent()
         assertTrue(job.isCompleted)
         assertFalse(reopened.isBusy)
 
-        val lines = File(reopened.sessionFile!!).readLines()
-        assertTrue(lines.any { it.contains("\"peerSessionId\":null") })
-        assertTrue(lines.any { it.contains("\"peerSessionId\":\"peer-2\"") })
+        // Must NOT silently retry with sessionId = null to create a zombie session on the peer.
+        val prompts = transport.calls.filter { it.method == "bot.prompt" }
+        assertEquals(1, prompts.size)
+        assertEquals(FakeRemoteTransport.PEER_SESSION_ID, prompts[0].params.getValue("sessionId").jsonPrimitive.content)
+        val err = received.filterIsInstance<SessionEvent.SessionError>().single()
+        assertTrue(err.message.contains("deleted"))
 
-        val next = launch { reopened.prompt("again") }
+        // Subsequent sends on the deleted mirror must also fail locally without hitting the peer.
+        val second = launch { reopened.prompt("again") }
         runCurrent()
-        val nextPrompt = transport.calls.last()
-        assertEquals("peer-2", nextPrompt.params.getValue("sessionId").jsonPrimitive.content)
-        transport.emit(nextPrompt.routeId, 0, FakeEvents.settled())
-        runCurrent()
-        assertTrue(next.isCompleted)
+        assertTrue(second.isCompleted)
+        assertEquals(1, transport.calls.filter { it.method == "bot.prompt" }.size)
     }
 
     @Test
@@ -532,14 +720,12 @@ class RemoteSessionHandleTest {
         assertFalse(handle.isBusy)
         assertTrue(transport.calls.any { it.method == "bot.abort" })
 
-        transport.result = { buildJsonObject { put("sessionId", "peer-2") } }
+        // Deleted session must not silently create a new session on next prompt.
+        val promptCountBefore = transport.calls.count { it.method == "bot.prompt" }
         val next = launch { handle.prompt("fresh") }
         runCurrent()
-        val fresh = transport.calls.last()
-        assertNull(fresh.params["sessionId"])
-        transport.emit(fresh.routeId, 0, FakeEvents.settled())
-        runCurrent()
         assertTrue(next.isCompleted)
+        assertEquals(promptCountBefore, transport.calls.count { it.method == "bot.prompt" })
     }
 
     @Test
@@ -560,15 +746,13 @@ class RemoteSessionHandleTest {
         assertTrue(turn.isCompleted)
         assertFalse(handle.isBusy)
         val error = received.filterIsInstance<SessionEvent.SessionError>().single()
-        assertTrue(error.message.contains("restarted"))
+        assertTrue(error.message.contains("deleted"))
 
-        transport.result = { buildJsonObject { put("sessionId", "peer-2") } }
+        val promptCountBefore = transport.calls.count { it.method == "bot.prompt" }
         val next = launch { handle.prompt("fresh") }
         runCurrent()
-        assertNull(transport.calls.last().params["sessionId"])
-        transport.emit(transport.calls.last().routeId, 0, FakeEvents.settled())
-        runCurrent()
         assertTrue(next.isCompleted)
+        assertEquals(promptCountBefore, transport.calls.count { it.method == "bot.prompt" })
     }
 
     @Test

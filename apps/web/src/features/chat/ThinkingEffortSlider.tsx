@@ -325,6 +325,8 @@ export function ThinkingEffortSlider({
   const customAccent = useSettingsStore((s) => s.customAccent);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const previewIdxRef = useRef<number | null>(null);
 
   const palette = useMemo(
     () => resolveThemeEffortPalette(themePreset, customAccent, dark),
@@ -332,27 +334,24 @@ export function ThinkingEffortSlider({
   );
 
   const count = levels.length;
-  const activeIdx = Math.max(0, levels.indexOf(value));
+  const committedIdx = Math.max(0, levels.indexOf(value));
+  const activeIdx = dragging && previewIdx !== null ? previewIdx : committedIdx;
   const activeLevel = levels[activeIdx] ?? "off";
   const visual = palette[activeLevel];
   const ratio = count > 1 ? activeIdx / (count - 1) : 1;
 
-  const commitFromClientX = useCallback(
-    (clientX: number) => {
+  const indexFromClientX = useCallback(
+    (clientX: number): number | null => {
       const el = trackRef.current;
-      if (!el || count <= 1) return;
+      if (!el || count <= 1) return null;
       const rect = el.getBoundingClientRect();
-      if (rect.width <= 0) return;
+      if (rect.width <= 0) return null;
       const pad = 13;
       const usable = Math.max(1, rect.width - pad * 2);
       const frac = Math.min(1, Math.max(0, (clientX - rect.left - pad) / usable));
-      const idx = Math.round(frac * (count - 1));
-      const next = levels[idx];
-      if (next && next !== value) {
-        onChange(next);
-      }
+      return Math.round(frac * (count - 1));
     },
-    [count, levels, onChange, value],
+    [count],
   );
 
   if (count <= 1) return null;
@@ -386,19 +385,40 @@ export function ThinkingEffortSlider({
           e.preventDefault();
           e.currentTarget.setPointerCapture(e.pointerId);
           setDragging(true);
-          commitFromClientX(e.clientX);
+          const idx = indexFromClientX(e.clientX);
+          if (idx !== null) {
+            previewIdxRef.current = idx;
+            setPreviewIdx(idx);
+          }
         }}
         onPointerMove={(e) => {
           if (!dragging) return;
-          commitFromClientX(e.clientX);
+          const idx = indexFromClientX(e.clientX);
+          if (idx !== null && idx !== previewIdxRef.current) {
+            previewIdxRef.current = idx;
+            setPreviewIdx(idx);
+          }
         }}
         onPointerUp={(e) => {
           if (e.currentTarget.hasPointerCapture(e.pointerId)) {
             e.currentTarget.releasePointerCapture(e.pointerId);
           }
+          const finalIdx = indexFromClientX(e.clientX) ?? previewIdxRef.current;
           setDragging(false);
+          setPreviewIdx(null);
+          previewIdxRef.current = null;
+          if (finalIdx !== null) {
+            const next = levels[finalIdx];
+            if (next && next !== value) {
+              onChange(next);
+            }
+          }
         }}
-        onPointerCancel={() => setDragging(false)}
+        onPointerCancel={() => {
+          setDragging(false);
+          setPreviewIdx(null);
+          previewIdxRef.current = null;
+        }}
         onKeyDown={(e) => {
           if (e.key === "ArrowRight" || e.key === "ArrowUp") {
             e.preventDefault();

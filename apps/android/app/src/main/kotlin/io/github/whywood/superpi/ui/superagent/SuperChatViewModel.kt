@@ -48,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -113,7 +114,7 @@ internal class SuperChatViewModel(
             draft = draft,
             expanded = expanded,
         )
-    }.stateIn(scope, SharingStarted.Eagerly, SuperChatUiState())
+    }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, SuperChatUiState())
 
     fun updateStrings(next: ConversationStrings) {
         strings = next

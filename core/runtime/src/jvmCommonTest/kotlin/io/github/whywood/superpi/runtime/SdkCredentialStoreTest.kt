@@ -235,4 +235,17 @@ class SdkCredentialStoreTest {
         assertTrue(oauth.records.isEmpty())
         assertNull(store.kindOf("openai"))
     }
+
+    @Test
+    fun preloadAllMarksPreloadedAndSwapsAtomicallyWithoutClearingExistingCache() = runTest {
+        val apiKeys = FakeApiKeyStore().apply { records["opencode"] = "sk-opencode" }
+        val oauth = FakeOAuthStore()
+        val store = store(apiKeys, oauth)
+
+        assertFalse(store.preloaded.value)
+        store.preloadAll()
+        assertTrue(store.preloaded.value)
+        assertEquals(ProviderAuthKind.API_KEY, store.kindOf("opencode"))
+        assertEquals(setOf("opencode"), store.authKinds.value.keys)
+    }
 }

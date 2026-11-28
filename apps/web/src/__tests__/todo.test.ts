@@ -159,4 +159,85 @@ describe("todo helpers", () => {
       { content: "Live task", status: "completed" },
     ]);
   });
+
+  it("folds multiple todo_write cards per turn into one inline block and updates live card in place", () => {
+    const turn = mapHostMessageToTurn(
+      {
+        id: 20,
+        role: "assistant",
+        text: "Finished everything",
+        streaming: false,
+        status: "done",
+        startedAt: 1000,
+        finishedAt: 3000,
+        runId: "r-fold",
+        retrying: false,
+        steps: [
+          { kind: "reasoning", id: 1, text: "Step 1" },
+          {
+            kind: "custom_card",
+            id: 2,
+            customType: "todo_write",
+            payload: JSON.stringify({ todos: [{ content: "A", status: "in_progress" }] }),
+            text: "",
+          },
+          { kind: "reasoning", id: 3, text: "Step 2" },
+          {
+            kind: "custom_card",
+            id: 4,
+            customType: "todo_write",
+            payload: JSON.stringify({
+              todos: [
+                { content: "A", status: "completed" },
+                { content: "B", status: "completed" },
+              ],
+            }),
+            text: "",
+          },
+          { kind: "text", id: 5, text: "Finished everything" },
+        ],
+      },
+      "zh-CN",
+    );
+
+    const todoCards = turn.blocks.filter(
+      (b) => b.kind === "custom_card" && b.card.customType === "todo_write",
+    );
+    expect(todoCards).toHaveLength(1);
+    expect(turn.blocks.filter((b) => b.kind === "activity")).toHaveLength(1);
+    expect(extractLatestTodosFromTurns([turn])).toEqual([
+      { content: "A", status: "completed" },
+      { content: "B", status: "completed" },
+    ]);
+
+    useStreamStore.getState().resetAll();
+    useStreamStore.getState().beginRun("s-live-todo", "r-live-2");
+    useStreamStore
+      .getState()
+      .addCustomCard(
+        "s-live-todo",
+        "r-live-2",
+        "todo_write",
+        JSON.stringify({ todos: [{ content: "One", status: "in_progress" }] }),
+        "",
+      );
+    useStreamStore
+      .getState()
+      .addCustomCard(
+        "s-live-todo",
+        "r-live-2",
+        "todo_write",
+        JSON.stringify({ todos: [{ content: "One", status: "completed" }] }),
+        "",
+      );
+    const liveBlocks = useStreamStore.getState().activeBySession["s-live-todo"]?.blocks ?? [];
+    const liveTodos = liveBlocks.filter(
+      (b) => b.kind === "custom_card" && b.card.customType === "todo_write",
+    );
+    expect(liveTodos).toHaveLength(1);
+    expect(liveTodos[0].key).toBe("cc-todo");
+    expect(extractLatestTodosFromTurns([], liveBlocks)).toEqual([
+      { content: "One", status: "completed" },
+    ]);
+  });
 });

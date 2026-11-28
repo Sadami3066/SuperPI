@@ -235,8 +235,21 @@ function handleHostSseEvent(client: HostClient, ev: HostSseEvent): void {
   }
 
   if (ev.type === "devices_changed") {
-    void botStore.refreshBots(client).then((bots) => {
-      void sessionStore.refreshSessionLists(client, bots);
+    void botStore.refreshBots(client).then(async (bots) => {
+      await sessionStore.refreshSessionLists(client, bots);
+      const activeId = useSessionStore.getState().activeSessionId;
+      if (
+        activeId &&
+        ev.status &&
+        (ev.status.startsWith("sync:sessions_changed:") || ev.status.startsWith("sync:bot_activity:"))
+      ) {
+        const activeSum = useSessionStore.getState().summariesById[activeId];
+        const activeBot = bots.find((b) => b.id === activeSum?.botId);
+        const isStreaming = Boolean(useStreamStore.getState().activeBySession[activeId]);
+        if (activeBot?.isRemote && !isStreaming) {
+          void useSessionStore.getState().loadSession(client, activeId, useSettingsStore.getState().locale);
+        }
+      }
     });
     void settingsStore.refreshRelay(client);
     return;

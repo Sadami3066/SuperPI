@@ -15,6 +15,7 @@ import io.github.whywood.superpi.sdk.coding.session.ContextEditEntry
 import io.github.whywood.superpi.sdk.coding.session.CustomMessageEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionEntry
 import io.github.whywood.superpi.sdk.coding.session.SessionMessageEntry
+import java.time.Instant
 import kotlinx.serialization.json.JsonObject
 
 private const val REMINDER_PREFIX = "[Reminder]"
@@ -108,15 +109,23 @@ object HistoryMapper {
                         if (text.trimStart().startsWith(WORKER_UPDATE_PREFIX)) {
                             continue
                         }
-                        if (text.isNotBlank()) {
-                            val reminder = parseReminder(text)
+                        val hasNonTextBlocks = (message.content as? BlockContent)?.blocks?.isNotEmpty() == true
+                        if (text.isNotBlank() || hasNonTextBlocks) {
+                            val timestamp = entryTimestamp(entry, message.timestamp)
+                            val reminder = if (text.isNotBlank()) parseReminder(text) else null
                             if (reminder == null) {
-                                result += AssistantMessage(messageId++, AssistantRole.USER, text)
+                                result += AssistantMessage(
+                                    id = messageId++,
+                                    role = AssistantRole.USER,
+                                    text = text,
+                                    startedAt = timestamp,
+                                )
                             } else {
                                 result += AssistantMessage(
                                     id = messageId++,
                                     role = AssistantRole.USER,
                                     text = reminder.body,
+                                    startedAt = timestamp,
                                     reminder = reminder.name,
                                 )
                             }
@@ -124,12 +133,13 @@ object HistoryMapper {
                     }
 
                     is PiAssistantMessage -> {
+                        val messageTimestamp = entryTimestamp(entry, message.timestamp)
                         val base = current ?: AssistantMessage(
                             id = messageId++,
                             role = AssistantRole.ASSISTANT,
                             text = "",
                             status = MessageStatus.DONE,
-                            startedAt = message.timestamp,
+                            startedAt = messageTimestamp,
                         )
                         val newSteps = mutableListOf<AssistantStep>()
                         for (content in message.content) {
@@ -151,7 +161,7 @@ object HistoryMapper {
                                         id = stepId++,
                                         name = content.name,
                                         arguments = content.arguments.toDisplayArguments(),
-                                        startedAt = message.timestamp,
+                                        startedAt = messageTimestamp,
                                         toolCallId = content.id,
                                         rawArguments = content.arguments,
                                     )
@@ -167,14 +177,15 @@ object HistoryMapper {
                         current = base.copy(
                             text = finalText.ifBlank { base.text },
                             steps = steps,
-                            startedAt = base.startedAt.takeIf { it > 0 } ?: message.timestamp,
-                            finishedAt = message.timestamp,
+                            startedAt = base.startedAt.takeIf { it > 0 } ?: messageTimestamp,
+                            finishedAt = messageTimestamp.takeIf { it > 0 } ?: base.finishedAt,
                             status = turnStatus(base.status, message.stopReason),
                             rawError = message.errorMessage?.takeIf { it.isNotBlank() } ?: base.rawError,
                         )
                     }
 
                     is ToolResultMessage -> {
+                        val messageTimestamp = entryTimestamp(entry, message.timestamp)
                         val payload = message.toToolResultPayload()
                         val status = if (message.isError) ToolActivityStatus.FAILED else ToolActivityStatus.DONE
                         val existing = traces[message.toolCallId]
@@ -192,13 +203,13 @@ object HistoryMapper {
                             val ownerIndex = toolOwners[message.toolCallId]
                             when {
                                 messageWithStep != null && messageWithStep.hasToolCall(message.toolCallId) ->
-                                    current = messageWithStep.replaceTool(updated, message.timestamp)
+                                    current = messageWithStep.replaceTool(updated, messageTimestamp)
 
                                 ownerIndex != null -> result[ownerIndex] =
-                                    result[ownerIndex].replaceTool(updated, message.timestamp)
+                                    result[ownerIndex].replaceTool(updated, messageTimestamp)
 
-                                else -> current = (messageWithStep ?: emptyAssistant(messageId++, message.timestamp))
-                                    .appendTool(updated, message.timestamp)
+                                else -> current = (messageWithStep ?: emptyAssistant(messageId++, messageTimestamp))
+                                    .appendTool(updated, messageTimestamp)
                             }
                         } else {
                             val trace = ToolTrace(
@@ -214,8 +225,8 @@ object HistoryMapper {
                                 durationMs = message.durationMs,
                             )
                             traces[message.toolCallId] = trace
-                            current = (current ?: emptyAssistant(messageId++, message.timestamp))
-                                .appendTool(trace, message.timestamp)
+                            current = (current ?: emptyAssistant(messageId++, messageTimestamp))
+                                .appendTool(trace, messageTimestamp)
                         }
                     }
 
@@ -342,5 +353,12 @@ object HistoryMapper {
     private fun io.github.whywood.superpi.sdk.ai.MessageContent.asText(): String = when (this) {
         is PlainTextContent -> text
         is BlockContent -> blocks.filterIsInstance<TextContent>().joinToString("") { it.text }
+    }
+
+    private fun entryTimestamp(entry: SessionEntry, messageTimestamp: Long): Long {
+        if (messageTimestamp > 0L) return messageTimestamp
+        val raw = entry.timestamp.trim()
+        if (raw.isEmpty()) return 0L
+        return runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull()?.takeIf { it > 0L } ?: 0L
     }
 }

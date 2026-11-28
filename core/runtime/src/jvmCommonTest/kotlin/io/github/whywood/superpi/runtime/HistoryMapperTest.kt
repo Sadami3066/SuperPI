@@ -690,6 +690,30 @@ class HistoryMapperTest {
         assertEquals("结果已整理完毕。", mapped[2].text)
     }
 
+    @Test
+    fun preservesUserTimestampAndImageOnlyBlockUserMessages() {
+        val imageBlockUser = SessionMessageEntry(
+            id = nextId(),
+            parentId = null,
+            timestamp = "2026-10-29T10:00:00Z",
+            message = UserMessage(
+                content = io.github.whywood.superpi.sdk.ai.BlockContent(
+                    listOf(io.github.whywood.superpi.sdk.ai.ImageContent(data = "YWJj", mimeType = "image/png")),
+                ),
+                timestamp = 1_700_000_123_456L,
+            ),
+        )
+        val entries = listOf(
+            user("hello", 1_700_000_000_000L),
+            imageBlockUser,
+        )
+        val mapped = HistoryMapper.mapEntries(entries)
+        assertEquals(2, mapped.size)
+        assertEquals(1_700_000_000_000L, mapped[0].startedAt)
+        assertEquals(AssistantRole.USER, mapped[1].role)
+        assertEquals(1_700_000_123_456L, mapped[1].startedAt)
+    }
+
     private companion object {
         const val TIMESTAMP = "2026-10-29T10:00:00Z"
     }

@@ -597,16 +597,26 @@ internal class PiSessionHandle(
         session.abort()
     }
 
-    override suspend fun close() {
+    override suspend fun close() = closeInternal(captureMemory = true)
+
+    override suspend fun closeWithoutMemory() = closeInternal(captureMemory = false)
+
+    private suspend fun closeInternal(captureMemory: Boolean) {
         val sessionId = session.sessionId
-        val entries = try {
-            session.sessionManager.getBranch()
-        } catch (error: Exception) {
+        val entries = if (captureMemory) {
+            try {
+                session.sessionManager.getBranch()
+            } catch (error: Exception) {
+                null
+            }
+        } else {
             null
         }
         val sessionFile = session.sessionFile?.toString()
         session.close()
-        engine.captureMemory(sessionId, sessionFile, entries)
+        if (captureMemory) {
+            engine.captureMemory(sessionId, sessionFile, entries)
+        }
         engine.releaseSession(sessionId)
         engine.hooks.onSessionClosed?.let { it(sessionId) }
     }

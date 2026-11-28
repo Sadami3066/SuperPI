@@ -6,7 +6,6 @@ import {
   mapHostMessageToTurn,
   normalizeThinkingLevel,
 } from "../../api/mappers";
-import { extractLatestTodosFromTurns } from "../../api/todo";
 import type { HostWorkerDetailDto } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
@@ -19,7 +18,6 @@ import { AskQuestionCard } from "../chat/AskQuestionCard";
 import { ContextMeter } from "../chat/ContextMeter";
 import { ModelPicker } from "../chat/ModelPicker";
 import { useChatScroll } from "../chat/scrollPolicy";
-import { TodoPanel } from "../chat/TodoPanel";
 import { ToolApprovalCard } from "../chat/ToolApprovalCard";
 import { TurnItem } from "../chat/TurnItem";
 import { UsageSheet } from "../chat/UsageSheet";
@@ -90,8 +88,6 @@ export function WorkerWorkspace({
     if (!detail) return [];
     return detail.messages.map((m) => mapHostMessageToTurn(m, locale));
   }, [detail, locale]);
-
-  const latestTodos = useMemo(() => extractLatestTodosFromTurns(turns), [turns]);
 
   const lastAssistantIdx = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -361,10 +357,6 @@ export function WorkerWorkspace({
             <IconArrowDown size={16} stroke={1.8} />
           </button>
         )}
-      </div>
-
-      <div className="shrink-0 px-4">
-        <TodoPanel todos={latestTodos} sessionKey={workerArtifactSessionId} />
       </div>
 
       <div className="shrink-0 px-4 pt-1 pb-4">

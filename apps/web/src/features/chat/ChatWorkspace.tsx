@@ -1,14 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconAlertCircle, IconLayoutSidebarRight, IconLoader2 } from "@tabler/icons-react";
 import { normalizeThinkingLevel } from "../../api/mappers";
-import { extractLatestTodosFromTurns } from "../../api/todo";
 import type {
-  ChatTurn,
   HostBotDto,
   PermissionMode,
   QuestionAnswerInput,
   ToolApprovalDecision,
-  TurnBlock,
 } from "../../api/types";
 import { useI18n } from "../../i18n";
 import { useBotStore } from "../../stores/botStore";
@@ -24,7 +21,6 @@ import { ContextMeter } from "./ContextMeter";
 import { GoalBar } from "./GoalBar";
 import { JobsBar } from "./JobsBar";
 import { MessageList } from "./MessageList";
-import { TodoPanel } from "./TodoPanel";
 import { UsageSheet } from "./UsageSheet";
 
 type GreetingPair = {
@@ -58,33 +54,6 @@ function resolveGreetingKeys(): GreetingPair {
   }
   return { plain: "chat.greetingDefault", named: "chat.greetingDefaultNamed" };
 }
-
-const SessionTodoPanel = memo(function SessionTodoPanel({
-  sessionId,
-  turns,
-}: {
-  sessionId: string;
-  turns: ChatTurn[];
-}) {
-  const liveTodoBlock = useStreamStore((s): TurnBlock | null => {
-    const blocks = s.activeBySession[sessionId]?.blocks;
-    if (!blocks) return null;
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if (b.kind === "custom_card" && b.card.customType === "todo_write") {
-        return b;
-      }
-    }
-    return null;
-  });
-
-  const latestTodos = useMemo(
-    () => extractLatestTodosFromTurns(turns, liveTodoBlock ? [liveTodoBlock] : undefined),
-    [turns, liveTodoBlock],
-  );
-
-  return <TodoPanel todos={latestTodos} sessionKey={sessionId} />;
-});
 
 export function ChatWorkspace({
   onOpenBotSettings,
@@ -810,7 +779,6 @@ export function ChatWorkspace({
           <div className="shrink-0 px-4">
             <GoalBar sessionId={activeSessionId} />
             <JobsBar sessionId={activeSessionId} />
-            <SessionTodoPanel sessionId={activeSessionId} turns={turns} />
           </div>
           {composerElement("docked")}
         </>

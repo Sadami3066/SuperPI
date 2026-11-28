@@ -74,20 +74,26 @@ export default function FilesPanel({
   const [modalError, setModalError] = useState<string | null>(null);
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const loadSeqRef = useRef(0);
 
   const loadDir = useCallback(
     async (relPath: string) => {
       if (!client || !bot) return;
+      const seq = ++loadSeqRef.current;
       setLoading(true);
       setError(null);
       try {
         const res = await client.listBotFiles(bot.id, relPath);
+        if (loadSeqRef.current !== seq) return;
         setEntries(res.entries);
         setCurrentPath(res.path);
       } catch (err) {
+        if (loadSeqRef.current !== seq) return;
         setError(err instanceof Error ? err.message : "Failed to load files");
       } finally {
-        setLoading(false);
+        if (loadSeqRef.current === seq) {
+          setLoading(false);
+        }
       }
     },
     [bot, client],
@@ -106,13 +112,21 @@ export default function FilesPanel({
       setSearchEntries(null);
       return undefined;
     }
+    let cancelled = false;
     const timer = setTimeout(() => {
       void client
         .searchBotFiles(bot.id, trimmed, currentPath)
-        .then((res) => setSearchEntries(res.entries))
-        .catch(() => setSearchEntries([]));
+        .then((res) => {
+          if (!cancelled) setSearchEntries(res.entries);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchEntries([]);
+        });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [bot, client, currentPath, query]);
 
   if (!bot) return null;

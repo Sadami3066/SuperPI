@@ -153,6 +153,7 @@ function materializeFinishedLiveRun(
 const inFlightLoads = new Map<string, Promise<void>>();
 const pendingLoads = new Map<string, { locale: "zh-CN" | "en"; reconcileRunId?: string }>();
 const inFlightSends = new Map<string, Promise<boolean>>();
+const modelUpdateSeqBySession = new Map<string, number>();
 const slashStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingDeleteRecords = new Map<
   string,
@@ -238,6 +239,7 @@ export interface SessionStoreState {
     client: HostClient,
     botId: string,
     locale: "zh-CN" | "en",
+    initialTitle?: string,
   ) => Promise<string | null>;
   forkSession: (
     client: HostClient,
@@ -561,22 +563,6 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       if (!curActive && s.draftBotId) {
         return { summariesById, sessionIdsByBot };
       }
-      const prevActiveSummary = curActive ? s.summariesById[curActive] : undefined;
-      const prevActiveTranscript = curActive ? s.transcriptsById[curActive] : undefined;
-      if (
-        curActive &&
-        !summariesById[curActive] &&
-        prevActiveSummary &&
-        prevActiveTranscript &&
-        prevActiveTranscript.turns.length === 0 &&
-        !pendingDeleteRecords.has(curActive)
-      ) {
-        summariesById[curActive] = prevActiveSummary;
-        const botIds = sessionIdsByBot[prevActiveSummary.botId] ?? [];
-        if (!botIds.includes(curActive)) {
-          sessionIdsByBot[prevActiveSummary.botId] = [curActive, ...botIds];
-        }
-      }
       const nextActive =
         curActive && summariesById[curActive]
           ? curActive
@@ -846,7 +832,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
     await get().loadSession(client, sessionId, locale);
   },
 
-  createSession: async (client, botId, locale) => {
+  createSession: async (client, botId, locale, initialTitle = "") => {
     if (createInFlight) return null;
     createInFlight = true;
     set({ actionError: null });
@@ -857,7 +843,7 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       const summary: SessionSummary = {
         id,
         botId,
-        title: "",
+        title: initialTitle,
         updatedAtMs: Date.now(),
         cwd: created.cwd,
         pinned: false,
@@ -1212,10 +1198,15 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         },
       };
     });
+    const seq = (modelUpdateSeqBySession.get(sessionId) ?? 0) + 1;
+    modelUpdateSeqBySession.set(sessionId, seq);
     try {
       await client.setSessionModel(sessionId, providerId, modelId, thinking.toUpperCase());
-      void get().loadSession(client, sessionId, locale);
+      if (modelUpdateSeqBySession.get(sessionId) === seq) {
+        void get().loadSession(client, sessionId, locale);
+      }
     } catch (err) {
+      if (modelUpdateSeqBySession.get(sessionId) !== seq) return;
       const msg = err instanceof Error ? err.message : "Failed to switch model";
       set((s) => {
         const cur = s.transcriptsById[sessionId];
@@ -1472,23 +1463,6 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
       const quoted = overrideText === undefined ? state.quotedTextBySession[composerKey] : null;
       const baseText = quoted ? `> ${quoted}\n\n${raw}` : raw;
 
-      let sessionId = opts.sessionId;
-      if (isDraft) {
-        const createdId = await get().createSession(c, botId, locale);
-        if (!createdId) return false;
-        const draftModel = get().draftModelByBot[botId];
-        if (draftModel) {
-          await get()
-            .updateSessionModel(c, createdId, draftModel.model, draftModel.thinking, locale)
-            .catch(() => void 0);
-        }
-        sessionId = createdId;
-        if (overrideText === undefined) {
-          get().setComposerText(sessionId, raw);
-          if (quoted) get().setQuotedText(sessionId, quoted);
-        }
-      }
-
       const inlineImages: Array<{ data: string; mimeType: string; name?: string }> = [];
       const stagedMeta: Array<{ path: string; name: string; mime: string; size: number }> = [];
       const chips: AttachmentChip[] = [];
@@ -1567,6 +1541,24 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
             kind: "image",
             previewUrl: att.previewUrl,
           });
+        }
+      }
+
+      let sessionId = opts.sessionId;
+      if (isDraft) {
+        const seedTitle = (baseText || chips[0]?.name || "").trim().slice(0, 28);
+        const createdId = await get().createSession(c, botId, locale, seedTitle);
+        if (!createdId) return false;
+        const draftModel = get().draftModelByBot[botId];
+        if (draftModel) {
+          await get()
+            .updateSessionModel(c, createdId, draftModel.model, draftModel.thinking, locale)
+            .catch(() => void 0);
+        }
+        sessionId = createdId;
+        if (overrideText === undefined) {
+          get().setComposerText(sessionId, raw);
+          if (quoted) get().setQuotedText(sessionId, quoted);
         }
       }
 
@@ -1676,7 +1668,26 @@ export const useSessionStore = create<SessionStoreState>((set, get) => {
         const msg = err instanceof Error ? err.message : "Request failed";
         useStreamStore.getState().failRun(sessionId, pendingRunId, msg);
         get().setSessionBusy(sessionId, false);
-        set({ actionError: msg });
+        if (isDraft) {
+          set((s) => {
+            const nextSummaries = { ...s.summariesById };
+            delete nextSummaries[sessionId];
+            const nextTranscripts = { ...s.transcriptsById };
+            delete nextTranscripts[sessionId];
+            const nextIds = (s.sessionIdsByBot[botId] ?? []).filter((id) => id !== sessionId);
+            return {
+              summariesById: nextSummaries,
+              transcriptsById: nextTranscripts,
+              sessionIdsByBot: { ...s.sessionIdsByBot, [botId]: nextIds },
+              activeSessionId: s.activeSessionId === sessionId ? "" : s.activeSessionId,
+              draftBotId: s.activeSessionId === sessionId ? botId : s.draftBotId,
+              actionError: msg,
+            };
+          });
+          void c.deleteSession(sessionId).catch(() => void 0);
+        } else {
+          set({ actionError: msg });
+        }
         return false;
       }
     };

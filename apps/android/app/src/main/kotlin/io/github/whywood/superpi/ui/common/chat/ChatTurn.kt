@@ -71,8 +71,10 @@ import io.github.whywood.superpi.ui.common.chat.AskQuestionCard
 import io.github.whywood.superpi.ui.common.chat.MiniappChatCard
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -95,15 +97,35 @@ private data class BubbleContent(
 
 private val messageTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-@Composable
-private fun rememberMessageTime(timestamp: Long): String? = remember(timestamp) {
-    if (timestamp <= 0L) {
-        null
+internal fun formatMessageTime(
+    timestamp: Long,
+    zone: ZoneId = ZoneId.systemDefault(),
+    today: LocalDate = LocalDate.now(zone),
+    daysAgoLabel: (Int) -> String,
+): String? {
+    if (timestamp <= 0L) return null
+    val zoned = Instant.ofEpochMilli(timestamp).atZone(zone)
+    val daysAgo = ChronoUnit.DAYS.between(zoned.toLocalDate(), today)
+    return if (daysAgo >= 1L) {
+        daysAgoLabel(daysAgo.toInt())
     } else {
-        Instant.ofEpochMilli(timestamp)
-            .atZone(ZoneId.systemDefault())
-            .toLocalTime()
-            .format(messageTimeFormatter)
+        zoned.toLocalTime().format(messageTimeFormatter)
+    }
+}
+
+@Composable
+private fun rememberMessageTime(timestamp: Long): String? {
+    if (timestamp <= 0L) return null
+    val resources = LocalContext.current.resources
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    return remember(timestamp, today, resources) {
+        formatMessageTime(
+            timestamp = timestamp,
+            zone = zone,
+            today = today,
+            daysAgoLabel = { days -> resources.getString(R.string.relative_days, days) },
+        )
     }
 }
 
@@ -141,6 +163,17 @@ internal fun ChatTurn(
     }
     val customType = message.customType
     if (customType != null) {
+        if (customType == TodoWriteCustomType) {
+            val todos = remember(message.customPayload) { parseTodos(message.customPayload) }
+            if (todos.isNotEmpty()) {
+                InlineTodoCard(
+                    todos = todos,
+                    cardKey = "todo-msg-${message.id}",
+                    streaming = message.streaming,
+                )
+            }
+            return
+        }
         val payload = remember(message.customPayload) {
             message.customPayload
                 ?.let { raw -> runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull() }
@@ -655,6 +688,12 @@ private fun AssistantTurn(
                                 onAnswer = { answers -> onAnswerQuestion(block.question, answers) },
                             )
                         }
+
+                        is TurnBlock.TodoCard -> InlineTodoCard(
+                            todos = block.todos,
+                            cardKey = block.key,
+                            streaming = message.streaming,
+                        )
                     }
                 }
             }

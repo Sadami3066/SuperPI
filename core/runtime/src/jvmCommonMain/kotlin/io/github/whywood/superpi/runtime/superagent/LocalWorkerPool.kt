@@ -239,10 +239,10 @@ class LocalWorkerPool(
         val nextUiId: AtomicLong = AtomicLong(100_000L),
     )
 
-    suspend fun initialize() {
-        if (initialized.get()) return
+    suspend fun initialize() = withContext(ioDispatcher) {
+        if (initialized.get()) return@withContext
         initMutex.withLock {
-            if (initialized.get()) return
+            if (initialized.get()) return@withContext
             taskStore.ensure()
             taskStore.recoverStaleLocalWorkers()
             reconcileDiskAndStore()

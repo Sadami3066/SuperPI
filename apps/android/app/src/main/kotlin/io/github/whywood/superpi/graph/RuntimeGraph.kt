@@ -702,6 +702,7 @@ internal class RuntimeGraph(private val deps: RuntimeGraphDeps) {
             }
         }
         deps.scope.launch {
+            deps.credentials.preloaded.first { it }
             if (deps.configuredProviderIds().isEmpty()) {
                 deps.credentials.authKinds.filter { it.isNotEmpty() }.first()
             }

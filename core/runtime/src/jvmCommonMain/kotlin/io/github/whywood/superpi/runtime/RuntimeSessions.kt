@@ -11,6 +11,7 @@ internal class RuntimeSessions(
     private val catalog: SessionDirectory,
     private val visibleCwds: suspend () -> List<String>,
     private val workspaceFor: suspend (String) -> RuntimeWorkspace,
+    private val cwdsForWorkspace: suspend (String) -> List<String> = { id -> listOf(workspaceFor(id).cwd) },
     private val emitListChanged: suspend () -> Unit,
     private val emitSessionRemoved: suspend (String) -> Unit,
     private val detachForget: suspend (String) -> Unit,
@@ -32,6 +33,9 @@ internal class RuntimeSessions(
         )
     }
 
+    private fun isVisibleInMemory(handle: RuntimeHandle): Boolean =
+        handle.state.busy || handle.session.history().isNotEmpty()
+
     suspend fun all(): List<ConversationSummary> {
         val cwds = visibleCwds()
         val persistedAll = catalog.listAll(cwds)
@@ -40,7 +44,7 @@ internal class RuntimeSessions(
         val inMemory = handles.values
             .filter { h ->
                 val sid = h.session.sessionId
-                sid !in knownIds && normalizeCwd(h.cwd) in normalizedVisible
+                sid !in knownIds && normalizeCwd(h.cwd) in normalizedVisible && isVisibleInMemory(h)
             }
             .map { handleToSummary(it) }
         return (inMemory + persistedAll.filterNot { it.archived }).sortedByDescending { it.updatedAt }
@@ -54,14 +58,18 @@ internal class RuntimeSessions(
     }
 
     suspend fun list(workspaceId: String): List<ConversationSummary> {
-        val targetCwd = workspaceFor(workspaceId).cwd
-        val normalizedTarget = normalizeCwd(targetCwd)
-        val persistedAll = catalog.list(targetCwd)
+        val targetCwds = cwdsForWorkspace(workspaceId)
+        val normalizedTargets = targetCwds.mapTo(HashSet()) { normalizeCwd(it) }
+        val persistedAll = if (targetCwds.size <= 1) {
+            catalog.list(targetCwds.firstOrNull() ?: workspaceFor(workspaceId).cwd)
+        } else {
+            catalog.listAll(targetCwds)
+        }
         val knownIds = persistedAll.mapTo(HashSet()) { it.id }
         val inMemory = handles.values
             .filter { h ->
                 val sid = h.session.sessionId
-                sid !in knownIds && normalizeCwd(h.cwd) == normalizedTarget
+                sid !in knownIds && normalizeCwd(h.cwd) in normalizedTargets && isVisibleInMemory(h)
             }
             .map { handleToSummary(it) }
         return (inMemory + persistedAll.filterNot { it.archived }).sortedByDescending { it.updatedAt }
@@ -103,13 +111,18 @@ internal class RuntimeSessions(
             ?: catalog.find(visibleCwds(), sessionId)?.cwd
 
     suspend fun delete(id: String) {
-        val summary = catalog.find(visibleCwds(), id)
+        val handleFile = handles[id]?.session?.sessionFile
+        val summaries = catalog.listAll(visibleCwds()).filter { it.id == id }
         detachForget(id)
         sessionCleaner?.invoke(id)
-        if (summary != null) {
-            catalog.delete(summary.filePath)
-            catalog.removeMeta(id)
+        val pathsToDelete = buildSet {
+            handleFile?.takeIf { it.isNotBlank() }?.let { add(it) }
+            summaries.forEach { if (it.filePath.isNotBlank()) add(it.filePath) }
         }
+        for (path in pathsToDelete) {
+            catalog.delete(path)
+        }
+        catalog.removeMeta(id)
         emitSessionRemoved(id)
         emitListChanged()
     }

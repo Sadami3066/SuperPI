@@ -526,30 +526,15 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
             return@post
         }
         val mode = req.mode.trim().lowercase()
-        var restoredFiles = 0
-        var backupCheckpointId: String? = null
-        if (mode == "files_only" || mode == "files_and_chat") {
-            val checkpoints = controller.checkpointStore.list(sessionId)
-            val cp = if (!req.checkpointId.isNullOrBlank()) {
-                checkpoints.firstOrNull { it.id == req.checkpointId }
-            } else {
-                checkpoints.firstOrNull { it.turnIndex == req.turnIndex }
-            }
-            if (cp == null) {
-                if (mode == "files_only") {
-                    call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Checkpoint not found for turn ${req.turnIndex}"))
-                    return@post
-                }
-            } else {
-                val res = controller.checkpointStore.restoreFiles(sessionId, cp.id)
-                if (!res.ok) {
-                    call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(res.message))
-                    return@post
-                }
-                restoredFiles = res.restoredFiles
-                backupCheckpointId = res.backupCheckpointId
-            }
+        if (mode != "files_only" && mode != "chat_only" && mode != "files_and_chat") {
+            call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Invalid rewind mode: $mode"))
+            return@post
         }
+
+        // Validate chat rewind target BEFORE mutating any workspace files so invalid turnIndex
+        // or remote sessions never overwrite user files in files_and_chat mode.
+        var chatSummary: io.github.whywood.superpi.runtime.ConversationSummary? = null
+        var chatFile: File? = null
         if (mode == "chat_only" || mode == "files_and_chat") {
             val summary = controller.runtimeHost.allSessions().firstOrNull { it.id == sessionId }
                 ?: controller.runtimeHost.archivedSessions().firstOrNull { it.id == sessionId }
@@ -569,8 +554,39 @@ internal fun Route.installWorktreeAndCheckpointRoutes(controller: SuperPiControl
                 call.respond(HttpStatusCode.BadRequest, ApiErrorResponse("Rewind target turn index not found: ${req.turnIndex}"))
                 return@post
             }
+            chatSummary = summary
+            chatFile = file
+        }
+
+        var restoredFiles = 0
+        var backupCheckpointId: String? = null
+        if (mode == "files_only" || mode == "files_and_chat") {
+            val checkpoints = controller.checkpointStore.list(sessionId)
+            val cp = if (!req.checkpointId.isNullOrBlank()) {
+                checkpoints.firstOrNull { it.id == req.checkpointId }
+            } else {
+                checkpoints.lastOrNull { !it.isBackup && it.turnIndex == req.turnIndex }
+            }
+            if (cp == null) {
+                if (mode == "files_only") {
+                    call.respond(HttpStatusCode.NotFound, ApiErrorResponse("Checkpoint not found for turn ${req.turnIndex}"))
+                    return@post
+                }
+            } else {
+                val res = controller.checkpointStore.restoreFiles(sessionId, cp.id)
+                if (!res.ok) {
+                    call.respond(HttpStatusCode.BadRequest, ApiErrorResponse(res.message))
+                    return@post
+                }
+                restoredFiles = res.restoredFiles
+                backupCheckpointId = res.backupCheckpointId
+            }
+        }
+        if (mode == "chat_only" || mode == "files_and_chat") {
+            val summary = requireNotNull(chatSummary)
+            val file = requireNotNull(chatFile)
             runCatching { controller.runtimeHost.stop(sessionId) }
-            runCatching { controller.runtimeHost.closeSession(sessionId) }
+            runCatching { controller.runtimeHost.closeSessionWithoutMemory(sessionId) }
             val truncated = withContext(Dispatchers.IO) {
                 SessionJsonlHistoryOps.truncateBeforeUserTurn(file, req.turnIndex)
             }

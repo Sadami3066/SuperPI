@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -40,7 +42,10 @@ class SdkCredentialStore(
     val authKinds: StateFlow<Map<String, ProviderAuthKind>> = authKindsState.asStateFlow()
     private val revisionState = MutableStateFlow(0L)
     val revision: StateFlow<Long> = revisionState.asStateFlow()
+    private val preloadedState = MutableStateFlow(false)
+    val preloaded: StateFlow<Boolean> = preloadedState.asStateFlow()
 
+    private val preloadMutex = Mutex()
     private val writeLock = Any()
     private val writeRevisions = HashMap<String, Long>()
     private val writeCounts = HashMap<String, Int>()
@@ -59,18 +64,25 @@ class SdkCredentialStore(
     }
 
     suspend fun preloadAll() {
-        val pendingKeys = synchronized(writeLock) { writeCounts.keys.toSet() }
-        val pendingApiKeys = pendingKeys.associateWith { apiKeyCache[it] }
-        val pendingOauth = pendingKeys.associateWith { oauthCache[it] }
-        apiKeyCache.clear()
-        oauthCache.clear()
-        apiKeyCache.putAll(apiKeys.readAllRecords().filterValues { it.isNotBlank() })
-        oauthCache.putAll(oauth.readRawRecords())
-        pendingKeys.forEach { providerId ->
-            pendingApiKeys[providerId]?.let { apiKeyCache[providerId] = it } ?: apiKeyCache.remove(providerId)
-            pendingOauth[providerId]?.let { oauthCache[providerId] = it } ?: oauthCache.remove(providerId)
+        preloadMutex.withLock {
+            val loadedApiKeys = apiKeys.readAllRecords().filterValues { it.isNotBlank() }
+            val loadedOauth = oauth.readRawRecords()
+            synchronized(writeLock) {
+                val pendingKeys = writeCounts.keys.toSet()
+                val pendingApiKeys = pendingKeys.associateWith { apiKeyCache[it] }
+                val pendingOauth = pendingKeys.associateWith { oauthCache[it] }
+                apiKeyCache.clear()
+                oauthCache.clear()
+                apiKeyCache.putAll(loadedApiKeys)
+                oauthCache.putAll(loadedOauth)
+                pendingKeys.forEach { providerId ->
+                    pendingApiKeys[providerId]?.let { apiKeyCache[providerId] = it } ?: apiKeyCache.remove(providerId)
+                    pendingOauth[providerId]?.let { oauthCache[providerId] = it } ?: oauthCache.remove(providerId)
+                }
+            }
+            publishKinds()
+            preloadedState.value = true
         }
-        publishKinds()
     }
 
     suspend fun awaitCommit(providerId: String) {

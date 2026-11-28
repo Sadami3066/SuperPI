@@ -101,4 +101,30 @@ class SessionJsonlHistoryOpsTest {
         assertTrue(forked[0].contains("\"type\":\"session\""))
         assertTrue(forked[0].contains("\"id\":\"new-id\""))
     }
+
+    @Test
+    fun skipsWorkerUpdatesOmittedEntriesAndEmptyTextWhileCountingImageOnlyUsers() {
+        val lines = listOf(
+            """{"type":"session","version":3,"id":"s-align","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp/ws"}""",
+            """{"type":"message","id":"u-omitted","message":{"role":"user","content":"deleted prompt"}}""",
+            """{"type":"message","id":"u-0","message":{"role":"user","content":[{"type":"image","data":"YWJj","mimeType":"image/png"}]}}""",
+            """{"type":"message","id":"a-0","message":{"role":"assistant","content":"saw image"}}""",
+            """{"type":"message","id":"u-worker","message":{"role":"user","content":"  [Worker update] done"}}""",
+            """{"type":"message","id":"u-empty","message":{"role":"user","content":"   "}}""",
+            """{"type":"message","id":"u-1","message":{"role":"user","content":"real second prompt"}}""",
+            """{"type":"context_edit","id":"ce-1","targetId":"u-omitted","replacement":null}""",
+        )
+        val file = File(tempDir, "align.jsonl").apply {
+            writeText(lines.joinToString("\n") + "\n")
+        }
+        assertTrue(SessionJsonlHistoryOps.hasUserTurnAtIndex(file, 0))
+        assertTrue(SessionJsonlHistoryOps.hasUserTurnAtIndex(file, 1))
+        assertFalse(SessionJsonlHistoryOps.hasUserTurnAtIndex(file, 2))
+
+        assertTrue(SessionJsonlHistoryOps.truncateBeforeUserTurn(file, 1))
+        val remaining = file.readLines().filter { it.isNotBlank() }
+        assertTrue(remaining.any { it.contains("u-0") })
+        assertTrue(remaining.any { it.contains("a-0") })
+        assertFalse(remaining.any { it.contains("real second prompt") })
+    }
 }

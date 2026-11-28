@@ -12,6 +12,7 @@ import io.github.whywood.superpi.ui.common.chat.ChatUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -32,6 +33,7 @@ internal class ModelController(
     private val switchThinkingFailedText: () -> String,
     private val onModelPersisted: (String, SessionModelSnapshot) -> Unit = { _, _ -> },
 ) {
+    private var activeChangeJob: Job? = null
     fun setModel(modelId: String) {
         val current = state()
         if (current.switchingConversation) return
@@ -110,7 +112,8 @@ internal class ModelController(
         val sessionId = state().conversationId ?: return
         applySessionModel(model)
         onModelChanged(sessionId, model)
-        scope.launch {
+        activeChangeJob?.cancel()
+        activeChangeJob = scope.launch {
             var succeeded = false
             try {
                 if (thinkingOnly) {

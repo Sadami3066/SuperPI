@@ -93,6 +93,7 @@ import io.github.whywood.superpi.runtime.memory.MemoryConsolidationCoordinator
 import io.github.whywood.superpi.runtime.memory.MemoryModelRouter
 import io.github.whywood.superpi.runtime.memory.MemoryPreferencesStore
 import io.github.whywood.superpi.runtime.memory.MemoryStore
+import kotlinx.coroutines.sync.withLock
 import io.github.whywood.superpi.runtime.memory.memoryTools
 import io.github.whywood.superpi.runtime.miniappLookup
 import io.github.whywood.superpi.runtime.presentTool
@@ -1174,6 +1175,224 @@ class SuperPiController(
 
     suspend fun listMergedBots(): List<io.github.whywood.superpi.runtime.RuntimeWorkspace> =
         botRegistry.listAllBots() + RemoteWorkspaces.workspaces(remoteWorkspaceRoot, _remoteBots.value)
+
+    data class RemoteMirrorRef(
+        val workspace: io.github.whywood.superpi.runtime.RuntimeWorkspace,
+        val peerSessionId: String,
+        val filePath: String,
+    )
+
+    private val remoteMirrorRefs = java.util.concurrent.ConcurrentHashMap<String, RemoteMirrorRef>()
+    private val remoteHydrateLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+    private val remoteBotListLocks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
+
+    fun forgetRemoteMirrorRef(sessionId: String) {
+        remoteMirrorRefs.remove(sessionId)
+        remoteHydrateLocks.remove(sessionId)
+    }
+
+    suspend fun resolveRemoteMirrorRef(sessionId: String): RemoteMirrorRef? {
+        remoteMirrorRefs[sessionId]?.let { cached ->
+            val currentWs = RemoteWorkspaces.workspaces(remoteWorkspaceRoot, _remoteBots.value)
+                .firstOrNull { it.id == cached.workspace.id }
+                ?: cached.workspace
+            return cached.copy(workspace = currentWs)
+        }
+        val remoteWorkspaces = RemoteWorkspaces.workspaces(remoteWorkspaceRoot, _remoteBots.value)
+        for (ws in remoteWorkspaces) {
+            val summary = runCatching { runtimeHost.sessions(ws.id) }
+                .getOrDefault(emptyList())
+                .firstOrNull { it.id == sessionId }
+                ?: continue
+            val peerId = withContext(Dispatchers.IO) {
+                io.github.whywood.superpi.remote.RemoteSessionBrowser.readPeerSessionId(File(summary.filePath))
+            } ?: io.github.whywood.superpi.remote.RemoteSessionRegistry.peerSessionId(sessionId)
+                ?: return null
+            val ref = RemoteMirrorRef(ws, peerId, summary.filePath)
+            remoteMirrorRefs[sessionId] = ref
+            return ref
+        }
+        return null
+    }
+
+    suspend fun listRemoteBotSessions(
+        workspace: io.github.whywood.superpi.runtime.RuntimeWorkspace,
+    ): List<io.github.whywood.superpi.host.server.SessionSummaryDto> =
+        remoteBotListLocks.computeIfAbsent(workspace.id) { kotlinx.coroutines.sync.Mutex() }.withLock {
+            listRemoteBotSessionsLocked(workspace)
+        }
+
+    private suspend fun listRemoteBotSessionsLocked(
+        workspace: io.github.whywood.superpi.runtime.RuntimeWorkspace,
+    ): List<io.github.whywood.superpi.host.server.SessionSummaryDto> {
+        val remote = workspace.remote ?: return emptyList()
+        val busyIds = runtimeHost.busySessionIds.value
+        val localSummaries = runCatching { runtimeHost.sessions(workspace.id) }.getOrDefault(emptyList())
+        val peerToLocal = HashMap<String, io.github.whywood.superpi.runtime.ConversationSummary>()
+        withContext(Dispatchers.IO) {
+            for (s in localSummaries) {
+                val peerId = io.github.whywood.superpi.remote.RemoteSessionBrowser.readPeerSessionId(File(s.filePath))
+                    ?: io.github.whywood.superpi.remote.RemoteSessionRegistry.peerSessionId(s.id)
+                if (!peerId.isNullOrBlank()) {
+                    peerToLocal.putIfAbsent(peerId, s)
+                    remoteMirrorRefs[s.id] = RemoteMirrorRef(workspace, peerId, s.filePath)
+                }
+            }
+        }
+        if (remote.online) {
+            val outcome = kotlinx.coroutines.withTimeoutOrNull(8_000L) {
+                relayLive.listRemoteSessions(remote.deviceId, remote.botId, includeArchived = false)
+            }
+            if (outcome is io.github.whywood.superpi.data.relay.RemoteSessionsOutcome.Ok) {
+                val activePeerSessions = outcome.sessions.filterNot { it.archived }
+                val authoritativePeerIds = activePeerSessions.mapTo(HashSet()) { it.id }
+                val prunedIds = withContext(Dispatchers.IO) {
+                    io.github.whywood.superpi.remote.RemoteSessionBrowser.pruneStaleMirrors(
+                        runtime = runtimeHost,
+                        workspace = workspace,
+                        authoritativePeerSessionIds = authoritativePeerIds,
+                    )
+                }
+                prunedIds.forEach { prunedId -> forgetRemoteMirrorRef(prunedId) }
+                val prunedSet = prunedIds.toSet()
+
+                val matchedLocalIds = HashSet<String>()
+                val merged = ArrayList<io.github.whywood.superpi.host.server.SessionSummaryDto>(activePeerSessions.size)
+                for (peer in activePeerSessions) {
+                    val existingLocal = peerToLocal[peer.id]?.takeUnless { it.id in prunedSet }
+                    val local = existingLocal ?: withContext(Dispatchers.IO) {
+                        io.github.whywood.superpi.remote.RemoteSessionBrowser.ensureStubMirror(
+                            runtime = runtimeHost,
+                            agentDir = paths.homeDir,
+                            workspace = workspace,
+                            peerSessionId = peer.id,
+                            title = peer.title,
+                            updatedAt = peer.updatedAt,
+                            pinned = peer.pinned,
+                            archived = false,
+                        )
+                    }
+                    matchedLocalIds.add(local.id)
+                    remoteMirrorRefs[local.id] = RemoteMirrorRef(workspace, peer.id, local.filePath)
+                    merged.add(
+                        io.github.whywood.superpi.host.server.SessionSummaryDto(
+                            id = local.id,
+                            title = peer.title.takeIf { it.isNotBlank() && it != "Untitled" }
+                                ?: local.title.ifBlank { peer.title },
+                            updatedAt = peer.updatedAt.takeIf { it > 0L } ?: local.updatedAt,
+                            filePath = local.filePath,
+                            cwd = local.cwd.ifBlank { workspace.cwd },
+                            pinned = peer.pinned,
+                            archived = false,
+                            memoryExcluded = local.memoryExcluded,
+                            busy = peer.busy || local.id in busyIds,
+                        ),
+                    )
+                }
+                // Keep locally active/busy mirrors that may not yet have appeared in peer's session list
+                for (s in localSummaries) {
+                    if (s.id !in matchedLocalIds && s.id !in prunedSet && !s.archived && s.id in busyIds) {
+                        merged.add(
+                            io.github.whywood.superpi.host.server.SessionSummaryDto(
+                                id = s.id,
+                                title = s.title,
+                                updatedAt = s.updatedAt,
+                                filePath = s.filePath,
+                                cwd = s.cwd.ifBlank { workspace.cwd },
+                                pinned = s.pinned,
+                                archived = false,
+                                memoryExcluded = s.memoryExcluded,
+                                busy = true,
+                            ),
+                        )
+                    }
+                }
+                return merged.sortedWith(
+                    compareByDescending<io.github.whywood.superpi.host.server.SessionSummaryDto> { it.pinned }
+                        .thenByDescending { it.updatedAt },
+                )
+            }
+        }
+        return localSummaries
+            .filterNot { it.archived }
+            .sortedWith(
+                compareByDescending<io.github.whywood.superpi.runtime.ConversationSummary> { it.pinned }
+                    .thenByDescending { it.updatedAt },
+            )
+            .map { s ->
+                io.github.whywood.superpi.host.server.SessionSummaryDto(
+                    id = s.id,
+                    title = s.title,
+                    updatedAt = s.updatedAt,
+                    filePath = s.filePath,
+                    cwd = s.cwd.ifBlank { workspace.cwd },
+                    pinned = s.pinned,
+                    archived = false,
+                    memoryExcluded = s.memoryExcluded,
+                    busy = s.id in busyIds,
+                )
+            }
+    }
+
+    enum class RemoteSessionSyncResult { Ok, Deleted, Skipped }
+
+    suspend fun syncRemoteSessionHistoryIfNeeded(sessionId: String): RemoteSessionSyncResult {
+        val ref = resolveRemoteMirrorRef(sessionId) ?: return RemoteSessionSyncResult.Skipped
+        val remote = ref.workspace.remote ?: return RemoteSessionSyncResult.Skipped
+        val isOnline = _remoteBots.value.any {
+            it.deviceId == remote.deviceId && it.botId == remote.botId && it.online
+        }
+        if (!isOnline) return RemoteSessionSyncResult.Skipped
+        if (sessionId in runtimeHost.busySessionIds.value ||
+            io.github.whywood.superpi.remote.RemoteSessionRegistry.isPassiveStreaming(sessionId)
+        ) {
+            return RemoteSessionSyncResult.Skipped
+        }
+        val lock = remoteHydrateLocks.computeIfAbsent(sessionId) { kotlinx.coroutines.sync.Mutex() }
+        return lock.withLock {
+            if (sessionId in runtimeHost.busySessionIds.value ||
+                io.github.whywood.superpi.remote.RemoteSessionRegistry.isPassiveStreaming(sessionId)
+            ) {
+                return@withLock RemoteSessionSyncResult.Skipped
+            }
+            val outcome = kotlinx.coroutines.withTimeoutOrNull(10_000L) {
+                relayLive.getRemoteHistory(remote.deviceId, remote.botId, ref.peerSessionId)
+            } ?: return@withLock RemoteSessionSyncResult.Skipped
+            when (outcome) {
+                is io.github.whywood.superpi.data.relay.RemoteHistoryOutcome.Failed -> {
+                    if (outcome.error.code == "session_not_found") {
+                        forgetRemoteMirrorRef(sessionId)
+                        runCatching { runtimeHost.deleteSession(sessionId) }
+                        return@withLock RemoteSessionSyncResult.Deleted
+                    }
+                    RemoteSessionSyncResult.Skipped
+                }
+                is io.github.whywood.superpi.data.relay.RemoteHistoryOutcome.Ok -> {
+                    val existingSummary = runCatching { runtimeHost.sessions(ref.workspace.id) }
+                        .getOrDefault(emptyList())
+                        .firstOrNull { it.id == sessionId }
+                        ?: io.github.whywood.superpi.runtime.ConversationSummary(
+                            id = sessionId,
+                            title = outcome.history.title.orEmpty(),
+                            updatedAt = System.currentTimeMillis(),
+                            filePath = ref.filePath,
+                            cwd = ref.workspace.cwd,
+                        )
+                    withContext(Dispatchers.IO) {
+                        io.github.whywood.superpi.remote.RemoteSessionBrowser.materializeHistoryInPlace(
+                            runtime = runtimeHost,
+                            agentDir = paths.homeDir,
+                            workspace = ref.workspace,
+                            history = outcome.history,
+                            existingSummary = existingSummary,
+                        )
+                    }
+                    RemoteSessionSyncResult.Ok
+                }
+                else -> RemoteSessionSyncResult.Skipped
+            }
+        }
+    }
 
     private fun remoteTargetFor(cwd: String): RemoteSessionTarget? {
         val normCwd = paths.normalizePath(cwd)

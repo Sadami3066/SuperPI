@@ -15,7 +15,7 @@ export const en: Record<I18nKey, string> = {
 
   "nav.searchPlaceholder": "Search chats, assistants, or actions…",
   "nav.searchShort": "Search",
-  "nav.tools": "Tools",
+  "nav.tools": "Features",
   "nav.capabilities": "Capabilities",
   "nav.capabilitiesSkills": "Skills",
   "nav.capabilitiesConnectors": "MCP",

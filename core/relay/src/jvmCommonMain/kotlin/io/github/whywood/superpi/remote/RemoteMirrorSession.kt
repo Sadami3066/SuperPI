@@ -93,7 +93,7 @@ class RemoteMirrorSession internal constructor(
 
     private suspend fun appendHistoryItem(botId: String, item: JsonObject) {
         val role = item.str("role") ?: return
-        val timestamp = (item["timestamp"] as? JsonPrimitive)?.longOrNull ?: System.currentTimeMillis()
+        val timestamp = (item["timestamp"] as? JsonPrimitive)?.longOrNull ?: 0L
         when (role) {
             "user" -> {
                 val blocks = parseContentBlocks(item["content"])
@@ -306,5 +306,46 @@ class RemoteMirrorSession internal constructor(
 
         suspend fun open(file: File): RemoteMirrorSession =
             RemoteMirrorSession(SessionManager.open(file.absolutePath.toPath(), FileSystem.SYSTEM))
+
+        suspend fun recreateInPlace(
+            file: File,
+            sessionId: String,
+            cwd: File,
+        ): RemoteMirrorSession {
+            val fs = FileSystem.SYSTEM
+            val path = file.absolutePath.toPath()
+            fs.createDirectories(checkNotNull(path.parent))
+            val header = SessionHeader(
+                version = 3,
+                id = sessionId,
+                timestamp = java.time.Instant.now().toString(),
+                cwd = cwd.absolutePath,
+            )
+            val tmp = File(file.parentFile, ".${file.name}.hydrate.tmp")
+            val tmpPath = tmp.absolutePath.toPath()
+            try {
+                fs.write(tmpPath) {
+                    writeUtf8(sessionHeaderJson.encodeToString(SessionHeader.serializer(), header))
+                    writeByte('\n'.code)
+                }
+                try {
+                    java.nio.file.Files.move(
+                        tmp.toPath(),
+                        file.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    )
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    java.nio.file.Files.move(
+                        tmp.toPath(),
+                        file.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }
+            } finally {
+                runCatching { tmp.delete() }
+            }
+            return RemoteMirrorSession(SessionManager.open(path, fs))
+        }
     }
 }

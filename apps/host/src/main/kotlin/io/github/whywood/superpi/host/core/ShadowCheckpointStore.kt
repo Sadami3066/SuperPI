@@ -31,6 +31,7 @@ data class CheckpointRecord(
     val messageCount: Int,
     val workspacePath: String,
     val createdAt: Long = System.currentTimeMillis(),
+    val isBackup: Boolean = false,
 )
 
 data class CheckpointRestoreResult(
@@ -115,9 +116,10 @@ class ShadowCheckpointStore(
             val backup = captureLocked(
                 sessionId = sessionId,
                 wsReal = wsDir,
-                turnIndex = (all.maxOfOrNull { it.turnIndex } ?: 0) + 1,
+                turnIndex = -1,
                 label = "Safety backup before restore",
                 messageCount = target.messageCount,
+                isBackup = true,
             ) ?: return@withLock CheckpointRestoreResult(
                 ok = false,
                 message = "Unable to create safety backup before restore; aborted to protect current files.",
@@ -238,6 +240,7 @@ class ShadowCheckpointStore(
         turnIndex: Int,
         label: String,
         messageCount: Int,
+        isBackup: Boolean = false,
     ): CheckpointRecord? {
         val sDir = sessionDir(sessionId)
         val repoDir = File(sDir, "repo.git")
@@ -269,6 +272,7 @@ class ShadowCheckpointStore(
             messageCount = messageCount,
             workspacePath = wsReal.absolutePath,
             createdAt = System.currentTimeMillis(),
+            isBackup = isBackup,
         )
         val all = readIndexLocked(sDir).toMutableList()
         all.add(record)

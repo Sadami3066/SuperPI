@@ -183,6 +183,7 @@ class AgentRuntimeHost internal constructor(
         catalog = catalog,
         visibleCwds = ::visibleCwds,
         workspaceFor = ::workspaceFor,
+        cwdsForWorkspace = workspaceAdmin::cwdsFor,
         emitListChanged = runs::emitListChanged,
         emitSessionRemoved = runs::emitSessionRemoved,
         detachForget = pool::detachForget,
@@ -256,6 +257,9 @@ class AgentRuntimeHost internal constructor(
         pool.openSession(filePath, cwd)
 
     override suspend fun closeSession(sessionId: String) = pool.close(sessionId)
+
+    override suspend fun closeSessionWithoutMemory(sessionId: String) =
+        pool.close(sessionId, captureMemory = false)
 
     suspend fun closeAllSessions() {
         handles.keys.toList().forEach { sid ->

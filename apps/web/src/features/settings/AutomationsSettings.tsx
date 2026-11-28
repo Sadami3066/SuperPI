@@ -135,6 +135,18 @@ export function AutomationsSettings({
         label: botName ? `${botName} · ${title}` : title,
       });
     }
+    if (editingTimer?.sessionId) {
+      const editingVal = `sess:${editingTimer.sessionId}`;
+      if (!opts.some((o) => o.value === editingVal)) {
+        const s = summariesById[editingTimer.sessionId];
+        const botName = s ? botNameById.get(s.botId) : undefined;
+        const title = s?.title || editingTimer.sessionId;
+        opts.unshift({
+          value: editingVal,
+          label: botName ? `${botName} · ${title}` : title,
+        });
+      }
+    }
     for (const b of localBots) {
       opts.push({
         value: `bot:${b.id}`,
@@ -142,7 +154,7 @@ export function AutomationsSettings({
       });
     }
     return opts;
-  }, [botNameById, isSuperScope, localBots, localSessions, t, workers]);
+  }, [botNameById, editingTimer?.sessionId, isSuperScope, localBots, localSessions, summariesById, t, workers]);
 
   const resolveTimerTargetLabel = useCallback(
     (timer: HostTimerDto): string | null => {
@@ -185,9 +197,7 @@ export function AutomationsSettings({
     setCronExpression(existing?.cronExpression || "0 9 * * 1-5");
     setEnabledDraft(existing ? existing.enabled : true);
     if (existing?.sessionId) {
-      const candidate = `sess:${existing.sessionId}`;
-      const matched = targetOptions.some((o) => o.value === candidate);
-      setTargetValue(matched ? candidate : (targetOptions[0]?.value ?? ""));
+      setTargetValue(`sess:${existing.sessionId}`);
     } else {
       setTargetValue(targetOptions[0]?.value ?? "");
     }
